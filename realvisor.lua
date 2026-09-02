@@ -1,15 +1,15 @@
-------------------------------------------------------------
+﻿------------------------------------------------------------
 -- Real Visor Overlay
--- Version: 0.2.1
+-- Version: 0.2.2
 --
 -- Author: saltyH
 -- CSP Target: 0.3.0-preview500+
 --
 -- Focus:
--- Camera rotation tracking
+-- mainWindow improvement, debug log, and visor glass visibility toggle
 ------------------------------------------------------------
 
-
+local appNameDebug = '[RealVisor_v0.2.1]'
 ------------------------------------------------------------
 -- Configuration
 ------------------------------------------------------------
@@ -39,7 +39,9 @@ local cfg = {
         -0.0519,
         0.0005
     ),
-
+    
+    debugShowGlassExt = true,
+    debugShowGlassInt = true,
     debugDeltapos = false,
     debugRotation = false,
 
@@ -84,6 +86,21 @@ local lastYaw = 99999
 ------------------------------------------------------------
 
 local worldUp = vec3(0, 1, 0)
+
+    
+--------------------------------------------------------
+-- Helper function: Mesh collection visibility toggle
+--------------------------------------------------------
+local function setMeshesVisible(meshCollection, visible)
+    if not meshCollection then return end
+    
+    -- findMeshes 결과가 테이블 배열 형태로 넘어오므로 순회 처리
+    for i = 1, #meshCollection do
+        if meshCollection[i] and meshCollection[i].setVisible then
+            meshCollection[i]:setVisible(visible)
+        end
+    end
+end
 
 
 ------------------------------------------------------------
@@ -173,7 +190,7 @@ local function initializeScene()
         or #carsRoot == 0 then
 
         ac.warn(            
-            '[RealVisor] carsRoot not found'
+            appNameDebug .. ' carsRoot not found'
         )
 
         return false
@@ -189,7 +206,7 @@ local function initializeScene()
     )
 
     if cameraAnchor == nil then
-        ac.warn('[RealVisor] Camera anchor creation failed')
+        ac.warn(appNameDebug .. ' Camera anchor creation failed')
         return false
     end
     
@@ -209,7 +226,7 @@ local function initializeScene()
 
     if not cameraRoot then
         ac.warn(
-            '[RealVisor] Camera root creation failed'
+            appNameDebug .. ' Camera root creation failed'
         )
 
         return false
@@ -251,7 +268,7 @@ local function initializeScene()
         or not axisNode then
 
         ac.warn(
-            '[RealVisor] Transform hierarchy failed'
+            appNameDebug .. ' Transform hierarchy failed'
         )
 
         return false
@@ -274,7 +291,7 @@ local function initializeScene()
     if not visor then
 
         ac.warn(
-            '[RealVisor] Failed to load KN5: '
+            appNameDebug .. ' Failed to load KN5: '
             .. cfg.modelPath
         )
 
@@ -302,13 +319,13 @@ local function initializeScene()
         and #visorGlassInt > 0 then
 
         ac.log(
-            '[RealVisor] VISOR_GLASS_INT found'
+            appNameDebug .. ' VISOR_GLASS_INT found'
         )
 
     else
 
         ac.warn(
-            '[RealVisor] VISOR_GLASS_INT not found'
+            appNameDebug .. ' VISOR_GLASS_INT not found'
         )
     end
 
@@ -316,13 +333,13 @@ local function initializeScene()
         and #visorGlassExt > 0 then
 
         ac.log(
-            '[RealVisor] VISOR_GLASS_EXT found'
+            appNameDebug .. ' VISOR_GLASS_EXT found'
         )
 
     else
 
         ac.warn(
-            '[RealVisor] VISOR_GLASS_EXT not found'
+            appNameDebug .. ' VISOR_GLASS_EXT not found'
         )
     end
 
@@ -339,7 +356,7 @@ local function initializeScene()
 
 
     ac.log(
-        '[RealVisor] v0.2.1 initialized'
+        appNameDebug .. ' initialized'
     )
 
 
@@ -352,6 +369,7 @@ end
 ------------------------------------------------------------
 local prevPos = nil
 local textDebugDeltaPos = nil
+local textDebugPos = nil
 local textDebugCamRotation = nil
 local function updateCameraTransform()
 
@@ -373,8 +391,11 @@ local function updateCameraTransform()
             textDebugDeltaPos = 'X: ' .. string.format('%.4f',position.x - prevPos.x) 
                                 .. ', Y: ' .. string.format('%.4f',position.y - prevPos.y) 
                                 .. ', Z: ' .. string.format('%.4f',position.z - prevPos.z)
+            textDebugPos = 'X: ' .. string.format('%.4f',position.x) 
+                                .. ', Y: ' .. string.format('%.4f',position.y) 
+                                .. ', Z: ' .. string.format('%.4f',position.z)
         ac.log(
-            '[RealVisor] ' .. textDebugDeltaPos
+            appNameDebug .. ' ' .. textDebugDeltaPos
         )
         end
     
@@ -410,7 +431,7 @@ local function updateCameraTransform()
             -- local angleRad = math.acos(dot)
             -- local angleDeg = math.deg(angleRad)
 
-            -- textDebugRotation = '[RealVisor] world rotation: ' .. string.format('%.2f°', angleDeg)
+            -- textDebugRotation = appNameDebug .. ' world rotation: ' .. string.format('%.2f°', angleDeg)
             --                     .. ' | Forward Delta X: ' .. string.format('%.4f', dX)
             --                     .. ', Y: ' .. string.format('%.4f', dY)
             --                     .. ', Z: ' .. string.format('%.4f', dZ)
@@ -430,14 +451,14 @@ local function updateCameraTransform()
             local yawRad = math.atan2(fwd.x, fwd.z)
             local yawDeg = math.deg(yawRad)
 
-            textDebugCamRotation = 'World-Cam Pitch: ' .. string.format('%.1f°', pitchDeg)
-                                .. ', Yaw: ' .. string.format('%.1f°', yawDeg)
-                                .. ' | Fwd Vec (' .. string.format('%.3f', fwd.x) 
+            textDebugCamRotation = 'World-Cam (Pitch ' .. string.format('%.1f°', pitchDeg)
+                                .. ', Yaw ' .. string.format('%.1f°', yawDeg)
+                                .. ') \t\t Fwd Vec (' .. string.format('%.3f', fwd.x) 
                                 .. ', ' .. string.format('%.3f', fwd.y) 
                                 .. ', ' .. string.format('%.3f', fwd.z) .. ')'
 
             ac.log(
-                '[RealVisor] ' .. textDebugCamRotation
+                appNameDebug .. ' ' .. textDebugCamRotation
             )
         end
         prevForward = forward
@@ -447,12 +468,11 @@ local function updateCameraTransform()
     --------------------------------------------------------
     -- Position
     --------------------------------------------------------
-
-    cameraRoot:setPosition(
+    
+    cameraAnchor:setPosition(
+    -- cameraRoot:setPosition(
         position
     )
-
-
 
     --------------------------------------------------------
     -- Orientation
@@ -524,7 +544,7 @@ function script.update(dt)
 
 
     if not cfg.enabled then
-        -- ac.log('[RealVisor] cfg.enabled = false update terminated')
+        -- ac.log(appNameDebug .. ' cfg.enabled = false update terminated')
         return
     end
 
@@ -584,7 +604,7 @@ function windowMain(dt)
     if changed then
         cfg.enabled = not cfg.enabled
         ac.log(
-            '[RealVisor] Visor ' .. (cfg.enabled and 'Enabled' or 'Disabled')
+            appNameDebug .. ' Visor ' .. (cfg.enabled and 'Enabled' or 'Disabled')
         )
     end        
 
@@ -597,7 +617,6 @@ function windowMain(dt)
 
     ui.text('Model Scale')
 
-    changed = nil
     cfg.modelScale, changed =
         ui.slider(
 
@@ -614,7 +633,7 @@ function windowMain(dt)
 
     if changed then
         ac.log(
-            '[RealVisor] KN5 Global Scale: ' .. cfg.modelScale
+            appNameDebug .. ' KN5 Global Scale: ' .. cfg.modelScale
         )
     end
 
@@ -626,7 +645,6 @@ function windowMain(dt)
 
     ui.text('Axis Correction')
 
-    changed = nil
     cfg.modelYawDeg, changed =
         ui.slider(
 
@@ -643,7 +661,7 @@ function windowMain(dt)
 
     if changed then
         ac.log(
-            '[RealVisor] KN5 Yaw: ' .. cfg.modelYawDeg
+            appNameDebug .. ' KN5 Yaw: ' .. cfg.modelYawDeg
         )
     end
 
@@ -656,7 +674,6 @@ function windowMain(dt)
     ui.text('Camera Local Offset')
 
 
-    changed = nil
     cfg.offset.x, changed =
         ui.slider(
 
@@ -673,11 +690,11 @@ function windowMain(dt)
 
     if changed then
         ac.log(
-            '[RealVisor] KN5 Camera Offset(Right): ' .. cfg.offset.x
+            appNameDebug .. ' KN5 Camera Offset(Right): ' .. cfg.offset.x
         )
     end
 
-    changed = nil
+
     cfg.offset.y, changed =
         ui.slider(
 
@@ -694,11 +711,10 @@ function windowMain(dt)
 
     if changed then
         ac.log(
-            '[RealVisor] KN5 Camera Offset(Up): ' .. cfg.offset.y
+            appNameDebug .. ' KN5 Camera Offset(Up): ' .. cfg.offset.y
         )
     end
 
-    changed = nil
     cfg.offset.z, changed =
         ui.slider(
 
@@ -715,22 +731,70 @@ function windowMain(dt)
 
     if changed then
         ac.log(
-            '[RealVisor] KN5 Camera Offset(Forward): ' .. cfg.offset.z
+            appNameDebug .. ' KN5 Camera Offset(Forward): ' .. cfg.offset.z
         )
     end
 
     --------------------------------------------------------
-    -- Glass debug
+    -- Glass debug: MESH Found
     --------------------------------------------------------
 
     ui.separator()
     ui.text('Model Config')
+    local foundGlassExt, foundGlassInt = visorGlassExt, visorGlassInt
+    
     ui.text(
-        visorGlass
-            and #visorGlass > 0
-            and 'VISOR_GLASS: FOUND'
-            or 'VISOR_GLASS: NOT FOUND'
+        '\tVISOR_GLASS_EXT: ' 
+        .. ((visorGlassExt and #visorGlassExt > 0 )
+        and 'FOUND' or 'NOTFOUND' )
     )
+    ui.sameLine(0, 50)
+    ui.text(
+        'VISOR_GLASS_INT:' 
+        .. ((visorGlassInt and #visorGlassInt > 0 )
+        and 'FOUND' or 'NOTFOUND')
+    )
+
+    --------------------------------------------------------
+    -- Glass debug: Show / Hide Meshes
+    --------------------------------------------------------
+    ui.text( '\tVisibility')
+    ui.text('')
+    ui.sameLine(0, 15)
+
+    changed, _ = ui.checkbox(
+            'VISOR_GLASS_EXT',
+            cfg.debugShowGlassExt
+        )
+
+    if changed then
+        cfg.debugShowGlassExt = not cfg.debugShowGlassExt
+        if visorGlassExt and #visorGlassExt > 0 then
+            visorGlassExt:setVisible(cfg.debugShowGlassExt)
+        end
+        --setMeshesVisible(visorGlassExt, cfg.debugShowGlassExt)
+        ac.log(
+            appNameDebug .. ' VISOR_GLASS_EXT' .. (cfg.enabled and ': Show' or ': Hide')
+        )
+    end        
+
+    ui.sameLine(0, 70)
+
+    changed, _ = ui.checkbox(
+            'VISOR_GLASS_INT',
+            cfg.debugShowGlassInt 
+        )
+
+    if changed then
+        cfg.debugShowGlassInt = not cfg.debugShowGlassInt
+        if visorGlassInt and #visorGlassInt > 0 then
+            visorGlassInt:setVisible(cfg.debugShowGlassInt)
+        end
+        --setMeshesVisible(visorGlassInt, cfg.debugShowGlassInt)
+        ac.log(
+            appNameDebug .. ' VISOR_GLASS_INT' .. (cfg.enabled and ': Show' or ': Hide')
+        )
+    end        
 
 
     --------------------------------------------------------
@@ -741,7 +805,7 @@ function windowMain(dt)
 
         string.format(
 
-            'Scale: %.4f',
+            '\tScale: %.4f',
 
             cfg.modelScale
         )
@@ -752,10 +816,12 @@ function windowMain(dt)
     -- Debug Log
     --------------------------------------------------------
 
-    changed = nil
+    ui.text('')
+    ui.sameLine(0, 15)
+
     changed, _ = ui.checkbox(
 
-        '[Log] position delta',
+        '[Log] Show position delta',
 
         cfg.debugDeltapos
     )
@@ -764,11 +830,15 @@ function windowMain(dt)
         cfg.debugDeltapos = not cfg.debugDeltapos
     end     
     if textDebugDeltaPos then 
-        ui.text('       *LastDelta: ' .. textDebugDeltaPos)
+        ui.text(
+            '\t\t*Delta: ' .. textDebugDeltaPos
+            .. '\n\t\t*World: ' .. textDebugPos
+        )
     end
     
-    
-    changed = nil
+    ui.text('')
+    ui.sameLine(0, 15)
+
     changed, _ = ui.checkbox(
 
         '[Log] world rotation',
@@ -781,7 +851,7 @@ function windowMain(dt)
     end     
 
     if textDebugCamRotation then
-        ui.text('          ' .. textDebugCamRotation)
+        ui.text('\t\t*' .. textDebugCamRotation)
     end
     
 end
