@@ -1,12 +1,12 @@
 ------------------------------------------------------------
 -- Real Visor Overlay
--- Prototype v0.2.0
+-- Version: 0.2.1
 --
 -- Author: saltyH
--- Target: CSP 0.3.0-preview500+
+-- CSP Target: 0.3.0-preview500+
 --
--- KN5:
--- visors/visor_lando.kn5
+-- Focus:
+-- Camera rotation tracking
 ------------------------------------------------------------
 
 
@@ -18,173 +18,76 @@ local cfg = {
 
     enabled = true,
 
-
-    --------------------------------------------------------
-    -- Visor KN5
-    --------------------------------------------------------
-
     modelPath = 'visors/visor_lando.kn5',
 
 
     --------------------------------------------------------
-    -- Model Axis Correction
-    --
-    -- Test result:
-    -- -90° horizontal correction required.
+    -- Model calibration
     --------------------------------------------------------
 
-    modelYawDeg = -90.0,
+    modelScale = 0.017,
 
-    
+    modelYawDeg = 0,        -- 지금은 모델 자체를 돌려서 제작했음 -90.0,  
+
+
     --------------------------------------------------------
-    -- Camera Local Offset
-    --
-    -- X = Camera Right
-    -- Y = Camera Up
-    -- Z = Camera Forward
+    -- Camera-local offset
     --------------------------------------------------------
 
     offset = vec3(
-        0.0,
-        0.0,
-        0.08
+        -0.0049,
+        -0.0519,
+        0.0005
     ),
 
+    debugDeltapos = false,
+    debugRotation = false,
 
     --------------------------------------------------------
-    -- Scale
+    -- Future motion
     --------------------------------------------------------
 
-    modelScale = 0.019,
-
-
-    --------------------------------------------------------
-    -- Motion prototype
-    --------------------------------------------------------
-    enableMotion = false,
-    dynamicMotion = false,
-
-
-    --------------------------------------------------------
-    -- Motion: Global intensity
-    --------------------------------------------------------
-
-    motionMultiplier = 1.0,
-
-
-    --------------------------------------------------------
-    -- Motion: Vehicle acceleration response
-    --------------------------------------------------------
-
-    lateralMultiplier = 0.002,
-    verticalMultiplier = 0.001,
-    longitudinalMultiplier = 0.003,
-
-
-    --------------------------------------------------------
-    -- Motion: Spring
-    --------------------------------------------------------
-
-    springStrength = 35.0,
-    springDamping = 8.0
+    enableMotion = false
 }
 
 
 ------------------------------------------------------------
--- Scene References
+-- Scene references
 ------------------------------------------------------------
 
-local sceneRoot = nil
+local carsRoot = nil
 
-local cameraAnchor = nil
-local motionNode = nil
+local cameraAnchor = nil    -- Temporal Crash Patches v2.0.0 Restore
+
+local cameraRoot = nil
+local offsetNode = nil
 local scaleNode = nil
 local axisNode = nil
 
 local visor = nil
+local visorGlassInt = nil
+local visorGlassExt = nil
 
 
 ------------------------------------------------------------
--- Runtime State
+-- Runtime state
 ------------------------------------------------------------
 
 local initialized = false
 
-local lastScale = -1.0
-local lastYaw = 99999.0
+local lastScale = -1
+local lastYaw = 99999
 
 
 ------------------------------------------------------------
--- Dynamic motion state
+-- Camera vectors
 ------------------------------------------------------------
 
-local motion = {
-
-    position = vec3(0, 0, 0),
-
-    velocity = vec3(0, 0, 0),
-
-    target = vec3(0, 0, 0)
-}
+local worldUp = vec3(0, 1, 0)
 
 
 ------------------------------------------------------------
--- Camera Basis
---
--- Camera API:
--- ac.getCameraPosition()
--- ac.getCameraForward()
---
--- Right / Up are temporarily reconstructed from Forward.
-------------------------------------------------------------
-
-local function getCameraBasis()
-
-    local forward = ac.getCameraForward()
-
-    forward:normalize()
-
-
-    --------------------------------------------------------
-    -- World Up (Temporary)
-    --------------------------------------------------------
-
-    local worldUp = vec3(0, 1, 0)
-
-
-    --------------------------------------------------------
-    -- Right
-    --------------------------------------------------------
-
-    local right = forward:cross(worldUp)
-
-    if right:lengthSquared() < 0.00001 then
-
-        right = vec3(1, 0, 0)
-
-    else
-
-        right:normalize()
-
-    end
-
-
-    --------------------------------------------------------
-    -- Reconstruct Up
-    --------------------------------------------------------
-
-    local up = right:cross(forward)
-    up:normalize()
-
-
-    return right, up, forward
-end
-
-
-------------------------------------------------------------
--- Apply Model Scale
---
--- Scale is isolated into its own node.
+-- Apply scale
 ------------------------------------------------------------
 
 local function applyScale()
@@ -212,16 +115,16 @@ local function applyScale()
             mat4x4.scaling(
                 vec3.new(cfg.modelScale)
             )
-
         )
-
-        lastScale = cfg.modelScale
     end
+
+
+    lastScale = cfg.modelScale
 end
 
 
 ------------------------------------------------------------
--- Apply Model Axis Correction
+-- Apply model axis correction
 ------------------------------------------------------------
 
 local function applyAxisCorrection()
@@ -253,38 +156,34 @@ end
 
 
 ------------------------------------------------------------
--- Scene initialization
+-- Initialize
 ------------------------------------------------------------
 
 local function initializeScene()
-    
+
 
     --------------------------------------------------------
-    -- Find cars root
+    -- carsRoot
     --------------------------------------------------------
 
-    sceneRoot = ac.findNodes('carsRoot:yes')
+    carsRoot =
+        ac.findNodes('carsRoot:yes')
 
+    if not carsRoot
+        or #carsRoot == 0 then
 
-    if sceneRoot == nil or #sceneRoot == 0 then
-
-        ac.warn(
+        ac.warn(            
             '[RealVisor] carsRoot not found'
         )
 
         return false
     end
 
-    --------------------------------------------------------
-    -- Camera Anchor
-    --
-    -- Bounding sphere node is used for efficient hierarchy.
-    --
-    -- Radius is deliberately generous while calibration
-    -- is still ongoing.
-    --------------------------------------------------------
 
-    cameraAnchor = sceneRoot:createBoundingSphereNode(
+    --------------------------------------------------------
+    -- Temporal Crash patches (v0.2.0 method)
+    --------------------------------------------------------
+    cameraAnchor = carsRoot:createBoundingSphereNode(
         'REALVISOR_CAMERA_ANCHOR',
         5.0
     )
@@ -293,22 +192,24 @@ local function initializeScene()
         ac.warn('[RealVisor] Camera anchor creation failed')
         return false
     end
-
+    
 
     --------------------------------------------------------
-    -- Motion Node
+    -- IMPORTANT
+    --
+    -- Use a normal node.
+    --
+    -- Previous version used a BoundingSphereNode.
+    -- Rotation tracking did not work correctly in testing.
     --------------------------------------------------------
 
-    motionNode =
-        cameraAnchor:createNode(
-            'REALVISOR_MOTION'
+    cameraRoot = cameraAnchor:createNode(
+            'REALVISOR_CAMERA_ROOT'
         )
 
-
-    if not motionNode then
-
+    if not cameraRoot then
         ac.warn(
-            '[RealVisor] Motion node creation failed'
+            '[RealVisor] Camera root creation failed'
         )
 
         return false
@@ -316,27 +217,27 @@ local function initializeScene()
 
 
     --------------------------------------------------------
-    -- Scale Node
+    -- Local offset
+    --------------------------------------------------------
+
+    offsetNode =
+        cameraRoot:createNode(
+            'REALVISOR_OFFSET'
+        )
+
+
+    --------------------------------------------------------
+    -- Scale
     --------------------------------------------------------
 
     scaleNode =
-        motionNode:createNode(
+        offsetNode:createNode(
             'REALVISOR_SCALE'
         )
 
 
-    if not scaleNode then
-
-        ac.warn(
-            '[RealVisor] Scale node creation failed'
-        )
-
-        return false
-    end
-
-
     --------------------------------------------------------
-    -- Axis Correction Node
+    -- Model axis
     --------------------------------------------------------
 
     axisNode =
@@ -345,10 +246,12 @@ local function initializeScene()
         )
 
 
-    if not axisNode then
+    if not offsetNode
+        or not scaleNode
+        or not axisNode then
 
         ac.warn(
-            '[RealVisor] Axis node creation failed'
+            '[RealVisor] Transform hierarchy failed'
         )
 
         return false
@@ -356,7 +259,7 @@ local function initializeScene()
 
 
     --------------------------------------------------------
-    -- Load KN5 as child(Anchor)
+    -- Load KN5
     --------------------------------------------------------
 
     visor =
@@ -380,30 +283,48 @@ local function initializeScene()
 
 
     --------------------------------------------------------
-    -- Important:
+    -- Find glass mesh
     --
-    -- Real Visor is a camera overlay.
-    -- It should NOT cast world shadows.
+    -- Actual tested filter:
+    -- VISOR_GLASS
     --------------------------------------------------------
 
-    local allMeshes =
-        visor:findMeshes('*')
+    visorGlassInt =
+        visor:findMeshes(
+            'VISOR_GLASS_INT'
+        )
+    visorGlassExt =
+        visor:findMeshes(
+            'VISOR_GLASS_EXT'
+        )
 
-
-    if #allMeshes > 0 then
-
-        allMeshes:setShadows(true)
+    if visorGlassInt
+        and #visorGlassInt > 0 then
 
         ac.log(
-            '[RealVisor] Any Mesh matches * found'
+            '[RealVisor] VISOR_GLASS_INT found'
         )
 
     else
+
         ac.warn(
-            '[RealVisor] Matches * not found'
+            '[RealVisor] VISOR_GLASS_INT not found'
         )
     end
 
+    if visorGlassExt
+        and #visorGlassExt > 0 then
+
+        ac.log(
+            '[RealVisor] VISOR_GLASS_EXT found'
+        )
+
+    else
+
+        ac.warn(
+            '[RealVisor] VISOR_GLASS_EXT not found'
+        )
+    end
 
     --------------------------------------------------------
     -- Apply initial transforms
@@ -414,95 +335,11 @@ local function initializeScene()
     applyAxisCorrection()
 
 
-    --------------------------------------------------------
-    -- VISOR_GLASS reference
-    --
-    -- No rendering modification is performed here.
-    --
-    -- This only prepares the architecture for
-    -- future mesh-specific work.
-    --------------------------------------------------------
-
-    local visorGlass =
-        visor:findMeshes(
-            'VISOR_GLASS'
-        )
-
-
-    if #visorGlass > 0 then
-
-        ac.log(
-            '[RealVisor] VISOR_GLASS found'
-        )
-
-        ac.log(
-            '[RealVisor] Material: '
-            .. visorGlass:materialName()
-        )
-
-        ac.log(
-            '[RealVisor] Shader: '
-            .. visorGlass:shaderName()
-        )
-
-        visorGlass:setVisible(true)
-
-    else
-
-        ac.warn(
-            '[RealVisor] VISOR_GLASS not found'
-        )
-
-    end
-
-
-    --------------------------------------------------------
-    -- AABB Debug
-    --------------------------------------------------------
-
-    local minAABB,
-          maxAABB,
-          meshCount =
-        visor:getLocalAABB()
-
-
-    ac.log(
-
-        string.format(
-
-            '[RealVisor] Mesh count: %d',
-            meshCount or 0
-        )
-    )
-
-
-    if minAABB and maxAABB then
-
-        ac.log(
-
-            string.format(
-
-                '[RealVisor] Local AABB '
-                .. 'Min=(%.3f, %.3f, %.3f) '
-                .. 'Max=(%.3f, %.3f, %.3f)',
-
-                minAABB.x,
-                minAABB.y,
-                minAABB.z,
-
-                maxAABB.x,
-                maxAABB.y,
-                maxAABB.z
-            )
-        )
-    end
-
-
     initialized = true
 
 
     ac.log(
-        '[RealVisor] v0.2 initialized'
+        '[RealVisor] v0.2.1 initialized'
     )
 
 
@@ -511,123 +348,144 @@ end
 
 
 ------------------------------------------------------------
--- Motion
---
--- Currently disabled by default.
---
--- Structure is retained for v0.3.
+-- Update camera transform
 ------------------------------------------------------------
-
-local function updateMotion(dt)
-
-    if not cfg.enableMotion then
-
-        motion.position:set(
-            0,
-            0,
-            0
-        )
-
-        motion.velocity:set(
-            0,
-            0,
-            0
-        )
-
-        motion.target:set(
-            0,
-            0,
-            0
-        )
-
-        return
-    end
-
-
-    --------------------------------------------------------
-    -- Future implementation point
-    --------------------------------------------------------
-
-end
-
-
-------------------------------------------------------------
--- Update Camera Anchor
-------------------------------------------------------------
-
+local prevPos = nil
+local textDebugDeltaPos = nil
+local textDebugCamRotation = nil
 local function updateCameraTransform()
 
-
+    
     --------------------------------------------------------
-    -- Camera Position
+    -- Get camera position
     --------------------------------------------------------
 
-    local cameraPosition =
+    local position =
         ac.getCameraPosition()
 
 
     --------------------------------------------------------
-    -- Camera Orientation
+    -- Debug logger: Position delta 
+    --------------------------------------------------------
+    if cfg.debugDeltapos then
+        
+        if prevPos ~= nil and prevPos ~= position then
+            textDebugDeltaPos = 'X: ' .. string.format('%.4f',position.x - prevPos.x) 
+                                .. ', Y: ' .. string.format('%.4f',position.y - prevPos.y) 
+                                .. ', Z: ' .. string.format('%.4f',position.z - prevPos.z)
+        ac.log(
+            '[RealVisor] ' .. textDebugDeltaPos
+        )
+        end
+    
+        prevPos = position
+    end
+
+
+    --------------------------------------------------------
+    -- Get camera forward direction
     --------------------------------------------------------
 
-    local right,
-          up,
-          forward =
-        getCameraBasis()
+    local forward =
+        ac.getCameraForward()
+    
+
+    --------------------------------------------------------
+    -- Debug logger: Orientation (Forward) delta
+    --------------------------------------------------------
+    if cfg.debugRotation then
+        if prevForward ~= nil and prevForward ~= forward then
+
+            --------------------------------------------------------
+            -- 1. Delta Rotation
+            --------------------------------------------------------
+            -- -- 1. 성분별 Vector 차이 (x, y, z)
+            -- local dX = forward.x - prevForward.x
+            -- local dY = forward.y - prevForward.y
+            -- local dZ = forward.z - prevForward.z
+
+            -- -- 2. 이전 방향과의 각도 차이 (Degree)
+            -- -- Inner product(내적)를 이용한 사이각 계산
+            -- local dot = math.max(-1.0, math.min(1.0, forward:dot(prevForward)))
+            -- local angleRad = math.acos(dot)
+            -- local angleDeg = math.deg(angleRad)
+
+            -- textDebugRotation = '[RealVisor] world rotation: ' .. string.format('%.2f°', angleDeg)
+            --                     .. ' | Forward Delta X: ' .. string.format('%.4f', dX)
+            --                     .. ', Y: ' .. string.format('%.4f', dY)
+            --                     .. ', Z: ' .. string.format('%.4f', dZ)
+
+
+            --------------------------------------------------------
+            -- 2. AC-cam vs Visor Rotation Comparison 
+            --------------------------------------------------------
+            -- Cam fwd vector normalized
+            local fwd = forward:normalize()
+
+            -- Pitch: -90° ~ 90°
+            local pitchRad = math.asin(math.max(-1.0, math.min(1.0, fwd.y)))
+            local pitchDeg = math.deg(pitchRad)
+
+            -- Yaw: -180° ~ 180°
+            local yawRad = math.atan2(fwd.x, fwd.z)
+            local yawDeg = math.deg(yawRad)
+
+            textDebugCamRotation = 'World-Cam Pitch: ' .. string.format('%.1f°', pitchDeg)
+                                .. ', Yaw: ' .. string.format('%.1f°', yawDeg)
+                                .. ' | Fwd Vec (' .. string.format('%.3f', fwd.x) 
+                                .. ', ' .. string.format('%.3f', fwd.y) 
+                                .. ', ' .. string.format('%.3f', fwd.z) .. ')'
+
+            ac.log(
+                '[RealVisor] ' .. textDebugCamRotation
+            )
+        end
+        prevForward = forward
+    end
 
 
     --------------------------------------------------------
-    -- Anchor World Position
+    -- Position
     --------------------------------------------------------
 
-    cameraAnchor:setPosition(
-        cameraPosition
+    cameraRoot:setPosition(
+        position
     )
 
 
+
     --------------------------------------------------------
-    -- Anchor Orientation
+    -- Orientation
+    --
+    -- Camera Root receives camera rotation directly.
+    --
+    -- Axis correction is handled by child node.
     --------------------------------------------------------
 
-    cameraAnchor:setOrientation(
+    cameraRoot:setOrientation(
+
         forward,
-        up
+
+        worldUp
     )
 end
 
 
 ------------------------------------------------------------
--- Update Local Motion
+-- Update local offset
 ------------------------------------------------------------
 
-local function updateLocalTransform()
+local function updateOffset()
 
 
     --------------------------------------------------------
-    -- Dynamic motion
-    --------------------------------------------------------
-
-    updateMotion(0)
-
-
-    --------------------------------------------------------
-    -- Base offset + motion
-    --------------------------------------------------------
-
-    local finalOffset =
-
-        cfg.offset
-        + motion.position
-
-
-    --------------------------------------------------------
-    -- This position is LOCAL
+    -- Currently no G-force motion.
     --
-    -- Parent is already camera-aligned.
+    -- Offset is local to cameraRoot.
     --------------------------------------------------------
 
-    motionNode:setPosition(
-        finalOffset
+    offsetNode:setPosition(
+        cfg.offset
     )
 end
 
@@ -637,6 +495,7 @@ end
 ------------------------------------------------------------
 
 function script.update(dt)
+
 
     --------------------------------------------------------
     -- Initialize
@@ -650,17 +509,13 @@ function script.update(dt)
     end
 
 
-    --------------------------------------------------------
-    -- Safety
-    --------------------------------------------------------
-
     if not visor then
         return
     end
 
 
     --------------------------------------------------------
-    -- Model visibility
+    -- Visibility
     --------------------------------------------------------
 
     visor:setVisible(
@@ -669,93 +524,72 @@ function script.update(dt)
 
 
     if not cfg.enabled then
+        -- ac.log('[RealVisor] cfg.enabled = false update terminated')
         return
     end
 
 
     --------------------------------------------------------
-    -- Camera Anchor
+    -- Camera transform
     --------------------------------------------------------
 
     updateCameraTransform()
 
 
     --------------------------------------------------------
-    -- Model Parameters
+    -- Local offset
+    --------------------------------------------------------
+
+    updateOffset()
+
+
+    --------------------------------------------------------
+    -- Calibration
     --------------------------------------------------------
 
     applyScale()
 
     applyAxisCorrection()
-
-
-    --------------------------------------------------------
-    -- Dynamic motion
-    --------------------------------------------------------
-
-    updateDynamicMotion(
-        dt,
-        right,
-        up,
-        forward
-    )
-
-
-    --------------------------------------------------------
-    -- Motion
-    --------------------------------------------------------
-
-    updateMotion(dt)
-
-
-    local finalOffset =
-
-        cfg.offset
-        + motion.position
-
-
-    motionNode:setPosition(
-        finalOffset
-    )
 end
 
 
 ------------------------------------------------------------
--- Main Window
+-- Main window
 ------------------------------------------------------------
+
 
 function windowMain(dt)
 
-    ui.text('Real Visor Overlay v0.2')
-
-    ui.separator()
-
-
-    --------------------------------------------------------
-    -- Status
-    --------------------------------------------------------
+    
 
     ui.text(
-        initialized
-            and 'Status: ACTIVE'
-            or 'Status: INITIALIZING'
+        'Real Visor Overlay v0.2.1'
     )
-
 
     ui.separator()
 
+
+
+    local changed = nil     -- local boolean
     --------------------------------------------------------
     -- Enable
     --------------------------------------------------------
+    changed, _ = ui.checkbox(
 
-    cfg.enabled =
-        ui.checkbox(
             'Enable Real Visor',
+
             cfg.enabled
         )
 
+    if changed then
+        cfg.enabled = not cfg.enabled
+        ac.log(
+            '[RealVisor] Visor ' .. (cfg.enabled and 'Enabled' or 'Disabled')
+        )
+    end        
 
-     --------------------------------------------------------
+
+    --------------------------------------------------------
     -- Scale
     --------------------------------------------------------
 
@@ -763,8 +597,8 @@ function windowMain(dt)
 
     ui.text('Model Scale')
 
-
-    cfg.modelScale =
+    changed = nil
+    cfg.modelScale, changed =
         ui.slider(
 
             'Scale',
@@ -773,11 +607,16 @@ function windowMain(dt)
 
             0.005,
 
-            1.0,
+            0.05,
 
             '%.4f'
         )
 
+    if changed then
+        ac.log(
+            '[RealVisor] KN5 Global Scale: ' .. cfg.modelScale
+        )
+    end
 
     --------------------------------------------------------
     -- Axis
@@ -785,26 +624,31 @@ function windowMain(dt)
 
     ui.separator()
 
-    ui.text('Model Axis Correction')
+    ui.text('Axis Correction')
 
-
-    cfg.modelYawDeg =
+    changed = nil
+    cfg.modelYawDeg, changed =
         ui.slider(
 
             'Yaw',
 
             cfg.modelYawDeg,
 
-            -180.0,
+            -180,
 
-            180.0,
+            180,
 
             '%.1f°'
         )
 
+    if changed then
+        ac.log(
+            '[RealVisor] KN5 Yaw: ' .. cfg.modelYawDeg
+        )
+    end
 
     --------------------------------------------------------
-    -- Camera Local Offset
+    -- Offset
     --------------------------------------------------------
 
     ui.separator()
@@ -812,90 +656,89 @@ function windowMain(dt)
     ui.text('Camera Local Offset')
 
 
-    cfg.offset.x =
+    changed = nil
+    cfg.offset.x, changed =
         ui.slider(
 
             'Right',
 
             cfg.offset.x,
 
-            -1.0,
+            -0.3,
 
-            1.0,
+            0.3,
 
             '%.4f m'
         )
 
+    if changed then
+        ac.log(
+            '[RealVisor] KN5 Camera Offset(Right): ' .. cfg.offset.x
+        )
+    end
 
-    cfg.offset.y =
+    changed = nil
+    cfg.offset.y, changed =
         ui.slider(
 
             'Up',
 
             cfg.offset.y,
 
-            -1.0,
+            -0.3,
 
-            1.0,
+            0.3,
 
             '%.4f m'
         )
 
+    if changed then
+        ac.log(
+            '[RealVisor] KN5 Camera Offset(Up): ' .. cfg.offset.y
+        )
+    end
 
-    cfg.offset.z =
+    changed = nil
+    cfg.offset.z, changed =
         ui.slider(
 
             'Forward',
 
             cfg.offset.z,
 
-            -0.5,
+            -0.3,
 
-            1.0,
+            0.5,
 
             '%.4f m'
         )
 
-
-    --------------------------------------------------------
-    -- Motion
-    --------------------------------------------------------
-
-    ui.separator()
-
-    ui.text('Dynamic Motion')
-
-
-    cfg.enableMotion =
-        ui.checkbox(
-
-            'Enable Motion Prototype',
-
-            cfg.enableMotion
+    if changed then
+        ac.log(
+            '[RealVisor] KN5 Camera Offset(Forward): ' .. cfg.offset.z
         )
-
-
-    if cfg.enableMotion then
-
-        ui.textWrapped(
-
-            'G-force motion is reserved '
-            .. 'for the next implementation stage.'
-        )
-
     end
 
-
     --------------------------------------------------------
-    -- Debug Information
+    -- Glass debug
     --------------------------------------------------------
 
     ui.separator()
+    ui.text('Model Config')
+    ui.text(
+        visorGlass
+            and #visorGlass > 0
+            and 'VISOR_GLASS: FOUND'
+            or 'VISOR_GLASS: NOT FOUND'
+    )
 
-    ui.text('Debug')
 
+    --------------------------------------------------------
+    -- Runtime info
+    --------------------------------------------------------
 
     ui.text(
+
         string.format(
 
             'Scale: %.4f',
@@ -904,13 +747,41 @@ function windowMain(dt)
         )
     )
 
+    
+    --------------------------------------------------------
+    -- Debug Log
+    --------------------------------------------------------
 
-    ui.text(
-        string.format(
+    changed = nil
+    changed, _ = ui.checkbox(
 
-            'Yaw: %.1f°',
+        '[Log] position delta',
 
-            cfg.modelYawDeg
-        )
+        cfg.debugDeltapos
     )
+
+    if changed then
+        cfg.debugDeltapos = not cfg.debugDeltapos
+    end     
+    if textDebugDeltaPos then 
+        ui.text('       *LastDelta: ' .. textDebugDeltaPos)
+    end
+    
+    
+    changed = nil
+    changed, _ = ui.checkbox(
+
+        '[Log] world rotation',
+
+        cfg.debugRotation
+    )
+
+    if changed then
+        cfg.debugRotation = not cfg.debugRotation
+    end     
+
+    if textDebugCamRotation then
+        ui.text('          ' .. textDebugCamRotation)
+    end
+    
 end
