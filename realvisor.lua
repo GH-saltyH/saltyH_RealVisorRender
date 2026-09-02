@@ -1,15 +1,20 @@
 ﻿------------------------------------------------------------
 -- Real Visor Overlay
--- Version: 0.2.2
+local strDisplayName = 'Real Visor Overlay'
+-- Version: 0.2.3
+local strAppNameInternal = 'RealVisor'
+local strVersion= '0.2.3'
+local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
--- CSP Target: 0.3.0-preview500+
+-- CSP Target: 0.3.0-preview477+
+--
+-- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- mainWindow improvement, debug log, and visor glass visibility toggle
+-- Add Near Clipping Control
 ------------------------------------------------------------
 
-local appNameDebug = '[RealVisor_v0.2.1]'
 ------------------------------------------------------------
 -- Configuration
 ------------------------------------------------------------
@@ -25,7 +30,7 @@ local cfg = {
     -- Model calibration
     --------------------------------------------------------
 
-    modelScale = 0.017,
+    modelScale = 1.00,
 
     modelYawDeg = 0,        -- 지금은 모델 자체를 돌려서 제작했음 -90.0,  
 
@@ -35,15 +40,27 @@ local cfg = {
     --------------------------------------------------------
 
     offset = vec3(
-        -0.0049,
-        -0.0519,
-        0.0005
+        -0.0033,
+        -0.0080,
+       -0.0373
     ),
+
+    --------------------------------------------------------
+    -- Camera-local offset
+    --------------------------------------------------------
+
+    distantNearclip = 0.0245,
     
+    
+    --------------------------------------------------------
+    -- Debug Controls
+    --------------------------------------------------------
+
     debugShowGlassExt = true,
     debugShowGlassInt = true,
     debugDeltapos = false,
     debugRotation = false,
+
 
     --------------------------------------------------------
     -- Future motion
@@ -300,6 +317,15 @@ local function initializeScene()
 
 
     --------------------------------------------------------
+    -- Setup Camera Clipping 
+    --------------------------------------------------------
+
+    if cfg.distantNearclip and ac.getSim().cameraClipFar then
+        ac.overrideCameraClipPlanes(cfg.distantNearclip, ac.getSim().cameraClipFar)
+    end
+
+
+    --------------------------------------------------------
     -- Find glass mesh
     --
     -- Actual tested filter:
@@ -529,7 +555,10 @@ function script.update(dt)
     end
 
 
-    if not visor then
+    if not visor then  
+
+        ac.overrideCameraClipPlanes(nil, nil)
+
         return
     end
 
@@ -583,7 +612,7 @@ function windowMain(dt)
     
 
     ui.text(
-        'Real Visor Overlay v0.2.1'
+        strDisplayName .. ' v' .. strVersion
     )
 
     ui.separator()
@@ -624,9 +653,9 @@ function windowMain(dt)
 
             cfg.modelScale,
 
-            0.005,
+            0.01,
 
-            0.05,
+            10.00,
 
             '%.4f'
         )
@@ -732,6 +761,36 @@ function windowMain(dt)
     if changed then
         ac.log(
             appNameDebug .. ' KN5 Camera Offset(Forward): ' .. cfg.offset.z
+        )
+    end
+
+    --------------------------------------------------------
+    -- Near Clip Distance
+    --------------------------------------------------------
+
+    ui.separator()
+
+    ui.text(
+        'Near Clip Distance'
+    )
+
+    cfg.distantNearclip, changed = ui.slider(
+
+        'Near Clip',
+
+        cfg.distantNearclip,
+
+        0.0001,
+
+        0.3,
+
+        '%.4f m'
+    )
+
+    if changed and visor then
+        ac.overrideCameraClipPlanes(cfg.distantNearclip, ac.getSim().cameraClipFar)
+        ac.log(
+            appNameDebug .. 'Set CamClipDist (Near: ' .. string.format('%4f', ac.getSim().cameraClipNear) .. ', Far Clip: ' .. ac.getSim().cameraClipFar .. ')'
         )
     end
 
