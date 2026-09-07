@@ -1,9 +1,9 @@
 ﻿------------------------------------------------------------
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
--- Version: 0.3.1
+-- Version: 0.3.2
 local strAppNameInternal = 'RealVisor'
-local strVersion= '0.3.1'
+local strVersion= '0.3.2'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,8 +12,13 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
+-- 0.3.0
 -- G-Force Motion (Tested)
+-- 0.3.1
 -- Support all-axis rotation (Tested *has Gimbal Lock limitation)
+-- 0.3.2
+-- Material Parameter Prototype
+--  VISOR_GLASS_EXT_REFLECT, Tested
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -34,9 +39,9 @@ local cfg = {
 
     modelScale = 1.00,
 
-    modelPitchDeg = 0,      -- 위아래
-    modelYawDeg = 0,        -- 지금은 모델 자체를 돌려서 제작했음 -90.0,  
-    modelRollDeg = 0,       -- 기울임회전
+    modelPitchDeg = 0,      
+    modelYawDeg = 0,       
+    modelRollDeg = 0,      
 
     --------------------------------------------------------
     -- Camera-local offset
@@ -59,8 +64,9 @@ local cfg = {
     -- Debug Controls
     --------------------------------------------------------
 
-    debugShowGlassExt = true,
+    debugShowGlassExtDirt = true,
     debugShowGlassInt = true,
+    debugShowGlassIntRefl = true,
     debugDeltapos = false,
     debugRotation = false,
 
@@ -83,9 +89,103 @@ local cfg = {
     motionLimitY = 0.020,
     motionLimitZ = 0.020,
 
-    debugMotion = false
+    debugMotion = false,
+
+    --------------------------------------------------------
+    -- Material Parameter Prototype (VISOR_GLASS_EXT_DIRT)
+    --------------------------------------------------------
+
+    -- Experimental: some 'bool' jstyle shader parameters may actually need
+    -- to be sent as 0/1 floats rather than Lua true/false to take effect.
+    -- Toggle this in the material editor window while testing
+    materialBoolAsNumber = true
 }
 
+
+------------------------------------------------------------
+-- Global Names
+------------------------------------------------------------
+local strMeshVisorExtDirt = 'VISOR_GLASS_EXT_DIRT'
+local strMeshVisorInt = 'VISOR_GLASS_INT'
+local strMeshVisorIntRefl = 'VISOR_GLASS_INT_REFLECT'
+
+local strMaterialEditorPopup = 'RealVisorMaterialEditor'
+-- Material assigned to VISOR_GLASS_EXT_DIRT (Material Parameter Prototype target)
+local strMaterialVisorExtDirt = 'mtVISOR_GLASS_EXT_DIRT'
+local strMaterialVisorIntRefl = 'mtVISOR_GLASS_INT_REFLECT'
+
+
+------------------------------------------------------------
+-- Custom Parametor Registry
+------------------------------------------------------------
+local EXTDIRT_PARAMETERS = {
+
+  -- Scalar
+  {    name = 'ksAmbient',    type = 'float'  },
+  {    name = 'ksDiffuse',    type = 'float'  },
+
+  {    name = 'ksSpecular',    type = 'float'  },
+  {    name = 'ksSpecularEXP',    type = 'float'  },
+
+  {    name = 'ksAlphaRef',    type = 'float'  },
+
+  {    name = 'fresnelC',    type = 'float'  },
+  {    name = 'fresnelEXP',    type = 'float'  },
+  {    name = 'fresnelMaxLevel',    type = 'float'  },
+
+  {    name = 'extColoredReflection',    type = 'float'  },
+  {    name = 'extColoredReflectionN',    type = 'float'  },
+  
+  {    name = 'nmObjectSpace',    type = 'float'  },
+
+  {    name = 'NMmult',    type = 'float'  },
+  {    name = 'detailNMmult',    type = 'float'  },
+
+  {    name = 'uvMultX',    type = 'float'  },
+  {    name = 'uvMultY',    type = 'float'  },
+
+  {    name = 'uvOffsetX',    type = 'float'  },
+  {    name = 'uvOffsetY',    type = 'float'  },
+
+
+  -- Vector3
+  {    name = 'ksEmissive',    type = 'vec3'  },
+
+
+  -- Vector2
+  {    name = 'offsetDSpeed',    type = 'vec2'  },
+  {    name = 'offsetNMSpeed',    type = 'vec2'  },
+  {    name = 'offsetNMdetailSpeed',    type = 'vec2'  },
+  {    name = 'pauseTiming',    type = 'vec2'  },
+
+
+  -- Boolean / 0 or 1
+  {    name = 'isAdditive',    type = 'bool'  },
+  {    name = 'emAlphaFromDiffuse',    type = 'bool'  },
+  {    name = 'emClipOutside',    type = 'bool'  }
+}
+
+local INTREFLECT_PARAMETERS = {
+
+  -- Scalar
+  {    name = 'ksAmbient',    type = 'float'  },
+  {    name = 'ksDiffuse',    type = 'float'  },
+  
+  {    name = 'ksSpecular',    type = 'float'  },
+  {    name = 'ksSpecularEXP',    type = 'float'  },
+  
+  {    name = 'ksAlphaRef',    type = 'float'  },
+
+  {    name = 'fresnelC',    type = 'float'  },
+  {    name = 'fresnelEXP',    type = 'float'  },
+  {    name = 'fresnelMaxLevel',    type = 'float'  },
+
+  -- Vector3
+  {    name = 'ksEmissive',    type = 'vec3'  },
+
+  -- Boolean / 0 or 1
+  {    name = 'isAdditive',    type = 'bool'  },
+}
 
 ------------------------------------------------------------
 -- Scene references
@@ -105,8 +205,11 @@ local axisRollNode = nil
 
 local visor = nil
 local visorGlassInt = nil
-local visorGlassExt = nil
+local visorGlassIntRefl = nil
+local visorGlassExtDirt = nil
 
+local visorGlassExtDirtMaterial = nil   -- SceneReference for mtVISOR_GLASS_EXT_DIRT, once located
+local visorGlassIntReflMaterial = nil   -- mtVISOR_GLASS_INT_REFLECT
 
 ------------------------------------------------------------
 -- Runtime state
@@ -119,6 +222,20 @@ local lastScale = -1
 local lastPitch = 99999
 local lastYaw = 99999
 local lastRoll = 99999
+
+local materialInputBuffers = {} -- materials Input Buffer during editing
+local materialInputApplyRequested = false   -- It helps to trigger when you presses 'Enter' on inputtext
+local extDirtValues = {}        -- Live UI/edit state for EXT_DIRT_PARAMETERS, keyed by parameter name
+local intReflValues = {}        -- Reflection parameter container (reserved for future prototype)
+
+
+------------------------------------------------------------
+-- Material editor state (VISOR_GLASS_EXT_DIRT prototype)
+------------------------------------------------------------
+
+local materialParamsLoaded = false      -- Have EXTDIRT_PARAMETERS been read from material at least once?
+local materialEditWindowOpen = false    -- Visibility flag for the floating material editor window
+local materialLastError = nil           -- Last apply/read error message, shown in the editor window
 
 
 ------------------------------------------------------------
@@ -164,6 +281,241 @@ local function clampValue(value, minimum, maximum)
     end
 
     return value
+end
+
+
+------------------------------------------------------------
+-- Material Parameter Prototype: helpers
+--
+-- Read and Apply are kept strictly separate:
+--   - loadExtDirtMaterialParams() reads current values from the material
+--     into extDirtValues (UI state). Only called on init / manual reload.
+--   - applyExtDirtMaterialParams() pushes edited UI state back onto the
+--     material. Only called when the user presses "Refresh".
+-- The per-frame UI code only ever touches extDirtValues, never the
+-- material directly, so scrubbing a slider can never fight with a
+-- material read happening on the same frame.
+------------------------------------------------------------
+
+
+--------------------------------------------------------
+-- Default value per declared parameter type
+--------------------------------------------------------
+
+local function defaultMaterialValue(paramType)
+
+    if paramType == 'float' then
+        return 0.0
+
+    elseif paramType == 'vec2' then
+        return vec2(0, 0)
+
+    elseif paramType == 'vec3' then
+        return vec3(0, 0, 0)
+
+    elseif paramType == 'bool' then
+        return false
+    end
+
+    return 0.0
+end
+
+
+--------------------------------------------------------
+-- Safely read one property off a SceneReference
+--
+-- NOTE: exact CSP getter name/behavior for reading back a live
+-- material property value was not fully verifiable at the time of
+-- writing (see chat notes). This is wrapped in pcall and falls back
+-- to a type-appropriate default so the tool never hard-crashes the
+-- script if the getter is missing/renamed on a given CSP build --
+-- worth double-checking against your local CSP Lua docs.
+--------------------------------------------------------
+
+local function readMaterialProperty(meshRef, paramDef)
+
+    if not meshRef then
+        return defaultMaterialValue(paramDef.type), false
+    end
+
+    local ok, result = pcall(
+        function()
+            return meshRef:getMaterialPropertyValue(paramDef.name)
+        end
+    )
+
+    if not ok or result == nil then
+        return defaultMaterialValue(paramDef.type), false
+    end
+
+    return result, true
+end
+
+
+--------------------------------------------------------
+-- Read all EXTDIRT_PARAMETERS from the material into
+-- extDirtValues (UI state only, does not touch the material).
+--------------------------------------------------------
+
+local function loadExtDirtMaterialParams()
+
+    extDirtValues = {}
+
+    if not visorGlassExtDirt or #visorGlassExtDirt == 0 then
+
+        ac.warn(
+            appNameDebug .. ' MATERIAL: ' .. strMeshVisorExtDirt .. ' mesh not available, cannot read material'
+        )
+
+        materialParamsLoaded = false
+
+        return false 
+    end
+
+    for _, paramDef in ipairs(EXTDIRT_PARAMETERS) do
+
+        local rawValue, readOk =
+            readMaterialProperty(visorGlassExtDirt, paramDef)
+
+        local entry = {
+            type = paramDef.type,
+            readOk = readOk
+        }
+
+        if paramDef.type == 'float' then
+
+            entry.value = tonumber(rawValue) or 0.0
+
+        elseif paramDef.type == 'bool' then
+
+            --------------------------------------------------------
+            -- Boolean parameters may come back as a real Lua boolean
+            -- or as a 0/1 float, depending on the CSP build/shader.
+            -- Normalize to a Lua boolean for the checkbox UI; the
+            -- send-back format is controlled separately by
+            -- cfg.materialBoolAsNumber in applyExtDirtMaterialParams().
+            --------------------------------------------------------
+
+            if type(rawValue) == 'boolean' then
+                entry.value = rawValue
+
+            elseif type(rawValue) == 'number' then
+                entry.value = rawValue > 0.5
+
+            else
+                entry.value = false
+            end
+
+        elseif paramDef.type == 'vec2' then
+
+            local okX, xValue = pcall(function() return rawValue.x end)
+            local okY, yValue = pcall(function() return rawValue.y end)
+
+            if okX and okY and xValue ~= nil and yValue ~= nil then
+                entry.value = vec2(xValue, yValue)
+            else
+                entry.value = vec2(0, 0)
+            end
+
+        elseif paramDef.type == 'vec3' then
+
+            local okX, xValue = pcall(function() return rawValue.x end)
+            local okY, yValue = pcall(function() return rawValue.y end)
+            local okZ, zValue = pcall(function() return rawValue.z end)
+
+            if okX and okY and okZ and xValue ~= nil and yValue ~= nil and zValue ~= nil then
+                entry.value = vec3(xValue, yValue, zValue)
+            else
+                entry.value = vec3(0, 0, 0)
+            end
+        end
+
+        extDirtValues[paramDef.name] = entry
+
+        if not readOk then
+            ac.warn(
+                appNameDebug .. ' MATERIAL: failed to read "' .. paramDef.name .. '", using default'
+            )
+        end
+    end
+
+    materialParamsLoaded = true
+
+    ac.log(
+        appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' parameters loaded'
+    )
+
+    materialInputBuffers = {}
+
+    return true
+end
+
+
+--------------------------------------------------------
+-- Push edited extDirtValues back onto the material.
+-- Only called explicitly (Refresh button) -- never per-frame.
+--------------------------------------------------------
+
+local function applyExtDirtMaterialParams()
+
+    if not visorGlassExtDirt or #visorGlassExtDirt == 0 then
+
+        materialLastError = strMeshVisorExtDirt .. ' mesh not available'
+
+        return false
+    end
+
+    local allOk = true
+
+    for _, paramDef in ipairs(EXTDIRT_PARAMETERS) do
+
+        local entry = extDirtValues[paramDef.name]
+
+        if entry then
+
+            local sendValue = entry.value
+
+            if paramDef.type == 'bool' then
+
+                if cfg.materialBoolAsNumber then
+                    sendValue = entry.value and 1.0 or 0.0
+                else
+                    sendValue = entry.value and true or false
+                end
+            end
+
+            local ok, err = pcall(
+                function()
+                    visorGlassExtDirt:setMaterialProperty(
+                        paramDef.name,
+                        sendValue
+                    )
+                end
+            )
+
+            if not ok then
+
+                allOk = false
+
+                materialLastError = paramDef.name .. ': ' .. tostring(err)
+
+                ac.warn(
+                    appNameDebug .. ' MATERIAL: failed to set "' .. paramDef.name .. '" -> ' .. tostring(err)
+                )
+            end
+        end
+    end
+
+    if allOk then
+
+        materialLastError = nil
+
+        ac.log(
+            appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' parameters applied'
+        )
+    end
+
+    return allOk
 end
 
 
@@ -458,58 +810,119 @@ local function initializeScene()
 
     visorGlassInt =
         visor:findMeshes(
-            'VISOR_GLASS_INT'
+            strMeshVisorInt
         )
-    visorGlassExt =
+
+    visorGlassIntRefl =
         visor:findMeshes(
-            'VISOR_GLASS_EXT'
+            strMeshVisorIntRefl
+        )
+
+    visorGlassExtDirt =
+        visor:findMeshes(
+            strMeshVisorExtDirt
         )
 
     if visorGlassInt
         and #visorGlassInt > 0 then
 
         ac.log(
-            appNameDebug .. ' VISOR_GLASS_INT found'
+            appNameDebug .. ' ' .. strMeshVisorInt .. ' found'
         )
 
     else
 
         ac.warn(
-            appNameDebug .. ' VISOR_GLASS_INT not found'
+            appNameDebug .. ' ' .. strMeshVisorInt .. ' not found'
         )
     end
 
-    if visorGlassExt
-        and #visorGlassExt > 0 then
+
+    if visorGlassIntRefl
+        and #visorGlassIntRefl > 0 then
 
         ac.log(
-            appNameDebug .. ' VISOR_GLASS_EXT found'
+            appNameDebug .. ' ' .. strMeshVisorIntRefl .. ' found'
+        )
+        
+
+    else
+
+        ac.warn(
+            appNameDebug .. ' ' .. strMeshVisorIntRefl .. ' not found'
+        )
+    end
+
+    
+    if visorGlassExtDirt
+        and #visorGlassExtDirt > 0 then
+
+        ac.log(
+            appNameDebug .. ' ' .. strMeshVisorExtDirt .. ' found'
         )
 
     else
-        visorGlassExt =
-            visor:findMeshes(
-                'VISOR_GLASS_EXT_REFLECT'
-            )
 
         ac.warn(
-            appNameDebug .. ' VISOR_GLASS_EXT not found : try find VISOR_GLASS_EXT_REFLECT instead'
+            appNameDebug .. ' ' .. strMeshVisorExtDirt .. ' not found'
         )
-        if visorGlassExt
-            and #visorGlassExt > 0 then
+        -- visorGlassExtDirt =
+        --     visor:findMeshes(
+        --         'VISOR_GLASS_EXT_REFLECT'
+        --     )
 
-            ac.log(
-                appNameDebug .. ' VISOR_GLASS_EXT_REFLECT found'
+        -- ac.warn(
+        --     appNameDebug .. ' VISOR_GLASS_EXT not found : try find VISOR_GLASS_EXT_REFLECT instead'
+        -- )
+        -- if visorGlassExtDirt
+        --     and #visorGlassExtDirt > 0 then
+
+        --     ac.log(
+        --         appNameDebug .. ' VISOR_GLASS_EXT_REFLECT found'
+        --     )
+
+        -- else
+            -- ac.warn(
+            --     appNameDebug .. ' VISOR_GLASS_EXT_REFLECT not found'
+            -- )
+        -- end
+    end
+
+
+    --------------------------------------------------------
+    -- Material Parameter Prototype
+    --
+    -- Locate mtVISOR_GLASS_EXT_DIRT (assigned to VISOR_GLASS_EXT_DIRT)
+    -- using CSP's 'material:' scene query, then do the initial
+    -- parameter read so the editor window has data as soon as it
+    -- is opened.
+    --------------------------------------------------------
+
+    if visorGlassExtDirt and #visorGlassExtDirt > 0 then
+
+        visorGlassExtDirtMaterial =
+            visor:findMeshes(
+                'material:' .. strMaterialVisorExtDirt
             )
 
+        if visorGlassExtDirtMaterial
+            and #visorGlassExtDirtMaterial > 0 then
+
+            ac.log(
+                appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' found'
+            )
+
+            loadExtDirtMaterialParams()
+
         else
+
             ac.warn(
-                appNameDebug .. ' VISOR_GLASS_EXT_REFLECT not found'
+                appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' not found'
             )
         end
     end
 
-    
+
     --------------------------------------------------------
     -- Apply initial transforms
     --------------------------------------------------------
@@ -1083,6 +1496,250 @@ end
 
 
 ------------------------------------------------------------
+-- Material Parameter Prototype: UI draw helpers
+--
+-- These only read/write extDirtValues (UI state). Nothing here
+-- touches the material -- that only happens in
+-- applyExtDirtMaterialParams(), on "Refresh".
+------------------------------------------------------------
+
+local function drawFloatParam(label, paramName, fmt)
+
+    local entry = extDirtValues[paramName]
+
+    if not entry then
+        ui.text(label .. ': N/A')
+        return
+    end
+
+    if materialInputBuffers[paramName] == nil then
+        materialInputBuffers[paramName] =
+            string.format(fmt or '%.3f', entry.value)
+    end
+
+    local newText, changed, enterPressed =
+        ui.inputText(
+            label .. '##' .. paramName,
+            materialInputBuffers[paramName]
+        )
+
+    if changed then
+
+        materialInputBuffers[paramName] = newText
+        local numberValue = tonumber(newText)
+
+        if numberValue ~= nil then        
+            entry.value = numberValue
+        end
+    end
+
+    if enterPressed then
+        materialInputApplyRequested = true
+    end
+
+end
+
+
+local function drawBoolParam(label, paramName)
+
+    local entry = extDirtValues[paramName]
+
+    if not entry then
+        return
+    end
+
+    local changed, _ =
+        ui.checkbox(
+            label,
+            entry.value
+        )
+
+    if changed then
+        entry.value = not entry.value
+    end
+end
+
+
+local function drawVec2Param(labelX, labelY, paramName, minV, maxV, fmt)
+
+    local entry = extDirtValues[paramName]
+
+    if not entry then
+        return
+    end
+
+    local nx, changedX =
+        ui.slider(labelX, entry.value.x, minV, maxV, fmt or '%.3f')
+
+    if changedX then
+        entry.value.x = nx
+    end
+
+    ui.sameLine(0, 20)
+
+    local ny, changedY =
+        ui.slider(labelY, entry.value.y, minV, maxV, fmt or '%.3f')
+
+    if changedY then
+        entry.value.y = ny
+    end
+end
+
+
+local function drawVec3Param(label, paramName, minV, maxV, fmt)
+
+    local entry = extDirtValues[paramName]
+
+    if not entry then
+        return
+    end
+
+    ui.text(label)
+
+    local nx, cx = ui.slider(label .. ' R', entry.value.x, minV, maxV, fmt or '%.3f')
+    if cx then entry.value.x = nx end
+
+    local ny, cy = ui.slider(label .. ' G', entry.value.y, minV, maxV, fmt or '%.3f')
+    if cy then entry.value.y = ny end
+
+    local nz, cz = ui.slider(label .. ' B', entry.value.z, minV, maxV, fmt or '%.3f')
+    if cz then entry.value.z = nz end
+end
+
+
+------------------------------------------------------------
+-- Material Parameter Prototype: floating editor window
+--
+-- ui.beginWindow / ui.endWindow open an auxiliary floating window
+-- independent of the app's main window (per CSP's own ui.beginWindow
+-- API) -- verify signature against your local CSP Lua docs if it
+-- doesn't compile on your CSP build; ui.openPopup / ui.beginPopup
+-- is the documented fallback.
+-- NOTE: Use openPopup/beginPopup instead
+------------------------------------------------------------
+
+
+local function drawMaterialEditorWindow()
+
+    if not materialEditWindowOpen then
+        return
+    end
+
+    if ui.beginPopup(
+        strMaterialEditorPopup,
+        nil,
+        nil,
+        materialEditWindowOpen
+    ) then
+
+        ui.text(strMaterialVisorExtDirt .. ' - Material')
+        ui.separator()
+
+        if not visorGlassExtDirtMaterial
+            or #visorGlassExtDirtMaterial == 0 then
+
+            ui.text(
+                'Material not found: ' 
+                .. strMaterialVisorExtDirt
+            )
+
+        elseif not materialParamsLoaded then
+
+            ui.text('Parameters not loaded yet.')
+
+        else
+
+            ui.text('Base')
+            drawFloatParam('Ambient', 'ksAmbient')
+            drawFloatParam('Diffuse', 'ksDiffuse')
+            drawFloatParam('Specular', 'ksSpecular')
+            drawFloatParam('Specular EXP', 'ksSpecularEXP', '%.1f')
+            drawFloatParam('Alpha Ref', 'ksAlphaRef', '%.3f')
+
+            ui.separator()
+            ui.text('Fresnel')
+            drawFloatParam('C', 'fresnelC')
+            drawFloatParam('EXP', 'fresnelEXP', '%.2f')
+            drawFloatParam('Max Level', 'fresnelMaxLevel')
+
+            ui.separator()
+            ui.text('Colored Reflection')
+            drawFloatParam('Amount', 'extColoredReflection')
+            drawFloatParam('Amount N', 'extColoredReflectionN')
+
+            ui.separator()
+            ui.text('Normal')
+            drawFloatParam('Object Space', 'nmObjectSpace')
+            drawFloatParam('NM Mult', 'NMmult')
+            drawFloatParam('Detail NM', 'detailNMmult')
+
+            ui.separator()
+            ui.text('UV')
+            drawFloatParam('MultX', 'uvMultX')
+            ui.sameLine(0,20)
+            drawFloatParam('MultY', 'uvMultY')
+
+            drawFloatParam('OffsetX', 'uvOffsetX')
+            ui.sameLine(0,20)
+            drawFloatParam('OffsetY', 'uvOffsetY')
+
+            ui.separator()
+            ui.text('Emissive')
+            drawVec3Param('ksEmissive', 'ksEmissive', 0.0, 5.0)
+
+            ui.separator()
+            ui.text('UV Animation (offset speed)')
+            drawVec2Param('D Speed X', 'D Speed Y', 'offsetDSpeed', -5.0, 5.0)
+            drawVec2Param('NM Speed X', 'NM Speed Y', 'offsetNMSpeed', -5.0, 5.0)
+            drawVec2Param('Detail NM Speed X', 'Detail NM Speed Y', 'offsetNMdetailSpeed', -5.0, 5.0)
+            drawVec2Param('Pause Timing X', 'Pause Timing Y', 'pauseTiming', 0.0, 10.0)
+
+            ui.separator()
+            ui.text('Flags')
+            drawBoolParam('Additive', 'isAdditive')
+            drawBoolParam('Emissive Alpha From Diffuse', 'emAlphaFromDiffuse')
+            drawBoolParam('Emissive Clip Outside', 'emClipOutside')
+
+            ui.separator()
+
+            local changedBoolMode, _ =
+                ui.checkbox('Send bool as 0/1 (experimental)', cfg.materialBoolAsNumber)
+
+            if changedBoolMode then
+                cfg.materialBoolAsNumber = not cfg.materialBoolAsNumber
+            end
+        end
+
+        ui.separator()
+
+        if ui.button('Refresh') 
+            or materialInputApplyRequested then
+                materialInputApplyRequested = false
+                applyExtDirtMaterialParams()
+        end
+
+        ui.sameLine(0, 15)
+
+        if ui.button('Reload from material') then
+            loadExtDirtMaterialParams()
+        end
+
+        ui.sameLine(0, 15)
+
+        if ui.button('Close') then
+            materialEditWindowOpen = false
+            ui.closePopup()
+        end
+
+        if materialLastError then
+            ui.text('Last error: ' .. materialLastError)
+        end
+
+    end
+end
+
+
+------------------------------------------------------------
 -- Main window
 ------------------------------------------------------------
 
@@ -1456,19 +2113,48 @@ function windowMain(dt)
 
     ui.separator()
     ui.text('Model Config')
-    local foundGlassExt, foundGlassInt = visorGlassExt, visorGlassInt
+    local foundGlassExt, foundGlassInt, foundGlassIntRefl = visorGlassExtDirt, visorGlassInt, visorGlassIntRefl
     
     ui.text(
-        '\tVISOR_GLASS_EXT: ' 
-        .. ((visorGlassExt and #visorGlassExt > 0 )
+        '\t' .. strMeshVisorExtDirt .. ': ' 
+        .. ((visorGlassExtDirt and #visorGlassExtDirt > 0 )
         and 'FOUND' or 'NOTFOUND' )
     )
-    ui.sameLine(0, 50)
+    
     ui.text(
-        'VISOR_GLASS_INT:' 
+        '\t' .. strMeshVisorInt .. ': ' 
         .. ((visorGlassInt and #visorGlassInt > 0 )
         and 'FOUND' or 'NOTFOUND')
     )
+
+    ui.text(
+        '\t' .. strMeshVisorIntRefl .. ': ' 
+        .. ((visorGlassIntRefl and #visorGlassIntRefl > 0 )
+        and 'FOUND' or 'NOTFOUND')
+    )
+
+    
+    --------------------------------------------------------
+    -- Material Parameter Prototype: open editor
+    --------------------------------------------------------
+
+    ui.text(
+        '\t' .. strMaterialVisorExtDirt .. ': '
+        .. ((visorGlassExtDirtMaterial and #visorGlassExtDirtMaterial > 0)
+        and 'FOUND' or 'NOTFOUND')
+    )
+
+    if ui.button('Edit ' .. strMeshVisorExtDirt .. ' Material...') then
+
+        materialEditWindowOpen = true
+
+        if not materialParamsLoaded then
+            loadExtDirtMaterialParams()
+        end
+
+        ui.openPopup(strMaterialEditorPopup)
+    end
+
 
     --------------------------------------------------------
     -- Glass debug: Show / Hide Meshes
@@ -1478,25 +2164,25 @@ function windowMain(dt)
     ui.sameLine(0, 15)
 
     changed, _ = ui.checkbox(
-            'VISOR_GLASS_EXT',
-            cfg.debugShowGlassExt
+            strMeshVisorExtDirt,
+            cfg.debugShowGlassExtDirt
         )
 
     if changed then
-        cfg.debugShowGlassExt = not cfg.debugShowGlassExt
-        if visorGlassExt and #visorGlassExt > 0 then
-            visorGlassExt:setVisible(cfg.debugShowGlassExt)
+        cfg.debugShowGlassExtDirt = not cfg.debugShowGlassExtDirt
+        if visorGlassExtDirt and #visorGlassExtDirt > 0 then
+            visorGlassExtDirt:setVisible(cfg.debugShowGlassExtDirt)
         end
-        --setMeshesVisible(visorGlassExt, cfg.debugShowGlassExt)
+        --setMeshesVisible(visorGlassExtDirt, cfg.debugShowGlassExtDirt)
         ac.log(
-            appNameDebug .. ' VISOR_GLASS_EXT' .. (cfg.enabled and ': Show' or ': Hide')
+            appNameDebug .. ' ' .. strMeshVisorExtDirt .. (cfg.debugShowGlassExtDirt and ': Show' or ': Hide')
         )
     end        
 
-    ui.sameLine(0, 70)
+    ui.sameLine(0, 30)
 
     changed, _ = ui.checkbox(
-            'VISOR_GLASS_INT',
+            strMeshVisorInt,
             cfg.debugShowGlassInt 
         )
 
@@ -1507,10 +2193,27 @@ function windowMain(dt)
         end
         --setMeshesVisible(visorGlassInt, cfg.debugShowGlassInt)
         ac.log(
-            appNameDebug .. ' VISOR_GLASS_INT' .. (cfg.enabled and ': Show' or ': Hide')
+            appNameDebug .. ' ' .. strMeshVisorInt .. (cfg.debugShowGlassInt and ': Show' or ': Hide')
         )
     end        
 
+    ui.sameLine(0, 35)
+
+    changed, _ = ui.checkbox(
+            strMeshVisorIntRefl,
+            cfg.debugShowGlassIntRefl
+        )
+
+    if changed then
+        cfg.debugShowGlassIntRefl = not cfg.debugShowGlassIntRefl
+        if visorGlassIntRefl and #visorGlassIntRefl > 0 then
+            visorGlassIntRefl:setVisible(cfg.debugShowGlassIntRefl)
+        end
+        --setMeshesVisible(visorGlassInt, cfg.debugShowGlassInt)
+        ac.log(
+            appNameDebug .. ' ' .. strMeshVisorIntRefl .. (cfg.debugShowGlassIntRefl and ': Show' or ': Hide')
+        )
+    end       
 
     --------------------------------------------------------
     -- Runtime info
@@ -1569,4 +2272,13 @@ function windowMain(dt)
         ui.text('\t\t*' .. textDebugCamRotation)
     end
     
+
+    
+    --------------------------------------------------------
+    -- Material Parameter Prototype: floating editor window
+    --------------------------------------------------------
+
+    drawMaterialEditorWindow()
+
+
 end
