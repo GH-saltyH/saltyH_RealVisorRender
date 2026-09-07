@@ -1,9 +1,9 @@
 ﻿------------------------------------------------------------
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
--- Version: 0.2.3
+-- Version: 0.3.1
 local strAppNameInternal = 'RealVisor'
-local strVersion= '0.2.3'
+local strVersion= '0.3.1'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,7 +12,8 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- Add Near Clipping Control
+-- G-Force Motion (Tested)
+-- Support all-axis rotation (Tested *has Gimbal Lock limitation)
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -23,7 +24,8 @@ local cfg = {
 
     enabled = true,
 
-    modelPath = 'visors/visor_lando.kn5',
+    --modelPath = 'visors/visor_lando.kn5',
+    modelPath = 'visors/visor_lando_reflection.kn5',
 
 
     --------------------------------------------------------
@@ -32,8 +34,9 @@ local cfg = {
 
     modelScale = 1.00,
 
+    modelPitchDeg = 0,      -- 위아래
     modelYawDeg = 0,        -- 지금은 모델 자체를 돌려서 제작했음 -90.0,  
-
+    modelRollDeg = 0,       -- 기울임회전
 
     --------------------------------------------------------
     -- Camera-local offset
@@ -41,8 +44,8 @@ local cfg = {
 
     offset = vec3(
         -0.0033,
-        -0.0080,
-       -0.0373
+        -0.0102,
+       -0.0492
     ),
 
     --------------------------------------------------------
@@ -63,10 +66,24 @@ local cfg = {
 
 
     --------------------------------------------------------
-    -- Future motion
+    -- G-Force Motion
     --------------------------------------------------------
 
-    enableMotion = false
+    enableMotion = true,
+
+    motionGainX = 0.00009,
+    motionGainY = 0.00006,
+    motionGainZ = 0.00007,
+
+    motionSmoothing = 30.0,
+
+    motionSharpness = 1.11,
+
+    motionLimitX = 0.025,
+    motionLimitY = 0.020,
+    motionLimitZ = 0.020,
+
+    debugMotion = false
 }
 
 
@@ -80,8 +97,11 @@ local cameraAnchor = nil    -- Temporal Crash Patches v2.0.0 Restore
 
 local cameraRoot = nil
 local offsetNode = nil
+local motionNode = nil
 local scaleNode = nil
-local axisNode = nil
+local axisPitchNode = nil
+local axisYawNode = nil
+local axisRollNode = nil
 
 local visor = nil
 local visorGlassInt = nil
@@ -95,7 +115,31 @@ local visorGlassExt = nil
 local initialized = false
 
 local lastScale = -1
+
+local lastPitch = 99999
 local lastYaw = 99999
+local lastRoll = 99999
+
+
+------------------------------------------------------------
+-- Motion state
+------------------------------------------------------------
+
+local previousVelocity = nil
+    
+local motionCurrent = vec3(
+    0,
+    0,
+    0
+)
+    
+local motionTarget= vec3(
+    0,
+    0,
+    0
+)
+
+local textDebugMotion = nil
 
 
 ------------------------------------------------------------
@@ -106,17 +150,20 @@ local worldUp = vec3(0, 1, 0)
 
     
 --------------------------------------------------------
--- Helper function: Mesh collection visibility toggle
+-- Helper function: Clamp
 --------------------------------------------------------
-local function setMeshesVisible(meshCollection, visible)
-    if not meshCollection then return end
-    
-    -- findMeshes 결과가 테이블 배열 형태로 넘어오므로 순회 처리
-    for i = 1, #meshCollection do
-        if meshCollection[i] and meshCollection[i].setVisible then
-            meshCollection[i]:setVisible(visible)
-        end
+
+local function clampValue(value, minimum, maximum)  
+
+    if value < minimum then
+        return minimum
     end
+
+    if value > maximum then 
+        return maximum
+    end
+
+    return value
 end
 
 
@@ -163,29 +210,73 @@ end
 
 local function applyAxisCorrection()
 
-    if not axisNode then
-        return
-    end
+    ------------------------------------------------------------
+    -- Pitch
+    ------------------------------------------------------------
 
+    if axisPitchNode
+        and math.abs(
+            cfg.modelPitchDeg - lastPitch
+        ) >= 0.0001 then
 
-    if math.abs(
-        cfg.modelYawDeg - lastYaw
-    ) < 0.0001 then
-        return
-    end
+        axisPitchNode:setRotation(
 
+            vec3(1, 0, 0),
 
-    axisNode:setRotation(
-
-        vec3(0, 1, 0),
-
-        math.rad(
-            cfg.modelYawDeg
+            math.rad(
+                cfg.modelPitchDeg
+            )
         )
-    )
+
+        lastPitch =
+            cfg.modelPitchDeg
+    end
 
 
-    lastYaw = cfg.modelYawDeg
+    ------------------------------------------------------------
+    -- Yaw
+    ------------------------------------------------------------
+
+    if axisYawNode
+        and math.abs(
+            cfg.modelYawDeg - lastYaw
+        ) >= 0.0001 then
+
+        axisYawNode:setRotation(
+
+            vec3(0, 1, 0),
+
+            math.rad(
+                cfg.modelYawDeg
+            )
+        )
+
+        lastYaw=
+            cfg.modelYawDeg
+    end
+
+
+    ------------------------------------------------------------
+    -- Roll
+    ------------------------------------------------------------
+
+    if axisRollNode
+        and math.abs(
+            cfg.modelRollDeg - lastRoll
+        ) >= 0.0001 then
+
+        axisRollNode:setRotation(
+
+            vec3(0, 0, 1),
+
+            math.rad(
+                cfg.modelRollDeg
+            )
+        )
+
+        lastRoll=
+            cfg.modelRollDeg
+    end
 end
 
 
@@ -261,11 +352,28 @@ local function initializeScene()
 
 
     --------------------------------------------------------
+    -- G-Force Motion
+    --------------------------------------------------------
+
+    motionNode =
+        offsetNode:createNode(
+            'REALVISOR_MOTION'
+        )
+
+    if not cameraRoot then
+    ac.warn(
+        appNameDebug .. ' Motion node creation failed'
+    )
+
+        return false
+    end
+
+    --------------------------------------------------------
     -- Scale
     --------------------------------------------------------
 
     scaleNode =
-        offsetNode:createNode(
+        motionNode:createNode(
             'REALVISOR_SCALE'
         )
 
@@ -274,15 +382,31 @@ local function initializeScene()
     -- Model axis
     --------------------------------------------------------
 
-    axisNode =
-        scaleNode:createNode(
-            'REALVISOR_AXIS'
-        )
+    -- axisNode =
+    --     scaleNode:createNode(
+    --         'REALVISOR_AXIS'
+    --     )
 
+    axisPitchNode =
+    scaleNode:createNode(
+        'REALVISOR_AXIS_PITCH'
+    )
+
+    axisYawNode =
+    axisPitchNode:createNode(
+        'REALVISOR_AXIS_YAW'
+    )
+
+    axisRollNode =
+    axisYawNode:createNode(
+        'REALVISOR_AXIS_ROLL'
+    )
 
     if not offsetNode
         or not scaleNode
-        or not axisNode then
+        or not axisPitchNode 
+        or not axisYawNode 
+        or not axisRollNode then
 
         ac.warn(
             appNameDebug .. ' Transform hierarchy failed'
@@ -297,7 +421,7 @@ local function initializeScene()
     --------------------------------------------------------
 
     visor =
-        axisNode:loadKN5({
+        axisRollNode:loadKN5({
 
             filename = cfg.modelPath,
 
@@ -363,12 +487,29 @@ local function initializeScene()
         )
 
     else
+        visorGlassExt =
+            visor:findMeshes(
+                'VISOR_GLASS_EXT_REFLECT'
+            )
 
         ac.warn(
-            appNameDebug .. ' VISOR_GLASS_EXT not found'
+            appNameDebug .. ' VISOR_GLASS_EXT not found : try find VISOR_GLASS_EXT_REFLECT instead'
         )
+        if visorGlassExt
+            and #visorGlassExt > 0 then
+
+            ac.log(
+                appNameDebug .. ' VISOR_GLASS_EXT_REFLECT found'
+            )
+
+        else
+            ac.warn(
+                appNameDebug .. ' VISOR_GLASS_EXT_REFLECT not found'
+            )
+        end
     end
 
+    
     --------------------------------------------------------
     -- Apply initial transforms
     --------------------------------------------------------
@@ -537,6 +678,338 @@ end
 
 
 ------------------------------------------------------------
+-- Update local offset
+------------------------------------------------------------
+
+local function updateMotion(dt)
+    
+    if not motionNode then
+        return
+    end
+
+
+    ------------------------------------------------------------
+    -- Disabled
+    ------------------------------------------------------------
+    if not cfg.enableMotion then
+
+        motionCurrent:set(
+            0,
+            0,
+            0
+        )
+
+        previousVelocity = nil
+
+        motionNode:setPosition(
+            motionCurrent
+        )
+
+        return
+    end
+
+
+    ------------------------------------------------------------
+    -- Invalid delta time
+    ------------------------------------------------------------
+
+    if not dt or dt <= 0.000001 then
+        ac.log(
+            appNameDebug .. ' MOTION: Invalid delta time!'
+        )
+        return
+    end
+
+    
+    ------------------------------------------------------------
+    -- Player car
+    ------------------------------------------------------------
+
+    local playerCar = 
+        ac.getCar(0)
+
+
+    if not playerCar then
+        return
+    end
+
+
+    ------------------------------------------------------------
+    -- Vehicle velocity
+    ------------------------------------------------------------
+
+    local velocity = 
+        playerCar.velocity
+
+
+    if not velocity then
+        return
+    end
+
+
+    ------------------------------------------------------------
+    -- First frame
+    ------------------------------------------------------------
+
+    if previousVelocity == nil then
+
+        previousVelocity =
+            vec3(
+                velocity.x,
+                velocity.y,
+                velocity.z
+            )
+
+        return
+    end
+    
+
+    ------------------------------------------------------------
+    -- World acceleration
+    ------------------------------------------------------------
+
+    local acceleration =
+        vec3(
+                (velocity.x - previousVelocity.x) / dt,
+                (velocity.y - previousVelocity.y) / dt,
+                (velocity.z - previousVelocity.z) / dt
+            )
+
+
+    ------------------------------------------------------------
+    -- Save velocity
+    ------------------------------------------------------------
+
+    previousVelocity:set(
+        velocity
+    )
+
+
+    ------------------------------------------------------------
+    -- Camera basis
+    ------------------------------------------------------------
+    
+    local cameraForward =
+        ac.getCameraForward()
+
+    if cameraForward:lengthSquared() < 0.000001 then
+        return
+    end
+
+
+    ------------------------------------------------------------
+    -- Copy forward vector
+    --
+    -- Do not modify CSP camera vector directly
+    ------------------------------------------------------------
+
+    local forward =
+        vec3(
+            cameraForward.x,
+            cameraForward.y,
+            cameraForward.z
+        )
+
+    forward:normalize()
+
+
+    ------------------------------------------------------------
+    -- Create fresh world up vector every frame
+    --
+    -- Never use global worldUp as a temporary calculation vector
+    ------------------------------------------------------------
+
+    local localWorldUp =
+        vec3(
+            0,
+            1,
+            0
+        )
+
+
+    ------------------------------------------------------------
+    -- Camera right axis
+    ------------------------------------------------------------
+
+    local right =
+        localWorldUp:cross(
+            forward
+        )
+
+    if right:lengthSquared() < 0.000001 then
+        return
+    end
+
+    right:normalize()
+
+
+    ------------------------------------------------------------
+    -- Camera up axis
+    ------------------------------------------------------------
+
+    local up =
+        forward:cross(
+            right
+        )
+
+    if up:lengthSquared() < 0.000001 then
+        return
+    end
+
+    up:normalize()
+
+
+    ------------------------------------------------------------
+    -- Convert acceleration
+    -- into camera-local coordinates
+    ------------------------------------------------------------
+
+    local accelerationX =
+        acceleration:dot(right)
+
+    local accelerationY =
+        acceleration:dot(up)
+
+    local accelerationZ =
+        acceleration:dot(forward)
+
+
+    ------------------------------------------------------------
+    -- Inertial target
+    --
+    -- Opposite direction to acceleration
+    ------------------------------------------------------------
+
+    motionTarget.x =
+            -accelerationX
+            * cfg.motionGainX
+            * cfg.motionSharpness
+
+    motionTarget.y =
+            -accelerationY
+            * cfg.motionGainY
+            * cfg.motionSharpness
+
+    motionTarget.y =
+            -accelerationY
+            * cfg.motionGainY
+            * cfg.motionSharpness
+
+
+    ------------------------------------------------------------
+    -- Axis limits
+    ------------------------------------------------------------
+
+    motionTarget.x =
+        clampValue(
+
+            motionTarget.x,
+
+            -cfg.motionLimitX,
+
+            cfg.motionLimitX
+        )
+
+
+    motionTarget.y =
+        clampValue(
+
+            motionTarget.y,
+
+            -cfg.motionLimitY,
+
+            cfg.motionLimitY
+        )
+
+
+    motionTarget.z =
+        clampValue(
+
+            motionTarget.z,
+
+            -cfg.motionLimitZ,
+
+            cfg.motionLimitZ
+        )
+
+
+    ------------------------------------------------------------
+    -- Exponential smoothing
+    ------------------------------------------------------------
+    local smoothingAlpha =
+        1.0
+        -
+        math.exp(
+            -cfg.motionSmoothing 
+            * dt
+        )
+
+    motionCurrent.x =
+        motionCurrent.x
+        +
+        (
+            motionTarget.x
+            -
+            motionCurrent.x
+        )
+        * smoothingAlpha
+
+
+    motionCurrent.y =
+        motionCurrent.y
+        +
+        (
+            motionTarget.y
+            -
+            motionCurrent.y
+        )
+        * smoothingAlpha
+
+
+    motionCurrent.z =
+        motionCurrent.z
+        +
+        (
+            motionTarget.z
+            -
+            motionCurrent.z
+        )
+        * smoothingAlpha
+
+
+    ------------------------------------------------------------
+    -- Apply
+    ------------------------------------------------------------
+
+    motionNode:setPosition(
+        motionCurrent
+    )
+    
+
+    ------------------------------------------------------------
+    -- Debug
+    ------------------------------------------------------------
+
+    if cfg.debugMotion then
+
+        textDebugMotion =
+            string.format(
+
+                'Accel: %.2f %.2f %.2f | Motion: %.4f %.4f %.4f',
+
+                accelerationX,
+                accelerationY,
+                accelerationZ,
+
+                motionCurrent.x,
+                motionCurrent.y,
+                motionCurrent.z
+            )
+    end
+end
+
+
+------------------------------------------------------------
 -- Main update
 ------------------------------------------------------------
 
@@ -590,6 +1063,13 @@ function script.update(dt)
     --------------------------------------------------------
 
     updateOffset()
+
+
+    --------------------------------------------------------
+    -- G-force Motion 
+    --------------------------------------------------------
+
+    updateMotion(dt)
 
 
     --------------------------------------------------------
@@ -674,25 +1154,78 @@ function windowMain(dt)
 
     ui.text('Axis Correction')
 
-    cfg.modelYawDeg, changed =
-        ui.slider(
 
-            'Yaw',
+        --------------------------------------------------------
+        -- Pitch
+        --------------------------------------------------------
+        cfg.modelPitchDeg, changed =
+            ui.slider(
 
-            cfg.modelYawDeg,
+                'Pitch',
 
-            -180,
+                cfg.modelPitchDeg,
 
-            180,
+                -180,
 
-            '%.1f°'
-        )
+                180,
 
-    if changed then
-        ac.log(
-            appNameDebug .. ' KN5 Yaw: ' .. cfg.modelYawDeg
-        )
-    end
+                '%.1f°'
+            )
+
+        if changed then
+            ac.log(
+                appNameDebug .. ' KN5 Pitch: ' .. cfg.modelPitchDeg
+            )
+        end
+
+
+        --------------------------------------------------------
+        -- Yaw
+        --------------------------------------------------------
+        cfg.modelYawDeg, changed =
+            ui.slider(
+
+                'Yaw',
+
+                cfg.modelYawDeg,
+
+                -180,
+
+                180,
+
+                '%.1f°'
+            )
+
+        if changed then
+            ac.log(
+                appNameDebug .. ' KN5 Yaw: ' .. cfg.modelYawDeg
+            )
+        end
+
+
+        --------------------------------------------------------
+        -- Pitch
+        --------------------------------------------------------
+        cfg.modelRollDeg, changed =
+            ui.slider(
+
+                'Roll',
+
+                cfg.modelRollDeg,
+
+                -180,
+
+                180,
+
+                '%.1f°'
+            )
+
+        if changed then
+            ac.log(
+                appNameDebug .. ' KN5 Roll: ' .. cfg.modelRollDeg
+            )
+        end
+
 
     --------------------------------------------------------
     -- Offset
@@ -767,7 +1300,6 @@ function windowMain(dt)
     --------------------------------------------------------
     -- Near Clip Distance
     --------------------------------------------------------
-
     ui.separator()
 
     ui.text(
@@ -793,6 +1325,130 @@ function windowMain(dt)
             appNameDebug .. 'Set CamClipDist (Near: ' .. string.format('%4f', ac.getSim().cameraClipNear) .. ', Far Clip: ' .. ac.getSim().cameraClipFar .. ')'
         )
     end
+
+
+    --------------------------------------------------------
+    -- G-Force Motion
+    --------------------------------------------------------
+
+    ui.separator()
+
+    ui.text(
+        'G-Force Motion'
+    )
+
+
+        --------------------------------------------------------
+        -- G-Force Motion: Enable / Disable
+        --------------------------------------------------------
+        changed, _ =
+            ui.checkbox(
+
+                'Enable Motion',
+
+                cfg.enableMotion
+            )
+
+        if changed then
+            cfg.enableMotion = 
+                not cfg.enableMotion
+        end
+
+
+        --------------------------------------------------------
+        -- G-Force Motion: X
+        --------------------------------------------------------
+
+        cfg.motionGainX, changed =
+            ui.slider(
+
+                'Motion X',
+
+                cfg.motionGainX,
+
+                0.0,
+
+                0.01,
+
+                '%.5f'
+            )
+
+
+        --------------------------------------------------------
+        -- G-Force Motion: Y
+        --------------------------------------------------------
+
+        cfg.motionGainY, changed =
+            ui.slider(
+
+                'Motion Y',
+
+                cfg.motionGainY,
+
+                0.0,
+
+                0.01,
+
+                '%.5f'
+            )
+
+
+        --------------------------------------------------------
+        -- G-Force Motion: Z
+        --------------------------------------------------------
+
+        cfg.motionGainZ, changed =
+            ui.slider(
+
+                'Motion Z',
+
+                cfg.motionGainZ,
+
+                0.0,
+
+                0.01,
+
+                '%.5f'
+            )
+
+
+        --------------------------------------------------------
+        -- G-Force Motion: Sharpness
+        --------------------------------------------------------
+
+        cfg.motionSharpness, changed =
+            ui.slider(
+
+                'Motion Strength',
+
+                cfg.motionSharpness,
+
+                0.0,
+
+                5.0,
+
+                '%.2f'
+            )
+
+
+        --------------------------------------------------------
+        -- G-Force Motion: Smothing
+        --------------------------------------------------------
+
+        cfg.motionSmoothing, changed =
+            ui.slider(
+
+                'Motion Response',
+
+                cfg.motionSmoothing,
+
+                0.1,
+
+                50.0,
+
+                '%.2f'
+            )
+
 
     --------------------------------------------------------
     -- Glass debug: MESH Found
