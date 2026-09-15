@@ -3,7 +3,7 @@
 local strDisplayName = 'Real Visor Overlay'
 -- Version: 0.4.2
 local strAppNameInternal = 'RealVisor'
-local strVersion= '0.4.0'
+local strVersion= '0.4.2'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
