@@ -1,9 +1,9 @@
 ﻿------------------------------------------------------------
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
--- Version: 0.3.2
+-- Version: 0.4.2
 local strAppNameInternal = 'RealVisor'
-local strVersion= '0.3.2'
+local strVersion= '0.4.0'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,13 +12,10 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- 0.3.0
--- G-Force Motion (Tested)
--- 0.3.1
--- Support all-axis rotation (Tested *has Gimbal Lock limitation)
--- 0.3.2
--- Material Parameter Prototype
---  VISOR_GLASS_EXT_REFLECT, Tested
+-- 0.4.2
+-- Material Parameter Editor (Tested)
+-- Update several Shader profiles
+-- Brand new HQ visor model 
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -30,43 +27,41 @@ local cfg = {
     enabled = true,
 
     --modelPath = 'visors/visor_lando.kn5',
-    modelPath = 'visors/visor_lando_reflection.kn5',
+    --modelPath = 'visors/visor_lando_reflection.kn5',
+    modelPath = 'visors/visor_lando_2025Champion_maxquality.kn5',
 
 
     --------------------------------------------------------
     -- Model calibration
     --------------------------------------------------------
 
+    --Based on Fov 42 
     modelScale = 1.00,
-
-    modelPitchDeg = 0,      
-    modelYawDeg = 0,       
-    modelRollDeg = 0,      
+                            -- Visor Cam View Preset        40 degree
+    modelPitchDeg = 0,      -- -6.2                         4.8
+    modelYawDeg = 0,        -- -16.8                        -23.1
+    modelRollDeg = 0,       -- 0.0                          0.0
 
     --------------------------------------------------------
     -- Camera-local offset
     --------------------------------------------------------
 
-    offset = vec3(
-        -0.0033,
-        -0.0102,
-       -0.0492
+    offset = vec3(          
+        0.0000,            -- 0.0648,                       0.1107
+        0.0000,            -- -0.0152,                      0.0096
+        -0.1033             -- -0.0482                      -0.0434
     ),
 
     --------------------------------------------------------
     -- Camera-local offset
     --------------------------------------------------------
 
-    distantNearclip = 0.0245,
+    distantNearclip = 0.0181,   -- 0.0081
     
     
     --------------------------------------------------------
     -- Debug Controls
     --------------------------------------------------------
-
-    debugShowGlassExtDirt = true,
-    debugShowGlassInt = true,
-    debugShowGlassIntRefl = true,
     debugDeltapos = false,
     debugRotation = false,
 
@@ -92,7 +87,7 @@ local cfg = {
     debugMotion = false,
 
     --------------------------------------------------------
-    -- Material Parameter Prototype (VISOR_GLASS_EXT_DIRT)
+    -- Material Parameter Prototype
     --------------------------------------------------------
 
     -- Experimental: some 'bool' jstyle shader parameters may actually need
@@ -101,91 +96,1390 @@ local cfg = {
     materialBoolAsNumber = true
 }
 
+local CFG_PROFILES = {
+    default = cfg,
+}
 
 ------------------------------------------------------------
 -- Global Names
 ------------------------------------------------------------
-local strMeshVisorExtDirt = 'VISOR_GLASS_EXT_DIRT'
-local strMeshVisorInt = 'VISOR_GLASS_INT'
-local strMeshVisorIntRefl = 'VISOR_GLASS_INT_REFLECT'
-
 local strMaterialEditorPopup = 'RealVisorMaterialEditor'
--- Material assigned to VISOR_GLASS_EXT_DIRT (Material Parameter Prototype target)
-local strMaterialVisorExtDirt = 'mtVISOR_GLASS_EXT_DIRT'
-local strMaterialVisorIntRefl = 'mtVISOR_GLASS_INT_REFLECT'
 
 
 ------------------------------------------------------------
--- Custom Parametor Registry
+-- Material Parameter Helpers
 ------------------------------------------------------------
-local EXTDIRT_PARAMETERS = {
-
-  -- Scalar
-  {    name = 'ksAmbient',    type = 'float'  },
-  {    name = 'ksDiffuse',    type = 'float'  },
-
-  {    name = 'ksSpecular',    type = 'float'  },
-  {    name = 'ksSpecularEXP',    type = 'float'  },
-
-  {    name = 'ksAlphaRef',    type = 'float'  },
-
-  {    name = 'fresnelC',    type = 'float'  },
-  {    name = 'fresnelEXP',    type = 'float'  },
-  {    name = 'fresnelMaxLevel',    type = 'float'  },
-
-  {    name = 'extColoredReflection',    type = 'float'  },
-  {    name = 'extColoredReflectionN',    type = 'float'  },
-  
-  {    name = 'nmObjectSpace',    type = 'float'  },
-
-  {    name = 'NMmult',    type = 'float'  },
-  {    name = 'detailNMmult',    type = 'float'  },
-
-  {    name = 'uvMultX',    type = 'float'  },
-  {    name = 'uvMultY',    type = 'float'  },
-
-  {    name = 'uvOffsetX',    type = 'float'  },
-  {    name = 'uvOffsetY',    type = 'float'  },
+local activeMaterialEditor = nil
 
 
-  -- Vector3
-  {    name = 'ksEmissive',    type = 'vec3'  },
+------------------------------------------------------------
+-- Custom Parameter Registry
+------------------------------------------------------------
+local PARAMS_ST_PERPIXELNM_UVFLOW = {
+
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'extColoredReflection',    
+        type = 'float',   
+        label = 'ColoredReflection',  
+        group = 'Colored Reflection', 
+        format = '%.3f'  
+    },
+
+    {   
+        name = 'extColoredReflectionN',    
+        type = 'float',   
+        label = 'ColoredReflectionN',  
+        group = 'Colored Reflection', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'nmObjectSpace',    
+        type = 'float',   
+        label = 'Object Space',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'NMmult',    
+        type = 'float',   
+        label = 'NM Mult',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+    {
+        name = 'detailNMmult',    
+        type = 'float',   
+        label = 'Detail NM mult',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'uvMultX',
+        type = 'float',   
+        label = 'Mult X',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'uvMultY',    
+        type = 'float',   
+        label = 'Mult Y',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'uvOffsetX',    
+        type = 'float',   
+        label = 'Offset X',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'uvOffsetY',    
+        type = 'float',   
+        label = 'Offset Y',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
 
 
-  -- Vector2
-  {    name = 'offsetDSpeed',    type = 'vec2'  },
-  {    name = 'offsetNMSpeed',    type = 'vec2'  },
-  {    name = 'offsetNMdetailSpeed',    type = 'vec2'  },
-  {    name = 'pauseTiming',    type = 'vec2'  },
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
 
 
-  -- Boolean / 0 or 1
-  {    name = 'isAdditive',    type = 'bool'  },
-  {    name = 'emAlphaFromDiffuse',    type = 'bool'  },
-  {    name = 'emClipOutside',    type = 'bool'  }
+    -- Vector2
+    {    
+        name = 'offsetDSpeed',    
+        type = 'vec2',   
+        labelX = 'D Speed X',  
+        labelY = 'D Speed Y',  
+        group = 'UV Animation', 
+        format = '%.3f, %.3f',
+        rangeMin = -500.000,
+        rangeMax = 500.000      
+    },
+
+    {    
+        name = 'offsetNMSpeed',    
+        type = 'vec2',   
+        labelX = 'NM Speed X',  
+        labelY = 'NM Speed Y',  
+        group = 'UV Animation', 
+        format = '%.3f, %.3f',
+        rangeMin = -500.000,
+        rangeMax = 500.000      
+    },
+
+    { 
+        name = 'offsetNMdetailSpeed',
+        type = 'vec2',   
+        labelX = 'Detail NM Speed X',  
+        labelY = 'Detail NM Speed Y',  
+        group = 'UV Animation', 
+        format = '%.3f, %.3f',
+        rangeMin = -500.000,
+        rangeMax = 500.000        
+    },
+
+    {   
+        name = 'pauseTiming',    
+        type = 'vec2',   
+        labelX = 'Pause Timing X',  
+        labelY = 'Pause Timing Y',  
+        group = 'UV Animation', 
+        format = '%.3f, %.3f',
+        rangeMin = -50000.000,
+        rangeMax = 50000.000        
+    },
+
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+    
+    {   
+        name = 'emAlphaFromDiffuse',    
+        type = 'bool',   
+        label = 'Emissive Alpha From Diffuse',  
+        group = 'Flags'   
+    },
+
+    {   
+        name = 'emClipOutside',    
+        type = 'bool',   
+        label = 'Emissive Clip Outside',  
+        group = 'Flags'   
+    }
 }
 
-local INTREFLECT_PARAMETERS = {
 
-  -- Scalar
-  {    name = 'ksAmbient',    type = 'float'  },
-  {    name = 'ksDiffuse',    type = 'float'  },
-  
-  {    name = 'ksSpecular',    type = 'float'  },
-  {    name = 'ksSpecularEXP',    type = 'float'  },
-  
-  {    name = 'ksAlphaRef',    type = 'float'  },
+local PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE = {
 
-  {    name = 'fresnelC',    type = 'float'  },
-  {    name = 'fresnelEXP',    type = 'float'  },
-  {    name = 'fresnelMaxLevel',    type = 'float'  },
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
 
-  -- Vector3
-  {    name = 'ksEmissive',    type = 'vec3'  },
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
 
-  -- Boolean / 0 or 1
-  {    name = 'isAdditive',    type = 'bool'  },
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'extColoredReflection',    
+        type = 'float',   
+        label = 'ColoredReflection',  
+        group = 'Colored Reflection', 
+        format = '%.3f'  
+    },
+
+    {   
+        name = 'extColoredReflectionN',    
+        type = 'float',   
+        label = 'ColoredReflectionN',  
+        group = 'Colored Reflection', 
+        format = '%.3f'  
+    },
+
+    {   
+        name = 'extColoredBaseReflect',    
+        type = 'float',   
+        label = 'Colored Base Reflect',  
+        group = 'Colored Reflection', 
+        format = '%.3f'  
+    },    
+    
+    {
+        name = 'detailUVMultiplier',    
+        type = 'float',   
+        label = 'Detail UV mult',  
+        group = 'Detail', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'shadowBiasMult',    
+        type = 'float',   
+        label = 'Bias multiplier',  
+        group = 'Shadow Adjustment', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'nmObjectSpace',    
+        type = 'float',   
+        label = 'Object Space (0= tangent 1= ObjectSpace)',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'sunSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Sun', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'sunSpecularEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Sun', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'emMirrorOffset',    
+        type = 'float',   
+        label = 'Mirror Offset',  
+        group = 'Emissive', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'emMirrorDir',    
+        type = 'vec3',   
+        label = 'Mirror Direction',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = -300.000,
+        rangeMax = 300.000
+    },
+
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        label = 'Emissive 0',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    {    
+        name = 'ksEmissive1',    
+        type = 'vec3',   
+        label = 'Emissive 1',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    {    
+        name = 'ksEmissive2',    
+        type = 'vec3',   
+        label = 'Emissive 2',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    {    
+        name = 'ksEmissive3',    
+        type = 'vec3',   
+        label = 'Emissive 3',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    {    
+        name = 'ksEmissive4',    
+        type = 'vec3',   
+        label = 'Emissive 4',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    {    
+        name = 'ksEmissive5',    
+        type = 'vec3',   
+        label = 'Emissive 5',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    {    
+        name = 'ksEmissive6',    
+        type = 'vec3',   
+        label = 'Emissive 6',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+        
+    {
+        name = 'emChannelsMode',    
+        type = 'float',   
+        label = 'Channels Mode (need verify)',  
+        group = 'Emissive', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'emMirrorChannel3As4',    
+        type = 'float',   
+        label = 'Mirror Channel 3 as 4 (need verify)',  
+        group = 'Emissive', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'emMirrorChannel2As5',    
+        type = 'float',   
+        label = 'Mirror Channel 2 as 5 (need verify)',  
+        group = 'Emissive', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'emMirrorChannel1As6',    
+        type = 'float',   
+        label = 'Mirror Channel 1 as 6 (need verify)',  
+        group = 'Emissive', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'extBounceBack',    
+        type = 'float',   
+        label = 'Bounce Back (need verify)',  
+        group = 'Bounce', 
+        format = '%.3f'  
+    },
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+ 
+    {
+        name = 'useDetail',    
+        type = 'bool',   
+        label = 'use Detail texture',  
+        group = 'Flags' 
+    },
+
+    {   
+        name = 'emAlphaFromDiffuse',    
+        type = 'bool',   
+        label = 'Emissive Alpha From Diffuse',  
+        group = 'Flags'   
+    },
+
+    {   
+        name = 'emSkipDiffuseMap',    
+        type = 'bool',   
+        label = 'emissive Skip Diffuse Map',  
+        group = 'Flags'   
+    },
+
+
 }
+
+
+local PARAMS_KS_PERPIXEL_MULTIMAP = {
+
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+        
+    {
+        name = 'nmObjectSpace',    
+        type = 'float',   
+        label = 'Object Space',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'detailUVMultiplier',    
+        type = 'float',   
+        label = 'UV Multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'shadowBiasMult',
+        type = 'float',   
+        label = 'shadow Bias Multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'sunSpecular',
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Sun', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'sunSpecularEXP',
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Sun', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        label = 'Emissive',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    -- Vector4
+    -- There's 4Vec types called damageZones not bindings yet
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+    
+    {   
+        name = 'useDetail',    
+        type = 'bool',   
+        label = 'use Detail texture',  
+        group = 'Flags'   
+    }
+
+}
+
+
+local PARAMS_KS_PERPIXEL_MULTIMAP_NMDETAIL = {
+
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'detailUVMultiplier',    
+        type = 'float',   
+        label = 'UV Multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'shadowBiasMult',
+        type = 'float',   
+        label = 'shadow Bias Multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'detailNormalBlend',
+        type = 'float',   
+        label = 'detail Normal Blend (float or 0/1 ? pls check it out)',  
+        group = 'Extras', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        label = 'Emissive',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+    
+    {   
+        name = 'useDetail',    
+        type = 'bool',   
+        label = 'use Detail texture',  
+        group = 'Flags'   
+    }
+}
+
+
+local PARAMS_KS_WINDSCREEN = {
+    ------------------------------------------------------------
+    -- ksWindScreen
+    ------------------------------------------------------------
+    
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000    
+    },
+}    
+
+
+local PARAMS_KS_PERPIXELREFLECTION = {
+    ------------------------------------------------------------
+    -- ksPerPixelReflection
+    ------------------------------------------------------------
+    
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000    
+    },
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+}    
+
+
+local PARAMS_KS_PERPIXEL_ALPHA = {
+    ------------------------------------------------------------
+    -- ksWindScreen
+    ------------------------------------------------------------
+    
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'alpha',    
+        type = 'float',   
+        label = 'Final Alpha',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000    
+    },
+}    
+
+
+    ------------------------------------------------------------
+    -- Material Definition
+    ------------------------------------------------------------
+    local MATERIAL_EDITORS = {
+
+
+        ------------------------------------------------------------
+        -- materials profile: visor_lando_2025Champion_maxquality.kn5 
+        ------------------------------------------------------------
+
+        {
+            id = 'GLASSRUBBER',
+
+            meshName = 
+                'BODY_INT_BORDER_GLASSLINE',
+
+            materialName = 
+                'mtBODY_INT_BORDER',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'BODYFABRIC',
+
+            meshName = 
+                'BODY_INT_FABRIC',
+
+            materialName = 
+                'mtBODY_INT_FABRIC',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+        {
+            id = 'GLASSINT',
+
+            meshName = 
+                'GLASS_INT',
+
+            materialName = 
+                'mtGLASS_INT',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'GLASSEXT',
+
+            meshName = 
+                'GLASS_EXT',
+
+            materialName = 
+                'mtGLASS_EXT',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'GLASSEXTBAND',
+
+            meshName = 
+                'GLASS_EXT_BAND',
+
+            materialName = 
+                'mtGLASS_EXT_BAND',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        -- {
+        --     id = 'GLASSOUTERFILM',
+
+        --     meshName = 
+        --         'GLASS_STICKER',
+
+        --     materialName = 
+        --         'mtGLASS_STICKER',
+
+        --     targetMesh = nil,
+        --     materialQueryRef = nil,
+
+        --     parameters = 
+        --         PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+        --     values = {},
+
+        --     inputBuffers = {},
+            
+        --     loaded = false,
+        --     lastError = nil,
+
+        --     visible = true,
+        -- },
+
+        {
+            id = 'GLASSCOATING',
+
+            meshName = 
+                'GLASS_COATING',
+
+            materialName = 
+                'mtGLASS_COATING',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'GLASSCOATINGREFL',
+
+            meshName = 
+                'GLASS_COATING_REFL',
+
+            materialName = 
+                'mtGLASS_COATING_REFL',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        }
+        
+        ------------------------------------------------------------
+        -- materials profile: visor_lando_reflection.kn5 
+        ------------------------------------------------------------
+        -- {
+        --     id = 'INTDISTORT',
+
+        --     meshName = 
+        --         'VISOR_GLASS_INT_DISTORT',
+
+        --     materialName = 
+        --         'mtVISOR_GLASS_DISTORT',
+
+        --     targetMesh = nil,
+        --     materialQueryRef = nil,
+
+        --     parameters = 
+        --         PARAMS_ST_PERPIXELNM_UVFLOW,
+
+        --     values = {},
+
+        --     inputBuffers = {},
+            
+        --     loaded = false,
+        --     lastError = nil,
+
+        --     visible = true,
+        -- },
+
+        -- {
+        --     id = 'INTREFLDIRT',
+            
+        --     meshName = 
+        --         'VISOR_GLASS_INT_REFLDIRT',
+
+        --     materialName = 
+        --         'mtVISOR_GLASS_REFLDIRT',
+
+        --     targetMesh = nil,
+        --     materialQueryRef = nil,
+
+        --     parameters =
+        --         PARAMS_KS_PERPIXELREFLECTION,
+
+        --     values = {},
+
+        --     inputBuffers = {},
+
+        --     loaded = false,
+        --     lastError = nil,
+
+        --     visible = true,
+        -- },
+        
+        -- {
+        --     id = 'INTSCREEN',
+
+        --     meshName = 
+        --         'VISOR_GLASS_INT',
+
+        --     materialName = 
+        --         'mtVISOR_GLASS_INT',
+
+        --     targetMesh = nil,
+        --     materialQueryRef = nil,
+
+        --     parameters =
+        --         PARAMS_KS_WINDSCREEN,
+
+        --     values = {},
+
+        --     inputBuffers = {},
+
+        --     loaded = false,
+        --     lastError = nil,
+
+        --     visible = true,
+        -- },
+        
+        -- {
+        --     id = 'GLASSBEVEL',
+            
+        --     meshName = 
+        --         'VISOR_GLASS_BEVEL',
+
+        --     materialName = 
+        --         'mtVISOR_GLASS_BEVEL',
+
+        --     targetMesh = nil,
+        --     materialQueryRef = nil,
+
+        --     parameters =
+        --         PARAMS_KS_PERPIXELREFLECTION,
+
+        --     values = {},
+
+        --     inputBuffers = {},
+
+        --     loaded = false,
+        --     lastError = nil,
+
+        --     visible = true,
+        -- },
+
+        -- {
+        --     id = 'INTFRAME',
+            
+        --     meshName = 
+        --         'VISOR_FRAME_INT',
+
+        --     materialName = 
+        --         'mtVISOR_FRAME_INT_FABRIC',
+
+        --     targetMesh = nil,
+        --     materialQueryRef = nil,
+
+        --     parameters =
+        --         PARAMS_KS_PERPIXEL_MULTIMAP_NMDETAIL,
+
+        --     values = {},
+
+        --     inputBuffers = {},
+
+        --     loaded = false,
+        --     lastError = nil,
+
+        --     visible = true,
+        -- }
+    }    
+
 
 ------------------------------------------------------------
 -- Scene references
@@ -204,12 +1498,7 @@ local axisYawNode = nil
 local axisRollNode = nil
 
 local visor = nil
-local visorGlassInt = nil
-local visorGlassIntRefl = nil
-local visorGlassExtDirt = nil
 
-local visorGlassExtDirtMaterial = nil   -- SceneReference for mtVISOR_GLASS_EXT_DIRT, once located
-local visorGlassIntReflMaterial = nil   -- mtVISOR_GLASS_INT_REFLECT
 
 ------------------------------------------------------------
 -- Runtime state
@@ -223,19 +1512,14 @@ local lastPitch = 99999
 local lastYaw = 99999
 local lastRoll = 99999
 
-local materialInputBuffers = {} -- materials Input Buffer during editing
 local materialInputApplyRequested = false   -- It helps to trigger when you presses 'Enter' on inputtext
-local extDirtValues = {}        -- Live UI/edit state for EXT_DIRT_PARAMETERS, keyed by parameter name
-local intReflValues = {}        -- Reflection parameter container (reserved for future prototype)
 
 
 ------------------------------------------------------------
 -- Material editor state (VISOR_GLASS_EXT_DIRT prototype)
 ------------------------------------------------------------
 
-local materialParamsLoaded = false      -- Have EXTDIRT_PARAMETERS been read from material at least once?
 local materialEditWindowOpen = false    -- Visibility flag for the floating material editor window
-local materialLastError = nil           -- Last apply/read error message, shown in the editor window
 
 
 ------------------------------------------------------------
@@ -288,9 +1572,9 @@ end
 -- Material Parameter Prototype: helpers
 --
 -- Read and Apply are kept strictly separate:
---   - loadExtDirtMaterialParams() reads current values from the material
+--   - loadMaterialParams() reads current values from the material
 --     into extDirtValues (UI state). Only called on init / manual reload.
---   - applyExtDirtMaterialParams() pushes edited UI state back onto the
+--   - applyMaterialParams() pushes edited UI state back onto the
 --     material. Only called when the user presses "Refresh".
 -- The per-frame UI code only ever touches extDirtValues, never the
 -- material directly, so scrubbing a slider can never fight with a
@@ -357,25 +1641,31 @@ end
 -- extDirtValues (UI state only, does not touch the material).
 --------------------------------------------------------
 
-local function loadExtDirtMaterialParams()
+local function loadMaterialParams(editor)
 
-    extDirtValues = {}
+    editor.values = {}
 
-    if not visorGlassExtDirt or #visorGlassExtDirt == 0 then
+    if not editor.targetMesh 
+        or #editor.targetMesh == 0 then
 
         ac.warn(
-            appNameDebug .. ' MATERIAL: ' .. strMeshVisorExtDirt .. ' mesh not available, cannot read material'
+            appNameDebug 
+            .. ' MATERIAL: ' 
+            .. editor.meshName
+            .. ' mesh not available'
         )
 
-        materialParamsLoaded = false
+        editor.loaded = false
 
         return false 
     end
 
-    for _, paramDef in ipairs(EXTDIRT_PARAMETERS) do
+    for _, paramDef in ipairs(editor.parameters) do
 
         local rawValue, readOk =
-            readMaterialProperty(visorGlassExtDirt, paramDef)
+            readMaterialProperty(
+                editor.targetMesh, 
+                paramDef)
 
         local entry = {
             type = paramDef.type,
@@ -384,68 +1674,94 @@ local function loadExtDirtMaterialParams()
 
         if paramDef.type == 'float' then
 
-            entry.value = tonumber(rawValue) or 0.0
+            entry.value = 
+                tonumber(rawValue) 
+                or 0.0
 
-        elseif paramDef.type == 'bool' then
-
-            --------------------------------------------------------
-            -- Boolean parameters may come back as a real Lua boolean
-            -- or as a 0/1 float, depending on the CSP build/shader.
-            -- Normalize to a Lua boolean for the checkbox UI; the
-            -- send-back format is controlled separately by
-            -- cfg.materialBoolAsNumber in applyExtDirtMaterialParams().
-            --------------------------------------------------------
+        elseif paramDef.type == 'bool' then            
 
             if type(rawValue) == 'boolean' then
+
                 entry.value = rawValue
 
             elseif type(rawValue) == 'number' then
-                entry.value = rawValue > 0.5
+
+                entry.value = 
+                    rawValue > 0.5
 
             else
+
                 entry.value = false
             end
 
         elseif paramDef.type == 'vec2' then
 
-            local okX, xValue = pcall(function() return rawValue.x end)
-            local okY, yValue = pcall(function() return rawValue.y end)
+            local okX, xValue = 
+                pcall(function() 
+                    return rawValue.x 
+                end)
 
-            if okX and okY and xValue ~= nil and yValue ~= nil then
+            local okY, yValue = 
+                pcall(function() 
+                    return rawValue.y                         
+                end)
+
+            if okX and okY 
+                and xValue ~= nil 
+                and yValue ~= nil then
+
                 entry.value = vec2(xValue, yValue)
+
             else
+
                 entry.value = vec2(0, 0)
             end
 
         elseif paramDef.type == 'vec3' then
 
-            local okX, xValue = pcall(function() return rawValue.x end)
-            local okY, yValue = pcall(function() return rawValue.y end)
-            local okZ, zValue = pcall(function() return rawValue.z end)
+            local okX, xValue = 
+                pcall(function() 
+                    return rawValue.x 
+                end)
 
-            if okX and okY and okZ and xValue ~= nil and yValue ~= nil and zValue ~= nil then
-                entry.value = vec3(xValue, yValue, zValue)
+            local okY, yValue = 
+                pcall(function() 
+                    return rawValue.y                     
+                end)
+                
+            local okZ, zValue = 
+                pcall(function() 
+                    return rawValue.z                        
+                end)
+
+            if okX and okY and okZ 
+                and xValue ~= nil 
+                and yValue ~= nil 
+                and zValue ~= nil then
+
+                entry.value = 
+                    vec3(xValue, yValue, zValue)
+
             else
-                entry.value = vec3(0, 0, 0)
+
+                entry.value = 
+                    vec3(0, 0, 0)
             end
         end
 
-        extDirtValues[paramDef.name] = entry
+        editor.values[paramDef.name] = entry
 
-        if not readOk then
-            ac.warn(
-                appNameDebug .. ' MATERIAL: failed to read "' .. paramDef.name .. '", using default'
-            )
-        end
     end
 
-    materialParamsLoaded = true
+    editor.loaded = true
+    editor.lastError = nil
 
     ac.log(
-        appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' parameters loaded'
+        appNameDebug 
+        .. ' MATERIAL: ' 
+        .. editor.materialName 
+        .. ' parameters loaded'
     )
-
-    materialInputBuffers = {}
 
     return true
 end
@@ -456,20 +1772,24 @@ end
 -- Only called explicitly (Refresh button) -- never per-frame.
 --------------------------------------------------------
 
-local function applyExtDirtMaterialParams()
+local function applyMaterialParams(editor)
 
-    if not visorGlassExtDirt or #visorGlassExtDirt == 0 then
+    if not editor.targetMesh
+        or #editor.targetMesh == 0 then
 
-        materialLastError = strMeshVisorExtDirt .. ' mesh not available'
+        editor.lastError = 
+             editor.meshName 
+             .. ' mesh not available'
 
         return false
     end
 
     local allOk = true
 
-    for _, paramDef in ipairs(EXTDIRT_PARAMETERS) do
+    for _, paramDef in ipairs(editor.parameters) do
 
-        local entry = extDirtValues[paramDef.name]
+        local entry = 
+            editor.values[paramDef.name]
 
         if entry then
 
@@ -486,7 +1806,7 @@ local function applyExtDirtMaterialParams()
 
             local ok, err = pcall(
                 function()
-                    visorGlassExtDirt:setMaterialProperty(
+                    editor.targetMesh:setMaterialProperty(
                         paramDef.name,
                         sendValue
                     )
@@ -497,7 +1817,10 @@ local function applyExtDirtMaterialParams()
 
                 allOk = false
 
-                materialLastError = paramDef.name .. ': ' .. tostring(err)
+                editor.lastError = 
+                    paramDef.name 
+                    .. ': ' 
+                    .. tostring(err)
 
                 ac.warn(
                     appNameDebug .. ' MATERIAL: failed to set "' .. paramDef.name .. '" -> ' .. tostring(err)
@@ -508,10 +1831,13 @@ local function applyExtDirtMaterialParams()
 
     if allOk then
 
-        materialLastError = nil
+        editor.lastError = nil
 
         ac.log(
-            appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' parameters applied'
+            appNameDebug 
+            .. ' MATERIAL: ' 
+            .. editor.materialName 
+            .. ' parameters applied'
         )
     end
 
@@ -803,122 +2129,53 @@ local function initializeScene()
 
     --------------------------------------------------------
     -- Find glass mesh
-    --
-    -- Actual tested filter:
-    -- VISOR_GLASS
+    --  see Material Definition Section
     --------------------------------------------------------
 
-    visorGlassInt =
-        visor:findMeshes(
-            strMeshVisorInt
-        )
 
-    visorGlassIntRefl =
-        visor:findMeshes(
-            strMeshVisorIntRefl
-        )
-
-    visorGlassExtDirt =
-        visor:findMeshes(
-            strMeshVisorExtDirt
-        )
-
-    if visorGlassInt
-        and #visorGlassInt > 0 then
-
-        ac.log(
-            appNameDebug .. ' ' .. strMeshVisorInt .. ' found'
-        )
-
-    else
-
-        ac.warn(
-            appNameDebug .. ' ' .. strMeshVisorInt .. ' not found'
-        )
-    end
-
-
-    if visorGlassIntRefl
-        and #visorGlassIntRefl > 0 then
-
-        ac.log(
-            appNameDebug .. ' ' .. strMeshVisorIntRefl .. ' found'
-        )
-        
-
-    else
-
-        ac.warn(
-            appNameDebug .. ' ' .. strMeshVisorIntRefl .. ' not found'
-        )
-    end
-
-    
-    if visorGlassExtDirt
-        and #visorGlassExtDirt > 0 then
-
-        ac.log(
-            appNameDebug .. ' ' .. strMeshVisorExtDirt .. ' found'
-        )
-
-    else
-
-        ac.warn(
-            appNameDebug .. ' ' .. strMeshVisorExtDirt .. ' not found'
-        )
-        -- visorGlassExtDirt =
-        --     visor:findMeshes(
-        --         'VISOR_GLASS_EXT_REFLECT'
-        --     )
-
-        -- ac.warn(
-        --     appNameDebug .. ' VISOR_GLASS_EXT not found : try find VISOR_GLASS_EXT_REFLECT instead'
-        -- )
-        -- if visorGlassExtDirt
-        --     and #visorGlassExtDirt > 0 then
-
-        --     ac.log(
-        --         appNameDebug .. ' VISOR_GLASS_EXT_REFLECT found'
-        --     )
-
-        -- else
-            -- ac.warn(
-            --     appNameDebug .. ' VISOR_GLASS_EXT_REFLECT not found'
-            -- )
-        -- end
-    end
-
-
-    --------------------------------------------------------
-    -- Material Parameter Prototype
-    --
-    -- Locate mtVISOR_GLASS_EXT_DIRT (assigned to VISOR_GLASS_EXT_DIRT)
-    -- using CSP's 'material:' scene query, then do the initial
-    -- parameter read so the editor window has data as soon as it
-    -- is opened.
-    --------------------------------------------------------
-
-    if visorGlassExtDirt and #visorGlassExtDirt > 0 then
-
-        visorGlassExtDirtMaterial =
+    for i, editor in ipairs(MATERIAL_EDITORS) do
+        editor.targetMesh = 
             visor:findMeshes(
-                'material:' .. strMaterialVisorExtDirt
+                editor.meshName
             )
-
-        if visorGlassExtDirtMaterial
-            and #visorGlassExtDirtMaterial > 0 then
+        
+        if editor.targetMesh
+            and #editor.targetMesh > 0 then
 
             ac.log(
-                appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' found'
-            )
+            appNameDebug .. ' ' .. editor.meshName .. ' found'
+        )
 
-            loadExtDirtMaterialParams()
+            --------------------------------------------------------
+            -- Find Material
+            --
+            -- Locate mtVISOR_GLASS_EXT_DIRT (assigned to VISOR_GLASS_EXT_DIRT)
+            -- using CSP's 'material:' scene query, then do the initial
+            -- parameter read so the editor window has data as soon as it
+            -- is opened.
+            --------------------------------------------------------
 
+            editor.materialQueryRef =
+                visor:findMeshes(
+                    'material:'
+                    .. editor.materialName
+                )
+
+            if editor.materialQueryRef
+                and #editor.materialQueryRef > 0 then
+                    
+                ac.log(
+                    appNameDebug .. ' MATERIAL: ' .. editor.materialName .. ' found'
+                )
+
+                loadMaterialParams(editor)
+            end
+            
         else
 
-            ac.warn(
-                appNameDebug .. ' MATERIAL: ' .. strMaterialVisorExtDirt .. ' not found'
-            )
+        ac.warn(
+            appNameDebug .. ' ' .. editor.meshName .. ' not found. Skip finding material..'
+        )
         end
     end
 
@@ -1303,9 +2560,9 @@ local function updateMotion(dt)
             * cfg.motionGainY
             * cfg.motionSharpness
 
-    motionTarget.y =
-            -accelerationY
-            * cfg.motionGainY
+    motionTarget.z =
+            -accelerationZ
+            * cfg.motionGainZ
             * cfg.motionSharpness
 
 
@@ -1500,85 +2757,139 @@ end
 --
 -- These only read/write extDirtValues (UI state). Nothing here
 -- touches the material -- that only happens in
--- applyExtDirtMaterialParams(), on "Refresh".
+-- applyMaterialParams(), on "Refresh".
 ------------------------------------------------------------
 
-local function drawFloatParam(label, paramName, fmt)
 
-    local entry = extDirtValues[paramName]
+local function drawFloatParam(editor, label, paramName, fmt)
+    
+    local entry = 
+        editor.values[paramName]
+        
 
     if not entry then
-        ui.text(label .. ': N/A')
+        
+        ui.text(
+            label .. ': N/A'
+        )
+
         return
     end
 
-    if materialInputBuffers[paramName] == nil then
-        materialInputBuffers[paramName] =
-            string.format(fmt or '%.3f', entry.value)
+
+    if editor.inputBuffers[paramName] == nil then
+
+        editor.inputBuffers[paramName] =
+            string.format(
+                fmt or '%.3f', 
+                entry.value
+            )
     end
 
+    
     local newText, changed, enterPressed =
-        ui.inputText(
-            label .. '##' .. paramName,
-            materialInputBuffers[paramName]
+    ui.inputText(
+            label 
+            .. '##'
+            .. editor.id
+            .. '_'
+            .. paramName,
+
+            editor.inputBuffers[paramName]
         )
+
 
     if changed then
 
-        materialInputBuffers[paramName] = newText
-        local numberValue = tonumber(newText)
+        editor.inputBuffers[paramName] = 
+        newText
+
+        local numberValue = 
+        tonumber(newText)
 
         if numberValue ~= nil then        
-            entry.value = numberValue
+
+            entry.value = 
+            numberValue
         end
     end
 
-    if enterPressed then
-        materialInputApplyRequested = true
-    end
 
+    if enterPressed then
+
+        materialInputApplyRequested = 
+        true
+    end
+    
 end
 
 
-local function drawBoolParam(label, paramName)
+local function drawBoolParam(editor, label, paramName)
+    
+    local entry = 
+        editor.values[paramName]
 
-    local entry = extDirtValues[paramName]
-
-    if not entry then
+        if not entry then
         return
     end
 
+
     local changed, _ =
         ui.checkbox(
-            label,
+            label
+            .. '##'
+            .. editor.id
+            .. '_'
+            .. paramName,
+            
             entry.value
         )
 
     if changed then
-        entry.value = not entry.value
+
+        entry.value = 
+        not entry.value
     end
 end
 
 
-local function drawVec2Param(labelX, labelY, paramName, minV, maxV, fmt)
+local function drawVec2Param(editor, labelX, labelY, paramName, minV, maxV, fmt)
 
-    local entry = extDirtValues[paramName]
-
+    local entry = 
+        editor.values[paramName]
+        
     if not entry then
         return
     end
 
+
     local nx, changedX =
-        ui.slider(labelX, entry.value.x, minV, maxV, fmt or '%.3f')
+        ui.slider(
+            labelX, 
+            entry.value.x, 
+            minV, 
+            maxV, 
+            fmt or '%.3f'
+        )
+
 
     if changedX then
         entry.value.x = nx
     end
 
+
     ui.sameLine(0, 20)
 
+    
     local ny, changedY =
-        ui.slider(labelY, entry.value.y, minV, maxV, fmt or '%.3f')
+    ui.slider(
+            labelY, 
+            entry.value.y, 
+            minV, 
+            maxV, 
+            fmt or '%.3f'
+        )
+
 
     if changedY then
         entry.value.y = ny
@@ -1586,14 +2897,14 @@ local function drawVec2Param(labelX, labelY, paramName, minV, maxV, fmt)
 end
 
 
-local function drawVec3Param(label, paramName, minV, maxV, fmt)
+local function drawVec3Param(editor, label, paramName, minV, maxV, fmt)
 
-    local entry = extDirtValues[paramName]
+    local entry = editor.values[paramName]
 
     if not entry then
         return
     end
-
+    
     ui.text(label)
 
     local nx, cx = ui.slider(label .. ' R', entry.value.x, minV, maxV, fmt or '%.3f')
@@ -1604,6 +2915,114 @@ local function drawVec3Param(label, paramName, minV, maxV, fmt)
 
     local nz, cz = ui.slider(label .. ' B', entry.value.z, minV, maxV, fmt or '%.3f')
     if cz then entry.value.z = nz end
+end    
+
+
+------------------------------------------------------------
+-- v0.4.0
+-- Draw UI Integrated 
+------------------------------------------------------------
+
+local function drawMaterialParameters(editor)
+
+    local currentGroup = 
+        nil
+
+    for _, paramDef in ipairs(
+        editor.parameters
+    ) do
+        
+        ------------------------------------------------------------
+        -- Change Group
+        ------------------------------------------------------------
+        
+        if paramDef.group
+            and paramDef.group ~= currentGroup then
+            
+            if currentGroup ~= nil then
+                
+                ui.separator()
+            end
+
+            ui.text(
+                paramDef.group
+            )
+
+            currentGroup = 
+                paramDef.group
+        end
+
+
+        ------------------------------------------------------------
+        -- Separeted UI Design by value types
+        ------------------------------------------------------------
+        
+        if paramDef.type == 'float' then
+            
+            drawFloatParam(
+                editor,
+
+                paramDef.label
+                    or paramDef.name,
+
+                paramDef.name,
+
+                paramDef.format
+            )
+
+
+        elseif  paramDef.type == 'bool' then
+
+            drawBoolParam(
+
+                editor,
+
+                paramDef.label
+                    or paramDef.name,
+
+                paramDef.name
+            )
+
+        elseif paramDef.type == 'vec2' then
+
+            drawVec2Param(
+
+                editor,
+
+                paramDef.labelX
+                    or 'X',
+                
+                paramDef.labelY
+                    or 'Y',
+                
+                paramDef.name,
+
+                paramDef.rangeMin,
+
+                paramDef.rangeMax,
+
+                paramDef.format
+            )
+
+        elseif paramDef.type == 'vec3' then
+
+            drawVec3Param(
+
+                editor,
+
+                paramDef.label
+                    or paramDef.name,
+
+                paramDef.name,
+
+                paramDef.rangeMin,
+
+                paramDef.rangeMax,
+
+                paramDef.format
+            )
+        end
+    end
 end
 
 
@@ -1619,120 +3038,90 @@ end
 ------------------------------------------------------------
 
 
-local function drawMaterialEditorWindow()
+local function drawMaterialEditorWindow(editor)
 
-    if not materialEditWindowOpen then
+    if not materialEditWindowOpen 
+        or not editor then
+
         return
     end
 
     if ui.beginPopup(
+
         strMaterialEditorPopup,
+        
         nil,
         nil,
+
         materialEditWindowOpen
+
     ) then
 
-        ui.text(strMaterialVisorExtDirt .. ' - Material')
+        ui.text(
+            editor.materialName
+            .. ' - Material'
+        )
+
         ui.separator()
 
-        if not visorGlassExtDirtMaterial
-            or #visorGlassExtDirtMaterial == 0 then
+
+        if not editor.materialQueryRef
+            or #editor.materialQueryRef == 0 then
 
             ui.text(
                 'Material not found: ' 
-                .. strMaterialVisorExtDirt
+                .. editor.materialName
             )
 
-        elseif not materialParamsLoaded then
+        elseif not editor.loaded then
 
-            ui.text('Parameters not loaded yet.')
+            ui.text(
+                'Parameters not loaded yet.'
+            )
 
         else
 
-            ui.text('Base')
-            drawFloatParam('Ambient', 'ksAmbient')
-            drawFloatParam('Diffuse', 'ksDiffuse')
-            drawFloatParam('Specular', 'ksSpecular')
-            drawFloatParam('Specular EXP', 'ksSpecularEXP', '%.1f')
-            drawFloatParam('Alpha Ref', 'ksAlphaRef', '%.3f')
 
-            ui.separator()
-            ui.text('Fresnel')
-            drawFloatParam('C', 'fresnelC')
-            drawFloatParam('EXP', 'fresnelEXP', '%.2f')
-            drawFloatParam('Max Level', 'fresnelMaxLevel')
-
-            ui.separator()
-            ui.text('Colored Reflection')
-            drawFloatParam('Amount', 'extColoredReflection')
-            drawFloatParam('Amount N', 'extColoredReflectionN')
-
-            ui.separator()
-            ui.text('Normal')
-            drawFloatParam('Object Space', 'nmObjectSpace')
-            drawFloatParam('NM Mult', 'NMmult')
-            drawFloatParam('Detail NM', 'detailNMmult')
-
-            ui.separator()
-            ui.text('UV')
-            drawFloatParam('MultX', 'uvMultX')
-            ui.sameLine(0,20)
-            drawFloatParam('MultY', 'uvMultY')
-
-            drawFloatParam('OffsetX', 'uvOffsetX')
-            ui.sameLine(0,20)
-            drawFloatParam('OffsetY', 'uvOffsetY')
-
-            ui.separator()
-            ui.text('Emissive')
-            drawVec3Param('ksEmissive', 'ksEmissive', 0.0, 5.0)
-
-            ui.separator()
-            ui.text('UV Animation (offset speed)')
-            drawVec2Param('D Speed X', 'D Speed Y', 'offsetDSpeed', -5.0, 5.0)
-            drawVec2Param('NM Speed X', 'NM Speed Y', 'offsetNMSpeed', -5.0, 5.0)
-            drawVec2Param('Detail NM Speed X', 'Detail NM Speed Y', 'offsetNMdetailSpeed', -5.0, 5.0)
-            drawVec2Param('Pause Timing X', 'Pause Timing Y', 'pauseTiming', 0.0, 10.0)
-
-            ui.separator()
-            ui.text('Flags')
-            drawBoolParam('Additive', 'isAdditive')
-            drawBoolParam('Emissive Alpha From Diffuse', 'emAlphaFromDiffuse')
-            drawBoolParam('Emissive Clip Outside', 'emClipOutside')
-
-            ui.separator()
-
-            local changedBoolMode, _ =
-                ui.checkbox('Send bool as 0/1 (experimental)', cfg.materialBoolAsNumber)
-
-            if changedBoolMode then
-                cfg.materialBoolAsNumber = not cfg.materialBoolAsNumber
-            end
+            drawMaterialParameters(
+                editor
+            )
         end
+
 
         ui.separator()
 
+
         if ui.button('Refresh') 
             or materialInputApplyRequested then
+
                 materialInputApplyRequested = false
-                applyExtDirtMaterialParams()
+                applyMaterialParams(editor)
         end
+
 
         ui.sameLine(0, 15)
 
         if ui.button('Reload from material') then
-            loadExtDirtMaterialParams()
+
+            loadMaterialParams(editor)
         end
+
 
         ui.sameLine(0, 15)
 
+
         if ui.button('Close') then
+
             materialEditWindowOpen = false
+
+            activeMaterialEditor = nil
+
             ui.closePopup()
         end
 
-        if materialLastError then
-            ui.text('Last error: ' .. materialLastError)
+
+        if editor.lastError then
+            ui.text('Last error: ' .. editor.lastError)
         end
 
     end
@@ -2108,112 +3497,105 @@ function windowMain(dt)
 
 
     --------------------------------------------------------
-    -- Glass debug: MESH Found
+    -- Glass debug: MESH & Material Configuration
     --------------------------------------------------------
 
     ui.separator()
-    ui.text('Model Config')
-    local foundGlassExt, foundGlassInt, foundGlassIntRefl = visorGlassExtDirt, visorGlassInt, visorGlassIntRefl
+
+    ui.text('Model Config & Debug')
     
-    ui.text(
-        '\t' .. strMeshVisorExtDirt .. ': ' 
-        .. ((visorGlassExtDirt and #visorGlassExtDirt > 0 )
-        and 'FOUND' or 'NOTFOUND' )
-    )
+    ui.text('\tVisible')    
+    ui.text('\t')
+
+
+    for i, foundEditor in ipairs(MATERIAL_EDITORS) do
+
+
+        --------------------------------------------------------
+        -- Util: Show / Hide Meshes
+        --------------------------------------------------------
+        ui.sameLine(0, 5)
+
+        changed, _ = ui.checkbox(
+                string.format(i, '[%d]'),
+                foundEditor.visible
+            )
+
+
+        if changed then
+
+            foundEditor.visible = 
+                not foundEditor.visible
+
+            if foundEditor.targetMesh
+                and #foundEditor.targetMesh > 0 then
+
+                foundEditor.targetMesh:setVisible(foundEditor.visible)
+            end
+
+            ac.log(
+                appNameDebug .. ' ' .. foundEditor.meshName .. (foundEditor.visible and ': Show' or ': Hide')
+            )
+        end       
+
+
+        --------------------------------------------------------
+        -- Debug: Found Meshes
+        --------------------------------------------------------
+        ui.sameLine(0, 5)
+
+        ui.text(
+            '\t' .. foundEditor.meshName .. ': ' 
+            .. ((foundEditor.targetMesh and #foundEditor.targetMesh > 0 )
+            and 'FOUND' or 'NOTFOUND' )
+        )
+
+
+        --------------------------------------------------------
+        -- Debug: Found Material
+        --------------------------------------------------------
+        ui.sameLine(320, 0)
+
+        ui.text(
+            foundEditor.materialName .. ': '
+            .. ((foundEditor.materialQueryRef and #foundEditor.materialQueryRef > 0)
+            and 'FOUND' or 'NOTFOUND')
+        )    
+        
+
+        --------------------------------------------------------
+        -- Button: Open Material Parameter editor
+        --------------------------------------------------------
     
-    ui.text(
-        '\t' .. strMeshVisorInt .. ': ' 
-        .. ((visorGlassInt and #visorGlassInt > 0 )
-        and 'FOUND' or 'NOTFOUND')
-    )
+        if foundEditor.materialQueryRef then
+            ui.text('')
+            ui.sameLine(320, 15)
+           
+            if ui.button(
+                '>> Click to Edit [' .. foundEditor.id .. '] <<' 
+                ) then
+                    
+                activeMaterialEditor = 
+                    foundEditor
+        
+                materialEditWindowOpen = 
+                    true
+        
+                if not activeMaterialEditor.loaded then
 
-    ui.text(
-        '\t' .. strMeshVisorIntRefl .. ': ' 
-        .. ((visorGlassIntRefl and #visorGlassIntRefl > 0 )
-        and 'FOUND' or 'NOTFOUND')
-    )
-
-    
-    --------------------------------------------------------
-    -- Material Parameter Prototype: open editor
-    --------------------------------------------------------
-
-    ui.text(
-        '\t' .. strMaterialVisorExtDirt .. ': '
-        .. ((visorGlassExtDirtMaterial and #visorGlassExtDirtMaterial > 0)
-        and 'FOUND' or 'NOTFOUND')
-    )
-
-    if ui.button('Edit ' .. strMeshVisorExtDirt .. ' Material...') then
-
-        materialEditWindowOpen = true
-
-        if not materialParamsLoaded then
-            loadExtDirtMaterialParams()
+                    loadMaterialParams(
+                        activeMaterialEditor
+                    )
+                end
+        
+                ui.openPopup(
+                    strMaterialEditorPopup
+                )
+            end
         end
-
-        ui.openPopup(strMaterialEditorPopup)
+        ui.text('\t')
     end
-
-
-    --------------------------------------------------------
-    -- Glass debug: Show / Hide Meshes
-    --------------------------------------------------------
-    ui.text( '\tVisibility')
-    ui.text('')
-    ui.sameLine(0, 15)
-
-    changed, _ = ui.checkbox(
-            strMeshVisorExtDirt,
-            cfg.debugShowGlassExtDirt
-        )
-
-    if changed then
-        cfg.debugShowGlassExtDirt = not cfg.debugShowGlassExtDirt
-        if visorGlassExtDirt and #visorGlassExtDirt > 0 then
-            visorGlassExtDirt:setVisible(cfg.debugShowGlassExtDirt)
-        end
-        --setMeshesVisible(visorGlassExtDirt, cfg.debugShowGlassExtDirt)
-        ac.log(
-            appNameDebug .. ' ' .. strMeshVisorExtDirt .. (cfg.debugShowGlassExtDirt and ': Show' or ': Hide')
-        )
-    end        
-
-    ui.sameLine(0, 30)
-
-    changed, _ = ui.checkbox(
-            strMeshVisorInt,
-            cfg.debugShowGlassInt 
-        )
-
-    if changed then
-        cfg.debugShowGlassInt = not cfg.debugShowGlassInt
-        if visorGlassInt and #visorGlassInt > 0 then
-            visorGlassInt:setVisible(cfg.debugShowGlassInt)
-        end
-        --setMeshesVisible(visorGlassInt, cfg.debugShowGlassInt)
-        ac.log(
-            appNameDebug .. ' ' .. strMeshVisorInt .. (cfg.debugShowGlassInt and ': Show' or ': Hide')
-        )
-    end        
-
-    ui.sameLine(0, 35)
-
-    changed, _ = ui.checkbox(
-            strMeshVisorIntRefl,
-            cfg.debugShowGlassIntRefl
-        )
-
-    if changed then
-        cfg.debugShowGlassIntRefl = not cfg.debugShowGlassIntRefl
-        if visorGlassIntRefl and #visorGlassIntRefl > 0 then
-            visorGlassIntRefl:setVisible(cfg.debugShowGlassIntRefl)
-        end
-        --setMeshesVisible(visorGlassInt, cfg.debugShowGlassInt)
-        ac.log(
-            appNameDebug .. ' ' .. strMeshVisorIntRefl .. (cfg.debugShowGlassIntRefl and ': Show' or ': Hide')
-        )
-    end       
+        
 
     --------------------------------------------------------
     -- Runtime info
@@ -2275,10 +3657,10 @@ function windowMain(dt)
 
     
     --------------------------------------------------------
-    -- Material Parameter Prototype: floating editor window
+    -- Material Parameter: floating editor window
     --------------------------------------------------------
 
-    drawMaterialEditorWindow()
+    drawMaterialEditorWindow(activeMaterialEditor)
 
 
 end
