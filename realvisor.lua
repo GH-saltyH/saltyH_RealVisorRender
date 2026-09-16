@@ -1,9 +1,9 @@
 ﻿------------------------------------------------------------
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
--- Version: 0.4.2
+-- Version: 0.5.0
 local strAppNameInternal = 'RealVisor'
-local strVersion= '0.4.2'
+local strVersion= '0.5.0'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,10 +12,9 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- 0.4.2
--- Material Parameter Editor (Tested)
--- Update several Shader profiles
--- Brand new HQ visor model 
+-- 0.5.0 Real Neck Camera FX
+-- (testing) Real Head Tracking
+-- (testing) Ingame Camera Controls
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -67,6 +66,15 @@ local cfg = {
 
 
     --------------------------------------------------------
+    -- Debug Controls
+    --------------------------------------------------------
+
+    debugHead = true,
+
+    debugTimer = 0.10,
+
+
+    --------------------------------------------------------
     -- G-Force Motion
     --------------------------------------------------------
 
@@ -89,11 +97,21 @@ local cfg = {
     --------------------------------------------------------
     -- Material Parameter Prototype
     --------------------------------------------------------
-
+    
     -- Experimental: some 'bool' jstyle shader parameters may actually need
     -- to be sent as 0/1 floats rather than Lua true/false to take effect.
     -- Toggle this in the material editor window while testing
-    materialBoolAsNumber = true
+    materialBoolAsNumber = true,
+    
+    
+    --------------------------------------------------------
+    -- v0.5.0 Real Neck Camera FX
+    --------------------------------------------------------
+    
+    hideDriverHelmet = true,
+    neckFollowEnabled = true
+
+
 }
 
 local CFG_PROFILES = {
@@ -1504,6 +1522,8 @@ local visor = nil
 -- Runtime state
 ------------------------------------------------------------
 
+
+
 local initialized = false
 
 local lastScale = -1
@@ -1513,6 +1533,43 @@ local lastYaw = 99999
 local lastRoll = 99999
 
 local materialInputApplyRequested = false   -- It helps to trigger when you presses 'Enter' on inputtext
+
+    --------------------------------------------------------
+    -- v0.5.0 Real Neck CameraFX
+    --------------------------------------------------------
+
+    local driverNeck = nil      --  Store 1st neck
+    local driverNecks = {}      --  Debug: Store all neck found 
+    local driverHeads = {}      --  Visiblilty control : we need to get all driver heads to hide them completely
+
+    local neckReferenceWorld = nil
+    local neckFollowInitialized = false
+
+    local neckFollowGain = 1.0 
+
+    local headFoundLogged = false
+    local nekFoundLogged = false
+
+    ------------------------------------------------------------
+    -- Head Observation State
+    ------------------------------------------------------------
+
+    local function createRealCamDebugState()
+        return {
+            referencePosition = nil,
+            previousPosition = nil,
+        
+            referenceLook = nil,
+            previousLook = nil,
+        
+            referenceUp = nil,
+            previousUp = nil,
+        
+            debugTimer = 0,
+        }
+    end
+
+    local realCamDebugStates = {}
 
 
 ------------------------------------------------------------
@@ -1959,6 +2016,495 @@ end
 
 
 ------------------------------------------------------------
+-- Helpers: Real Neck Camera FX
+------------------------------------------------------------
+
+local function captureNeckReference()
+
+    if driverNeck == nil then
+        return false
+    end
+
+
+    local world = driverNeck:getWorldTransformationRaw()
+
+
+    if world == nil then
+        return false
+    end
+
+
+    neckReferenceWorld = mat4x4()
+    neckReferenceWorld:set(world)
+
+    neckFollowInitialized = true
+
+
+    ac.log(appNameDebug ..
+        ' NECK FOLLOW: reference captured')
+
+    return true
+
+end
+
+
+local function applyNeckPositionFollow()
+
+    if not cfg.neckFollowEnabled then
+        return
+    end
+
+    if driverNeck == nil then
+        return
+    end
+
+    if not neckFollowInitialized then
+        if not captureNeckReference() then
+            return
+        end
+        return
+    end
+
+    local currentWorld = driverNeck:getWorldTransformationRaw()
+
+    if currentWorld == nil then
+        return
+    end
+
+    local currentPos =
+        currentWorld:transformPoint(vec3(0, 0, 0))
+
+    local referencePos =
+        neckReferenceWorld:transformPoint(vec3(0, 0, 0))
+
+    local deltaWorld = currentPos - referencePos
+
+    local car = ac.getCar(0)
+    
+    local x = math.dot(deltaWorld, car.side)
+    local y = math.dot(deltaWorld, car.up)
+    local z = math.dot(deltaWorld, car.look)
+
+    -- neck.position:addScaled(car.side, x * neckFollowGain)
+    -- neck.position:addScaled(car.up, y * neckFollowGain)
+    -- neck.position:addScaled(car.look, z * neckFollowGain)
+
+end
+
+
+
+------------------------------------------------------------
+-- Find Driver Head
+--
+-- Observation only.
+-- This does NOT modify the driver head or camera.
+------------------------------------------------------------
+
+local function findDriverHeadAndNeck()
+
+
+    local foundNek = 
+        ac.findNodes('DRIVER:RIG_Nek')
+
+
+    if not foundNek
+        or #foundNek == 0 then
+
+        driverNeck = nil
+
+        if not nekFoundLogged then
+
+            ac.warn(
+                appNameDebug
+                .. ' NEK: DRIVER:RIG_Nek not found'
+            )
+
+            nekFoundLogged = true
+        end
+
+        return false
+    end
+
+
+    --------------------------------------------------------
+    -- Try to find the physical driver head node
+    --------------------------------------------------------
+    
+    local foundHead =
+        ac.findNodes('DRIVER:RIG_Head')
+
+
+    if not foundHead
+        or #foundHead == 0 then
+
+        driverHeads = nil
+
+        if not headFoundLogged then
+
+            ac.warn(
+                appNameDebug
+                .. ' HEAD: DRIVER:RIG_Head not found'
+            )
+
+            headFoundLogged = true
+        end
+
+        return false
+    end
+
+    
+    --------------------------------------------------------
+    -- Keep the reference
+    --------------------------------------------------------
+
+    driverNecks = foundNek
+    driverHeads = foundHead
+
+
+    if not headFoundLogged 
+        and not nekFoundLogged then
+
+        ac.log(
+            appNameDebug
+            .. ' HEAD: DRIVER:RIG_Head found'
+            .. ' | count='
+            .. tostring(#foundHead)
+        )
+
+        headFoundLogged = true
+
+
+        for neckIndex, node in ipairs(driverNecks) do
+            realCamDebugStates[neckIndex] = createRealCamDebugState()
+                        
+
+            if neckIndex == 1 then
+                
+                driverNeck = node
+
+            end
+
+
+            --------------------------------------------------------
+            -- Debug Nek Hierarchy
+            --------------------------------------------------------
+
+
+            ac.log(
+                appNameDebug
+                .. ' NECK[' .. neckIndex .. '] Hierarchy:'
+            )
+
+            
+            for depth = 1, 10 do
+
+                ----------------------------------------------------
+                -- SceneReference can be empty even when it is not nil
+                ----------------------------------------------------
+
+                if node == nil or #node == 0 then
+                    ac.log(
+                        appNameDebug
+                        .. ' NECK[' .. neckIndex .. '] '
+                        .. 'Hierarchy end at depth='
+                        .. tostring(depth)
+                    )
+
+                    break
+                end
+
+
+                ----------------------------------------------------
+                -- Node name
+                ----------------------------------------------------
+
+                local strTab =
+                    string.rep('  ', depth - 1)
+
+                ac.log(
+                    appNameDebug
+                    .. strTab
+                    .. '└── '
+                    .. '[' .. node:name() .. ']'
+                )
+
+
+                ----------------------------------------------------
+                -- Move to parent
+                ----------------------------------------------------
+
+                node = node:getParent()
+                
+            end
+
+        end
+        
+
+        -- show/hide models when loaded (one time load)
+
+        for _, node in ipairs(driverHeads) do 
+
+            node:setVisible(cfg.hideDriverHelmet)
+
+        end
+
+    end
+
+    return true
+end
+
+
+------------------------------------------------------------
+-- Observe Driver Head
+--
+-- Observation only.
+-- No camera modification.
+------------------------------------------------------------
+
+local function observeDriverHead(dt)
+
+    if not cfg.debugHead then
+        return
+    end
+
+
+
+    --------------------------------------------------------
+    -- Find neck if needed
+    --------------------------------------------------------
+
+    if not driverNeck
+        or #driverNeck == 0 
+        or not driverHeads
+        or #driverHeads == 0 then
+
+        if not findDriverHeadAndNeck() then
+            return 
+        end
+    end
+
+
+    for _, node in ipairs(driverHeads) do 
+
+        node:setVisible(not cfg.hideDriverHelmet)
+
+    end
+
+    for i, selectNeck in ipairs(driverNecks) do
+        
+
+        --------------------------------------------------------
+        -- Read transform components
+        --------------------------------------------------------
+
+        local position =
+            selectNeck:getPosition()
+
+        local look =
+            selectNeck:getLook()
+
+        local up =
+            selectNeck:getUp()
+
+
+        if position
+            and look
+            and up then
+
+
+            --------------------------------------------------------
+            -- First frame
+            --------------------------------------------------------
+
+            if realCamDebugStates[i].referencePosition == nil then
+
+                realCamDebugStates[i].referencePosition =
+                    vec3(
+                        position.x,
+                        position.y,
+                        position.z
+                    )
+
+                realCamDebugStates[i].previousPosition =
+                    vec3(
+                        position.x,
+                        position.y,
+                        position.z
+                    )
+
+                realCamDebugStates[i].headReferenceLook =
+                    vec3(
+                        look.x,
+                        look.y,
+                        look.z
+                    )
+
+                realCamDebugStates[i].previousLook =
+                    vec3(
+                        look.x,
+                        look.y,
+                        look.z
+                    )
+
+                realCamDebugStates[i].headReferenceUp =
+                    vec3(
+                        up.x,
+                        up.y,
+                        up.z
+                    )
+
+                realCamDebugStates[i].previousUp =
+                    vec3(
+                        up.x,
+                        up.y,
+                        up.z
+                    )
+
+                ac.log(
+                    appNameDebug
+                    .. ' HEAD[' .. i .. ']: reference captured'
+                )
+
+            else
+
+
+                --------------------------------------------------------
+                -- Reference delta
+                --------------------------------------------------------
+
+                local deltaPosition =
+                    position - realCamDebugStates[i].referencePosition
+
+                local deltaLook =
+                    look - realCamDebugStates[i].headReferenceLook
+
+                local deltaUp =
+                    up - realCamDebugStates[i].headReferenceUp
+
+
+                --------------------------------------------------------
+                -- Frame delta
+                --------------------------------------------------------
+
+                local frameDeltaPosition =
+                    position - realCamDebugStates[i].previousPosition
+
+                local frameDeltaLook =
+                    look - realCamDebugStates[i].previousLook
+
+                local frameDeltaUp =
+                    up - realCamDebugStates[i].previousUp
+
+
+                --------------------------------------------------------
+                -- Save current state
+                --------------------------------------------------------
+
+                realCamDebugStates[i].previousPosition:set(position)
+                realCamDebugStates[i].previousLook:set(look)
+                realCamDebugStates[i].previousUp:set(up)
+
+
+                --------------------------------------------------------
+                -- Debug Logger by Timer
+                --------------------------------------------------------
+
+                realCamDebugStates[i].debugTimer =
+                    realCamDebugStates[i].debugTimer + (dt or 0)
+
+                if realCamDebugStates[i].debugTimer <= cfg.debugTimer then
+    
+                    --------------------------------------------------------
+                    -- LOG: Position
+                    --------------------------------------------------------
+    
+                    ac.log(
+                        appNameDebug
+                        .. ' HEAD[' .. i .. '] POS '
+                        .. 'P('
+                        .. string.format('%.4f', position.x)
+                        .. ', '
+                        .. string.format('%.4f', position.y)
+                        .. ', '
+                        .. string.format('%.4f', position.z)
+                        .. ')'
+                        .. ' REFΔ('
+                        .. string.format('%.4f', deltaPosition.x)
+                        .. ', '
+                        .. string.format('%.4f', deltaPosition.y)
+                        .. ', '
+                        .. string.format('%.4f', deltaPosition.z)
+                        .. ')'
+                        .. ' FRAMEΔ('
+                        .. string.format('%.5f', frameDeltaPosition.x)
+                        .. ', '
+                        .. string.format('%.5f', frameDeltaPosition.y)
+                        .. ', '
+                        .. string.format('%.5f', frameDeltaPosition.z)
+                        .. ')'
+                    )
+    
+    
+                    --------------------------------------------------------
+                    -- LOG: Look
+                    --------------------------------------------------------
+    
+                    ac.log(
+                        appNameDebug
+                        .. ' HEAD[' .. i .. '] LOOK '
+                        .. 'L('
+                        .. string.format('%.4f', look.x)
+                        .. ', '
+                        .. string.format('%.4f', look.y)
+                        .. ', '
+                        .. string.format('%.4f', look.z)
+                        .. ')'
+                        .. ' Δ('
+                        .. string.format('%.5f', deltaLook.x)
+                        .. ', '
+                        .. string.format('%.5f', deltaLook.y)
+                        .. ', '
+                        .. string.format('%.5f', deltaLook.z)
+                        .. ')'
+                    )
+    
+    
+                    --------------------------------------------------------
+                    -- LOG: Up
+                    --------------------------------------------------------
+    
+                    ac.log(
+                        appNameDebug
+                        .. ' HEAD[' .. i .. '] UP '
+                        .. 'U('
+                        .. string.format('%.4f', up.x)
+                        .. ', '
+                        .. string.format('%.4f', up.y)
+                        .. ', '
+                        .. string.format('%.4f', up.z)
+                        .. ')'
+                        .. ' Δ('
+                        .. string.format('%.5f', deltaUp.x)
+                        .. ', '
+                        .. string.format('%.5f', deltaUp.y)
+                        .. ', '
+                        .. string.format('%.5f', deltaUp.z)
+                        .. ')'
+                    )
+
+
+                else
+
+                    realCamDebugStates[i].debugTimer = 0
+
+                end
+            end
+        end
+    end
+end
+
+
+------------------------------------------------------------
 -- Initialize
 ------------------------------------------------------------
 
@@ -1981,6 +2527,13 @@ local function initializeScene()
 
         return false
     end
+
+
+    --------------------------------------------------------
+    -- Driver Head Observation
+    --------------------------------------------------------
+
+    findDriverHeadAndNeck()
 
 
     --------------------------------------------------------
@@ -2202,13 +2755,14 @@ end
 
 
 ------------------------------------------------------------
--- Update camera transform
+-- Update Visor transform
 ------------------------------------------------------------
 local prevPos = nil
+local prevForward = nil
 local textDebugDeltaPos = nil
 local textDebugPos = nil
 local textDebugCamRotation = nil
-local function updateCameraTransform()
+local function updateVisorTransform()
 
     
     --------------------------------------------------------
@@ -2247,6 +2801,8 @@ local function updateCameraTransform()
     local forward =
         ac.getCameraForward()
     
+
+    local up = ac.getCameraUp()
 
     --------------------------------------------------------
     -- Debug logger: Orientation (Forward) delta
@@ -2323,7 +2879,7 @@ local function updateCameraTransform()
 
         forward,
 
-        worldUp
+        (up or worldUp)
     )
 end
 
@@ -2697,6 +3253,16 @@ function script.update(dt)
         return
     end
 
+    --------------------------------------------------------
+    -- Driver Head Observation
+    --
+    -- IMPORTANT:
+    -- This only reads the head.
+    -- It does NOT modify camera or visor.
+    --------------------------------------------------------
+
+    observeDriverHead(dt)
+
 
     if not visor then  
 
@@ -2720,12 +3286,19 @@ function script.update(dt)
         return
     end
 
+    
+    --------------------------------------------------------
+    -- Camera Transform to Neck
+    --------------------------------------------------------
+    
+    applyNeckPositionFollow()
+
 
     --------------------------------------------------------
-    -- Camera transform
+    -- Visor transform
     --------------------------------------------------------
 
-    updateCameraTransform()
+    updateVisorTransform()
 
 
     --------------------------------------------------------
