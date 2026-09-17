@@ -16,7 +16,7 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- (Tested, see NeckFX module) Real Head Tracking
 -- (Tested, see NeckFX module) Ingame Camera Controls
 -- (Tested) RIG_Head scale
--- (Developing) 0.5.2 Dual Profile / Save / Load
+-- 0.5.2 Dual Profile / Save / Load (Tested)
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -39,6 +39,7 @@ local cfg = scriptSettings:mapConfig({
 
     PROFILE = {
         ACTIVE = 1,
+        ENABLE = true,
     },
 
 
@@ -51,17 +52,30 @@ local cfg = scriptSettings:mapConfig({
     --------------------------------------------------------
 
     PROFILE_1 = {
-        OFFSET_X = 0.0000,
-        OFFSET_Y = 0.0000,
-        OFFSET_Z = -0.1033,
-
         PITCH = 0.0000,
         YAW   = 0.0000,
         ROLL  = 0.0000,
 
+        OFFSET_X = 0.0000,
+        OFFSET_Y = 0.0000,
+        OFFSET_Z = -0.1033,
+        
         SCALE = 1.0000,
 
         NEARCLIP = 0.0181,
+        
+        ENABLE_MOTION   = true,
+        
+        MOTION_GAIN_X   = 0.00009,
+        MOTION_GAIN_Y   = 0.00006,
+        MOTION_GAIN_Z   = 0.00007,
+        
+        MOTION_SMOOTHING = 30.0,
+        MOTION_SHARPNESS = 1.11,
+        
+        MOTION_LIMIT_X  = 0.025,
+        MOTION_LIMIT_Y  = 0.020,
+        MOTION_LIMIT_Z  = 0.020,        
     },
 
 
@@ -74,17 +88,30 @@ local cfg = scriptSettings:mapConfig({
     --------------------------------------------------------
 
     PROFILE_2 = {
-        OFFSET_X = 0.1089,
-        OFFSET_Y = -0.0040,
-        OFFSET_Z = -0.0594,
-
         PITCH = -0.2200,
         YAW   = -19.2700,
         ROLL  = -6.3800,
 
+        OFFSET_X = 0.1089,
+        OFFSET_Y = -0.0040,
+        OFFSET_Z = -0.0594,
+
         SCALE = 1.0000,
 
         NEARCLIP = 0.0081,
+
+        ENABLE_MOTION   = true,
+        
+        MOTION_GAIN_X   = 0.00009,
+        MOTION_GAIN_Y   = 0.00006,
+        MOTION_GAIN_Z   = 0.00007,
+        
+        MOTION_SMOOTHING = 30.0,
+        MOTION_SHARPNESS = 1.11,
+        
+        MOTION_LIMIT_X  = 0.025,
+        MOTION_LIMIT_Y  = 0.020,
+        MOTION_LIMIT_Z  = 0.020,
     },
     
     
@@ -107,27 +134,14 @@ local cfg = scriptSettings:mapConfig({
         
         DEBUG_DELTAPOS  = false,
         DEBUG_ROTATION  = false,
-        DEBUG_HEAD      = true,
+        DEBUG_HEAD      = false,
         DEBUG_TIMER     = 0.10,
         
         
         --------------------------------------------------------
         -- G-Force Motion
         --------------------------------------------------------
-        
-        ENABLE_MOTION   = true,
-        
-        MOTION_GAIN_X   = 0.00009,
-        MOTION_GAIN_Y   = 0.00006,
-        MOTION_GAIN_Z   = 0.00007,
-        
-        MOTION_SMOOTHING = 30.0,
-        MOTION_SHARPNESS = 1.11,
-        
-        MOTION_LIMIT_X  = 0.025,
-        MOTION_LIMIT_Y  = 0.020,
-        MOTION_LIMIT_Z  = 0.020,
-        
+
         DEBUG_MOTION    = false,
         
         
@@ -158,15 +172,15 @@ local cfg = scriptSettings:mapConfig({
 -- This table is the single source of truth for Reset.
 ------------------------------------------------------------
 
-local DEFAULT_PROFILE = {
-
-    OFFSET_X = 0.0000,
-    OFFSET_Y = 0.0000,
-    OFFSET_Z = -0.1033,
+local DEFAULT_PROFILE1 = {
 
     PITCH = 0.0000,
     YAW   = 0.0000,
     ROLL  = 0.0000,
+
+    OFFSET_X = 0.0000,
+    OFFSET_Y = 0.0000,
+    OFFSET_Z = -0.1033,
 
     SCALE = 1.0000,
 
@@ -187,20 +201,33 @@ local DEFAULT_PROFILE = {
 }
 
 
-------------------------------------------------------------
--- Profile save/load
-------------------------------------------------------------
+local DEFAULT_PROFILE2 = {
+    
+    PITCH = -0.2200,
+    YAW   = -19.2700,
+    ROLL  = -6.3800,
 
-local function loadProfiles()
+    OFFSET_X = 0.1089,
+    OFFSET_Y = -0.0040,
+    OFFSET_Z = -0.0594,
 
-    local config = ac.INIConfig.load(settingsFile )
+    SCALE = 1.0000,
 
-    local p1 = config:mapSection('PROFILE_1', DEFAULT_PROFILE)
-    local p2 = config:mapSection('PROFILE_2', DEFAULT_PROFILE)
+    NEARCLIP = 0.0081,
 
-    -- continues
-end
-
+    ENABLE_MOTION   = true,
+    
+    MOTION_GAIN_X   = 0.00009,
+    MOTION_GAIN_Y   = 0.00006,
+    MOTION_GAIN_Z   = 0.00007,
+    
+    MOTION_SMOOTHING = 30.0,
+    MOTION_SHARPNESS = 1.11,
+    
+    MOTION_LIMIT_X  = 0.025,
+    MOTION_LIMIT_Y  = 0.020,
+    MOTION_LIMIT_Z  = 0.020,
+}
 
 
 ------------------------------------------------------------
@@ -225,7 +252,6 @@ local visor = nil
 ------------------------------------------------------------
 -- Runtime state
 ------------------------------------------------------------
-
 
 
 local initialized = false
@@ -313,6 +339,7 @@ local worldUp = vec3(0, 1, 0)
 ------------------------------------------------------------
 
 local activeProfile = 1
+local activeEnableMode = true
 
 
 local function getProfile(profileIndex)
@@ -345,6 +372,17 @@ local activeRoll = 0.0
 
 local activeNearclip = 0.0181
 
+local activeEnableMotion = true
+local activeMotionGainX = 0.0
+local activeMotionGainY = 0.0
+local activeMotionGainZ = 0.0
+local activeMotionSmoothing = 0.0
+local activeMotionSharpness = 0.0
+local activeMotionLimitX = 0.0
+local activeMotionLimitY = 0.0
+local activeMotionLimitZ = 0.0
+
+
 local lastScale = -1
 
 local lastPitch = 99999
@@ -352,9 +390,151 @@ local lastYaw = 99999
 local lastRoll = 99999
 
 
+------------------------------------------------------------
+-- Profile save/load
+------------------------------------------------------------
+
+local function loadProfiles()
+
+    local config = ac.INIConfig.load(settingsFile)
+
+    local p1 = config:mapSection('PROFILE_1', DEFAULT_PROFILE1)
+    local p2 = config:mapSection('PROFILE_2', DEFAULT_PROFILE2)
+
+
+    for key, value in pairs(p1) do
+        cfg.PROFILE_1[key] = value
+    end
+
+
+    for key, value in pairs(p2) do
+        cfg.PROFILE_2[key] = value
+    end
+
+    local generalProfile = config:mapSection('PROFILE', cfg.PROFILE)
+
+    local active = generalProfile.ACTIVE or 1
+
+    local enableMod = generalProfile.ENABLE or true
+
+
+    activeProfile = math.clamp(
+        math.floor(active or 1),
+        1,
+        2
+    )
+
+    activeEnableMode = enableMod
+    -- (tonumber(enableMod.ENABLE) or 1) ~= 0
+
+
+    cfg.PROFILE.ACTIVE = activeProfile
+
+    cfg.PROFILE.ENABLE = activeEnableMode
+
+end
+
+local function saveProfiles()
+    local p1 = cfg.PROFILE_1
+    local p2 = cfg.PROFILE_2
+
+    local enableValue = activeEnableMode and 1 or 0
+
+    local content = string.format([[
+[PROFILE]
+ACTIVE=%d
+ENABLE=%s
+
+[PROFILE_1]
+PITCH=%.6f
+YAW=%.6f
+ROLL=%.6f
+OFFSET_X=%.6f
+OFFSET_Y=%.6f
+OFFSET_Z=%.6f
+SCALE=%.6f
+NEARCLIP=%.6f
+ENABLE_MOTION=%s
+MOTION_GAIN_X=%.8f
+MOTION_GAIN_Y=%.8f
+MOTION_GAIN_Z=%.8f
+MOTION_SMOOTHING=%.6f
+MOTION_SHARPNESS=%.6f
+MOTION_LIMIT_X=%.6f
+MOTION_LIMIT_Y=%.6f
+MOTION_LIMIT_Z=%.6f
+
+[PROFILE_2]
+PITCH=%.6f
+YAW=%.6f
+ROLL=%.6f
+OFFSET_X=%.6f
+OFFSET_Y=%.6f
+OFFSET_Z=%.6f
+SCALE=%.6f
+NEARCLIP=%.6f
+ENABLE_MOTION=%s
+MOTION_GAIN_X=%.8f
+MOTION_GAIN_Y=%.8f
+MOTION_GAIN_Z=%.8f
+MOTION_SMOOTHING=%.6f
+MOTION_SHARPNESS=%.6f
+MOTION_LIMIT_X=%.6f
+MOTION_LIMIT_Y=%.6f
+MOTION_LIMIT_Z=%.6f
+]],
+        activeProfile,
+        tostring(cfg.PROFILE.ENABLE),
+
+        p1.PITCH,
+        p1.YAW,
+        p1.ROLL,
+        p1.OFFSET_X,
+        p1.OFFSET_Y,
+        p1.OFFSET_Z,
+        p1.SCALE,
+        p1.NEARCLIP,
+        tostring(p1.ENABLE_MOTION),
+        p1.MOTION_GAIN_X,
+        p1.MOTION_GAIN_Y,
+        p1.MOTION_GAIN_Z,
+        p1.MOTION_SMOOTHING,
+        p1.MOTION_SHARPNESS,
+        p1.MOTION_LIMIT_X,
+        p1.MOTION_LIMIT_Y,
+        p1.MOTION_LIMIT_Z,
+
+        p2.PITCH,
+        p2.YAW,
+        p2.ROLL,
+        p2.OFFSET_X,
+        p2.OFFSET_Y,
+        p2.OFFSET_Z,
+        p2.SCALE,
+        p2.NEARCLIP,
+        tostring(p2.ENABLE_MOTION),
+        p2.MOTION_GAIN_X,
+        p2.MOTION_GAIN_Y,
+        p2.MOTION_GAIN_Z,
+        p2.MOTION_SMOOTHING,
+        p2.MOTION_SHARPNESS,
+        p2.MOTION_LIMIT_X,
+        p2.MOTION_LIMIT_Y,
+        p2.MOTION_LIMIT_Z
+    )
+
+    io.save(settingsFile, content)
+
+end
+
+
 local function applyActiveProfileToRuntime()
 
     local p = getActiveProfile()
+
+
+    activeEnableMode = cfg.PROFILE.ENABLE
+
 
     activeOffset:set(
         p.OFFSET_X,
@@ -369,6 +549,24 @@ local function applyActiveProfileToRuntime()
     activeRoll = p.ROLL
 
     activeNearclip = p.NEARCLIP
+
+
+    -- Profile-specific G-force motion settings
+    -- Runtime motion code should read these active values.
+
+    activeEnableMotion = p.ENABLE_MOTION
+
+    activeMotionGainX = p.MOTION_GAIN_X
+    activeMotionGainY = p.MOTION_GAIN_Y
+    activeMotionGainZ = p.MOTION_GAIN_Z
+
+    activeMotionSmoothing = p.MOTION_SMOOTHING
+    activeMotionSharpness = p.MOTION_SHARPNESS
+
+    activeMotionLimitX = p.MOTION_LIMIT_X
+    activeMotionLimitY = p.MOTION_LIMIT_Y
+    activeMotionLimitZ = p.MOTION_LIMIT_Z
+
 
     ac.overrideCameraClipPlanes(activeNearclip, ac.getSim().cameraClipFar)
 
@@ -398,6 +596,8 @@ local function setActiveProfile(index)
 
     applyActiveProfileToRuntime()
 
+    saveProfiles()
+
     --------------------------------------------------------
     -- Force transform refresh
     --------------------------------------------------------
@@ -424,10 +624,20 @@ local function setProfileValue(
     local p =
         getActiveProfile()
 
-    p[key] = value
 
+    if key ~= 'ENABLE_MODE' then
+        p[key] = value        
+    else
+        cfg.PROFILE.ENABLE = value
+    end
+
+    
     applyActiveProfileToRuntime()
 
+    
+    saveProfiles()
+
+    
     --------------------------------------------------------
     -- Force transform update
     --------------------------------------------------------
@@ -451,8 +661,22 @@ end
 
 local function resetProfileValue(key)
 
-    local defaultValue =
-        DEFAULT_PROFILE[key]
+    local defaultValue = nil
+
+    if activeProfile == 1 then
+    
+        defaultValue = DEFAULT_PROFILE1[key]
+        
+         --ac.log('RealVisor: default_profile1_key=' .. tostring(key) .. ' value=' .. defaultValue)
+
+    elseif activeProfile == 2 then
+    
+        defaultValue = DEFAULT_PROFILE2[key]
+
+        --ac.log('RealVisor: default_profile2_key=' .. tostring(key) .. ' value=' .. defaultValue)
+
+    end
+
 
     if defaultValue == nil then
         return
@@ -481,6 +705,8 @@ local function resetActiveProfile()
 
     applyActiveProfileToRuntime()
 
+    saveProfiles()
+
     lastScale = -1
     lastPitch = 99999
     lastYaw = 99999
@@ -488,6 +714,53 @@ local function resetActiveProfile()
 
 end
 
+
+------------------------------------------------------------
+-- Helper: profile Context Menu
+------------------------------------------------------------
+
+local function profileContextMenu(label, key)
+
+    if ui.beginPopupContextItem('##'.. key .. '_context') then        
+        
+        --ac.log('RealVisor: popup opened key=' .. tostring(key))
+        
+        if ui.menuItem('Reset to Default') then
+
+            --ac.log('RealVisor: Reset clicked key=' .. tostring(key))
+            
+            resetProfileValue(key)
+
+
+        end
+
+
+        ui.separator()
+
+        local defaultValue = 
+                activeProfile == 1 
+                and DEFAULT_PROFILE1[key] 
+                or DEFAULT_PROFILE2[key]
+
+
+        -- ac.log(
+        --     appNameDebug
+        --     ..' default key='
+        --     .. tostring(key)
+        --     .. ' value='
+        --     .. tostring(defaultValue)
+        -- )
+        
+
+        ui.text('Default: ' .. tostring(defaultValue))
+
+
+        ui.endPopup()
+
+
+    end
+
+end
 
 ------------------------------------------------------------
 -- Global Names
@@ -2357,6 +2630,42 @@ end
 
 
 
+local function updateHelmetVisibility()
+
+    if not driverHeads
+
+        or #driverHeads == 0 then
+
+        return
+
+    end
+
+
+    for _, helmet in ipairs(driverHeads) do
+
+
+        if cfg.RUNTIME.HIDE_DRIVER_HELMET then
+            
+            local transform =
+
+                helmet:getTransformationRaw()
+
+
+            if transform then
+
+                transform:set(
+
+                    mat4x4.scaling(
+                        vec3.new(0.001)
+                        )
+                    )
+            
+
+            end
+        end
+    end
+end
+
 ------------------------------------------------------------
 -- Find Driver Head
 --
@@ -2532,6 +2841,7 @@ local function findDriverHeadAndNeck()
 end
 
 
+
 ------------------------------------------------------------
 -- Observe Driver Head
 --
@@ -2544,7 +2854,6 @@ local function observeDriverHead(dt)
     if not cfg.RUNTIME.DEBUG_HEAD then
         return
     end
-
 
 
     --------------------------------------------------------
@@ -2566,22 +2875,9 @@ local function observeDriverHead(dt)
 
         -- node:setVisible(not cfg.RUNTIME.HIDE_DRIVER_HELMET)
 
-        local transform =
-            node:getTransformationRaw()
-
-
-        if transform then
-
-        transform:set(
-
-            mat4x4.scaling(
-                vec3.new(0.001)
-                )
-            )
-        
-        end
 
     end
+
 
     for i, selectNeck in ipairs(driverNecks) do
         
@@ -3036,6 +3332,8 @@ local function initializeScene()
             2
     )
 
+    loadProfiles()
+
     applyActiveProfileToRuntime()
 
 
@@ -3223,7 +3521,7 @@ local function updateMotion(dt)
     ------------------------------------------------------------
     -- Disabled
     ------------------------------------------------------------
-    if not cfg.RUNTIME.ENABLE_MOTION then
+    if not activeEnableMotion then
 
         motionCurrent:set(
             0,
@@ -3414,18 +3712,18 @@ local function updateMotion(dt)
 
     motionTarget.x =
             -accelerationX
-            * cfg.RUNTIME.MOTION_GAIN_X
-            * cfg.RUNTIME.MOTION_SHARPNESS
+            * activeMotionGainX
+            * activeMotionSharpness
 
     motionTarget.y =
             -accelerationY
-            * cfg.RUNTIME.MOTION_GAIN_Y
-            * cfg.RUNTIME.MOTION_SHARPNESS
+            * activeMotionGainY
+            * activeMotionSharpness
 
     motionTarget.z =
             -accelerationZ
-            * cfg.RUNTIME.MOTION_GAIN_Z
-            * cfg.RUNTIME.MOTION_SHARPNESS
+            * activeMotionGainZ
+            * activeMotionSharpness
 
 
     ------------------------------------------------------------
@@ -3437,9 +3735,9 @@ local function updateMotion(dt)
 
             motionTarget.x,
 
-            -cfg.RUNTIME.MOTION_LIMIT_X,
+            -activeMotionLimitX,
 
-            cfg.RUNTIME.MOTION_LIMIT_X
+            activeMotionLimitX
         )
 
 
@@ -3448,9 +3746,9 @@ local function updateMotion(dt)
 
             motionTarget.y,
 
-            -cfg.RUNTIME.MOTION_LIMIT_Y,
+            -activeMotionLimitY,
 
-            cfg.RUNTIME.MOTION_LIMIT_Y
+            activeMotionLimitY
         )
 
 
@@ -3459,9 +3757,9 @@ local function updateMotion(dt)
 
             motionTarget.z,
 
-            -cfg.RUNTIME.MOTION_LIMIT_Z,
+            -activeMotionLimitZ,
 
-            cfg.RUNTIME.MOTION_LIMIT_Z
+            activeMotionLimitZ
         )
 
 
@@ -3472,7 +3770,7 @@ local function updateMotion(dt)
         1.0
         -
         math.exp(
-            -cfg.RUNTIME.MOTION_SMOOTHING 
+            -activeMotionSmoothing
             * dt
         )
 
@@ -3583,11 +3881,11 @@ function script.update(dt)
     --------------------------------------------------------
 
     visor:setVisible(
-        cfg.RUNTIME.ENABLED
+        activeEnableMode
     )
 
 
-    if not cfg.RUNTIME.ENABLED then
+    if not activeEnableMode then
         -- ac.log(appNameDebug .. ' cfg.RUNTIME.ENABLED = false update terminated')
         return
     end
@@ -4052,18 +4350,27 @@ function windowMain(dt)
     --------------------------------------------------------
     -- Enable
     --------------------------------------------------------
+    
     changed, _ = ui.checkbox(
 
             'Enable Real Visor',
 
-            cfg.RUNTIME.ENABLED
+            cfg.PROFILE.ENABLE
         )
 
+
     if changed then
-        cfg.RUNTIME.ENABLED = not cfg.RUNTIME.ENABLED
+
+        -- cfg.PROFILE.ENABLE = not cfg.PROFILE.ENABLE
+
+        setProfileValue('ENABLE_MODE', not cfg.PROFILE.ENABLE)
+
         ac.log(
-            appNameDebug .. ' Visor ' .. (cfg.RUNTIME.ENABLED and 'Enabled' or 'Disabled')
+            appNameDebug 
+            .. ' Visor ' 
+            .. (cfg.PROFILE.ENABLE and 'Enabled' or 'Disabled')
         )
+
     end        
 
 
@@ -4084,30 +4391,14 @@ function windowMain(dt)
         3.00,
         '%.4f'
     )
+    
 
     if changedScale then
+        -- p.SCALE = newScale
         setProfileValue('SCALE', newScale)
     end
 
-    -- activeScale, changed =
-    --     ui.slider(
-
-    --         'Scale',
-
-    --         activeScale,
-
-    --         0.01,
-
-    --         10.00,
-
-    --         '%.4f'
-    --     )
-
-    -- if changed then
-    --     ac.log(
-    --         appNameDebug .. ' KN5 Global Scale: ' .. activeScale
-    --     )
-    -- end
+    profileContextMenu('Scale', 'SCALE')
 
     --------------------------------------------------------
     -- Axis
@@ -4128,8 +4419,12 @@ function windowMain(dt)
     )
 
     if changedPitch then
+        -- p.PITCH = newPitch
         setProfileValue('PITCH', newPitch)
     end
+
+    profileContextMenu('Pitch', 'PITCH')
+
 
 
     local newYaw, changedYaw =
@@ -4142,8 +4437,12 @@ function windowMain(dt)
         )
 
     if changedYaw then
+        -- p.YAW = newYaw
         setProfileValue('YAW', newYaw)
     end
+
+    profileContextMenu('Yaw', 'YAW')
+
 
 
     local newRoll, changedRoll =
@@ -4156,79 +4455,12 @@ function windowMain(dt)
         )
 
     if changedRoll then
+        -- p.ROLL = newRoll
         setProfileValue('ROLL', newRoll)
     end
 
-        -- --------------------------------------------------------
-        -- -- Pitch
-        -- --------------------------------------------------------
-        -- activePitch, changed =
-        --     ui.slider(
+    profileContextMenu('Roll', 'ROLL')
 
-        --         'Pitch',
-
-        --         activePitch,
-
-        --         -180,
-
-        --         180,
-
-        --         '%.1f°'
-        --     )
-
-        -- if changed then
-        --     ac.log(
-        --         appNameDebug .. ' KN5 Pitch: ' .. activePitch
-        --     )
-        -- end
-
-
-        -- --------------------------------------------------------
-        -- -- Yaw
-        -- --------------------------------------------------------
-        -- activeYaw, changed =
-        --     ui.slider(
-
-        --         'Yaw',
-
-        --         activeYaw,
-
-        --         -180,
-
-        --         180,
-
-        --         '%.1f°'
-        --     )
-
-        -- if changed then
-        --     ac.log(
-        --         appNameDebug .. ' KN5 Yaw: ' .. activeYaw
-        --     )
-        -- end
-
-
-        -- --------------------------------------------------------
-        -- -- Pitch
-        -- --------------------------------------------------------
-        -- activeRoll, changed =
-        --     ui.slider(
-
-        --         'Roll',
-
-        --         activeRoll,
-
-        --         -180,
-
-        --         180,
-
-        --         '%.1f°'
-        --     )
-
-        -- if changed then
-        --     ac.log(
-        --         appNameDebug .. ' KN5 Roll: ' .. activeRoll
-        --     )
-        -- end
 
 
     --------------------------------------------------------
@@ -4250,25 +4482,31 @@ function windowMain(dt)
         )
 
     if changedX then
+        -- p.OFFSET_X = newX
         setProfileValue('OFFSET_X', newX)
     end
+    
+    profileContextMenu('Offset_X', 'OFFSET_X')    
 
-
+    
     local newY, changedY =
-        ui.slider(
-            'Offset Y',
-            p.OFFSET_Y,
-            -0.20,
+    ui.slider(
+        'Offset Y',
+        p.OFFSET_Y,
+        -0.20,
             0.20,
             '%.4f'
         )
+        
+        if changedY then
+            -- p.OFFSET_Y = newY   
+            setProfileValue('OFFSET_Y', newY)
+        end
+        
+        profileContextMenu('Offset Y', 'OFFSET_Y')
 
-    if changedY then
-        setProfileValue('OFFSET_Y', newY)
-    end
-
-
-    local newZ, changedZ =
+        
+        local newZ, changedZ =
         ui.slider(
             'Offset Z',
             p.OFFSET_Z,
@@ -4276,72 +4514,14 @@ function windowMain(dt)
             0.20,
             '%.4f'
         )
+        
+        if changedZ then
+            -- p.OFFSET_Z = newZ   
+            setProfileValue('OFFSET_Z', newZ)
+        end
 
-    if changedZ then
-        setProfileValue('OFFSET_Z', newZ)
-    end
+        profileContextMenu('Offset Z', 'OFFSET_Z')
 
-
-    -- cfg.offset.x, changed =
-    --     ui.slider(
-
-    --         'Right',
-
-    --         cfg.offset.x,
-
-    --         -0.3,
-
-    --         0.3,
-
-    --         '%.4f m'
-    --     )
-
-    -- if changed then
-    --     ac.log(
-    --         appNameDebug .. ' KN5 Camera Offset(Right): ' .. cfg.offset.x
-    --     )
-    -- end
-
-
-    -- cfg.offset.y, changed =
-    --     ui.slider(
-
-    --         'Up',
-
-    --         cfg.offset.y,
-
-    --         -0.3,
-
-    --         0.3,
-
-    --         '%.4f m'
-    --     )
-
-    -- if changed then
-    --     ac.log(
-    --         appNameDebug .. ' KN5 Camera Offset(Up): ' .. cfg.offset.y
-    --     )
-    -- end
-
-    -- cfg.offset.z, changed =
-    --     ui.slider(
-
-    --         'Forward',
-
-    --         cfg.offset.z,
-
-    --         -0.3,
-
-    --         0.5,
-
-    --         '%.4f m'
-    --     )
-
-    -- if changed then
-    --     ac.log(
-    --         appNameDebug .. ' KN5 Camera Offset(Forward): ' .. cfg.offset.z
-    --     )
-    -- end
 
     --------------------------------------------------------
     -- Near Clip Distance
@@ -4363,31 +4543,17 @@ function windowMain(dt)
     )
 
     if changedNearclip then
+
+        -- p.NEARCLIP= newNearclip
+
         setProfileValue(
             'NEARCLIP',
             newNearclip
         )
+
     end
 
-    -- activeNearclip, changed = ui.slider(
-
-    --     'Near Clip',
-
-    --     activeNearclip,
-
-    --     0.0001,
-
-    --     0.3,
-
-    --     '%.4f m'
-    -- )
-
-    -- if changed and visor then
-    --     ac.overrideCameraClipPlanes(activeNearclip, ac.getSim().cameraClipFar)
-    --     ac.log(
-    --         appNameDebug .. 'Set CamClipDist (Near: ' .. string.format('%4f', ac.getSim().cameraClipNear) .. ', Far Clip: ' .. ac.getSim().cameraClipFar .. ')'
-    --     )
-    -- end
+    profileContextMenu('Near Clip', 'NEARCLIP')
 
 
     --------------------------------------------------------
@@ -4409,25 +4575,32 @@ function windowMain(dt)
 
                 'Enable Motion',
 
-                cfg.RUNTIME.ENABLE_MOTION
+                p.ENABLE_MOTION
             )
 
         if changed then
-            cfg.RUNTIME.ENABLE_MOTION = 
-                not cfg.RUNTIME.ENABLE_MOTION
+            -- p.ENABLE_MOTION = not p.ENABLE_MOTION
+
+            setProfileValue(
+                'ENABLE_MOTION',
+                not p.ENABLE_MOTION
+            )
+
         end
+
+        profileContextMenu('Enable Motion', 'ENABLE_MOTION')
 
 
         --------------------------------------------------------
         -- G-Force Motion: X
         --------------------------------------------------------
 
-        cfg.RUNTIME.MOTION_GAIN_X, changed =
+        local newMotionGainX, changed =
             ui.slider(
 
                 'Motion X',
 
-                cfg.RUNTIME.MOTION_GAIN_X,
+                p.MOTION_GAIN_X,
 
                 0.0,
 
@@ -4437,82 +4610,157 @@ function windowMain(dt)
             )
 
 
+        if changed then
+
+            -- p.MOTION_GAIN_X = newMotionGainX
+
+
+            setProfileValue(
+                'MOTION_GAIN_X',
+                newMotionGainX
+            )
+
+        end
+
+        profileContextMenu('Motion X', 'MOTION_GAIN_X')
+        
+        
         --------------------------------------------------------
         -- G-Force Motion: Y
         --------------------------------------------------------
-
-        cfg.RUNTIME.MOTION_GAIN_Y, changed =
-            ui.slider(
-
-                'Motion Y',
-
-                cfg.RUNTIME.MOTION_GAIN_Y,
-
-                0.0,
-
-                0.01,
-
-                '%.5f'
+        
+        local newMotionGainY, changed =
+        ui.slider(
+            
+            'Motion Y',
+            
+            p.MOTION_GAIN_Y,
+            
+            0.0,
+            
+            0.01,
+            
+            '%.5f'
+        )
+        
+        
+        if changed then
+            
+            -- p.MOTION_GAIN_Y = newMotionGainY
+            
+            
+            setProfileValue(
+                'MOTION_GAIN_Y',
+                newMotionGainY
             )
-
-
+            
+        end
+        
+        profileContextMenu('Motion Y', 'MOTION_GAIN_Y')
+        
+        
         --------------------------------------------------------
         -- G-Force Motion: Z
         --------------------------------------------------------
-
-        cfg.RUNTIME.MOTION_GAIN_Z, changed =
-            ui.slider(
-
-                'Motion Z',
-
-                cfg.RUNTIME.MOTION_GAIN_Z,
-
-                0.0,
-
-                0.01,
-
-                '%.5f'
+        
+        local newMotionGainZ, changed =
+        ui.slider(
+            
+            'Motion Z',
+            
+            p.MOTION_GAIN_Z,
+            
+            0.0,
+            
+            0.01,
+            
+            '%.5f'
+        )
+        
+        
+        if changed then
+            
+            -- p.MOTION_GAIN_Z = newMotionGainZ
+            
+            setProfileValue(
+                'MOTION_GAIN_Z',
+                newMotionGainZ
             )
+            
+        end
+        
+        profileContextMenu('Motion Z', 'MOTION_GAIN_Z')
 
-
+        
         --------------------------------------------------------
         -- G-Force Motion: Sharpness
         --------------------------------------------------------
-
-        cfg.RUNTIME.MOTION_SHARPNESS, changed =
+        
+        local newMotionSharpness, changed =
             ui.slider(
-
+                
                 'Motion Strength',
-
-                cfg.RUNTIME.MOTION_SHARPNESS,
-
+                
+                p.MOTION_SHARPNESS,
+                
                 0.0,
-
+                
                 5.0,
-
+                
                 '%.2f'
             )
+            
+
+        if changed then
+
+            -- p.MOTION_SHARPNESS = newMotionSharpness
+
+
+            setProfileValue(
+                'MOTION_SHARPNESS',
+                newMotionSharpness
+            )
+
+        end
+        
+        profileContextMenu('Motion Strength', 'MOTION_SHARPNESS')
 
 
         --------------------------------------------------------
-        -- G-Force Motion: Smothing
+        -- G-Force Motion: Smoothing
         --------------------------------------------------------
+        
+        local newMotionSmoothing, changed =
+        ui.slider(
+            
+            'Motion Response',
+            
+            p.MOTION_SMOOTHING,
+            
+            0.1,
+            
+            50.0,
+            
+            '%.2f'
+        )
+        
 
-        cfg.RUNTIME.MOTION_SMOOTHING, changed =
-            ui.slider(
+        if changed then
 
-                'Motion Response',
+            -- p.MOTION_SMOOTHING = newMotionSmoothing
 
-                cfg.RUNTIME.MOTION_SMOOTHING,
 
-                0.1,
-
-                50.0,
-
-                '%.2f'
+            setProfileValue(
+                'MOTION_SMOOTHING',
+                newMotionSmoothing
             )
 
 
+        end
+
+    profileContextMenu('Motion Response', 'MOTION_SMOOTHING')        
+
+        
     --------------------------------------------------------
     -- Glass debug: MESH & Material Configuration
     --------------------------------------------------------

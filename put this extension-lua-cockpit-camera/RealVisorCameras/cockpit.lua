@@ -901,23 +901,46 @@ function script.update(dt, mode, turnMix)
   -- POSITION OFFSETS
   -- ============================================================
 
-  neck.position:addScaled(
-    neck.side,
-    cfg.POSITION.X_OFFSET
-    * cfg.SETTINGS.POSITION_MULT
-  )
+  if cfg.PROFILE.PRF_POSITION == 0 then
 
-  neck.position:addScaled(
-    neck.look,
-    cfg.POSITION.Y_OFFSET
-    * cfg.SETTINGS.POSITION_MULT
-  )
+    neck.position:addScaled(
+      neck.side,
+      cfg.POSITION.X_OFFSET
+      * cfg.SETTINGS.POSITION_MULT
+    )
 
-  neck.position:addScaled(
-    neck.up,
-    cfg.POSITION.Z_OFFSET
-    * cfg.SETTINGS.POSITION_MULT
-  )
+    neck.position:addScaled(
+      neck.look,
+      cfg.POSITION.Y_OFFSET
+      * cfg.SETTINGS.POSITION_MULT
+    )
+
+    neck.position:addScaled(
+      neck.up,
+      cfg.POSITION.Z_OFFSET
+      * cfg.SETTINGS.POSITION_MULT
+    )
+    
+  elseif cfg.PROFILE.PRF_POSITION == 1 then
+
+    neck.position:addScaled(
+      neck.side,
+      cfg.POSITION_PROFILE2.X_OFFSET
+      * cfg.SETTINGS.POSITION_MULT
+    )
+
+    neck.position:addScaled(
+      neck.look,
+      cfg.POSITION_PROFILE2.Y_OFFSET
+      * cfg.SETTINGS.POSITION_MULT
+    )
+
+    neck.position:addScaled(
+      neck.up,
+      cfg.POSITION_PROFILE2.Z_OFFSET
+      * cfg.SETTINGS.POSITION_MULT
+    )
+  end
 
 
   -- ============================================================
