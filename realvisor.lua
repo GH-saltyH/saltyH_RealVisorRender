@@ -1,9 +1,9 @@
 ﻿------------------------------------------------------------
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
--- Version: 0.5.0
 local strAppNameInternal = 'RealVisor'
-local strVersion= '0.5.0'
+-- Version: 0.5.2
+local strVersion= '0.5.2'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,111 +12,482 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- 0.5.0 Real Neck Camera FX
--- (testing) Real Head Tracking
--- (testing) Ingame Camera Controls
+-- 0.5.1 Real Neck Camera FX
+-- (Tested, see NeckFX module) Real Head Tracking
+-- (Tested, see NeckFX module) Ingame Camera Controls
+-- (Tested) RIG_Head scale
+-- (Developing) 0.5.2 Dual Profile / Save / Load
 ------------------------------------------------------------
 
 ------------------------------------------------------------
--- Configuration
+-- Persistent settings
 ------------------------------------------------------------
 
-local cfg = {
+local scriptSettings = ac.INIConfig.scriptSettings()
 
-    enabled = true,
+local appFolder = 
+    ac.getFolder(ac.FolderID.ACApps) .. '/lua/realvisor/'
 
-    --modelPath = 'visors/visor_lando.kn5',
-    --modelPath = 'visors/visor_lando_reflection.kn5',
-    modelPath = 'visors/visor_lando_2025Champion_maxquality.kn5',
+local settingsFile = 
+    appFolder .. 'settings.ini'
+
+local cfg = scriptSettings:mapConfig({
+
+    --------------------------------------------------------
+    -- Active profile
+    --------------------------------------------------------
+
+    PROFILE = {
+        ACTIVE = 1,
+    },
 
 
     --------------------------------------------------------
-    -- Model calibration
+    -- Profile 1
+    --  Real World Aspect        -- F1 TV Visor Cam
+    --  46 Inch 16:9             -- 46 Inch 16:9    
+    --  FOV (vertical) 51.03°,   -- FOV 39°
+    --  Eye distance 60cm        -- 60cm
     --------------------------------------------------------
 
-    --Based on Fov 42 
-    modelScale = 1.00,
-                            -- Visor Cam View Preset        40 degree
-    modelPitchDeg = 0,      -- -6.2                         4.8
-    modelYawDeg = 0,        -- -16.8                        -23.1
-    modelRollDeg = 0,       -- 0.0                          0.0
+    PROFILE_1 = {
+        OFFSET_X = 0.0000,
+        OFFSET_Y = 0.0000,
+        OFFSET_Z = -0.1033,
+
+        PITCH = 0.0000,
+        YAW   = 0.0000,
+        ROLL  = 0.0000,
+
+        SCALE = 1.0000,
+
+        NEARCLIP = 0.0181,
+    },
+
 
     --------------------------------------------------------
-    -- Camera-local offset
+    -- Profile 2
+    --  F1 TV Visor Cam
+    --  46 Inch 16:9    
+    --  FOV 39°
+    --  60cm    
     --------------------------------------------------------
 
-    offset = vec3(          
-        0.0000,            -- 0.0648,                       0.1107
-        0.0000,            -- -0.0152,                      0.0096
-        -0.1033             -- -0.0482                      -0.0434
-    ),
+    PROFILE_2 = {
+        OFFSET_X = 0.1089,
+        OFFSET_Y = -0.0040,
+        OFFSET_Z = -0.0594,
 
-    --------------------------------------------------------
-    -- Camera-local offset
-    --------------------------------------------------------
+        PITCH = -0.2200,
+        YAW   = -19.2700,
+        ROLL  = -6.3800,
 
-    distantNearclip = 0.0181,   -- 0.0081
+        SCALE = 1.0000,
+
+        NEARCLIP = 0.0081,
+    },
     
     
     --------------------------------------------------------
-    -- Debug Controls
-    --------------------------------------------------------
-    debugDeltapos = false,
-    debugRotation = false,
-
-
-    --------------------------------------------------------
-    -- Debug Controls
-    --------------------------------------------------------
-
-    debugHead = true,
-
-    debugTimer = 0.10,
-
-
-    --------------------------------------------------------
-    -- G-Force Motion
-    --------------------------------------------------------
-
-    enableMotion = true,
-
-    motionGainX = 0.00009,
-    motionGainY = 0.00006,
-    motionGainZ = 0.00007,
-
-    motionSmoothing = 30.0,
-
-    motionSharpness = 1.11,
-
-    motionLimitX = 0.025,
-    motionLimitY = 0.020,
-    motionLimitZ = 0.020,
-
-    debugMotion = false,
-
-    --------------------------------------------------------
-    -- Material Parameter Prototype
+    -- Runtime / development settings
+    --
+    -- These are intentionally NOT profile-dependent.
     --------------------------------------------------------
     
-    -- Experimental: some 'bool' jstyle shader parameters may actually need
-    -- to be sent as 0/1 floats rather than Lua true/false to take effect.
-    -- Toggle this in the material editor window while testing
-    materialBoolAsNumber = true,
-    
-    
-    --------------------------------------------------------
-    -- v0.5.0 Real Neck Camera FX
-    --------------------------------------------------------
-    
-    hideDriverHelmet = true,
-    neckFollowEnabled = true
+    RUNTIME = {
+        ENABLED = true,
+        
+        MODEL_PATH =
+        'visors/visor_lando_2025Champion_maxquality.kn5',
+        
+
+        --------------------------------------------------------
+        -- Visor Model Debug Controls
+        --------------------------------------------------------
+        
+        DEBUG_DELTAPOS  = false,
+        DEBUG_ROTATION  = false,
+        DEBUG_HEAD      = true,
+        DEBUG_TIMER     = 0.10,
+        
+        
+        --------------------------------------------------------
+        -- G-Force Motion
+        --------------------------------------------------------
+        
+        ENABLE_MOTION   = true,
+        
+        MOTION_GAIN_X   = 0.00009,
+        MOTION_GAIN_Y   = 0.00006,
+        MOTION_GAIN_Z   = 0.00007,
+        
+        MOTION_SMOOTHING = 30.0,
+        MOTION_SHARPNESS = 1.11,
+        
+        MOTION_LIMIT_X  = 0.025,
+        MOTION_LIMIT_Y  = 0.020,
+        MOTION_LIMIT_Z  = 0.020,
+        
+        DEBUG_MOTION    = false,
+        
+        
+        --------------------------------------------------------
+        -- Material Parameter Prototype
+        --------------------------------------------------------
+        
+        -- Experimental: some 'bool' jstyle shader parameters may actually need
+        -- to be sent as 0/1 floats rather than Lua true/false to take effect.
+        -- Toggle this in the material editor window while testing
+        
+        MATERIAL_BOOL_AS_NUMBER = true,
+        
+
+        --------------------------------------------------------
+        -- Neck / Head Debug Controls
+        --------------------------------------------------------
+
+        HIDE_DRIVER_HELMET = true,
+        NECK_FOLLOW_ENABLED = true,
+    },
+})
 
 
+------------------------------------------------------------
+-- Hardcoded profile defaults
+--
+-- This table is the single source of truth for Reset.
+------------------------------------------------------------
+
+local DEFAULT_PROFILE = {
+
+    OFFSET_X = 0.0000,
+    OFFSET_Y = 0.0000,
+    OFFSET_Z = -0.1033,
+
+    PITCH = 0.0000,
+    YAW   = 0.0000,
+    ROLL  = 0.0000,
+
+    SCALE = 1.0000,
+
+    NEARCLIP = 0.0181,
+
+    ENABLE_MOTION   = true,
+    
+    MOTION_GAIN_X   = 0.00009,
+    MOTION_GAIN_Y   = 0.00006,
+    MOTION_GAIN_Z   = 0.00007,
+    
+    MOTION_SMOOTHING = 30.0,
+    MOTION_SHARPNESS = 1.11,
+    
+    MOTION_LIMIT_X  = 0.025,
+    MOTION_LIMIT_Y  = 0.020,
+    MOTION_LIMIT_Z  = 0.020,
 }
 
-local CFG_PROFILES = {
-    default = cfg,
-}
+
+------------------------------------------------------------
+-- Profile save/load
+------------------------------------------------------------
+
+local function loadProfiles()
+
+    local config = ac.INIConfig.load(settingsFile )
+
+    local p1 = config:mapSection('PROFILE_1', DEFAULT_PROFILE)
+    local p2 = config:mapSection('PROFILE_2', DEFAULT_PROFILE)
+
+    -- continues
+end
+
+
+
+------------------------------------------------------------
+-- Scene references
+------------------------------------------------------------
+
+local carsRoot = nil
+
+local cameraAnchor = nil    -- Temporal Crash Patches v2.0.0 Restore
+
+local cameraRoot = nil
+local offsetNode = nil
+local motionNode = nil
+local scaleNode = nil
+local axisPitchNode = nil
+local axisYawNode = nil
+local axisRollNode = nil
+
+local visor = nil
+
+
+------------------------------------------------------------
+-- Runtime state
+------------------------------------------------------------
+
+
+
+local initialized = false
+
+
+local materialInputApplyRequested = false   -- It helps to trigger when you presses 'Enter' on inputtext
+
+    --------------------------------------------------------
+    -- v0.5.0 Real Neck CameraFX
+    --------------------------------------------------------
+
+    local driverNeck = nil      --  Store 1st neck
+    local neckScaleNode = nil
+    local driverNecks = {}      --  Debug: Store all neck found 
+    local driverHeads = {}      --  Visiblilty control : we need to get all driver heads to hide them completely
+
+    local neckReferenceWorld = nil
+    local neckFollowInitialized = false
+
+    local neckFollowGain = 1.0 
+
+    local headFoundLogged = false
+    local nekFoundLogged = false
+
+    ------------------------------------------------------------
+    -- Head Observation State
+    ------------------------------------------------------------
+
+    local function createRealCamDebugState()
+        return {
+            referencePosition = nil,
+            previousPosition = nil,
+        
+            referenceLook = nil,
+            previousLook = nil,
+        
+            referenceUp = nil,
+            previousUp = nil,
+        
+            debugTimer = 0,
+        }
+    end
+
+    local realCamDebugStates = {}
+
+
+------------------------------------------------------------
+-- Material editor state (VISOR_GLASS_EXT_DIRT prototype)
+------------------------------------------------------------
+
+local materialEditWindowOpen = false    -- Visibility flag for the floating material editor window
+
+
+------------------------------------------------------------
+-- Motion state
+------------------------------------------------------------
+
+local previousVelocity = nil
+    
+local motionCurrent = vec3(
+    0,
+    0,
+    0
+)
+    
+local motionTarget= vec3(
+    0,
+    0,
+    0
+)
+
+local textDebugMotion = nil
+
+
+------------------------------------------------------------
+-- Camera vectors
+------------------------------------------------------------
+
+local worldUp = vec3(0, 1, 0)
+
+
+
+------------------------------------------------------------
+-- Active profile helpers
+------------------------------------------------------------
+
+local activeProfile = 1
+
+
+local function getProfile(profileIndex)
+
+    if profileIndex == 2 then
+        return cfg.PROFILE_2
+    end
+
+    return cfg.PROFILE_1
+end
+
+
+local function getActiveProfile()
+
+    return getProfile(activeProfile)
+
+end
+
+
+------------------------------------------------------------
+-- Runtime transform state
+------------------------------------------------------------
+
+local activeOffset = vec3()
+local activeScale = 1.0
+
+local activePitch = 0.0
+local activeYaw = 0.0
+local activeRoll = 0.0
+
+local activeNearclip = 0.0181
+
+local lastScale = -1
+
+local lastPitch = 99999
+local lastYaw = 99999
+local lastRoll = 99999
+
+
+local function applyActiveProfileToRuntime()
+
+    local p = getActiveProfile()
+
+    activeOffset:set(
+        p.OFFSET_X,
+        p.OFFSET_Y,
+        p.OFFSET_Z
+    )
+
+    activeScale = p.SCALE
+
+    activePitch = p.PITCH
+    activeYaw = p.YAW
+    activeRoll = p.ROLL
+
+    activeNearclip = p.NEARCLIP
+
+    ac.overrideCameraClipPlanes(activeNearclip, ac.getSim().cameraClipFar)
+
+end
+
+
+------------------------------------------------------------
+-- Profile switching
+------------------------------------------------------------
+
+local function setActiveProfile(index)
+
+    index = math.clamp(
+        math.floor(index),
+        1,
+        2
+    )
+
+    if activeProfile == index then
+        return false
+    end
+
+    activeProfile = index
+
+    cfg.PROFILE.ACTIVE =
+        activeProfile
+
+    applyActiveProfileToRuntime()
+
+    --------------------------------------------------------
+    -- Force transform refresh
+    --------------------------------------------------------
+
+    lastScale = -1
+    lastPitch = 99999
+    lastYaw = 99999
+    lastRoll = 99999
+
+    return true
+
+end
+
+
+------------------------------------------------------------
+-- Profile value setters
+------------------------------------------------------------
+
+local function setProfileValue(
+    key,
+    value
+)
+
+    local p =
+        getActiveProfile()
+
+    p[key] = value
+
+    applyActiveProfileToRuntime()
+
+    --------------------------------------------------------
+    -- Force transform update
+    --------------------------------------------------------
+
+    if key == 'SCALE' then
+        lastScale = -1
+    elseif key == 'PITCH' then
+        lastPitch = 99999
+    elseif key == 'YAW' then
+        lastYaw = 99999
+    elseif key == 'ROLL' then
+        lastRoll = 99999
+    end
+
+end
+
+
+------------------------------------------------------------
+-- Reset one profile value to hardcoded default
+------------------------------------------------------------
+
+local function resetProfileValue(key)
+
+    local defaultValue =
+        DEFAULT_PROFILE[key]
+
+    if defaultValue == nil then
+        return
+    end
+
+    setProfileValue(
+        key,
+        defaultValue
+    )
+
+end
+
+
+------------------------------------------------------------
+-- Reset entire active profile
+------------------------------------------------------------
+
+local function resetActiveProfile()
+
+    local p =
+        getActiveProfile()
+
+    for key, value in pairs(DEFAULT_PROFILE) do
+        p[key] = value
+    end
+
+    applyActiveProfileToRuntime()
+
+    lastScale = -1
+    lastPitch = 99999
+    lastYaw = 99999
+    lastRoll = 99999
+
+end
+
 
 ------------------------------------------------------------
 -- Global Names
@@ -1499,114 +1870,7 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
     }    
 
 
-------------------------------------------------------------
--- Scene references
-------------------------------------------------------------
 
-local carsRoot = nil
-
-local cameraAnchor = nil    -- Temporal Crash Patches v2.0.0 Restore
-
-local cameraRoot = nil
-local offsetNode = nil
-local motionNode = nil
-local scaleNode = nil
-local axisPitchNode = nil
-local axisYawNode = nil
-local axisRollNode = nil
-
-local visor = nil
-
-
-------------------------------------------------------------
--- Runtime state
-------------------------------------------------------------
-
-
-
-local initialized = false
-
-local lastScale = -1
-
-local lastPitch = 99999
-local lastYaw = 99999
-local lastRoll = 99999
-
-local materialInputApplyRequested = false   -- It helps to trigger when you presses 'Enter' on inputtext
-
-    --------------------------------------------------------
-    -- v0.5.0 Real Neck CameraFX
-    --------------------------------------------------------
-
-    local driverNeck = nil      --  Store 1st neck
-    local driverNecks = {}      --  Debug: Store all neck found 
-    local driverHeads = {}      --  Visiblilty control : we need to get all driver heads to hide them completely
-
-    local neckReferenceWorld = nil
-    local neckFollowInitialized = false
-
-    local neckFollowGain = 1.0 
-
-    local headFoundLogged = false
-    local nekFoundLogged = false
-
-    ------------------------------------------------------------
-    -- Head Observation State
-    ------------------------------------------------------------
-
-    local function createRealCamDebugState()
-        return {
-            referencePosition = nil,
-            previousPosition = nil,
-        
-            referenceLook = nil,
-            previousLook = nil,
-        
-            referenceUp = nil,
-            previousUp = nil,
-        
-            debugTimer = 0,
-        }
-    end
-
-    local realCamDebugStates = {}
-
-
-------------------------------------------------------------
--- Material editor state (VISOR_GLASS_EXT_DIRT prototype)
-------------------------------------------------------------
-
-local materialEditWindowOpen = false    -- Visibility flag for the floating material editor window
-
-
-------------------------------------------------------------
--- Motion state
-------------------------------------------------------------
-
-local previousVelocity = nil
-    
-local motionCurrent = vec3(
-    0,
-    0,
-    0
-)
-    
-local motionTarget= vec3(
-    0,
-    0,
-    0
-)
-
-local textDebugMotion = nil
-
-
-------------------------------------------------------------
--- Camera vectors
-------------------------------------------------------------
-
-local worldUp = vec3(0, 1, 0)
-
-    
 --------------------------------------------------------
 -- Helper function: Clamp
 --------------------------------------------------------
@@ -1854,7 +2118,7 @@ local function applyMaterialParams(editor)
 
             if paramDef.type == 'bool' then
 
-                if cfg.materialBoolAsNumber then
+                if cfg.RUNTIME.MATERIAL_BOOL_AS_NUMBER then
                     sendValue = entry.value and 1.0 or 0.0
                 else
                     sendValue = entry.value and true or false
@@ -1914,7 +2178,7 @@ local function applyScale()
 
 
     if math.abs(
-        cfg.modelScale - lastScale
+        activeScale - lastScale
     ) < 0.000001 then
         return
     end
@@ -1929,13 +2193,13 @@ local function applyScale()
         transform:set(
 
             mat4x4.scaling(
-                vec3.new(cfg.modelScale)
+                vec3.new(activeScale)
             )
         )
     end
 
 
-    lastScale = cfg.modelScale
+    lastScale = activeScale
 end
 
 
@@ -1951,7 +2215,7 @@ local function applyAxisCorrection()
 
     if axisPitchNode
         and math.abs(
-            cfg.modelPitchDeg - lastPitch
+            activePitch - lastPitch
         ) >= 0.0001 then
 
         axisPitchNode:setRotation(
@@ -1959,12 +2223,12 @@ local function applyAxisCorrection()
             vec3(1, 0, 0),
 
             math.rad(
-                cfg.modelPitchDeg
+                activePitch
             )
         )
 
         lastPitch =
-            cfg.modelPitchDeg
+            activePitch
     end
 
 
@@ -1974,7 +2238,7 @@ local function applyAxisCorrection()
 
     if axisYawNode
         and math.abs(
-            cfg.modelYawDeg - lastYaw
+            activeYaw - lastYaw
         ) >= 0.0001 then
 
         axisYawNode:setRotation(
@@ -1982,12 +2246,12 @@ local function applyAxisCorrection()
             vec3(0, 1, 0),
 
             math.rad(
-                cfg.modelYawDeg
+                activeYaw
             )
         )
 
         lastYaw=
-            cfg.modelYawDeg
+            activeYaw
     end
 
 
@@ -1997,7 +2261,7 @@ local function applyAxisCorrection()
 
     if axisRollNode
         and math.abs(
-            cfg.modelRollDeg - lastRoll
+            activeRoll - lastRoll
         ) >= 0.0001 then
 
         axisRollNode:setRotation(
@@ -2005,12 +2269,12 @@ local function applyAxisCorrection()
             vec3(0, 0, 1),
 
             math.rad(
-                cfg.modelRollDeg
+                activeRoll
             )
         )
 
         lastRoll=
-            cfg.modelRollDeg
+            activeRoll
     end
 end
 
@@ -2050,7 +2314,7 @@ end
 
 local function applyNeckPositionFollow()
 
-    if not cfg.neckFollowEnabled then
+    if not cfg.RUNTIME.NECK_FOLLOW_ENABLED then
         return
     end
 
@@ -2244,7 +2508,21 @@ local function findDriverHeadAndNeck()
 
         for _, node in ipairs(driverHeads) do 
 
-            node:setVisible(cfg.hideDriverHelmet)
+            --node:setVisible(cfg.RUNTIME.HIDE_DRIVER_HELMET)
+
+            local transform =
+                node:getTransformationRaw()
+
+
+            if transform then
+
+                transform:set(
+
+                    mat4x4.scaling(
+                        vec3.new(0.001)
+                    )
+                )
+            end
 
         end
 
@@ -2263,7 +2541,7 @@ end
 
 local function observeDriverHead(dt)
 
-    if not cfg.debugHead then
+    if not cfg.RUNTIME.DEBUG_HEAD then
         return
     end
 
@@ -2286,7 +2564,22 @@ local function observeDriverHead(dt)
 
     for _, node in ipairs(driverHeads) do 
 
-        node:setVisible(not cfg.hideDriverHelmet)
+        -- node:setVisible(not cfg.RUNTIME.HIDE_DRIVER_HELMET)
+
+        local transform =
+            node:getTransformationRaw()
+
+
+        if transform then
+
+        transform:set(
+
+            mat4x4.scaling(
+                vec3.new(0.001)
+                )
+            )
+        
+        end
 
     end
 
@@ -2412,7 +2705,7 @@ local function observeDriverHead(dt)
                 realCamDebugStates[i].debugTimer =
                     realCamDebugStates[i].debugTimer + (dt or 0)
 
-                if realCamDebugStates[i].debugTimer <= cfg.debugTimer then
+                if realCamDebugStates[i].debugTimer <= cfg.RUNTIME.DEBUG_TIMER then
     
                     --------------------------------------------------------
                     -- LOG: Position
@@ -2654,7 +2947,7 @@ local function initializeScene()
     visor =
         axisRollNode:loadKN5({
 
-            filename = cfg.modelPath,
+            filename = cfg.RUNTIME.MODEL_PATH,
 
             forceRenderableOn = true
         })
@@ -2664,7 +2957,7 @@ local function initializeScene()
 
         ac.warn(
             appNameDebug .. ' Failed to load KN5: '
-            .. cfg.modelPath
+            .. cfg.RUNTIME.MODEL_PATH
         )
 
         return false
@@ -2675,8 +2968,8 @@ local function initializeScene()
     -- Setup Camera Clipping 
     --------------------------------------------------------
 
-    if cfg.distantNearclip and ac.getSim().cameraClipFar then
-        ac.overrideCameraClipPlanes(cfg.distantNearclip, ac.getSim().cameraClipFar)
+    if activeNearclip and ac.getSim().cameraClipFar then
+        ac.overrideCameraClipPlanes(activeNearclip, ac.getSim().cameraClipFar)
     end
 
 
@@ -2734,6 +3027,19 @@ local function initializeScene()
 
 
     --------------------------------------------------------
+    -- Apply profile
+    --------------------------------------------------------
+
+    activeProfile = math.clamp(
+            tonumber(cfg.PROFILE.ACTIVE) or 1,
+            1,
+            2
+    )
+
+    applyActiveProfileToRuntime()
+
+
+    --------------------------------------------------------
     -- Apply initial transforms
     --------------------------------------------------------
 
@@ -2776,7 +3082,7 @@ local function updateVisorTransform()
     --------------------------------------------------------
     -- Debug logger: Position delta 
     --------------------------------------------------------
-    if cfg.debugDeltapos then
+    if cfg.RUNTIME.DEBUG_DELTAPOS then
         
         if prevPos ~= nil and prevPos ~= position then
             textDebugDeltaPos = 'X: ' .. string.format('%.4f',position.x - prevPos.x) 
@@ -2807,7 +3113,7 @@ local function updateVisorTransform()
     --------------------------------------------------------
     -- Debug logger: Orientation (Forward) delta
     --------------------------------------------------------
-    if cfg.debugRotation then
+    if cfg.RUNTIME.DEBUG_ROTATION then
         if prevForward ~= nil and prevForward ~= forward then
 
             --------------------------------------------------------
@@ -2898,7 +3204,7 @@ local function updateOffset()
     --------------------------------------------------------
 
     offsetNode:setPosition(
-        cfg.offset
+        activeOffset
     )
 end
 
@@ -2917,7 +3223,7 @@ local function updateMotion(dt)
     ------------------------------------------------------------
     -- Disabled
     ------------------------------------------------------------
-    if not cfg.enableMotion then
+    if not cfg.RUNTIME.ENABLE_MOTION then
 
         motionCurrent:set(
             0,
@@ -3108,18 +3414,18 @@ local function updateMotion(dt)
 
     motionTarget.x =
             -accelerationX
-            * cfg.motionGainX
-            * cfg.motionSharpness
+            * cfg.RUNTIME.MOTION_GAIN_X
+            * cfg.RUNTIME.MOTION_SHARPNESS
 
     motionTarget.y =
             -accelerationY
-            * cfg.motionGainY
-            * cfg.motionSharpness
+            * cfg.RUNTIME.MOTION_GAIN_Y
+            * cfg.RUNTIME.MOTION_SHARPNESS
 
     motionTarget.z =
             -accelerationZ
-            * cfg.motionGainZ
-            * cfg.motionSharpness
+            * cfg.RUNTIME.MOTION_GAIN_Z
+            * cfg.RUNTIME.MOTION_SHARPNESS
 
 
     ------------------------------------------------------------
@@ -3131,9 +3437,9 @@ local function updateMotion(dt)
 
             motionTarget.x,
 
-            -cfg.motionLimitX,
+            -cfg.RUNTIME.MOTION_LIMIT_X,
 
-            cfg.motionLimitX
+            cfg.RUNTIME.MOTION_LIMIT_X
         )
 
 
@@ -3142,9 +3448,9 @@ local function updateMotion(dt)
 
             motionTarget.y,
 
-            -cfg.motionLimitY,
+            -cfg.RUNTIME.MOTION_LIMIT_Y,
 
-            cfg.motionLimitY
+            cfg.RUNTIME.MOTION_LIMIT_Y
         )
 
 
@@ -3153,9 +3459,9 @@ local function updateMotion(dt)
 
             motionTarget.z,
 
-            -cfg.motionLimitZ,
+            -cfg.RUNTIME.MOTION_LIMIT_Z,
 
-            cfg.motionLimitZ
+            cfg.RUNTIME.MOTION_LIMIT_Z
         )
 
 
@@ -3166,7 +3472,7 @@ local function updateMotion(dt)
         1.0
         -
         math.exp(
-            -cfg.motionSmoothing 
+            -cfg.RUNTIME.MOTION_SMOOTHING 
             * dt
         )
 
@@ -3216,7 +3522,7 @@ local function updateMotion(dt)
     -- Debug
     ------------------------------------------------------------
 
-    if cfg.debugMotion then
+    if cfg.RUNTIME.DEBUG_MOTION then
 
         textDebugMotion =
             string.format(
@@ -3277,12 +3583,12 @@ function script.update(dt)
     --------------------------------------------------------
 
     visor:setVisible(
-        cfg.enabled
+        cfg.RUNTIME.ENABLED
     )
 
 
-    if not cfg.enabled then
-        -- ac.log(appNameDebug .. ' cfg.enabled = false update terminated')
+    if not cfg.RUNTIME.ENABLED then
+        -- ac.log(appNameDebug .. ' cfg.RUNTIME.ENABLED = false update terminated')
         return
     end
 
@@ -3708,17 +4014,41 @@ end
 
 function windowMain(dt)
 
+    local p = getActiveProfile()
     
+    local changed = nil     -- state boolean
+
 
     ui.text(
         strDisplayName .. ' v' .. strVersion
     )
-
+    
     ui.separator()
+    
+
+    --------------------------------------------------------
+    -- Profile Selector
+    --------------------------------------------------------
+    
+    local profileChanged
+
+    local selectedProfile = activeProfile
+
+    selectedProfile, profileChanged =
+        ui.combo(
+            'Profile',
+            selectedProfile,
+            {
+                'Profile 1',
+                'Profile 2'
+            }
+        )
+
+    if profileChanged then
+        setActiveProfile(selectedProfile)
+    end
 
 
-
-    local changed = nil     -- local boolean
     --------------------------------------------------------
     -- Enable
     --------------------------------------------------------
@@ -3726,13 +4056,13 @@ function windowMain(dt)
 
             'Enable Real Visor',
 
-            cfg.enabled
+            cfg.RUNTIME.ENABLED
         )
 
     if changed then
-        cfg.enabled = not cfg.enabled
+        cfg.RUNTIME.ENABLED = not cfg.RUNTIME.ENABLED
         ac.log(
-            appNameDebug .. ' Visor ' .. (cfg.enabled and 'Enabled' or 'Disabled')
+            appNameDebug .. ' Visor ' .. (cfg.RUNTIME.ENABLED and 'Enabled' or 'Disabled')
         )
     end        
 
@@ -3745,25 +4075,39 @@ function windowMain(dt)
 
     ui.text('Model Scale')
 
-    cfg.modelScale, changed =
-        ui.slider(
 
-            'Scale',
+    local newScale, changedScale =
+    ui.slider(
+        'Scale',
+        p.SCALE,
+        0.10,
+        3.00,
+        '%.4f'
+    )
 
-            cfg.modelScale,
-
-            0.01,
-
-            10.00,
-
-            '%.4f'
-        )
-
-    if changed then
-        ac.log(
-            appNameDebug .. ' KN5 Global Scale: ' .. cfg.modelScale
-        )
+    if changedScale then
+        setProfileValue('SCALE', newScale)
     end
+
+    -- activeScale, changed =
+    --     ui.slider(
+
+    --         'Scale',
+
+    --         activeScale,
+
+    --         0.01,
+
+    --         10.00,
+
+    --         '%.4f'
+    --     )
+
+    -- if changed then
+    --     ac.log(
+    --         appNameDebug .. ' KN5 Global Scale: ' .. activeScale
+    --     )
+    -- end
 
     --------------------------------------------------------
     -- Axis
@@ -3774,76 +4118,117 @@ function windowMain(dt)
     ui.text('Axis Correction')
 
 
-        --------------------------------------------------------
-        -- Pitch
-        --------------------------------------------------------
-        cfg.modelPitchDeg, changed =
-            ui.slider(
+    local newPitch, changedPitch =
+    ui.slider(
+        'Pitch',
+        p.PITCH,
+        -45.0,
+        45.0,
+        '%.2f°'
+    )
 
-                'Pitch',
-
-                cfg.modelPitchDeg,
-
-                -180,
-
-                180,
-
-                '%.1f°'
-            )
-
-        if changed then
-            ac.log(
-                appNameDebug .. ' KN5 Pitch: ' .. cfg.modelPitchDeg
-            )
-        end
+    if changedPitch then
+        setProfileValue('PITCH', newPitch)
+    end
 
 
-        --------------------------------------------------------
-        -- Yaw
-        --------------------------------------------------------
-        cfg.modelYawDeg, changed =
-            ui.slider(
+    local newYaw, changedYaw =
+        ui.slider(
+            'Yaw',
+            p.YAW,
+            -45.0,
+            45.0,
+            '%.2f°'
+        )
 
-                'Yaw',
-
-                cfg.modelYawDeg,
-
-                -180,
-
-                180,
-
-                '%.1f°'
-            )
-
-        if changed then
-            ac.log(
-                appNameDebug .. ' KN5 Yaw: ' .. cfg.modelYawDeg
-            )
-        end
+    if changedYaw then
+        setProfileValue('YAW', newYaw)
+    end
 
 
-        --------------------------------------------------------
-        -- Pitch
-        --------------------------------------------------------
-        cfg.modelRollDeg, changed =
-            ui.slider(
+    local newRoll, changedRoll =
+        ui.slider(
+            'Roll',
+            p.ROLL,
+            -45.0,
+            45.0,
+            '%.2f°'
+        )
 
-                'Roll',
+    if changedRoll then
+        setProfileValue('ROLL', newRoll)
+    end
 
-                cfg.modelRollDeg,
+        -- --------------------------------------------------------
+        -- -- Pitch
+        -- --------------------------------------------------------
+        -- activePitch, changed =
+        --     ui.slider(
 
-                -180,
+        --         'Pitch',
 
-                180,
+        --         activePitch,
 
-                '%.1f°'
-            )
+        --         -180,
 
-        if changed then
-            ac.log(
-                appNameDebug .. ' KN5 Roll: ' .. cfg.modelRollDeg
-            )
-        end
+        --         180,
+
+        --         '%.1f°'
+        --     )
+
+        -- if changed then
+        --     ac.log(
+        --         appNameDebug .. ' KN5 Pitch: ' .. activePitch
+        --     )
+        -- end
+
+
+        -- --------------------------------------------------------
+        -- -- Yaw
+        -- --------------------------------------------------------
+        -- activeYaw, changed =
+        --     ui.slider(
+
+        --         'Yaw',
+
+        --         activeYaw,
+
+        --         -180,
+
+        --         180,
+
+        --         '%.1f°'
+        --     )
+
+        -- if changed then
+        --     ac.log(
+        --         appNameDebug .. ' KN5 Yaw: ' .. activeYaw
+        --     )
+        -- end
+
+
+        -- --------------------------------------------------------
+        -- -- Pitch
+        -- --------------------------------------------------------
+        -- activeRoll, changed =
+        --     ui.slider(
+
+        --         'Roll',
+
+        --         activeRoll,
+
+        --         -180,
+
+        --         180,
+
+        --         '%.1f°'
+        --     )
+
+        -- if changed then
+        --     ac.log(
+        --         appNameDebug .. ' KN5 Roll: ' .. activeRoll
+        --     )
+        -- end
 
 
     --------------------------------------------------------
@@ -3853,68 +4238,110 @@ function windowMain(dt)
     ui.separator()
 
     ui.text('Camera Local Offset')
+    
 
-
-    cfg.offset.x, changed =
+    local newX, changedX =
         ui.slider(
-
-            'Right',
-
-            cfg.offset.x,
-
-            -0.3,
-
-            0.3,
-
-            '%.4f m'
+            'Offset X',
+            p.OFFSET_X,
+            -0.20,
+            0.20,
+            '%.4f'
         )
 
-    if changed then
-        ac.log(
-            appNameDebug .. ' KN5 Camera Offset(Right): ' .. cfg.offset.x
-        )
+    if changedX then
+        setProfileValue('OFFSET_X', newX)
     end
 
 
-    cfg.offset.y, changed =
+    local newY, changedY =
         ui.slider(
-
-            'Up',
-
-            cfg.offset.y,
-
-            -0.3,
-
-            0.3,
-
-            '%.4f m'
+            'Offset Y',
+            p.OFFSET_Y,
+            -0.20,
+            0.20,
+            '%.4f'
         )
 
-    if changed then
-        ac.log(
-            appNameDebug .. ' KN5 Camera Offset(Up): ' .. cfg.offset.y
-        )
+    if changedY then
+        setProfileValue('OFFSET_Y', newY)
     end
 
-    cfg.offset.z, changed =
+
+    local newZ, changedZ =
         ui.slider(
-
-            'Forward',
-
-            cfg.offset.z,
-
-            -0.3,
-
-            0.5,
-
-            '%.4f m'
+            'Offset Z',
+            p.OFFSET_Z,
+            -0.20,
+            0.20,
+            '%.4f'
         )
 
-    if changed then
-        ac.log(
-            appNameDebug .. ' KN5 Camera Offset(Forward): ' .. cfg.offset.z
-        )
+    if changedZ then
+        setProfileValue('OFFSET_Z', newZ)
     end
+
+
+    -- cfg.offset.x, changed =
+    --     ui.slider(
+
+    --         'Right',
+
+    --         cfg.offset.x,
+
+    --         -0.3,
+
+    --         0.3,
+
+    --         '%.4f m'
+    --     )
+
+    -- if changed then
+    --     ac.log(
+    --         appNameDebug .. ' KN5 Camera Offset(Right): ' .. cfg.offset.x
+    --     )
+    -- end
+
+
+    -- cfg.offset.y, changed =
+    --     ui.slider(
+
+    --         'Up',
+
+    --         cfg.offset.y,
+
+    --         -0.3,
+
+    --         0.3,
+
+    --         '%.4f m'
+    --     )
+
+    -- if changed then
+    --     ac.log(
+    --         appNameDebug .. ' KN5 Camera Offset(Up): ' .. cfg.offset.y
+    --     )
+    -- end
+
+    -- cfg.offset.z, changed =
+    --     ui.slider(
+
+    --         'Forward',
+
+    --         cfg.offset.z,
+
+    --         -0.3,
+
+    --         0.5,
+
+    --         '%.4f m'
+    --     )
+
+    -- if changed then
+    --     ac.log(
+    --         appNameDebug .. ' KN5 Camera Offset(Forward): ' .. cfg.offset.z
+    --     )
+    -- end
 
     --------------------------------------------------------
     -- Near Clip Distance
@@ -3925,25 +4352,42 @@ function windowMain(dt)
         'Near Clip Distance'
     )
 
-    cfg.distantNearclip, changed = ui.slider(
-
+    local newNearclip, changedNearclip =
+    
+    ui.slider(
         'Near Clip',
-
-        cfg.distantNearclip,
-
-        0.0001,
-
-        0.3,
-
-        '%.4f m'
+        p.NEARCLIP,
+        0.001,
+        0.100,
+        '%.4f'
     )
 
-    if changed and visor then
-        ac.overrideCameraClipPlanes(cfg.distantNearclip, ac.getSim().cameraClipFar)
-        ac.log(
-            appNameDebug .. 'Set CamClipDist (Near: ' .. string.format('%4f', ac.getSim().cameraClipNear) .. ', Far Clip: ' .. ac.getSim().cameraClipFar .. ')'
+    if changedNearclip then
+        setProfileValue(
+            'NEARCLIP',
+            newNearclip
         )
     end
+
+    -- activeNearclip, changed = ui.slider(
+
+    --     'Near Clip',
+
+    --     activeNearclip,
+
+    --     0.0001,
+
+    --     0.3,
+
+    --     '%.4f m'
+    -- )
+
+    -- if changed and visor then
+    --     ac.overrideCameraClipPlanes(activeNearclip, ac.getSim().cameraClipFar)
+    --     ac.log(
+    --         appNameDebug .. 'Set CamClipDist (Near: ' .. string.format('%4f', ac.getSim().cameraClipNear) .. ', Far Clip: ' .. ac.getSim().cameraClipFar .. ')'
+    --     )
+    -- end
 
 
     --------------------------------------------------------
@@ -3965,12 +4409,12 @@ function windowMain(dt)
 
                 'Enable Motion',
 
-                cfg.enableMotion
+                cfg.RUNTIME.ENABLE_MOTION
             )
 
         if changed then
-            cfg.enableMotion = 
-                not cfg.enableMotion
+            cfg.RUNTIME.ENABLE_MOTION = 
+                not cfg.RUNTIME.ENABLE_MOTION
         end
 
 
@@ -3978,12 +4422,12 @@ function windowMain(dt)
         -- G-Force Motion: X
         --------------------------------------------------------
 
-        cfg.motionGainX, changed =
+        cfg.RUNTIME.MOTION_GAIN_X, changed =
             ui.slider(
 
                 'Motion X',
 
-                cfg.motionGainX,
+                cfg.RUNTIME.MOTION_GAIN_X,
 
                 0.0,
 
@@ -3997,12 +4441,12 @@ function windowMain(dt)
         -- G-Force Motion: Y
         --------------------------------------------------------
 
-        cfg.motionGainY, changed =
+        cfg.RUNTIME.MOTION_GAIN_Y, changed =
             ui.slider(
 
                 'Motion Y',
 
-                cfg.motionGainY,
+                cfg.RUNTIME.MOTION_GAIN_Y,
 
                 0.0,
 
@@ -4016,12 +4460,12 @@ function windowMain(dt)
         -- G-Force Motion: Z
         --------------------------------------------------------
 
-        cfg.motionGainZ, changed =
+        cfg.RUNTIME.MOTION_GAIN_Z, changed =
             ui.slider(
 
                 'Motion Z',
 
-                cfg.motionGainZ,
+                cfg.RUNTIME.MOTION_GAIN_Z,
 
                 0.0,
 
@@ -4035,12 +4479,12 @@ function windowMain(dt)
         -- G-Force Motion: Sharpness
         --------------------------------------------------------
 
-        cfg.motionSharpness, changed =
+        cfg.RUNTIME.MOTION_SHARPNESS, changed =
             ui.slider(
 
                 'Motion Strength',
 
-                cfg.motionSharpness,
+                cfg.RUNTIME.MOTION_SHARPNESS,
 
                 0.0,
 
@@ -4054,12 +4498,12 @@ function windowMain(dt)
         -- G-Force Motion: Smothing
         --------------------------------------------------------
 
-        cfg.motionSmoothing, changed =
+        cfg.RUNTIME.MOTION_SMOOTHING, changed =
             ui.slider(
 
                 'Motion Response',
 
-                cfg.motionSmoothing,
+                cfg.RUNTIME.MOTION_SMOOTHING,
 
                 0.1,
 
@@ -4180,7 +4624,7 @@ function windowMain(dt)
 
             '\tScale: %.4f',
 
-            cfg.modelScale
+            activeScale
         )
     )
 
@@ -4196,11 +4640,11 @@ function windowMain(dt)
 
         '[Log] Show position delta',
 
-        cfg.debugDeltapos
+        cfg.RUNTIME.DEBUG_DELTAPOS
     )
 
     if changed then
-        cfg.debugDeltapos = not cfg.debugDeltapos
+        cfg.RUNTIME.DEBUG_DELTAPOS = not cfg.RUNTIME.DEBUG_DELTAPOS
     end     
     if textDebugDeltaPos then 
         ui.text(
@@ -4216,11 +4660,11 @@ function windowMain(dt)
 
         '[Log] world rotation',
 
-        cfg.debugRotation
+        cfg.RUNTIME.DEBUG_ROTATION
     )
 
     if changed then
-        cfg.debugRotation = not cfg.debugRotation
+        cfg.RUNTIME.DEBUG_ROTATION = not cfg.RUNTIME.DEBUG_ROTATION
     end     
 
     if textDebugCamRotation then
