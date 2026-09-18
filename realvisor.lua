@@ -2,8 +2,8 @@
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
 local strAppNameInternal = 'RealVisor'
--- Version: 0.5.2
-local strVersion= '0.5.2'
+-- Version: 0.5.3
+local strVersion= '0.5.3'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,11 +12,15 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- 0.5.1 Real Neck Camera FX
--- (Tested, see NeckFX module) Real Head Tracking
--- (Tested, see NeckFX module) Ingame Camera Controls
--- (Tested) RIG_Head scale
--- 0.5.2 Dual Profile / Save / Load (Tested)
+-- v0.5.1 Real Neck Camera FX
+--  (Tested, see NeckFX module) Real Head Tracking
+--  (Tested, see NeckFX module) Ingame Camera Controls
+--  (Tested) RIG_Head scale
+-- v0.5.2 
+--  Dual Profile / Save / Load (Tested)
+-- v0.5.3
+--  support Hide/Show Helmet Completely
+--  Configurations works properly
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -161,6 +165,12 @@ local cfg = scriptSettings:mapConfig({
         --------------------------------------------------------
 
         HIDE_DRIVER_HELMET = true,
+        HIDE_DRIVER_HELMET_SCALE = mat4x4.scaling(
+                                        vec3.new(0.00001)
+                                    ),
+        SHOW_DRIVER_HELMET_SCALE = mat4x4.scaling(
+                                        vec3.new(1.00000)
+                                    ),
         NECK_FOLLOW_ENABLED = true,
     },
 })
@@ -267,6 +277,7 @@ local materialInputApplyRequested = false   -- It helps to trigger when you pres
     local neckScaleNode = nil
     local driverNecks = {}      --  Debug: Store all neck found 
     local driverHeads = {}      --  Visiblilty control : we need to get all driver heads to hide them completely
+    local driverHeadStates = {}    
 
     local neckReferenceWorld = nil
     local neckFollowInitialized = false
@@ -434,11 +445,10 @@ local function loadProfiles()
 
 end
 
+
 local function saveProfiles()
     local p1 = cfg.PROFILE_1
     local p2 = cfg.PROFILE_2
-
-    local enableValue = activeEnableMode and 1 or 0
 
     local content = string.format([[
 [PROFILE]
@@ -594,9 +604,12 @@ local function setActiveProfile(index)
     cfg.PROFILE.ACTIVE =
         activeProfile
 
+
     applyActiveProfileToRuntime()
 
+    
     saveProfiles()
+
 
     --------------------------------------------------------
     -- Force transform refresh
@@ -2552,84 +2565,6 @@ local function applyAxisCorrection()
 end
 
 
-------------------------------------------------------------
--- Helpers: Real Neck Camera FX
-------------------------------------------------------------
-
-local function captureNeckReference()
-
-    if driverNeck == nil then
-        return false
-    end
-
-
-    local world = driverNeck:getWorldTransformationRaw()
-
-
-    if world == nil then
-        return false
-    end
-
-
-    neckReferenceWorld = mat4x4()
-    neckReferenceWorld:set(world)
-
-    neckFollowInitialized = true
-
-
-    ac.log(appNameDebug ..
-        ' NECK FOLLOW: reference captured')
-
-    return true
-
-end
-
-
-local function applyNeckPositionFollow()
-
-    if not cfg.RUNTIME.NECK_FOLLOW_ENABLED then
-        return
-    end
-
-    if driverNeck == nil then
-        return
-    end
-
-    if not neckFollowInitialized then
-        if not captureNeckReference() then
-            return
-        end
-        return
-    end
-
-    local currentWorld = driverNeck:getWorldTransformationRaw()
-
-    if currentWorld == nil then
-        return
-    end
-
-    local currentPos =
-        currentWorld:transformPoint(vec3(0, 0, 0))
-
-    local referencePos =
-        neckReferenceWorld:transformPoint(vec3(0, 0, 0))
-
-    local deltaWorld = currentPos - referencePos
-
-    local car = ac.getCar(0)
-    
-    local x = math.dot(deltaWorld, car.side)
-    local y = math.dot(deltaWorld, car.up)
-    local z = math.dot(deltaWorld, car.look)
-
-    -- neck.position:addScaled(car.side, x * neckFollowGain)
-    -- neck.position:addScaled(car.up, y * neckFollowGain)
-    -- neck.position:addScaled(car.look, z * neckFollowGain)
-
-end
-
-
-
 local function updateHelmetVisibility()
 
     if not driverHeads
@@ -2643,28 +2578,38 @@ local function updateHelmetVisibility()
 
     for _, helmet in ipairs(driverHeads) do
 
+        local transform =
+
+            helmet:getTransformationRaw()
+        
 
         if cfg.RUNTIME.HIDE_DRIVER_HELMET then
             
-            local transform =
-
-                helmet:getTransformationRaw()
-
-
             if transform then
-
+                
                 transform:set(
 
-                    mat4x4.scaling(
-                        vec3.new(0.001)
-                        )
-                    )
-            
+                    cfg.RUNTIME.HIDE_DRIVER_HELMET_SCALE
+
+                )
 
             end
+
+
+        else
+            
+            transform:set(
+            
+                cfg.RUNTIME.SHOW_DRIVER_HELMET_SCALE
+
+            )
+
         end
+
     end
+
 end
+
 
 ------------------------------------------------------------
 -- Find Driver Head
@@ -2674,7 +2619,6 @@ end
 ------------------------------------------------------------
 
 local function findDriverHeadAndNeck()
-
 
     local foundNek = 
         ac.findNodes('DRIVER:RIG_Nek')
@@ -2815,25 +2759,7 @@ local function findDriverHeadAndNeck()
 
         -- show/hide models when loaded (one time load)
 
-        for _, node in ipairs(driverHeads) do 
-
-            --node:setVisible(cfg.RUNTIME.HIDE_DRIVER_HELMET)
-
-            local transform =
-                node:getTransformationRaw()
-
-
-            if transform then
-
-                transform:set(
-
-                    mat4x4.scaling(
-                        vec3.new(0.001)
-                    )
-                )
-            end
-
-        end
+        updateHelmetVisibility()
 
     end
 
@@ -2843,7 +2769,7 @@ end
 
 
 ------------------------------------------------------------
--- Observe Driver Head
+-- Observe Driver Head (actually it Observes Neck instead)
 --
 -- Observation only.
 -- No camera modification.
@@ -3845,7 +3771,6 @@ end
 
 function script.update(dt)
 
-
     --------------------------------------------------------
     -- Initialize
     --------------------------------------------------------
@@ -3857,11 +3782,12 @@ function script.update(dt)
         return
     end
 
+
     --------------------------------------------------------
     -- Driver Head Observation
     --
     -- IMPORTANT:
-    -- This only reads the head.
+    -- This only reads the neck.
     -- It does NOT modify camera or visor.
     --------------------------------------------------------
 
@@ -3890,12 +3816,8 @@ function script.update(dt)
         return
     end
 
-    
-    --------------------------------------------------------
-    -- Camera Transform to Neck
-    --------------------------------------------------------
-    
-    applyNeckPositionFollow()
+
+    updateHelmetVisibility()
 
 
     --------------------------------------------------------
@@ -3926,6 +3848,7 @@ function script.update(dt)
     applyScale()
 
     applyAxisCorrection()
+
 end
 
 
@@ -4373,6 +4296,22 @@ function windowMain(dt)
 
     end        
 
+    ui.sameLine(0, 20)
+
+    changed, _ = ui.checkbox(
+
+            'Hide driver head&helmet (to avoid light render conflicts)',
+
+            cfg.RUNTIME.HIDE_DRIVER_HELMET
+        )
+
+
+    if changed then
+
+        cfg.RUNTIME.HIDE_DRIVER_HELMET = not cfg.RUNTIME.HIDE_DRIVER_HELMET
+
+    end
+
 
     --------------------------------------------------------
     -- Scale
@@ -4399,6 +4338,7 @@ function windowMain(dt)
     end
 
     profileContextMenu('Scale', 'SCALE')
+
 
     --------------------------------------------------------
     -- Axis
@@ -4460,7 +4400,6 @@ function windowMain(dt)
     end
 
     profileContextMenu('Roll', 'ROLL')
-
 
 
     --------------------------------------------------------

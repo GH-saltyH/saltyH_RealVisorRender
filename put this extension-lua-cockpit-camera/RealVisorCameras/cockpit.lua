@@ -1074,23 +1074,22 @@ end
 
   elseif cfg.PROFILE.PRF_POSITION == 1 then
 
-      pitch = 
-        math.rad(
-        cfg.POSITION_PROFILE2.PITCH_VIEW
-        )
+    pitch = 
+      math.rad(
+      cfg.POSITION_PROFILE2.PITCH_VIEW
+      )
 
-      roll = 
-        math.rad(
-          cfg.POSITION_PROFILE2.ROLL_VIEW
-        )
+    roll = 
+      math.rad(
+        cfg.POSITION_PROFILE2.ROLL_VIEW
+      )
 
-      yaw = 
-        math.rad(
-          cfg.POSITION_PROFILE2.YAW_VIEW
-        )      
+    yaw = 
+      math.rad(
+        cfg.POSITION_PROFILE2.YAW_VIEW
+      )      
 
   end
-
 
 
   neck.look =
