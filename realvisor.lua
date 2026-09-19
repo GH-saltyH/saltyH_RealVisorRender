@@ -2743,7 +2743,7 @@ float rainDropLayer(
                 boundaries continuously.
             */
             float3 persistentFlow =
-                rainFlowDistance;
+                gRainFlowDistance;
 
             float2 persistentTravel =
                 rainProjectForceToUV(
