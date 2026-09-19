@@ -194,6 +194,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_ACCEL_GAIN_Y = 0.000001,
         RAIN_ACCEL_GAIN_Z = 0.0000015,
 
+        -- Flow response / damping
+        RAIN_FLOW_RESPONSE = 5.0,
+        RAIN_FLOW_MAX = 0.02,
+
         -- Debug
         RAIN_DEBUG = false,
 
@@ -358,6 +362,13 @@ local motionCurrent = vec3(
     0,
     0
 )
+
+--------------------------------------------------------
+-- Rain flow state
+--------------------------------------------------------
+
+local rainFlowCurrent = vec2(0, 0)
+local rainFlowPreviousTime = nil
     
 local motionTarget= vec3(
     0,
@@ -2292,13 +2303,13 @@ float rainDropLayer(
             float speedRandom =
                 rndMotion.x;            
 
-           float vehicleFlowSpeed =
-                gRainFlowSpeed
-                * lerp(
-                    0.35,
-                    1.0,
-                    gRainSpeed01
-                );
+            /*
+                Base vertical movement is independent from
+                vehicle speed. Acceleration controls the additional
+                2D flow vector instead.
+            */
+            float vehicleFlowSpeed =
+                gRainFlowSpeed;
 
             float dropSpeed =
                 gRainBaseSpeed
@@ -2371,29 +2382,30 @@ float rainDropLayer(
                 차량 운동에 따라 X/Y 양쪽으로 추가 흐름을 만든다.
             */
 
-            float accelFlowX =
-                gRainAccelX
-                * accelerationInfluence
-                * 1.00;
-
-            float accelFlowY =
-                -gRainAccelZ
-                * accelerationInfluence
-                * 1.00;
-
-
             /*
-                차량 가속도에 따른 추가 이동.
+                gRainFlow is a smoothed continuous UV velocity.
+                Apply it as movement over simulation time, not as
+                an instantaneous acceleration-based position jump.
             */
-            dropPos +=
-                float2(
-                    accelFlowX,
-                    accelFlowY
+            float2 flowVelocity =
+                gRainFlow
+                * lerp(
+                    0.55,
+                    1.35,
+                    accelerationInfluence
                 );
 
-            /*
-                가속 흐름에 따른 드롭 포지션.
-            */                
+            float2 flowOffset =
+                flowVelocity
+                * time;
+
+            dropPos += flowOffset;
+
+            float accelFlowX =
+                flowVelocity.x;
+
+            float accelFlowY =
+                flowVelocity.y;
             float2 pixelPos =
                 grid;
 
@@ -2467,12 +2479,7 @@ float rainDropLayer(
                 );
                 
             float accelerationAmount =
-                length(
-                    float2(
-                        accelFlowX,
-                        accelFlowY
-                    )
-                );
+                length(flowVelocity);
 
             float movementAmount =
                 saturate(
@@ -3633,12 +3640,68 @@ render.on('main.track.transparent', function()
     -- Vehicle flow magnitude
     --------------------------------------------------------
     
-    local flowAmount =
-        math.sqrt(
-            flowX * flowX
-            + flowZ * flowZ
+    --------------------------------------------------------
+    -- Smooth acceleration into continuous visor flow velocity.
+    --
+    -- X: lateral visor flow
+    -- Y: longitudinal / vertical visor flow
+    --
+    -- Raw acceleration is never applied directly to dropPos.
+    --------------------------------------------------------
+
+    local now = sim.time
+
+    if rainFlowPreviousTime == nil then
+        rainFlowPreviousTime = now
+    end
+
+    local flowDt =
+        math.clamp(
+            now - rainFlowPreviousTime,
+            0.0,
+            0.1
         )
-    
+
+    rainFlowPreviousTime = now
+
+    local targetFlow =
+        vec2(
+            flowX,
+            -flowZ
+        )
+
+    local targetLength =
+        math.sqrt(
+            targetFlow.x * targetFlow.x
+            + targetFlow.y * targetFlow.y
+        )
+
+    if targetLength > cfg.RUNTIME.RAIN_FLOW_MAX then
+        targetFlow =
+            targetFlow
+            / targetLength
+            * cfg.RUNTIME.RAIN_FLOW_MAX
+    end
+
+    local response =
+        math.max(
+            cfg.RUNTIME.RAIN_FLOW_RESPONSE,
+            0.01
+        )
+
+    local smoothing =
+        1.0
+        - math.exp(
+            -response * flowDt
+        )
+
+    rainFlowCurrent =
+        rainFlowCurrent
+        + (
+            targetFlow
+            - rainFlowCurrent
+        ) * smoothing
+
 
     --------------------------------------------------------
     -- Render
@@ -3684,29 +3747,14 @@ render.on('main.track.transparent', function()
             gRainDensity =
                 cfg.RUNTIME.RAIN_DENSITY,
 
-            gRainSpeed01 =
-                speed01,
-
             gRainFlow =
-                vec2(
-                    flowX,
-                    flowY
-                ),
+                rainFlowCurrent,
 
             gRainBaseSpeed = 
                 cfg.RUNTIME.RAIN_SPEED_BASE,
 
             gRainFlowSpeed =
                 cfg.RUNTIME.RAIN_FLOW_SPEED,
-
-            gRainAccelX = 
-                flowX,
-            
-            gRainAccelY = 
-                flowY,
-            
-            gRainAccelZ = 
-                flowZ,
 
             gRainTime =
                 sim.time,
