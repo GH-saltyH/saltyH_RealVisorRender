@@ -190,9 +190,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_SPEED = 0.005,
 
         -- Acceleration influence
-        RAIN_ACCEL_GAIN_X = 0.0505,
-        RAIN_ACCEL_GAIN_Y = 0.0001,
-        RAIN_ACCEL_GAIN_Z = 0.005,
+        RAIN_ACCEL_GAIN_X = 0.000505,
+        RAIN_ACCEL_GAIN_Y = 0.000001,
+        RAIN_ACCEL_GAIN_Z = 0.0000015,
 
         -- Debug
         RAIN_DEBUG = false,
@@ -2292,9 +2292,13 @@ float rainDropLayer(
             float speedRandom =
                 rndMotion.x;            
 
-            float vehicleFlowSpeed =
+           float vehicleFlowSpeed =
                 gRainFlowSpeed
-                * 0.35;
+                * lerp(
+                    0.35,
+                    1.0,
+                    gRainSpeed01
+                );
 
             float dropSpeed =
                 gRainBaseSpeed
@@ -2357,10 +2361,14 @@ float rainDropLayer(
                 );
     
             /*
-                차량 가속도에 따른 추가 이동.
+                Vehicle acceleration flow.
 
-                Y는 기본적으로 아래 방향.
-                X는 차량 운동에 따라 변한다.
+                UV 기준:
+                X = visor 좌우
+                Y = visor 위/아래
+
+                기본 낙하 방향은 Y이며,
+                차량 운동에 따라 X/Y 양쪽으로 추가 흐름을 만든다.
             */
 
             float accelFlowX =
@@ -2368,13 +2376,24 @@ float rainDropLayer(
                 * accelerationInfluence
                 * 1.00;
 
+            float accelFlowY =
+                -gRainAccelZ
+                * accelerationInfluence
+                * 1.00;
+
+
+            /*
+                차량 가속도에 따른 추가 이동.
+            */
+            dropPos +=
+                float2(
+                    accelFlowX,
+                    accelFlowY
+                );
+
             /*
                 가속 흐름에 따른 드롭 포지션.
             */                
-            dropPos.x +=
-                accelFlowX;
-
-
             float2 pixelPos =
                 grid;
 
@@ -2447,10 +2466,18 @@ float rainDropLayer(
                     life
                 );
                 
+            float accelerationAmount =
+                length(
+                    float2(
+                        accelFlowX,
+                        accelFlowY
+                    )
+                );
+
             float movementAmount =
                 saturate(
                     abs(dropSpeed) * 35.0
-                    + abs(accelFlowX) * 4.0                
+                    + accelerationAmount * 4.0
                 );
 
             float trailAmount =
@@ -2474,24 +2501,81 @@ float rainDropLayer(
                     0.0025
                 );
 
-            float trailX =
-                abs(delta.x);
+                                        
+            /*
+                실제 물방울 이동 방향.
 
+                기본 흐름:
+                    +Y
+
+                차량 운동:
+                    accelFlowX / accelFlowY
+            */
+            float2 movementVector =
+                float2(
+                    accelFlowX,
+                    dropSpeed + accelFlowY
+                );
+
+            float movementLength =
+                length(movementVector);
+
+            float2 movementDir =
+                movementLength > 0.00001
+                ? movementVector / movementLength
+                : float2(0.0, 1.0);
+
+
+            /*
+                Trail은 물방울이 지나온 방향으로 남긴다.
+
+                delta:
+                    현재 픽셀 - 현재 물방울 위치
+            */
+            float trailAlong =
+                dot(
+                    -delta,
+                    movementDir
+                );
+
+            float2 perpendicular =
+                float2(
+                    -movementDir.y,
+                    movementDir.x
+                );
+
+            float trailSide =
+                abs(
+                    dot(
+                        delta,
+                        perpendicular
+                    )
+                );
+
+
+            /*
+                Trail 폭.
+            */
             float trail =
                 smoothstep(
                     trailWidth,
                     0.0,
-                    trailX
+                    trailSide
                 );
 
+
+            /*
+                물방울 뒤쪽에만 trail 생성.
+            */
             float trailY =
                 smoothstep(
                     0.0,
                     trailLength,
-                    -delta.y
+                    trailAlong
                 );
 
-            trail *= trailY;
+            trail *=
+                trailY;
             
             trail *= trailAmount;
 
@@ -3599,6 +3683,9 @@ render.on('main.track.transparent', function()
 
             gRainDensity =
                 cfg.RUNTIME.RAIN_DENSITY,
+
+            gRainSpeed01 =
+                speed01,
 
             gRainFlow =
                 vec2(
