@@ -992,14 +992,15 @@ float4 main(PS_IN pin)
     if (gRainDebug == 4)
     {
         /*
-            Debug 4 is currently an absolute branch/transport test.
-            It intentionally ignores UV, textures, alpha masks,
-            lifecycle, normals and force.
+            Debug 4 exposes the ACTUAL interpolated mesh UV.
+            Red = U, Green = V, Blue = 0.
+            Alpha is forced to 1 so this test cannot disappear
+            because of the diagnostic mask.
         */
         return float4(
+            saturate(pin.Tex.x),
+            saturate(pin.Tex.y),
             0.0,
-            0.45,
-            1.0,
             1.0
         );
     }
