@@ -198,6 +198,32 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_RESPONSE = 5.0,
         RAIN_FLOW_MAX = 0.02,
 
+        -- Rain surface / adhesion model
+        -- UV center is intentionally explicit so the surface model
+        -- can later be remapped without rewriting the physics.
+        RAIN_SURFACE_CENTER_X = 0.5,
+        RAIN_SURFACE_CENTER_Y = 0.5,
+
+        -- Approximate visor curvature in UV space.
+        -- X controls lateral curvature; Y controls upper/lower curvature.
+        RAIN_SURFACE_CURVATURE_X = 0.35,
+        RAIN_SURFACE_CURVATURE_Y = 0.12,
+
+        -- Global visor downward slope. This gives gravity a tangential
+        -- component even at the UV center.
+        RAIN_SURFACE_SLOPE_Y = 0.12,
+
+        -- Adhesion threshold range. A drop remains attached while the
+        -- effective tangential force is below its own threshold.
+        RAIN_ADHESION_MIN = 0.65,
+        RAIN_ADHESION_MAX = 2.20,
+
+        -- Physical gravity used by the surface model.
+        RAIN_GRAVITY = 9.81,
+
+        -- Procedural lifetime of one drop before it respawns.
+        RAIN_DROP_LIFETIME = 8.0,
+
         -- Debug
         RAIN_DEBUG = false,
 
@@ -367,8 +393,8 @@ local motionCurrent = vec3(
 -- Rain flow state
 --------------------------------------------------------
 
-local rainFlowCurrent = vec2(0, 0)
-local rainFlowOffset = vec2(0, 0)
+local rainAccelerationCurrent = vec3(0, 0, 0)
+local rainPreviousVelocity = nil
     
 local motionTarget= vec3(
     0,
@@ -2210,22 +2236,97 @@ float2 rainHash22(float2 p)
         dot(p, float2(269.5, 183.3))
     );
 
-    return frac(
-        sin(p) * 43758.5453
-    );
+    return frac(sin(p) * 43758.5453);
 }
 
 
 float rainHash(float2 p)
 {
     return frac(
-        sin(
-            dot(
-                p,
-                float2(127.1, 311.7)
-            )
-        ) * 43758.5453
+        sin(dot(p, float2(127.1, 311.7))) * 43758.5453
     );
+}
+
+
+/*
+    Build an approximate local surface normal from UV position.
+
+    Local visor basis:
+        X = lateral
+        Y = upper/lower
+        Z = outward from visor towards camera
+
+    This is deliberately a replaceable approximation. Once the visor UV
+    is evenly unwrapped around the center, these terms become a useful
+    low-cost surface model. A texture normal field can replace this
+    function later without changing the force/adhesion model.
+*/
+float3 rainSurfaceNormal(float2 uv)
+{
+    float2 centered =
+        uv
+        - float2(
+            gRainSurfaceCenter.x,
+            gRainSurfaceCenter.y
+        );
+
+    centered *= 2.0;
+
+    float nx =
+        centered.x
+        * gRainSurfaceCurvature.x;
+
+    float ny =
+        gRainSurfaceSlopeY
+        + centered.y
+        * gRainSurfaceCurvature.y;
+
+    return normalize(
+        float3(
+            nx,
+            ny,
+            1.0
+        )
+    );
+}
+
+
+/*
+    Convert a 3D force into the two surface directions represented by UV.
+
+    The important part is the projection:
+        tangentialForce = force - normal * dot(force, normal)
+
+    This prevents acceleration from moving a drop "through" the glass.
+*/
+float2 rainProjectForceToUV(
+    float3 force,
+    float3 normal
+)
+{
+    float3 tangentU =
+        normalize(
+            cross(
+                float3(0.0, 1.0, 0.0),
+                normal
+            )
+        );
+
+    float3 tangentV =
+        normalize(
+            cross(
+                normal,
+                tangentU
+            )
+        );
+
+    float2 result =
+        float2(
+            dot(force, tangentU),
+            -dot(force, tangentV)
+        );
+
+    return result;
 }
 
 
@@ -2233,7 +2334,6 @@ float rainDropLayer(
     float2 uv,
     float time,
     float scale,
-    float baseSpeed,
     float layerOffset
 )
 {
@@ -2250,9 +2350,6 @@ float rainDropLayer(
                 baseCell
                 + float2(x, y);
 
-            /*
-                각각 다른 seed를 사용한다.
-            */
             float2 rndPos =
                 rainHash22(cell + 17.13);
 
@@ -2267,10 +2364,8 @@ float rainDropLayer(
 
 
             /*
-                spawn probability.
-
-                작은 물방울 layer는
-                상대적으로 많이 발생.
+                Spawn density remains probabilistic.
+                This is appearance probability, not physical motion.
             */
             float spawnChance =
                 lerp(
@@ -2284,7 +2379,7 @@ float rainDropLayer(
 
 
             /*
-                size와 speed를 독립적으로 만든다.
+                Size remains intentionally oversized for development/debug.
             */
             float sizeRandom =
                 rndState.y;
@@ -2298,59 +2393,43 @@ float rainDropLayer(
 
 
             /*
-                기본 속도 역시 독립 seed.
+                Each drop gets its own adhesion threshold.
+
+                This is now the source of different responses between drops:
+                not an arbitrary acceleration multiplier, but different
+                resistance to starting movement.
             */
-            float speedRandom =
-                rndMotion.x;            
-
-            /*
-                Base vertical movement is independent from
-                vehicle speed. Acceleration controls the additional
-                2D flow vector instead.
-            */
-            float vehicleFlowSpeed =
-                gRainFlowSpeed;
-
-            float dropSpeed =
-                gRainBaseSpeed
-                + vehicleFlowSpeed;
-
-            dropSpeed *=
+            float adhesion =
                 lerp(
-                    0.35,
-                    1.0,
-                    speedRandom
-                );
-
-            /*
-                차량 가속도의 영향.
-
-                물방울마다 영향량도 조금씩 다르게 한다.
-            */
-            float accelerationInfluence =
-                lerp(
-                    0.55,
-                    1.35,
-                    rndMotion.y
+                    gRainAdhesionMin,
+                    gRainAdhesionMax,
+                    rndMotion.x
                 );
 
 
             /*
-                spawn phase.
+                Static spawn position.
+
+                A drop no longer falls simply because time advances.
+                Time is used for its lifetime/spawn cycle only.
             */
-            float life =
+            float dropLifetime =
+                max(
+                    gRainDropLifetime,
+                    0.1
+                );
+
+            float life01 =
                 frac(
                     rndState.y
-                    + time * dropSpeed
+                    + time / dropLifetime
                 );
 
-            float phase =
-                life;
+            float dropAge =
+                life01
+                * dropLifetime;
 
-                
-            /*
-                X 방향에도 아주 작은 변화를 준다.
-            */
+
             float drift =
                 (
                     rndPos.x
@@ -2358,57 +2437,143 @@ float rainDropLayer(
                 ) * 0.15;
 
 
-            /*
-                기본적인 물방울 위치.
-            */
-            float2 dropPos =
+            float2 spawnPos =
                 cell
                 + float2(
                     0.15
                     + rndPos.x * 0.70
                     + drift,
 
-                    phase
+                    0.15
+                    + rndPos.y * 0.70
                 );
-    
+
+
             /*
-                Vehicle acceleration flow.
-
-                UV 기준:
-                X = visor 좌우
-                Y = visor 위/아래
-
-                기본 낙하 방향은 Y이며,
-                차량 운동에 따라 X/Y 양쪽으로 추가 흐름을 만든다.
+                Evaluate the visor surface at the drop's own position.
             */
+            float2 surfaceUV =
+                spawnPos / scale;
+
+            float3 surfaceNormal =
+                rainSurfaceNormal(surfaceUV);
+
 
             /*
-                gRainFlow is a smoothed continuous UV velocity.
-                Apply it as movement over simulation time, not as
-                an instantaneous acceleration-based position jump.
+                Effective force in the visor's moving reference frame.
+
+                Gravity pulls downward.
+                Vehicle acceleration produces the opposite inertial force.
+
+                This is deliberately a force/acceleration model, not a
+                velocity model.
+            */
+            float3 gravityForce =
+                float3(
+                    0.0,
+                    -gRainGravity,
+                    0.0
+                );
+
+            float3 effectiveForce =
+                gravityForce
+                - gRainAcceleration;
+
+
+            /*
+                Only the component tangent to the glass can move the drop.
+            */
+            float2 tangentForce =
+                rainProjectForceToUV(
+                    effectiveForce,
+                    surfaceNormal
+                );
+
+            float forceMagnitude =
+                length(tangentForce);
+
+
+            /*
+                Adhesion gate.
+
+                Below threshold:
+                    attached / essentially static.
+
+                Above threshold:
+                    the excess force progressively turns into flow.
+            */
+            float excessForce =
+                max(
+                    forceMagnitude
+                    - adhesion,
+                    0.0
+                );
+
+            float dynamic01 =
+                saturate(
+                    excessForce
+                    /
+                    max(
+                        adhesion,
+                        0.001
+                    )
+                );
+
+
+            /*
+                Once a drop starts moving, stronger force produces more
+                surface velocity. The per-drop variation comes primarily
+                from adhesion, not from changing the force direction.
             */
             float2 flowVelocity =
-                gRainFlow
-                * lerp(
-                    0.55,
-                    1.35,
-                    accelerationInfluence
-                );
+                tangentForce
+                *
+                dynamic01
+                *
+                gRainFlowSpeed;
+
 
             /*
-                gRainFlowOffset is an integrated, wrapped displacement.
-                It is updated once per simulation frame in Lua.
-                Never multiply the current flow by absolute simulation
-                time here: doing so makes tiny acceleration responses
-                grow without bound.
+                Limit the physical flow response before converting it to
+                displacement. This keeps a very large acceleration from
+                instantly crossing the entire UV field.
             */
-            dropPos += gRainFlowOffset;
+            float flowLength =
+                length(flowVelocity);
 
-            float accelFlowX =
-                flowVelocity.x;
+            if (flowLength > gRainFlowMax)
+            {
+                flowVelocity =
+                    flowVelocity
+                    / flowLength
+                    * gRainFlowMax;
+            }
 
-            float accelFlowY =
-                flowVelocity.y;
+
+            /*
+                Integrate the moving drop from its own age.
+
+                A static drop therefore stays where it spawned.
+                A moving drop accumulates displacement as it gets older.
+            */
+            float2 dropPos =
+                spawnPos
+                + flowVelocity
+                * dropAge;
+
+
+            /*
+                Wrap only the simulated travel component. This avoids
+                requiring an ever-growing world-space position.
+            */
+            dropPos =
+                cell
+                + frac(
+                    dropPos
+                    - cell
+                );
+
+
             float2 pixelPos =
                 grid;
 
@@ -2418,15 +2583,10 @@ float rainDropLayer(
 
 
             /*
-                이동성이 높은 물방울은
-                조금 길어진다.
+                Flowing drops stretch according to their actual motion.
             */
             float mobility =
-                smoothstep(
-                    0.25,
-                    0.85,
-                    speedRandom
-                );
+                dynamic01;
 
             float stretch =
                 lerp(
@@ -2435,7 +2595,13 @@ float rainDropLayer(
                     mobility
                 );
 
-            delta.y *= stretch;
+            float movementLength =
+                length(flowVelocity);
+
+            if (movementLength > 0.00001)
+            {
+                delta.y *= stretch;
+            }
 
 
             float distanceToDrop =
@@ -2450,55 +2616,43 @@ float rainDropLayer(
 
 
             /*
-                lifecycle.
+                Lifecycle is purely the spawn/pop fade.
+                It is no longer responsible for downward movement.
             */
-
             float active =
                 smoothstep(
                     0.03,
                     0.10,
-                    life
+                    life01
                 );
 
             active *=
-                1.0 -
+                1.0
+                -
                 smoothstep(
                     0.80,
                     0.98,
-                    life
+                    life01
                 );
 
             drop *= active;
 
 
             /*
-                TRAIL
+                Trail is generated only from physical flow.
+
+                A stationary adhered drop therefore does not create a
+                trail just because its lifetime is progressing.
             */
-            float trailLife =
-                smoothstep(
-                    0.12,
-                    0.30,
-                    life
-                );
-                
-            float accelerationAmount =
-                length(flowVelocity);
-
-            float movementAmount =
-                saturate(
-                    abs(dropSpeed) * 35.0
-                    + accelerationAmount * 4.0
-                );
-
             float trailAmount =
                 smoothstep(
-                    0.08,
+                    0.05,
                     0.30,
-                    movementAmount
+                    dynamic01
                 );
 
             float trailLength =
-                dropSize 
+                dropSize
                 * lerp(
                     0.5,
                     5.0,
@@ -2511,37 +2665,12 @@ float rainDropLayer(
                     0.0025
                 );
 
-                                        
-            /*
-                실제 물방울 이동 방향.
-
-                기본 흐름:
-                    +Y
-
-                차량 운동:
-                    accelFlowX / accelFlowY
-            */
-            float2 movementVector =
-                float2(
-                    accelFlowX,
-                    dropSpeed + accelFlowY
-                );
-
-            float movementLength =
-                length(movementVector);
 
             float2 movementDir =
                 movementLength > 0.00001
-                ? movementVector / movementLength
-                : float2(0.0, 1.0);
+                ? flowVelocity / movementLength
+                : float2(0.0, 0.0);
 
-
-            /*
-                Trail은 물방울이 지나온 방향으로 남긴다.
-
-                delta:
-                    현재 픽셀 - 현재 물방울 위치
-            */
             float trailAlong =
                 dot(
                     -delta,
@@ -2562,22 +2691,16 @@ float rainDropLayer(
                     )
                 );
 
-
-            /*
-                Trail 폭.
-            */
             float trail =
-                smoothstep(
+                movementLength > 0.00001
+                ? smoothstep(
                     trailWidth,
                     0.0,
                     trailSide
-                );
+                )
+                : 0.0;
 
-
-            /*
-                물방울 뒤쪽에만 trail 생성.
-            */
-            float trailY =
+            trail *=
                 smoothstep(
                     0.0,
                     trailLength,
@@ -2585,9 +2708,7 @@ float rainDropLayer(
                 );
 
             trail *=
-                trailY;
-            
-            trail *= trailAmount;
+                trailAmount;
 
             trail *=
                 lerp(
@@ -2598,7 +2719,6 @@ float rainDropLayer(
 
             trail *= active;
 
-            trail *= trailLife;
 
             result =
                 max(
@@ -2617,52 +2737,41 @@ float4 main(PS_IN pin)
     float2 uv =
         pin.Tex;
 
-
-    /*
-        큰 / 중간 물방울.
-    */
     float large =
         rainDropLayer(
             uv,
             gRainTime,
             6.5,
-            1.0,
             0.0
         );
 
-
-    /*
-        작은 물방울.
-    */
     float small =
         rainDropLayer(
             uv * 1.73 + 13.7,
             gRainTime,
             14.0,
-            1.0,
             13.7
         );
-
 
     float mask =
         large * 0.90
         + small * 0.32;
 
-
     mask =
         saturate(mask);
 
-
+    /*
+        RAIN_AMOUNT currently remains a visual master amount.
+        It is intentionally not used to multiply force.
+    */
     mask *=
         gRainAmount;
 
     mask *=
         gRainDensity;
 
-
     mask =
         saturate(mask);
-
 
     return float4(
         0.82,
@@ -2673,6 +2782,10 @@ float4 main(PS_IN pin)
 }
 
 ]]
+
+
+--------------------------------------------------------
+
 
 
 --------------------------------------------------------
@@ -3672,17 +3785,47 @@ render.on('main.track.transparent', function()
             gRainDensity =
                 cfg.RUNTIME.RAIN_DENSITY,
 
-            gRainFlow =
-                rainFlowCurrent,
+            gRainAcceleration =
+                rainAccelerationCurrent,
 
-            gRainFlowOffset =
-                rainFlowOffset,
+            gRainSurfaceCenter =
+                vec2(
+                    cfg.RUNTIME.RAIN_SURFACE_CENTER_X,
+                    cfg.RUNTIME.RAIN_SURFACE_CENTER_Y
+                ),
 
-            gRainBaseSpeed = 
-                cfg.RUNTIME.RAIN_SPEED_BASE,
+            gRainSurfaceCurvature =
+                vec2(
+                    cfg.RUNTIME.RAIN_SURFACE_CURVATURE_X,
+                    cfg.RUNTIME.RAIN_SURFACE_CURVATURE_Y
+                ),
+
+            gRainSurfaceSlopeY =
+                cfg.RUNTIME.RAIN_SURFACE_SLOPE_Y,
+
+            gRainAdhesionMin =
+                cfg.RUNTIME.RAIN_ADHESION_MIN,
+
+            gRainAdhesionMax =
+                cfg.RUNTIME.RAIN_ADHESION_MAX,
+
+            gRainGravity =
+                cfg.RUNTIME.RAIN_GRAVITY,
+
+            gRainDropLifetime =
+                cfg.RUNTIME.RAIN_DROP_LIFETIME,
+
+            gRainFlowMax =
+                cfg.RUNTIME.RAIN_FLOW_MAX,
 
             gRainFlowSpeed =
                 cfg.RUNTIME.RAIN_FLOW_SPEED,
+
+            gRainAmount =
+                cfg.RUNTIME.RAIN_AMOUNT,
+
+            gRainDensity =
+                cfg.RUNTIME.RAIN_DENSITY,
 
             gRainTime =
                 sim.time,
@@ -4483,31 +4626,98 @@ local function updateRainFlow(dt)
 
     local car = ac.getCar(0)
 
-    if not car or not car.acceleration then
+    if not car or not car.velocity then
         return
     end
 
-    local acceleration = car.acceleration
+    local velocity = car.velocity
 
-    local targetFlow =
-        vec2(
-            -acceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN_X,
-             acceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN_Z
-        )
+    if rainPreviousVelocity == nil then
+        rainPreviousVelocity =
+            vec3(
+                velocity.x,
+                velocity.y,
+                velocity.z
+            )
 
-    local targetLength =
-        math.sqrt(
-            targetFlow.x * targetFlow.x
-            + targetFlow.y * targetFlow.y
-        )
-
-    if targetLength > cfg.RUNTIME.RAIN_FLOW_MAX then
-        targetFlow =
-            targetFlow
-            / targetLength
-            * cfg.RUNTIME.RAIN_FLOW_MAX
+        return
     end
 
+    /*
+        Acceleration is explicitly derived from velocity delta.
+        This keeps the model tied to acceleration rather than speed.
+    */
+    local rawAcceleration =
+        vec3(
+            (velocity.x - rainPreviousVelocity.x) / dt,
+            (velocity.y - rainPreviousVelocity.y) / dt,
+            (velocity.z - rainPreviousVelocity.z) / dt
+        )
+
+    rainPreviousVelocity:set(velocity)
+
+
+    /*
+        Camera basis is also the current visor basis because the visor
+        follows the camera root.
+
+        Convert world acceleration into visor-local coordinates before
+        applying the experimental gain values.
+    */
+    local forward =
+        ac.getCameraForward()
+
+    local up =
+        ac.getCameraUp()
+
+    if not forward or not up then
+        return
+    end
+
+    local right =
+        up:cross(forward)
+
+    if right:lengthSquared() < 0.000001 then
+        return
+    end
+
+    right:normalize()
+
+    up =
+        forward:cross(right)
+
+    if up:lengthSquared() < 0.000001 then
+        return
+    end
+
+    up:normalize()
+
+    local localAcceleration =
+        vec3(
+            rawAcceleration:dot(right),
+            rawAcceleration:dot(up),
+            rawAcceleration:dot(forward)
+        )
+
+
+    /*
+        Keep the user's current gain values as the experimental
+        sensitivity controls. These scale the inertial force only;
+        gravity is handled separately in the shader.
+    */
+    local targetAcceleration =
+        vec3(
+            localAcceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN_X,
+            localAcceleration.y * cfg.RUNTIME.RAIN_ACCEL_GAIN_Y,
+            localAcceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN_Z
+        )
+
+
+    /*
+        Smooth acceleration itself, not the resulting position.
+        This removes single-frame spikes while preserving the sign of
+        acceleration/braking.
+    */
     local response =
         math.max(
             cfg.RUNTIME.RAIN_FLOW_RESPONSE,
@@ -4520,24 +4730,12 @@ local function updateRainFlow(dt)
             -response * dt
         )
 
-    rainFlowCurrent =
-        rainFlowCurrent
+    rainAccelerationCurrent =
+        rainAccelerationCurrent
         + (
-            targetFlow
-            - rainFlowCurrent
+            targetAcceleration
+            - rainAccelerationCurrent
         ) * smoothing
-
-    rainFlowOffset =
-        rainFlowOffset
-        + rainFlowCurrent * dt
-
-    rainFlowOffset.x =
-        rainFlowOffset.x
-        - math.floor(rainFlowOffset.x)
-
-    rainFlowOffset.y =
-        rainFlowOffset.y
-        - math.floor(rainFlowOffset.y)
 end
 
 
