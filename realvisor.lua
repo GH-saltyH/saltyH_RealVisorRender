@@ -419,6 +419,8 @@ local motionCurrent = vec3(
 
 local rainAccelerationCurrent = vec3(0, 0, 0)
 local rainPreviousVelocity = nil
+local rainLastDebugMode = nil
+local rainRenderDiagnosticLogged = false
     
 local motionTarget= vec3(
     0,
@@ -3144,7 +3146,23 @@ render.on('main.track.transparent', function()
 
 
     if not rainShader then
+        if not rainRenderDiagnosticLogged then
+            ac.warn(appNameDebug .. ' Rain render skipped: RAINFXVISOR shader is not loaded')
+            rainRenderDiagnosticLogged = true
+        end
         return
+    end
+
+
+    if rainLastDebugMode ~= cfg.RUNTIME.RAIN_DEBUG then
+        rainLastDebugMode = cfg.RUNTIME.RAIN_DEBUG
+        ac.log(
+            appNameDebug
+            .. ' Rain render debug=' .. tostring(cfg.RUNTIME.RAIN_DEBUG)
+            .. ' mesh=' .. tostring(rainTargetMesh ~= nil)
+            .. ' meshCount=' .. tostring(rainTargetMesh and #rainTargetMesh or 0)
+            .. ' shaderBytes=' .. tostring(rainShader.HLSL and #rainShader.HLSL or 0)
+        )
     end
 
 
@@ -4128,10 +4146,17 @@ local function initShaders()
             )
             
             shader.HLSL = file:read('*a')
+            file:close()
 
             shader.LOADED = true
 
             shaderInitialized = true
+
+            ac.log(
+                appNameDebug
+                .. ' HLSL bytes=' .. tostring(#shader.HLSL)
+                .. ' path=' .. shader.PATH
+            )
 
         end
     end
