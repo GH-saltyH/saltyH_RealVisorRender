@@ -234,12 +234,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FORCE_SCALE = 100000.0,
 
         -- Procedural lifetime of one drop before it respawns.
-        RAIN_DROP_LIFETIME = 8.0,
         RAIN_DROP_LIFETIME_MIN = 4.0,
         RAIN_DROP_LIFETIME_MAX = 10.0,
         RAIN_DROP_RESPAWN_GAP_MIN = 0.15,
         RAIN_DROP_RESPAWN_GAP_MAX = 0.75,
-        RAIN_DROP_CANDIDATES = 2,
 
         -- Debug
         RAIN_DEBUG = 0,
@@ -4262,8 +4260,6 @@ render.on('main.track.transparent', function()
             gRainForceScale =
                 cfg.RUNTIME.RAIN_FORCE_SCALE,
 
-            gRainDropLifetime =
-                cfg.RUNTIME.RAIN_DROP_LIFETIME,
 
             gRainDropLifetimeMin =
                 cfg.RUNTIME.RAIN_DROP_LIFETIME_MIN,
@@ -4276,9 +4272,6 @@ render.on('main.track.transparent', function()
 
             gRainDropRespawnGapMax =
                 cfg.RUNTIME.RAIN_DROP_RESPAWN_GAP_MAX,
-
-            gRainDropCandidates =
-                cfg.RUNTIME.RAIN_DROP_CANDIDATES,
 
             gRainFlowMax =
                 cfg.RUNTIME.RAIN_FLOW_MAX,
