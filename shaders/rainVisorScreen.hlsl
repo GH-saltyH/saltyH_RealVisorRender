@@ -1071,17 +1071,35 @@ float4 main(PS_IN pin)
     */
     if (gRainDebug == 4)
     {
-        float diagnostic =
-            rainSingleDropDiagnostic(
-                pin,
-                gRainTime
+        /*
+            Debug 4 stage 1: prove that this branch and mesh UVs are
+            visible before any lifecycle/normal/force code is involved.
+
+            The marker is deliberately large and opaque. Its center is
+            the same UV used by the single-drop diagnostic.
+        */
+        const float2 diagnosticCenterUV = float2(0.5, 0.535);
+        const float2 diagnosticHalfSize = float2(0.12, 0.12);
+
+        float2 diagnosticDistance =
+            abs(pin.Tex - diagnosticCenterUV);
+
+        float diagnosticMarker =
+            step(
+                diagnosticDistance.x,
+                diagnosticHalfSize.x
+            )
+            *
+            step(
+                diagnosticDistance.y,
+                diagnosticHalfSize.y
             );
 
         return float4(
-            0.82,
-            0.90,
+            0.0,
+            0.45,
             1.0,
-            diagnostic * 0.70
+            diagnosticMarker
         );
     }
 
