@@ -2386,13 +2386,6 @@ float2 rainHash22(float2 p)
 }
 
 
-Texture2D txRainSurfaceNormal;
-
-float4x4 gRainObjectToWorld;
-float3 gRainCameraRight;
-float3 gRainCameraUp;
-float3 gRainCameraForward;
-
 float rainHash(float2 p)
 {
     return frac(
@@ -2416,9 +2409,10 @@ float rainHash(float2 p)
 float3 rainSurfaceNormalObject(float2 uv)
 {
     float3 encoded =
-        txRainSurfaceNormal.Sample(
-            samLinear,
-            saturate(uv)
+        txRainSurfaceNormal.SampleLevel(
+            samLinearSimple,
+            saturate(uv),
+            0.0
         ).rgb;
 
     float3 decoded =
@@ -2916,7 +2910,7 @@ float4 main(PS_IN pin)
         rainDropLayer(
             uv,
             gRainTime,
-            6.5,
+            14.53,
             0.0
         );
 
@@ -2924,7 +2918,7 @@ float4 main(PS_IN pin)
         rainDropLayer(
             uv * 1.73 + 13.7,
             gRainTime,
-            14.0,
+            31.30,
             13.7
         );
 
@@ -3965,7 +3959,7 @@ render.on('main.track.transparent', function()
                 startingTransform,
 
             gRainCameraRight =
-                ac.getCameraRight(),
+                ac.getCameraSide(),
 
             gRainCameraUp =
                 ac.getCameraUp(),
