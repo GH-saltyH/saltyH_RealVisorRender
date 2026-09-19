@@ -190,9 +190,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_SPEED = 0.005,
 
         -- Acceleration influence
-        RAIN_ACCEL_GAIN_X = 0.0005,
-        RAIN_ACCEL_GAIN_Y = 0.0005,
-        RAIN_ACCEL_GAIN_Z = 0.0005,
+        RAIN_ACCEL_GAIN_X = 0.00000505,
+        RAIN_ACCEL_GAIN_Y = 0.000001,
+        RAIN_ACCEL_GAIN_Z = 0.0000015,
 
         -- Flow response / damping
         RAIN_FLOW_RESPONSE = 5.0,
@@ -219,7 +219,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_ADHESION_MAX = 2.20,
 
         -- Physical gravity used by the surface model.
-        RAIN_GRAVITY = 9.81,
+        RAIN_GRAVITY = 0.35,
+
+        -- Converts physical acceleration units into the compact
+        -- surface-force space used by the procedural visor model.
+        RAIN_FORCE_SCALE = 100000.0,
 
         -- Procedural lifetime of one drop before it respawns.
         RAIN_DROP_LIFETIME = 8.0,
@@ -2612,9 +2616,14 @@ float rainDropLayer(
                     0.0
                 );
 
+            /*
+                gRainAcceleration is already gain-scaled in Lua.
+                Convert it back into the compact force space used by
+                the visor model. Gravity stays in the same space.
+            */
             float3 effectiveForce =
                 gravityForce
-                - gRainAcceleration;
+                - gRainAcceleration * gRainForceScale;
 
 
             /*
@@ -2703,12 +2712,19 @@ float rainDropLayer(
                 Wrap only the simulated travel component. This avoids
                 requiring an ever-growing world-space position.
             */
-            dropPos =
-                cell
-                + frac(
-                    dropPos
-                    - cell
-                );
+            /*
+                Do not wrap the physical drop position back into its
+                original cell. That creates the small periodic
+                back-and-forth motion seen during observation.
+                Neighbor cells are intentionally evaluated so a moving
+                drop can cross a cell boundary.
+            */
+            float2 travel =
+                flowVelocity * dropAge;
+
+            float2 dropPos =
+                spawnPos
+                + travel;
 
 
             float2 pixelPos =
@@ -2783,16 +2799,16 @@ float rainDropLayer(
             */
             float trailAmount =
                 smoothstep(
-                    0.05,
-                    0.30,
+                    0.25,
+                    0.75,
                     dynamic01
                 );
 
             float trailLength =
                 dropSize
                 * lerp(
-                    0.5,
-                    5.0,
+                    0.35,
+                    3.0,
                     trailAmount
                 );
 
@@ -3942,6 +3958,9 @@ render.on('main.track.transparent', function()
 
             gRainGravity =
                 cfg.RUNTIME.RAIN_GRAVITY,
+
+            gRainForceScale =
+                cfg.RUNTIME.RAIN_FORCE_SCALE,
 
             gRainDropLifetime =
                 cfg.RUNTIME.RAIN_DROP_LIFETIME,
