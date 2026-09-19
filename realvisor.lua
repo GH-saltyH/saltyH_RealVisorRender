@@ -2702,25 +2702,16 @@ float rainDropLayer(
                 A static drop therefore stays where it spawned.
                 A moving drop accumulates displacement as it gets older.
             */
-            float2 dropPos =
-                spawnPos
-                + flowVelocity
-                * dropAge;
-
-
             /*
-                Wrap only the simulated travel component. This avoids
-                requiring an ever-growing world-space position.
-            */
-            /*
-                Do not wrap the physical drop position back into its
-                original cell. That creates the small periodic
-                back-and-forth motion seen during observation.
-                Neighbor cells are intentionally evaluated so a moving
-                drop can cross a cell boundary.
+                Integrate the moving drop from its own age.
+
+                Do not wrap the physical position back into the original
+                cell. A moving drop must be allowed to cross cell
+                boundaries continuously.
             */
             float2 travel =
-                flowVelocity * dropAge;
+                flowVelocity
+                * dropAge;
 
             float2 dropPos =
                 spawnPos
