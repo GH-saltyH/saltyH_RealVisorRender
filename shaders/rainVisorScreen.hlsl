@@ -294,8 +294,8 @@ float2 rainPatternToMeshUV(
 */
 float rainSingleDropDiagnostic(PS_IN pin, float time)
 {
-    const float2 spawnUV = float2(0.5, 0.5);
-    const float dropSize = 0.055;
+    const float2 spawnUV = float2(0.5, 0.535);
+    const float dropSize = 0.085;
 
     /* Keep the same procedural scale as the large layer. */
     float2 proceduralUV = pin.Tex;
@@ -418,9 +418,10 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
         length(delta);
 
     float drop =
-        smoothstep(
-            dropSize,
+        1.0
+        - smoothstep(
             dropSize * 0.30,
+            dropSize,
             distanceToDrop
         );
 
