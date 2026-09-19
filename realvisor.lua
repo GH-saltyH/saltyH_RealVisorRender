@@ -235,6 +235,11 @@ local cfg = scriptSettings:mapConfig({
 
         -- Procedural lifetime of one drop before it respawns.
         RAIN_DROP_LIFETIME = 8.0,
+        RAIN_DROP_LIFETIME_MIN = 4.0,
+        RAIN_DROP_LIFETIME_MAX = 10.0,
+        RAIN_DROP_RESPAWN_GAP_MIN = 0.15,
+        RAIN_DROP_RESPAWN_GAP_MAX = 0.75,
+        RAIN_DROP_CANDIDATES = 2,
 
         -- Debug
         RAIN_DEBUG = 0,
@@ -2839,28 +2844,105 @@ float rainDropLayer(
                 result =
                     max(
                         result,
-                        drop
+                        drop * lifeVisibility
                     );
 
                 continue;
             }
 
             /*
-                Each drop has its own phase inside the lifetime.
-                This gives independent spawn ages without making the
-                procedural cell itself a physical coordinate system.
+                Each procedural candidate now has its own lifecycle.
+
+                cycle = visible lifetime + respawn gap
+
+                The particle is:
+                    born at age 0
+                    -> moves while alive
+                    -> disappears at lifetime
+                    -> stays absent for respawnGap
+                    -> respawns with a new phase
+
+                Because every cell/candidate has a different lifetime,
+                gap and phase, the whole visor no longer resets as one
+                population.
             */
             float lifetime =
+                lerp(
+                    gRainDropLifetimeMin,
+                    gRainDropLifetimeMax,
+                    rndState.x
+                );
+
+            lifetime =
                 max(
-                    gRainDropLifetime,
+                    lifetime,
                     0.001
                 );
 
-            float age =
-                frac(
-                    time / lifetime
-                    + rndMotion.y
-                ) * lifetime;
+            float respawnGap =
+                lerp(
+                    gRainDropRespawnGapMin,
+                    gRainDropRespawnGapMax,
+                    rndState.y
+                );
+
+            float cycleDuration =
+                lifetime
+                + max(
+                    respawnGap,
+                    0.0
+                );
+
+            float cycleTime =
+                fmod(
+                    time
+                    + rndMotion.y * cycleDuration,
+                    cycleDuration
+                );
+
+            /*
+                The gap is an actual dead state rather than a zero-alpha
+                particle. This makes creation/destruction asynchronous.
+            */
+            if (cycleTime >= lifetime)
+                continue;
+
+            float age = cycleTime;
+
+            float life01 =
+                saturate(
+                    age / lifetime
+                );
+
+            /*
+                Soft birth/death envelopes prevent a hard popping edge
+                while retaining an actual finite lifetime.
+            */
+            float lifeFadeIn =
+                smoothstep(
+                    0.0,
+                    min(
+                        0.08,
+                        lifetime * 0.20
+                    ),
+                    age
+                );
+
+            float lifeFadeOut =
+                1.0
+                - smoothstep(
+                    lifetime
+                    - min(
+                        0.12,
+                        lifetime * 0.20
+                    ),
+                    lifetime,
+                    age
+                );
+
+            float lifeVisibility =
+                lifeFadeIn
+                * lifeFadeOut;
 
             /*
                 Movement is driven directly by the SAME thresholded
@@ -4182,6 +4264,21 @@ render.on('main.track.transparent', function()
 
             gRainDropLifetime =
                 cfg.RUNTIME.RAIN_DROP_LIFETIME,
+
+            gRainDropLifetimeMin =
+                cfg.RUNTIME.RAIN_DROP_LIFETIME_MIN,
+
+            gRainDropLifetimeMax =
+                cfg.RUNTIME.RAIN_DROP_LIFETIME_MAX,
+
+            gRainDropRespawnGapMin =
+                cfg.RUNTIME.RAIN_DROP_RESPAWN_GAP_MIN,
+
+            gRainDropRespawnGapMax =
+                cfg.RUNTIME.RAIN_DROP_RESPAWN_GAP_MAX,
+
+            gRainDropCandidates =
+                cfg.RUNTIME.RAIN_DROP_CANDIDATES,
 
             gRainFlowMax =
                 cfg.RUNTIME.RAIN_FLOW_MAX,
