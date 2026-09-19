@@ -404,6 +404,7 @@ local motionCurrent = vec3(
 
 local rainAccelerationCurrent = vec3(0, 0, 0)
 local rainPreviousVelocity = nil
+local rainFlowDistance = vec3(0, 0, 0)
     
 local motionTarget= vec3(
     0,
@@ -2507,9 +2508,9 @@ float rainDropLayer(
 
     float result = 0.0;
 
-    for (int y = -5; y <= 5; ++y)
+    for (int y = -3; y <= 3; ++y)
     {
-        for (int x = -5; x <= 5; ++x)
+        for (int x = -3; x <= 3; ++x)
         {
             float2 cell =
                 baseCell
@@ -2754,9 +2755,28 @@ float rainDropLayer(
                 cell. A moving drop must be allowed to cross cell
                 boundaries continuously.
             */
+            float3 persistentFlow =
+                rainFlowDistance;
+
+            float2 persistentTravel =
+                rainProjectForceToUV(
+                    persistentFlow,
+                    surfaceNormal
+                );
+
+            float adhesionMobility =
+                1.0
+                - saturate(
+                    (adhesion - gRainAdhesionMin)
+                    / max(
+                        gRainAdhesionMax - gRainAdhesionMin,
+                        0.001
+                    )
+                );
+
             float2 travel =
-                flowVelocity
-                * dropAge
+                persistentTravel
+                * adhesionMobility
                 * scale;
 
             float2 dropPos =
@@ -2786,7 +2806,7 @@ float rainDropLayer(
                 );
 
             float movementLength =
-                length(flowVelocity);
+                length(persistentTravel);
 
             if (movementLength > 0.00001)
             {
@@ -2839,7 +2859,8 @@ float rainDropLayer(
                     0.25,
                     0.75,
                     dynamic01
-                );
+                )
+                * saturate(adhesionMobility);
 
             /*
                 Trail length must come from actual accumulated travel.
