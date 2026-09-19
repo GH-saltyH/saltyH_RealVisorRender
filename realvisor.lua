@@ -2516,36 +2516,28 @@ float rainDropLayer(
                 baseCell
                 + float2(x, y);
 
-            float spawnCycle =
-                floor(
-                    time
-                    / max(gRainDropLifetime, 0.1)
-                );
-
-            float2 cycleSeed =
+            float2 cellSeed =
                 cell
-                + spawnCycle * 37.17;
+                + layerOffset * 19.37;
 
             float2 rndPos =
                 rainHash22(
-                    cycleSeed + 17.13
+                    cellSeed + 17.13
                 );
 
             float2 rndState =
                 rainHash22(
-                    cycleSeed + 43.71
+                    cellSeed + 43.71
                 );
 
             float2 rndMotion =
                 rainHash22(
-                    cycleSeed + 91.37
+                    cellSeed + 91.37
                 );
 
             float rndSpawn =
                 rainHash(
-                    cell
-                    + 157.91
-                    + spawnCycle * 71.31
+                    cellSeed + 157.91
                 );
 
 
@@ -2605,15 +2597,10 @@ float rainDropLayer(
                     0.1
                 );
 
-            float life01 =
-                frac(
-                    rndState.y
-                    + time / dropLifetime
-                );
+            float life01 = 0.5;
 
             float dropAge =
-                life01
-                * dropLifetime;
+                dropLifetime * 0.5;
 
 
             float drift =
@@ -2829,21 +2816,7 @@ float rainDropLayer(
                 Lifecycle is purely the spawn/pop fade.
                 It is no longer responsible for downward movement.
             */
-            float active =
-                smoothstep(
-                    0.03,
-                    0.10,
-                    life01
-                );
-
-            active *=
-                1.0
-                -
-                smoothstep(
-                    0.80,
-                    0.98,
-                    life01
-                );
+            float active = 1.0;
 
             drop *= active;
 
@@ -4020,6 +3993,9 @@ render.on('main.track.transparent', function()
 
             gRainAcceleration =
                 rainAccelerationCurrent,
+
+            gRainFlowDistance =
+                rainFlowDistance,
 
             gRainObjectToWorld =
                 startingTransform,
