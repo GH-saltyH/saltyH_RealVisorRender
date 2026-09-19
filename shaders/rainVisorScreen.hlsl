@@ -1049,14 +1049,20 @@ float4 main(PS_IN pin)
     */
     if (gRainDebug == 3)
     {
-        float marker =
-            rainUVVisibilityDiagnostic(pin);
+        /*
+            Hard render-path test.
 
+            Deliberately ignore UV, textures, normals, forces and alpha
+            masks. Every fragment of the submitted mesh must be opaque red.
+
+            If this is invisible, the failure is outside the rain-drop
+            algorithm itself.
+        */
         return float4(
             1.0,
             0.0,
             0.0,
-            marker
+            1.0
         );
     }
 
