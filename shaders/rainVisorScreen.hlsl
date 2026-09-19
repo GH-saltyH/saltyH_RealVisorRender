@@ -282,31 +282,16 @@ float2 rainPatternToMeshUV(
 
 /*
     Single-drop lifecycle diagnostic.
-
-    This deliberately removes population effects:
-        - one fixed spawn position
-        - one fixed size
-        - one fixed adhesion threshold
-        - one deterministic lifetime / respawn gap
-
-    The purpose is to verify the core state machine before adding
-    population density and candidate-specific surface reconstruction.
 */
 float rainSingleDropDiagnostic(PS_IN pin, float time)
 {
     const float2 spawnUV = float2(0.5, 0.535);
     const float dropSize = 0.085;
 
-    /* Keep the same procedural scale as the large layer. */
     float2 proceduralUV = pin.Tex;
     float2 grid = proceduralUV * 18.0;
     float2 spawnPos = spawnUV * 18.0;
 
-    /*
-        Keep the existing force model intact.
-        A fixed midpoint adhesion makes the state transition
-        observable without depending on a random candidate.
-    */
     float adhesion =
         lerp(
             gRainAdhesionMin,
@@ -328,12 +313,6 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
         gravityForce
         + gRainAcceleration * gRainForceScale;
 
-    /*
-        The tangent frame is evaluated from the actual rendered
-        fragment. The drop is intentionally tiny and centered, so
-        this diagnostic is for lifecycle first, not candidate-wide
-        tangent reconstruction.
-    */
     float2 tangentForce =
         rainProjectForceToUV(
             effectiveForce,
@@ -425,10 +404,6 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
             distanceToDrop
         );
 
-    /*
-        Diagnostic trail is derived from the same movement vector.
-        No independent flow direction is introduced.
-    */
     float movementLength =
         length(movement);
 
@@ -593,10 +568,6 @@ float rainDropLayer(
                     0.08 + rndPos.y * 0.84
                 );
 
-            /*
-                Convert the candidate's procedural position back to the
-                real mesh UV before sampling the object-space normal.
-            */
             float2 surfaceUV =
                 rainPatternToMeshUV(
                     spawnPos / cellScale,
@@ -609,13 +580,6 @@ float rainDropLayer(
                     surfaceUV
                 );
 
-            /*
-                All forces are now evaluated for THIS drop at THIS UV.
-
-                Gravity is camera-local, matching gRainAcceleration.
-                The normal removes the component pressing through the
-                visor; only the tangential component can move the drop.
-            */
             float3 gravityForce =
                 float3(
                     0.0,
@@ -638,22 +602,6 @@ float rainDropLayer(
             float forceMagnitude =
                 length(tangentForce);
 
-            /*
-                Each procedural candidate now has its own lifecycle.
-
-                cycle = visible lifetime + respawn gap
-
-                The particle is:
-                    born at age 0
-                    -> moves while alive
-                    -> disappears at lifetime
-                    -> stays absent for respawnGap
-                    -> respawns with a new phase
-
-                Because every cell/candidate has a different lifetime,
-                gap and phase, the whole visor no longer resets as one
-                population.
-            */
             float lifetime =
                 lerp(
                     gRainDropLifetimeMin,
@@ -688,10 +636,6 @@ float rainDropLayer(
                     cycleDuration
                 );
 
-            /*
-                The gap is an actual dead state rather than a zero-alpha
-                particle. This makes creation/destruction asynchronous.
-            */
             if (cycleTime >= lifetime)
                 continue;
 
@@ -702,10 +646,6 @@ float rainDropLayer(
                     age / lifetime
                 );
 
-            /*
-                Soft birth/death envelopes prevent a hard popping edge
-                while retaining an actual finite lifetime.
-            */
             float lifeFadeIn =
                 smoothstep(
                     0.0,
@@ -732,16 +672,6 @@ float rainDropLayer(
                 lifeFadeIn
                 * lifeFadeOut;
 
-            /*
-                This is the actual adhesion threshold.
-
-                Below threshold:
-                    excessForce = 0 -> drop stays attached.
-
-                Above threshold:
-                    excessForce determines both movement speed and
-                    visible trail strength.
-            */
             float excessForce =
                 max(
                     forceMagnitude
@@ -761,10 +691,6 @@ float rainDropLayer(
 
             if (excessForce <= 0.000001)
             {
-                /*
-                    No tangent force over the drop's own adhesion
-                    threshold: it does not move.
-                */
                 float2 delta =
                     grid
                     - spawnPos;
@@ -788,14 +714,6 @@ float rainDropLayer(
                 continue;
             }
 
-            /*
-                Movement is driven directly by the SAME thresholded
-                tangent force used above.
-
-                There is no separate global flow vector anymore, so a
-                change in force direction changes this drop's direction
-                immediately according to its own local surface normal.
-            */
             float movementSpeed =
                 excessForce
                 * gRainFlowSpeed;
@@ -835,12 +753,6 @@ float rainDropLayer(
                     distanceToDrop
                 );
 
-            /*
-                The trail uses the ACTUAL movement vector.
-
-                Its length is the actual distance travelled by the drop;
-                there is no fixed drop-size cap anymore.
-            */
             float movementLength =
                 length(movement);
 
@@ -918,10 +830,6 @@ float rainDropLayer(
                 * trailFadeOut
                 * trailAmount;
 
-            /*
-                A little extra persistence for stronger force, but the
-                direction and length remain tied to actual movement.
-            */
             trail *=
                 lerp(
                     0.15,
@@ -1009,20 +917,8 @@ float4 rainDebugOutput(
 }
 
 
-/* 
+/*
     Render-path / UV diagnostic.
-
-    This is intentionally independent from:
-        - normal texture
-        - force projection
-        - lifetime
-        - movement
-        - alpha fading
-
-    The marker is defined directly in MESH UV space. If this is not
-    visible with gRainDebug == 3, the problem is upstream of the rain
-    lifecycle itself: mesh coverage/UVs, depth/cull/blend state, or
-    shader submission.
 */
 float rainUVVisibilityDiagnostic(PS_IN pin)
 {
@@ -1043,21 +939,8 @@ float rainUVVisibilityDiagnostic(PS_IN pin)
 
 float4 main(PS_IN pin)
 {
-    /*
-        Debug 3: absolute UV/render-path visibility test.
-        This must produce a clearly visible opaque red marker.
-    */
     if (gRainDebug == 3)
     {
-        /*
-            Hard render-path test.
-
-            Deliberately ignore UV, textures, normals, forces and alpha
-            masks. Every fragment of the submitted mesh must be opaque red.
-
-            If this is invisible, the failure is outside the rain-drop
-            algorithm itself.
-        */
         return float4(
             1.0,
             0.0,
@@ -1066,40 +949,18 @@ float4 main(PS_IN pin)
         );
     }
 
-    /*
-        Debug 4: single-drop lifecycle diagnostic.
-    */
     if (gRainDebug == 4)
     {
         /*
-            Debug 4 stage 1: prove that this branch and mesh UVs are
-            visible before any lifecycle/normal/force code is involved.
-
-            The marker is deliberately large and opaque. Its center is
-            the same UV used by the single-drop diagnostic.
+            Debug 4 is currently an absolute branch/transport test.
+            It intentionally ignores UV, textures, alpha masks,
+            lifecycle, normals and force.
         */
-        const float2 diagnosticCenterUV = float2(0.5, 0.535);
-        const float2 diagnosticHalfSize = float2(0.12, 0.12);
-
-        float2 diagnosticDistance =
-            abs(pin.Tex - diagnosticCenterUV);
-
-        float diagnosticMarker =
-            step(
-                diagnosticDistance.x,
-                diagnosticHalfSize.x
-            )
-            *
-            step(
-                diagnosticDistance.y,
-                diagnosticHalfSize.y
-            );
-
         return float4(
             0.0,
             0.45,
             1.0,
-            diagnosticMarker
+            1.0
         );
     }
 
