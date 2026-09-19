@@ -2518,14 +2518,28 @@ float rainDropLayer(
             float2 rndPos =
                 rainHash22(cell + 17.13);
 
+            float spawnCycle =
+                floor(
+                    time
+                    / max(gRainDropLifetime, 0.1)
+                );
+
             float2 rndState =
-                rainHash22(cell + 43.71);
+                rainHash22(
+                    cell
+                    + 43.71
+                    + spawnCycle * 37.17
+                );
 
             float2 rndMotion =
                 rainHash22(cell + 91.37);
 
             float rndSpawn =
-                rainHash(cell + 157.91);
+                rainHash(
+                    cell
+                    + 157.91
+                    + spawnCycle * 71.31
+                );
 
 
             /*
@@ -2736,7 +2750,8 @@ float rainDropLayer(
             */
             float2 travel =
                 flowVelocity
-                * dropAge;
+                * dropAge
+                * scale;
 
             float2 dropPos =
                 spawnPos
