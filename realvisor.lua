@@ -190,7 +190,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_SPEED = 0.005,
 
         -- Acceleration influence
-        RAIN_ACCEL_GAIN_X = 0.000505,
+        RAIN_ACCEL_GAIN_X = 0.00000505,
         RAIN_ACCEL_GAIN_Y = 0.000001,
         RAIN_ACCEL_GAIN_Z = 0.0000015,
 
@@ -368,7 +368,7 @@ local motionCurrent = vec3(
 --------------------------------------------------------
 
 local rainFlowCurrent = vec2(0, 0)
-local rainFlowPreviousTime = nil
+local rainFlowOffset = vec2(0, 0)
     
 local motionTarget= vec3(
     0,
@@ -2395,11 +2395,14 @@ float rainDropLayer(
                     accelerationInfluence
                 );
 
-            float2 flowOffset =
-                flowVelocity
-                * time;
-
-            dropPos += flowOffset;
+            /*
+                gRainFlowOffset is an integrated, wrapped displacement.
+                It is updated once per simulation frame in Lua.
+                Never multiply the current flow by absolute simulation
+                time here: doing so makes tiny acceleration responses
+                grow without bound.
+            */
+            dropPos += gRainFlowOffset;
 
             float accelFlowX =
                 flowVelocity.x;
@@ -3621,87 +3624,9 @@ render.on('main.track.transparent', function()
 
     
     --------------------------------------------------------
-    -- Vehicle flow
+    -- Vehicle flow is updated once per simulation frame by
+    -- updateRainFlow(). The render pass only consumes the state.
     --------------------------------------------------------
-    
-    local flowX = 
-        -acceleration.x
-        * cfg.RUNTIME.RAIN_ACCEL_GAIN_X
-    
-    local flowY = 
-        0.0
-    
-    local flowZ = 
-        -acceleration.z
-        * cfg.RUNTIME.RAIN_ACCEL_GAIN_Z
-    
-
-    --------------------------------------------------------
-    -- Vehicle flow magnitude
-    --------------------------------------------------------
-    
-    --------------------------------------------------------
-    -- Smooth acceleration into continuous visor flow velocity.
-    --
-    -- X: lateral visor flow
-    -- Y: longitudinal / vertical visor flow
-    --
-    -- Raw acceleration is never applied directly to dropPos.
-    --------------------------------------------------------
-
-    local now = sim.time
-
-    if rainFlowPreviousTime == nil then
-        rainFlowPreviousTime = now
-    end
-
-    local flowDt =
-        math.clamp(
-            now - rainFlowPreviousTime,
-            0.0,
-            0.1
-        )
-
-    rainFlowPreviousTime = now
-
-    local targetFlow =
-        vec2(
-            flowX,
-            -flowZ
-        )
-
-    local targetLength =
-        math.sqrt(
-            targetFlow.x * targetFlow.x
-            + targetFlow.y * targetFlow.y
-        )
-
-    if targetLength > cfg.RUNTIME.RAIN_FLOW_MAX then
-        targetFlow =
-            targetFlow
-            / targetLength
-            * cfg.RUNTIME.RAIN_FLOW_MAX
-    end
-
-    local response =
-        math.max(
-            cfg.RUNTIME.RAIN_FLOW_RESPONSE,
-            0.01
-        )
-
-    local smoothing =
-        1.0
-        - math.exp(
-            -response * flowDt
-        )
-
-    rainFlowCurrent =
-        rainFlowCurrent
-        + (
-            targetFlow
-            - rainFlowCurrent
-        ) * smoothing
-
 
     --------------------------------------------------------
     -- Render
@@ -3749,6 +3674,9 @@ render.on('main.track.transparent', function()
 
             gRainFlow =
                 rainFlowCurrent,
+
+            gRainFlowOffset =
+                rainFlowOffset,
 
             gRainBaseSpeed = 
                 cfg.RUNTIME.RAIN_SPEED_BASE,
@@ -3803,6 +3731,13 @@ local function initializeScene()
 
         return false
     end
+
+
+    --------------------------------------------------------
+    -- Rain flow
+    --------------------------------------------------------
+
+    updateRainFlow(dt)
 
 
     --------------------------------------------------------
@@ -4532,6 +4467,84 @@ local function updateMotion(dt)
                 motionCurrent.z
             )
     end
+end
+
+
+------------------------------------------------------------
+-- Update rain flow
+--
+-- Acceleration is filtered once per simulation frame and integrated
+-- into a wrapped grid-space displacement. This keeps render-pass
+-- timing out of the physical flow state and prevents absolute-time
+-- multiplication from creating extreme jumps.
+------------------------------------------------------------
+local function updateRainFlow(dt)
+
+    if not cfg.RUNTIME.RAIN_ENABLED then
+        return
+    end
+
+    if not dt or dt <= 0.000001 then
+        return
+    end
+
+    local car = ac.getCar(0)
+
+    if not car or not car.acceleration then
+        return
+    end
+
+    local acceleration = car.acceleration
+
+    local targetFlow =
+        vec2(
+            -acceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN_X,
+             acceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN_Z
+        )
+
+    local targetLength =
+        math.sqrt(
+            targetFlow.x * targetFlow.x
+            + targetFlow.y * targetFlow.y
+        )
+
+    if targetLength > cfg.RUNTIME.RAIN_FLOW_MAX then
+        targetFlow =
+            targetFlow
+            / targetLength
+            * cfg.RUNTIME.RAIN_FLOW_MAX
+    end
+
+    local response =
+        math.max(
+            cfg.RUNTIME.RAIN_FLOW_RESPONSE,
+            0.01
+        )
+
+    local smoothing =
+        1.0
+        - math.exp(
+            -response * dt
+        )
+
+    rainFlowCurrent =
+        rainFlowCurrent
+        + (
+            targetFlow
+            - rainFlowCurrent
+        ) * smoothing
+
+    rainFlowOffset =
+        rainFlowOffset
+        + rainFlowCurrent * dt
+
+    rainFlowOffset.x =
+        rainFlowOffset.x
+        - math.floor(rainFlowOffset.x)
+
+    rainFlowOffset.y =
+        rainFlowOffset.y
+        - math.floor(rainFlowOffset.y)
 end
 
 
