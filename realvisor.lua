@@ -2515,24 +2515,30 @@ float rainDropLayer(
                 baseCell
                 + float2(x, y);
 
-            float2 rndPos =
-                rainHash22(cell + 17.13);
-
             float spawnCycle =
                 floor(
                     time
                     / max(gRainDropLifetime, 0.1)
                 );
 
+            float2 cycleSeed =
+                cell
+                + spawnCycle * 37.17;
+
+            float2 rndPos =
+                rainHash22(
+                    cycleSeed + 17.13
+                );
+
             float2 rndState =
                 rainHash22(
-                    cell
-                    + 43.71
-                    + spawnCycle * 37.17
+                    cycleSeed + 43.71
                 );
 
             float2 rndMotion =
-                rainHash22(cell + 91.37);
+                rainHash22(
+                    cycleSeed + 91.37
+                );
 
             float rndSpawn =
                 rainHash(
@@ -2892,12 +2898,28 @@ float rainDropLayer(
                 )
                 : 0.0;
 
-            trail *=
+            float trailFadeIn =
                 smoothstep(
                     0.0,
-                    trailLength,
+                    trailWidth,
                     trailAlong
                 );
+
+            float trailFadeOut =
+                1.0
+                -
+                smoothstep(
+                    trailLength * 0.65,
+                    max(
+                        trailLength,
+                        trailLength * 0.65 + trailWidth
+                    ),
+                    trailAlong
+                );
+
+            trail *=
+                trailFadeIn
+                * trailFadeOut;
 
             trail *=
                 trailAmount;
