@@ -234,7 +234,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DROP_LIFETIME = 8.0,
 
         -- Debug
-        RAIN_DEBUG = false,
+        RAIN_DEBUG = 0,
 
     },
 })
@@ -2515,15 +2515,15 @@ float rainDropLayer(
         multiple independently randomized candidates so the underlying
         partition does not become a visible checkerboard pattern.
     */
-    for (int y = -2; y <= 2; ++y)
+    for (int y = -1; y <= 1; ++y)
     {
-        for (int x = -2; x <= 2; ++x)
+        for (int x = -1; x <= 1; ++x)
         {
             float2 cell =
                 baseCell
                 + float2(x, y);
 
-            for (int candidate = 0; candidate < 2; ++candidate)
+            for (int candidate = 0; candidate < 1; ++candidate)
             {
                 float2 cellSeed =
                     cell
@@ -2811,8 +2811,52 @@ float rainDropLayer(
 }
 
 
+float4 rainDebugOutput()
+{
+    float3 flow =
+        gRainFlowDistance;
+
+    float flowMagnitude =
+        length(flow);
+
+    float3 acceleration =
+        gRainAcceleration
+        * gRainForceScale;
+
+    float accelerationMagnitude =
+        length(acceleration);
+
+    if (gRainDebug == 1)
+    {
+        return float4(
+            saturate(flowMagnitude * 10.0),
+            saturate(abs(flow.x) * 20.0),
+            saturate(abs(flow.z) * 20.0),
+            1.0
+        );
+    }
+
+    if (gRainDebug == 2)
+    {
+        return float4(
+            saturate(accelerationMagnitude * 0.05),
+            saturate(abs(acceleration.x) * 0.1),
+            saturate(abs(acceleration.z) * 0.1),
+            1.0
+        );
+    }
+
+    return float4(0.0, 0.0, 0.0, 1.0);
+}
+
+
 float4 main(PS_IN pin)
 {
+    if (gRainDebug > 0)
+    {
+        return rainDebugOutput();
+    }
+
     float2 uv =
         pin.Tex;
 
@@ -3868,6 +3912,9 @@ render.on('main.track.transparent', function()
             gRainFlowDistance =
                 rainFlowDistance,
 
+            gRainDebug =
+                cfg.RUNTIME.RAIN_DEBUG,
+
             gRainObjectToWorld =
                 startingTransform,
 
@@ -4831,6 +4878,35 @@ local function updateRainFlow(dt)
             targetAcceleration
             - rainAccelerationCurrent
         ) * smoothing
+
+    local flowStep =
+        rainAccelerationCurrent
+        * cfg.RUNTIME.RAIN_FORCE_SCALE
+        * cfg.RUNTIME.RAIN_FLOW_SPEED
+        * dt
+
+    rainFlowDistance:set(
+        rainFlowDistance.x + flowStep.x,
+        rainFlowDistance.y + flowStep.y,
+        rainFlowDistance.z + flowStep.z
+    )
+
+    local maxDistance =
+        math.max(
+            cfg.RUNTIME.RAIN_FLOW_MAX
+            * cfg.RUNTIME.RAIN_DROP_LIFETIME,
+            0.001
+        )
+
+    local distanceLength =
+        rainFlowDistance:length()
+
+    if distanceLength > maxDistance then
+        rainFlowDistance =
+            rainFlowDistance
+            / distanceLength
+            * maxDistance
+    end
 end
 
 
