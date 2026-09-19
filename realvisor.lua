@@ -2386,6 +2386,13 @@ float2 rainHash22(float2 p)
 }
 
 
+Texture2D txRainSurfaceNormal;
+
+float4x4 gRainObjectToWorld;
+float3 gRainCameraRight;
+float3 gRainCameraUp;
+float3 gRainCameraForward;
+
 float rainHash(float2 p)
 {
     return frac(
@@ -2395,43 +2402,61 @@ float rainHash(float2 p)
 
 
 /*
-    Build an approximate local surface normal from UV position.
+    Decode the supplied object-space normal texture.
 
-    Local visor basis:
-        X = lateral
-        Y = upper/lower
-        Z = outward from visor towards camera
+    The source texture stores each normal component as:
+        encoded = normal * 0.5 + 0.5
 
-    This is deliberately a replaceable approximation. Once the visor UV
-    is evenly unwrapped around the center, these terms become a useful
-    low-cost surface model. A texture normal field can replace this
-    function later without changing the force/adhesion model.
+    Therefore:
+        decoded = encoded * 2 - 1
+
+    The final normalize() also protects the force projection from small
+    interpolation/precision errors in the texture.
 */
-float3 rainSurfaceNormal(float2 uv)
+float3 rainSurfaceNormalObject(float2 uv)
 {
-    float2 centered =
-        uv
-        - float2(
-            gRainSurfaceCenter.x,
-            gRainSurfaceCenter.y
+    float3 encoded =
+        txRainSurfaceNormal.Sample(
+            samLinear,
+            saturate(uv)
+        ).rgb;
+
+    float3 decoded =
+        encoded * 2.0 - 1.0;
+
+    return normalize(decoded);
+}
+
+
+/*
+    Convert an object-space visor normal into the same camera-local
+    coordinate system used by gRainAcceleration.
+
+    gRainObjectToWorld contains the world transform of the rendered visor.
+    The visor is currently rendered with rigid transforms, so its upper-left
+    3x3 is sufficient for the normal direction.
+*/
+float3 rainSurfaceNormalCamera(
+    float2 uv
+)
+{
+    float3 normalObject =
+        rainSurfaceNormalObject(uv);
+
+    float3 normalWorld =
+        mul(
+            normalObject,
+            (float3x3)gRainObjectToWorld
         );
 
-    centered *= 2.0;
-
-    float nx =
-        centered.x
-        * gRainSurfaceCurvature.x;
-
-    float ny =
-        gRainSurfaceSlopeY
-        + centered.y
-        * gRainSurfaceCurvature.y;
+    normalWorld =
+        normalize(normalWorld);
 
     return normalize(
         float3(
-            nx,
-            ny,
-            1.0
+            dot(normalWorld, gRainCameraRight),
+            dot(normalWorld, gRainCameraUp),
+            dot(normalWorld, gRainCameraForward)
         )
     );
 }
@@ -2602,7 +2627,7 @@ float rainDropLayer(
                 spawnPos / scale;
 
             float3 surfaceNormal =
-                rainSurfaceNormal(surfaceUV);
+                rainSurfaceNormalCamera(surfaceUV);
 
 
             /*
@@ -2943,6 +2968,7 @@ float4 main(PS_IN pin)
 --------------------------------------------------------
 
 local textureRaindrops = appFolder .. 'texture/drops.dds'
+local textureRainSurfaceNormal = appFolder .. 'texture/GLASS_EXT_DUMMY_surfaceNormal_objectSpace.dds'
 
 
 --------------------------------------------------------
@@ -3924,6 +3950,9 @@ render.on('main.track.transparent', function()
             txRainDrops =
                 textureRaindrops,
 
+            txRainSurfaceNormal =
+                textureRainSurfaceNormal,
+
         },
 
         
@@ -3931,6 +3960,18 @@ render.on('main.track.transparent', function()
 
             gRainAcceleration =
                 rainAccelerationCurrent,
+
+            gRainObjectToWorld =
+                startingTransform,
+
+            gRainCameraRight =
+                ac.getCameraRight(),
+
+            gRainCameraUp =
+                ac.getCameraUp(),
+
+            gRainCameraForward =
+                ac.getCameraForward(),
 
             gRainSurfaceCenter =
                 vec2(
