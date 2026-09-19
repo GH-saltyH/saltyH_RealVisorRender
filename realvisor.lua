@@ -2448,7 +2448,7 @@ float3 rainSurfaceNormalCamera(
 
     return normalize(
         float3(
-            dot(normalWorld, gRainCameraRight),
+            dot(normalWorld, gRainCameraSide),
             dot(normalWorld, gRainCameraUp),
             dot(normalWorld, gRainCameraForward)
         )
@@ -2487,8 +2487,8 @@ float2 rainProjectForceToUV(
 
     float2 result =
         float2(
-            dot(force, tangentU),
-            -dot(force, tangentV)
+            -dot(force, tangentU),
+            dot(force, tangentV)
         );
 
     return result;
@@ -2507,9 +2507,9 @@ float rainDropLayer(
 
     float result = 0.0;
 
-    for (int y = -1; y <= 1; ++y)
+    for (int y = -5; y <= 5; ++y)
     {
-        for (int x = -1; x <= 1; ++x)
+        for (int x = -5; x <= 5; ++x)
         {
             float2 cell =
                 baseCell
