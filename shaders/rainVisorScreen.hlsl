@@ -1009,11 +1009,67 @@ float4 rainDebugOutput(
 }
 
 
+/* 
+    Render-path / UV diagnostic.
+
+    This is intentionally independent from:
+        - normal texture
+        - force projection
+        - lifetime
+        - movement
+        - alpha fading
+
+    The marker is defined directly in MESH UV space. If this is not
+    visible with gRainDebug == 3, the problem is upstream of the rain
+    lifecycle itself: mesh coverage/UVs, depth/cull/blend state, or
+    shader submission.
+*/
+float rainUVVisibilityDiagnostic(PS_IN pin)
+{
+    const float2 centerUV = float2(0.5, 0.535);
+    const float radiusUV = 0.025;
+
+    float distanceToCenter =
+        length(pin.Tex - centerUV);
+
+    return 1.0
+        - smoothstep(
+            radiusUV * 0.70,
+            radiusUV,
+            distanceToCenter
+        );
+}
+
+
 float4 main(PS_IN pin)
 {
+    /*
+        Debug 3: absolute UV/render-path visibility test.
+        This must produce a clearly visible opaque red marker.
+    */
     if (gRainDebug == 3)
     {
-        float diagnostic = rainSingleDropDiagnostic(pin, gRainTime);
+        float marker =
+            rainUVVisibilityDiagnostic(pin);
+
+        return float4(
+            1.0,
+            0.0,
+            0.0,
+            marker
+        );
+    }
+
+    /*
+        Debug 4: single-drop lifecycle diagnostic.
+    */
+    if (gRainDebug == 4)
+    {
+        float diagnostic =
+            rainSingleDropDiagnostic(
+                pin,
+                gRainTime
+            );
 
         return float4(
             0.82,
