@@ -280,6 +280,234 @@ float2 rainPatternToMeshUV(
 }
 
 
+/*
+    Single-drop lifecycle diagnostic.
+
+    This deliberately removes population effects:
+        - one fixed spawn position
+        - one fixed size
+        - one fixed adhesion threshold
+        - one deterministic lifetime / respawn gap
+
+    The purpose is to verify the core state machine before adding
+    population density and candidate-specific surface reconstruction.
+*/
+float rainSingleDropDiagnostic(PS_IN pin, float time)
+{
+    const float2 spawnUV = float2(0.5, 0.5);
+    const float dropSize = 0.055;
+
+    /* Keep the same procedural scale as the large layer. */
+    float2 proceduralUV = pin.Tex;
+    float2 grid = proceduralUV * 18.0;
+    float2 spawnPos = spawnUV * 18.0;
+
+    /*
+        Keep the existing force model intact.
+        A fixed midpoint adhesion makes the state transition
+        observable without depending on a random candidate.
+    */
+    float adhesion =
+        lerp(
+            gRainAdhesionMin,
+            gRainAdhesionMax,
+            0.5
+        );
+
+    float3 surfaceNormal =
+        rainSurfaceNormalCamera(spawnUV);
+
+    float3 gravityForce =
+        float3(
+            0.0,
+            -gRainGravity,
+            0.0
+        );
+
+    float3 effectiveForce =
+        gravityForce
+        + gRainAcceleration * gRainForceScale;
+
+    /*
+        The tangent frame is evaluated from the actual rendered
+        fragment. The drop is intentionally tiny and centered, so
+        this diagnostic is for lifecycle first, not candidate-wide
+        tangent reconstruction.
+    */
+    float2 tangentForce =
+        rainProjectForceToUV(
+            effectiveForce,
+            surfaceNormal,
+            pin,
+            1.0
+        );
+
+    float forceMagnitude =
+        length(tangentForce);
+
+    float excessForce =
+        max(
+            forceMagnitude - adhesion,
+            0.0
+        );
+
+    float dynamic01 =
+        saturate(
+            excessForce / max(adhesion, 0.001)
+        );
+
+    const float lifetime = 6.0;
+    const float respawnGap = 0.75;
+    const float cycleDuration = lifetime + respawnGap;
+
+    float cycleTime =
+        fmod(
+            time,
+            cycleDuration
+        );
+
+    if (cycleTime >= lifetime)
+        return 0.0;
+
+    float age = cycleTime;
+
+    float lifeFadeIn =
+        smoothstep(
+            0.0,
+            0.20,
+            age
+        );
+
+    float lifeFadeOut =
+        1.0
+        - smoothstep(
+            lifetime - 0.30,
+            lifetime,
+            age
+        );
+
+    float lifeVisibility =
+        lifeFadeIn
+        * lifeFadeOut;
+
+    float2 movement = float2(0.0, 0.0);
+
+    if (excessForce > 0.000001)
+    {
+        float movementSpeed =
+            excessForce * gRainFlowSpeed;
+
+        float travelDistance =
+            min(
+                movementSpeed * age,
+                gRainFlowMax
+            );
+
+        movement =
+            normalize(tangentForce)
+            * travelDistance;
+    }
+
+    float2 dropPos =
+        spawnPos + movement;
+
+    float2 delta =
+        grid - dropPos;
+
+    float distanceToDrop =
+        length(delta);
+
+    float drop =
+        smoothstep(
+            dropSize,
+            dropSize * 0.30,
+            distanceToDrop
+        );
+
+    /*
+        Diagnostic trail is derived from the same movement vector.
+        No independent flow direction is introduced.
+    */
+    float movementLength =
+        length(movement);
+
+    float2 movementDir =
+        movementLength > 0.000001
+        ? movement / movementLength
+        : float2(0.0, 0.0);
+
+    float trailLength =
+        movementLength;
+
+    float trailWidth =
+        max(
+            dropSize * lerp(0.16, 0.28, dynamic01),
+            0.0020
+        );
+
+    float trailAlong =
+        dot(
+            -delta,
+            movementDir
+        );
+
+    float2 perpendicular =
+        float2(
+            -movementDir.y,
+            movementDir.x
+        );
+
+    float trailSide =
+        abs(
+            dot(
+                delta,
+                perpendicular
+            )
+        );
+
+    float trail =
+        movementLength > 0.000001
+        ? smoothstep(
+            trailWidth,
+            0.0,
+            trailSide
+        )
+        : 0.0;
+
+    float trailFadeIn =
+        smoothstep(
+            0.0,
+            trailWidth,
+            trailAlong
+        );
+
+    float trailFadeOut =
+        1.0
+        - smoothstep(
+            trailLength * 0.70,
+            max(
+                trailLength,
+                trailLength * 0.70 + trailWidth
+            ),
+            trailAlong
+        );
+
+    trail *=
+        trailFadeIn
+        * trailFadeOut
+        * smoothstep(
+            0.0,
+            0.5,
+            dynamic01
+        );
+
+    return saturate(
+        (drop + trail)
+        * lifeVisibility
+    );
+}
+
+
 float rainDropLayer(
     PS_IN pin,
     float time,
@@ -782,6 +1010,18 @@ float4 rainDebugOutput(
 
 float4 main(PS_IN pin)
 {
+    if (gRainDebug == 3)
+    {
+        float diagnostic = rainSingleDropDiagnostic(pin, gRainTime);
+
+        return float4(
+            0.82,
+            0.90,
+            1.0,
+            diagnostic * 0.70
+        );
+    }
+
     if (gRainDebug > 0)
     {
         return rainDebugOutput(pin);
