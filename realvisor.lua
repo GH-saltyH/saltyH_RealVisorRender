@@ -2820,13 +2820,21 @@ float rainDropLayer(
                     dynamic01
                 );
 
+            /*
+                Trail length must come from actual accumulated travel.
+                The previous fixed drop-size multiplier could draw a long
+                "predicted" tail even when the drop had barely moved.
+            */
+            float travelLength =
+                length(travel);
+
             float trailLength =
-                dropSize
-                * lerp(
-                    0.35,
-                    3.0,
-                    trailAmount
+                min(
+                    travelLength,
+                    dropSize * 3.0
                 );
+
+            trailLength *= trailAmount;
 
             float trailWidth =
                 max(
