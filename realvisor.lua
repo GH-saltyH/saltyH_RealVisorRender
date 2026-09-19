@@ -4138,9 +4138,6 @@ render.on('main.track.transparent', function()
             gRainAcceleration =
                 rainAccelerationCurrent,
 
-            gRainFlowDistance =
-                rainFlowDistance,
-
             gRainDebug =
                 cfg.RUNTIME.RAIN_DEBUG,
 
