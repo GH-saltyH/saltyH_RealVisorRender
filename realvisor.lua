@@ -2,8 +2,8 @@
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
 local strAppNameInternal = 'RealVisor'
--- Version: 0.5.3
-local strVersion= '0.5.3'
+-- Version: 0.6.0
+local strVersion= '0.6.0'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 --
 -- Author: saltyH
@@ -12,15 +12,8 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 -- Tested on AC 1.16 / CSP 0.3.0-preview542
 --
 -- Focus:
--- v0.5.1 Real Neck Camera FX
---  (Tested, see NeckFX module) Real Head Tracking
---  (Tested, see NeckFX module) Ingame Camera Controls
---  (Tested) RIG_Head scale
--- v0.5.2 
---  Dual Profile / Save / Load (Tested)
--- v0.5.3
---  support Hide/Show Helmet Completely
---  Configurations works properly
+-- v0.6.0 Custom Shader 
+--  RainFX, RenderPass Improvements (Newer upscaler compatible)
 ------------------------------------------------------------
 
 ------------------------------------------------------------
@@ -172,6 +165,38 @@ local cfg = scriptSettings:mapConfig({
                                         vec3.new(1.00000)
                                     ),
         NECK_FOLLOW_ENABLED = true,
+       
+
+        ------------------------------------------------------------
+        -- v0.6.0 Rain / Visor Water
+        ------------------------------------------------------------
+
+        RAIN_ENABLED = true,
+
+        -- Master amount
+        RAIN_AMOUNT = 250.0,
+
+        -- Base Rain Speed
+        RAIN_SPEED_BASE = 0.0018,
+
+        -- Vehicle speed influence
+        RAIN_SPEED_MIN = 0.0,
+        RAIN_SPEED_MAX = 10.0,
+
+        -- Visual density
+        RAIN_DENSITY = 1.0,
+
+        -- Drop movement
+        RAIN_FLOW_SPEED = 0.005,
+
+        -- Acceleration influence
+        RAIN_ACCEL_GAIN_X = 0.0505,
+        RAIN_ACCEL_GAIN_Y = 0.0001,
+        RAIN_ACCEL_GAIN_Z = 0.005,
+
+        -- Debug
+        RAIN_DEBUG = false,
+
     },
 })
 
@@ -272,20 +297,26 @@ local materialInputApplyRequested = false   -- It helps to trigger when you pres
     --------------------------------------------------------
     -- v0.5.0 Real Neck CameraFX
     --------------------------------------------------------
-
+    
     local driverNeck = nil      --  Store 1st neck
     local neckScaleNode = nil
     local driverNecks = {}      --  Debug: Store all neck found 
     local driverHeads = {}      --  Visiblilty control : we need to get all driver heads to hide them completely
     local driverHeadStates = {}    
-
+    
     local neckReferenceWorld = nil
     local neckFollowInitialized = false
-
+    
     local neckFollowGain = 1.0 
-
+    
     local headFoundLogged = false
     local nekFoundLogged = false
+    
+    
+    --------------------------------------------------------
+    -- v0.6.0 Rain Drop 
+    --------------------------------------------------------
+    local rainTargetMesh = nil
 
     ------------------------------------------------------------
     -- Head Observation State
@@ -2156,6 +2187,406 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
     }    
 
 
+--------------------------------------------------------
+-- Definition: Custom Shaders
+--------------------------------------------------------
+
+local RAIN_SHADER = [[
+float2 rainHash22(float2 p)
+{
+    p = float2(
+        dot(p, float2(127.1, 311.7)),
+        dot(p, float2(269.5, 183.3))
+    );
+
+    return frac(
+        sin(p) * 43758.5453
+    );
+}
+
+
+float rainHash(float2 p)
+{
+    return frac(
+        sin(
+            dot(
+                p,
+                float2(127.1, 311.7)
+            )
+        ) * 43758.5453
+    );
+}
+
+
+float rainDropLayer(
+    float2 uv,
+    float time,
+    float scale,
+    float baseSpeed,
+    float layerOffset
+)
+{
+    float2 grid = uv * scale;
+    float2 baseCell = floor(grid);
+
+    float result = 0.0;
+
+    for (int y = -1; y <= 1; ++y)
+    {
+        for (int x = -1; x <= 1; ++x)
+        {
+            float2 cell =
+                baseCell
+                + float2(x, y);
+
+            /*
+                각각 다른 seed를 사용한다.
+            */
+            float2 rndPos =
+                rainHash22(cell + 17.13);
+
+            float2 rndState =
+                rainHash22(cell + 43.71);
+
+            float2 rndMotion =
+                rainHash22(cell + 91.37);
+
+            float rndSpawn =
+                rainHash(cell + 157.91);
+
+
+            /*
+                spawn probability.
+
+                작은 물방울 layer는
+                상대적으로 많이 발생.
+            */
+            float spawnChance =
+                lerp(
+                    0.32,
+                    0.72,
+                    rndState.x
+                );
+
+            if (rndSpawn > spawnChance)
+                continue;
+
+
+            /*
+                size와 speed를 독립적으로 만든다.
+            */
+            float sizeRandom =
+                rndState.y;
+
+            float dropSize =
+                lerp(
+                    0.032,
+                    0.115,
+                    pow(sizeRandom, 1.65)
+                );
+
+
+            /*
+                기본 속도 역시 독립 seed.
+            */
+            float speedRandom =
+                rndMotion.x;            
+
+            float vehicleFlowSpeed =
+                gRainFlowSpeed
+                * 0.35;
+
+            float dropSpeed =
+                gRainBaseSpeed
+                + vehicleFlowSpeed;
+
+            dropSpeed *=
+                lerp(
+                    0.35,
+                    1.0,
+                    speedRandom
+                );
+
+            /*
+                차량 가속도의 영향.
+
+                물방울마다 영향량도 조금씩 다르게 한다.
+            */
+            float accelerationInfluence =
+                lerp(
+                    0.55,
+                    1.35,
+                    rndMotion.y
+                );
+
+
+            /*
+                spawn phase.
+            */
+            float life =
+                frac(
+                    rndState.y
+                    + time * dropSpeed
+                );
+
+            float phase =
+                life;
+
+                
+            /*
+                X 방향에도 아주 작은 변화를 준다.
+            */
+            float drift =
+                (
+                    rndPos.x
+                    - 0.5
+                ) * 0.15;
+
+
+            /*
+                기본적인 물방울 위치.
+            */
+            float2 dropPos =
+                cell
+                + float2(
+                    0.15
+                    + rndPos.x * 0.70
+                    + drift,
+
+                    phase
+                );
+    
+            /*
+                차량 가속도에 따른 추가 이동.
+
+                Y는 기본적으로 아래 방향.
+                X는 차량 운동에 따라 변한다.
+            */
+
+            float accelFlowX =
+                gRainAccelX
+                * accelerationInfluence
+                * 1.00;
+
+            /*
+                가속 흐름에 따른 드롭 포지션.
+            */                
+            dropPos.x +=
+                accelFlowX;
+
+
+            float2 pixelPos =
+                grid;
+
+            float2 delta =
+                pixelPos
+                - dropPos;
+
+
+            /*
+                이동성이 높은 물방울은
+                조금 길어진다.
+            */
+            float mobility =
+                smoothstep(
+                    0.25,
+                    0.85,
+                    speedRandom
+                );
+
+            float stretch =
+                lerp(
+                    1.0,
+                    1.8,
+                    mobility
+                );
+
+            delta.y *= stretch;
+
+
+            float distanceToDrop =
+                length(delta);
+
+            float drop =
+                smoothstep(
+                    dropSize,
+                    dropSize * 0.30,
+                    distanceToDrop
+                );
+
+
+            /*
+                lifecycle.
+            */
+
+            float active =
+                smoothstep(
+                    0.03,
+                    0.10,
+                    life
+                );
+
+            active *=
+                1.0 -
+                smoothstep(
+                    0.80,
+                    0.98,
+                    life
+                );
+
+            drop *= active;
+
+
+            /*
+                TRAIL
+            */
+            float trailLife =
+                smoothstep(
+                    0.12,
+                    0.30,
+                    life
+                );
+                
+            float movementAmount =
+                saturate(
+                    abs(dropSpeed) * 35.0
+                    + abs(accelFlowX) * 4.0                
+                );
+
+            float trailAmount =
+                smoothstep(
+                    0.08,
+                    0.30,
+                    movementAmount
+                );
+
+            float trailLength =
+                dropSize 
+                * lerp(
+                    0.5,
+                    5.0,
+                    trailAmount
+                );
+
+            float trailWidth =
+                max(
+                    dropSize * 0.18,
+                    0.0025
+                );
+
+            float trailX =
+                abs(delta.x);
+
+            float trail =
+                smoothstep(
+                    trailWidth,
+                    0.0,
+                    trailX
+                );
+
+            float trailY =
+                smoothstep(
+                    0.0,
+                    trailLength,
+                    -delta.y
+                );
+
+            trail *= trailY;
+            
+            trail *= trailAmount;
+
+            trail *=
+                lerp(
+                    0.15,
+                    0.65,
+                    mobility
+                );
+
+            trail *= active;
+
+            trail *= trailLife;
+
+            result =
+                max(
+                    result,
+                    drop + trail
+                );
+        }
+    }
+
+    return saturate(result);
+}
+
+
+float4 main(PS_IN pin)
+{
+    float2 uv =
+        pin.Tex;
+
+
+    /*
+        큰 / 중간 물방울.
+    */
+    float large =
+        rainDropLayer(
+            uv,
+            gRainTime,
+            6.5,
+            1.0,
+            0.0
+        );
+
+
+    /*
+        작은 물방울.
+    */
+    float small =
+        rainDropLayer(
+            uv * 1.73 + 13.7,
+            gRainTime,
+            14.0,
+            1.0,
+            13.7
+        );
+
+
+    float mask =
+        large * 0.90
+        + small * 0.32;
+
+
+    mask =
+        saturate(mask);
+
+
+    mask *=
+        gRainAmount;
+
+    mask *=
+        gRainDensity;
+
+
+    mask =
+        saturate(mask);
+
+
+    return float4(
+        0.82,
+        0.90,
+        1.0,
+        mask * 0.35
+    );
+}
+
+]]
+
+
+--------------------------------------------------------
+-- Texture Bindings
+--------------------------------------------------------
+
+local textureRaindrops = appFolder .. 'texture/drops.dds'
+
 
 --------------------------------------------------------
 -- Helper function: Clamp
@@ -3019,6 +3450,201 @@ local function observeDriverHead(dt)
 end
 
 
+--------------------------------------------------------
+-- 3.6.0 TESTING: Custom Shader Render - RainDrops
+--------------------------------------------------------
+local UV_DEBUG_SHADER = [[
+
+float4 main(PS_IN pin)
+{
+    return float4(
+        pin.Tex.x,
+        pin.Tex.y,
+        0.0,
+        1.0
+    );
+}
+
+]]
+
+render.on('main.track.transparent', function()
+    -- ac.log('[RealVisor] ENTER main.track.transparent')
+    
+    
+    if not cfg.RUNTIME.RAIN_ENABLED then
+        return
+    end
+    
+    
+    if not textureRaindrops then
+        return
+    end
+    
+    
+    if not rainTargetMesh
+        or #rainTargetMesh == 0 then
+        return
+    end
+
+    
+    local startingTransform = 
+        rainTargetMesh:getWorldTransformationRaw():clone()
+
+
+    if not startingTransform then
+        return
+    end
+
+
+    --------------------------------------------------------
+    -- Rain state
+    --------------------------------------------------------
+
+    local sim = ac.getSim()
+
+    local car = ac.getCar(0)
+
+
+    if not car then
+        return
+    end
+
+
+    --------------------------------------------------------
+    -- Speed
+    --------------------------------------------------------
+    
+    local speed =
+        car.velocity:length()
+    
+    
+    local speed01 =
+        math.clamp(
+            speed / cfg.RUNTIME.RAIN_SPEED_MAX,
+            0.0,
+            1.0
+        )
+    
+    local acceleration = 
+        car.acceleration
+
+    
+    --------------------------------------------------------
+    -- Vehicle flow
+    --------------------------------------------------------
+    
+    local flowX = 
+        -acceleration.x
+        * cfg.RUNTIME.RAIN_ACCEL_GAIN_X
+    
+    local flowY = 
+        0.0
+    
+    local flowZ = 
+        -acceleration.z
+        * cfg.RUNTIME.RAIN_ACCEL_GAIN_Z
+    
+
+    --------------------------------------------------------
+    -- Vehicle flow magnitude
+    --------------------------------------------------------
+    
+    local flowAmount =
+        math.sqrt(
+            flowX * flowX
+            + flowZ * flowZ
+        )
+    
+
+    --------------------------------------------------------
+    -- Render
+    --------------------------------------------------------
+    
+    
+    render.setBlendMode(
+        render.BlendMode.AlphaBlend
+    )
+
+    render.setCullMode(
+        render.CullMode.None
+    )
+
+    render.setDepthMode(
+        render.DepthMode.ReadOnly
+    )
+
+
+    render.mesh({
+
+        mesh = 
+            rainTargetMesh,
+
+
+        transform = 
+            startingTransform,
+
+
+        textures = {
+            
+            txRainDrops =
+                textureRaindrops,
+
+        },
+
+        
+        values = {
+
+            gRainAmount = 
+                cfg.RUNTIME.RAIN_AMOUNT,
+
+            gRainDensity =
+                cfg.RUNTIME.RAIN_DENSITY,
+
+            gRainFlow =
+                vec2(
+                    flowX,
+                    flowY
+                ),
+
+            gRainBaseSpeed = 
+                cfg.RUNTIME.RAIN_SPEED_BASE,
+
+            gRainFlowSpeed =
+                cfg.RUNTIME.RAIN_FLOW_SPEED,
+
+            gRainAccelX = 
+                flowX,
+            
+            gRainAccelY = 
+                flowY,
+            
+            gRainAccelZ = 
+                flowZ,
+
+            gRainTime =
+                sim.time,
+        },
+
+        shader = 
+            -- UV_DEBUG_SHADER
+            RAIN_SHADER
+
+
+            -- shader = [[
+            --     float4 main(PS_IN pin) {
+            --         return txRain.Sample(samAnisotropic, pin.Tex);
+            --     }
+            -- ]]
+
+
+        })
+
+
+
+
+        -- ac.log('[RealVisor] track.transparent render.mesh=' .. tostring(result))
+end)
+
 ------------------------------------------------------------
 -- Initialize
 ------------------------------------------------------------
@@ -3213,6 +3839,15 @@ local function initializeScene()
             ac.log(
             appNameDebug .. ' ' .. editor.meshName .. ' found'
         )
+
+            --------------------------------------------------------
+            -- binding target mesh for RainFX
+            --------------------------------------------------------
+
+            if editor.id == 'GLASSEXT' then
+                rainTargetMesh = editor.targetMesh 
+            end
+
 
             --------------------------------------------------------
             -- Find Material
@@ -3782,7 +4417,7 @@ function script.update(dt)
         return
     end
 
-
+    
     --------------------------------------------------------
     -- Driver Head Observation
     --
@@ -4353,8 +4988,8 @@ function windowMain(dt)
     ui.slider(
         'Pitch',
         p.PITCH,
-        -45.0,
-        45.0,
+        -89.0,
+        89.0,
         '%.2f°'
     )
 
@@ -4371,8 +5006,8 @@ function windowMain(dt)
         ui.slider(
             'Yaw',
             p.YAW,
-            -45.0,
-            45.0,
+            -179.0,
+            179.0,
             '%.2f°'
         )
 
@@ -4389,8 +5024,8 @@ function windowMain(dt)
         ui.slider(
             'Roll',
             p.ROLL,
-            -45.0,
-            45.0,
+            -179.0,
+            179.0,
             '%.2f°'
         )
 
@@ -4415,8 +5050,8 @@ function windowMain(dt)
         ui.slider(
             'Offset X',
             p.OFFSET_X,
-            -0.20,
-            0.20,
+            -1.20,
+            1.20,
             '%.4f'
         )
 
@@ -4432,8 +5067,8 @@ function windowMain(dt)
     ui.slider(
         'Offset Y',
         p.OFFSET_Y,
-        -0.20,
-            0.20,
+            -1.20,
+            1.20,
             '%.4f'
         )
         
@@ -4449,8 +5084,8 @@ function windowMain(dt)
         ui.slider(
             'Offset Z',
             p.OFFSET_Z,
-            -0.20,
-            0.20,
+            -1.20,
+            1.20,
             '%.4f'
         )
         
