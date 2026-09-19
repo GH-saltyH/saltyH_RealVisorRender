@@ -3958,7 +3958,7 @@ render.on('main.track.transparent', function()
             gRainObjectToWorld =
                 startingTransform,
 
-            gRainCameraRight =
+            gRainCameraSide =
                 ac.getCameraSide(),
 
             gRainCameraUp =
