@@ -192,7 +192,12 @@ local cfg = scriptSettings:mapConfig({
         -- Acceleration influence
         RAIN_ACCEL_GAIN_X = 0.00000505,
         RAIN_ACCEL_GAIN_Y = 0.000001,
-        RAIN_ACCEL_GAIN_Z = 0.0000015,
+        -- Front/back acceleration needs a stronger response than
+        -- lateral acceleration because surface projection removes most
+        -- of it near the visor center. The center should still remain
+        -- comparatively resistant; curvature supplies the response
+        -- towards the sides.
+        RAIN_ACCEL_GAIN_Z = 0.000006,
 
         -- Flow response / damping
         RAIN_FLOW_RESPONSE = 5.0,
