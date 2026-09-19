@@ -190,9 +190,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_SPEED = 0.005,
 
         -- Acceleration influence
-        RAIN_ACCEL_GAIN_X = 0.00000505,
-        RAIN_ACCEL_GAIN_Y = 0.000001,
-        RAIN_ACCEL_GAIN_Z = 0.0000015,
+        RAIN_ACCEL_GAIN_X = 0.0005,
+        RAIN_ACCEL_GAIN_Y = 0.0005,
+        RAIN_ACCEL_GAIN_Z = 0.0005,
 
         -- Flow response / damping
         RAIN_FLOW_RESPONSE = 5.0,
@@ -1396,6 +1396,118 @@ local PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE = {
 }
 
 
+
+local PARAMS_KS_PERPIXEL_NM = {
+
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+    
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        label = 'Emissive',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+    
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+        
+    {
+        name = 'nmObjectSpace',    
+        type = 'float',   
+        label = 'Object Space',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'boh',    
+        type = 'vec3',   
+        label = 'boh',
+        group = 'boh', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+
+}
+
+
 local PARAMS_KS_PERPIXEL_MULTIMAP = {
 
     -- Scalar
@@ -2083,6 +2195,31 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
 
             parameters = 
                 PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'GLASSEXTDUMMY',
+
+            meshName = 
+                'GLASS_EXT_DUMMY',
+
+            materialName = 
+                'mtGLASS_EXT_DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_NM,
 
             values = {},
 
@@ -4044,7 +4181,7 @@ local function initializeScene()
             -- binding target mesh for RainFX
             --------------------------------------------------------
 
-            if editor.id == 'GLASSEXT' then
+            if editor.id == 'GLASSEXTDUMMY' then
                 rainTargetMesh = editor.targetMesh 
             end
 
@@ -4637,10 +4774,10 @@ local function updateRainFlow(dt)
         return
     end
 
-    /*
-        Acceleration is explicitly derived from velocity delta.
-        This keeps the model tied to acceleration rather than speed.
-    */
+    ------------------------------------------------------------
+    --    Acceleration is explicitly derived from velocity delta.
+    --    This keeps the model tied to acceleration rather than speed.
+    ------------------------------------------------------------
     local rawAcceleration =
         vec3(
             (velocity.x - rainPreviousVelocity.x) / dt,
@@ -4651,13 +4788,13 @@ local function updateRainFlow(dt)
     rainPreviousVelocity:set(velocity)
 
 
-    /*
+    --[[
         Camera basis is also the current visor basis because the visor
         follows the camera root.
 
         Convert world acceleration into visor-local coordinates before
         applying the experimental gain values.
-    */
+    ]]
     local forward =
         ac.getCameraForward()
 
@@ -4694,11 +4831,11 @@ local function updateRainFlow(dt)
         )
 
 
-    /*
+    --[[
         Keep the user's current gain values as the experimental
         sensitivity controls. These scale the inertial force only;
         gravity is handled separately in the shader.
-    */
+    ]]
     local targetAcceleration =
         vec3(
             localAcceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN_X,
@@ -4707,11 +4844,11 @@ local function updateRainFlow(dt)
         )
 
 
-    /*
+    --[[
         Smooth acceleration itself, not the resulting position.
         This removes single-frame spikes while preserving the sign of
         acceleration/braking.
-    */
+    ]]
     local response =
         math.max(
             cfg.RUNTIME.RAIN_FLOW_RESPONSE,
