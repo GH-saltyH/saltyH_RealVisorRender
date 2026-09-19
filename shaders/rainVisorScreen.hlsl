@@ -83,7 +83,6 @@ float3 rainSurfaceNormalCamera(float2 uv)
 */
 void rainSurfaceBasisCamera(
     PS_IN pin,
-    float3 normalCamera,
     out float3 tangentUCamera,
     out float3 tangentVCamera
 )
@@ -184,28 +183,12 @@ void rainSurfaceBasisCamera(
         );
 
     /*
-        The normal map can differ slightly from the geometric normal.
-        Re-orthogonalize the UV tangents against the supplied surface
-        normal so force projection remains tangent to the actual normal
-        used by the rain model.
+        The tangent frame is purely geometric/UV based.
+        It is intentionally independent of the candidate normal so
+        derivatives are evaluated once per fragment, outside candidate
+        loops. Candidate-specific normal orthogonalization is performed
+        later without gradient instructions.
     */
-    tangentUCamera =
-        normalize(
-            tangentUCamera
-            - normalCamera * dot(
-                tangentUCamera,
-                normalCamera
-            )
-        );
-
-    tangentVCamera =
-        normalize(
-            tangentVCamera
-            - normalCamera * dot(
-                tangentVCamera,
-                normalCamera
-            )
-        );
 
     /*
         Preserve the UV V orientation after orthogonalization.
@@ -236,19 +219,47 @@ void rainSurfaceBasisCamera(
 float2 rainProjectForceToUV(
     float3 force,
     float3 normal,
-    PS_IN pin,
+    float3 baseTangentU,
+    float3 baseTangentV,
     float patternScale
 )
 {
-    float3 tangentU;
-    float3 tangentV;
+    /*
+        Candidate-specific normal correction contains no ddx/ddy.
+        This keeps the physical surface normal local to the drop while
+        allowing the actual mesh UV derivatives to be evaluated once
+        per rendered fragment.
+    */
+    float3 tangentU =
+        normalize(
+            baseTangentU
+            - normal * dot(
+                baseTangentU,
+                normal
+            )
+        );
 
-    rainSurfaceBasisCamera(
-        pin,
-        normal,
-        tangentU,
-        tangentV
-    );
+    float3 tangentV =
+        normalize(
+            baseTangentV
+            - normal * dot(
+                baseTangentV,
+                normal
+            )
+        );
+
+    if (
+        dot(
+            cross(
+                normal,
+                tangentU
+            ),
+            tangentV
+        ) < 0.0
+    )
+    {
+        tangentV = -tangentV;
+    }
 
     float2 result =
         float2(
@@ -256,10 +267,6 @@ float2 rainProjectForceToUV(
             dot(force, tangentV)
         );
 
-    /*
-        Convert from real mesh UV movement into this layer's procedural
-        UV space. Positive patternScale values preserve direction.
-    */
     return result * patternScale;
 }
 
@@ -302,6 +309,15 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
     float3 surfaceNormal =
         rainSurfaceNormalCamera(spawnUV);
 
+    float3 baseTangentU;
+    float3 baseTangentV;
+
+    rainSurfaceBasisCamera(
+        pin,
+        baseTangentU,
+        baseTangentV
+    );
+
     float3 gravityForce =
         float3(
             0.0,
@@ -317,7 +333,8 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
         rainProjectForceToUV(
             effectiveForce,
             surfaceNormal,
-            pin,
+            baseTangentU,
+            baseTangentV,
             1.0
         );
 
@@ -505,6 +522,15 @@ float rainDropLayer(
 
     float result = 0.0;
 
+    float3 baseTangentU;
+    float3 baseTangentV;
+
+    rainSurfaceBasisCamera(
+        pin,
+        baseTangentU,
+        baseTangentV
+    );
+
     for (int y = -1; y <= 1; ++y)
     {
         for (int x = -1; x <= 1; ++x)
@@ -595,7 +621,8 @@ float rainDropLayer(
                 rainProjectForceToUV(
                     effectiveForce,
                     surfaceNormal,
-                    pin,
+                    baseTangentU,
+                    baseTangentV,
                     patternScale
                 );
 
@@ -865,11 +892,21 @@ float4 rainDebugOutput(
             pin.Tex
         );
 
+    float3 baseTangentU;
+    float3 baseTangentV;
+
+    rainSurfaceBasisCamera(
+        pin,
+        baseTangentU,
+        baseTangentV
+    );
+
     float2 tangentForce =
         rainProjectForceToUV(
             acceleration,
             normal,
-            pin,
+            baseTangentU,
+            baseTangentV,
             1.0
         );
 
