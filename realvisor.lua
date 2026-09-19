@@ -197,7 +197,7 @@ local cfg = scriptSettings:mapConfig({
         -- of it near the visor center. The center should still remain
         -- comparatively resistant; curvature supplies the response
         -- towards the sides.
-        RAIN_ACCEL_GAIN_Z = 0.000006,
+        RAIN_ACCEL_GAIN_Z = 0.000024,
 
         -- Flow response / damping
         RAIN_FLOW_RESPONSE = 5.0,
@@ -2609,7 +2609,8 @@ float rainDropLayer(
                 Effective force in the visor's moving reference frame.
 
                 Gravity pulls downward.
-                Vehicle acceleration produces the opposite inertial force.
+                Vehicle acceleration is applied in the observed flow direction.
+                The sign is intentionally aligned with the current test result.
 
                 This is deliberately a force/acceleration model, not a
                 velocity model.
@@ -2628,7 +2629,7 @@ float rainDropLayer(
             */
             float3 effectiveForce =
                 gravityForce
-                - gRainAcceleration * gRainForceScale;
+                + gRainAcceleration * gRainForceScale;
 
 
             /*
