@@ -2508,431 +2508,302 @@ float rainDropLayer(
 
     float result = 0.0;
 
-    for (int y = -3; y <= 3; ++y)
+    /*
+        A cell is only a search partition.
+
+        It no longer represents one physical drop. Each cell contains
+        multiple independently randomized candidates so the underlying
+        partition does not become a visible checkerboard pattern.
+    */
+    for (int y = -2; y <= 2; ++y)
     {
-        for (int x = -3; x <= 3; ++x)
+        for (int x = -2; x <= 2; ++x)
         {
             float2 cell =
                 baseCell
                 + float2(x, y);
 
-            float2 cellSeed =
-                cell
-                + layerOffset * 19.37;
+            for (int candidate = 0; candidate < 2; ++candidate)
+            {
+                float2 cellSeed =
+                    cell
+                    + layerOffset * 19.37
+                    + float2(
+                        candidate * 47.13,
+                        candidate * 91.71
+                    );
 
-            float2 rndPos =
-                rainHash22(
-                    cellSeed + 17.13
-                );
+                float2 rndPos =
+                    rainHash22(
+                        cellSeed + 17.13
+                    );
 
-            float2 rndState =
-                rainHash22(
-                    cellSeed + 43.71
-                );
+                float2 rndState =
+                    rainHash22(
+                        cellSeed + 43.71
+                    );
 
-            float2 rndMotion =
-                rainHash22(
-                    cellSeed + 91.37
-                );
+                float2 rndMotion =
+                    rainHash22(
+                        cellSeed + 91.37
+                    );
 
-            float rndSpawn =
-                rainHash(
-                    cellSeed + 157.91
-                );
+                float rndSpawn =
+                    rainHash(
+                        cellSeed + 157.91
+                    );
 
+                float spawnChance =
+                    lerp(
+                        0.22,
+                        0.52,
+                        rndState.x
+                    );
 
-            /*
-                Spawn density remains probabilistic.
-                This is appearance probability, not physical motion.
-            */
-            float spawnChance =
-                lerp(
-                    0.32,
-                    0.72,
-                    rndState.x
-                );
+                if (rndSpawn > spawnChance)
+                    continue;
 
-            if (rndSpawn > spawnChance)
-                continue;
+                float dropSize =
+                    lerp(
+                        0.032,
+                        0.115,
+                        pow(rndState.y, 1.65)
+                    );
 
+                float adhesion =
+                    lerp(
+                        gRainAdhesionMin,
+                        gRainAdhesionMax,
+                        rndMotion.x
+                    );
 
-            /*
-                Size remains intentionally oversized for development/debug.
-            */
-            float sizeRandom =
-                rndState.y;
+                /*
+                    Randomized position is local to this candidate only.
+                    There is no global spawn coordinate shared by drops.
+                */
+                float2 spawnPos =
+                    cell
+                    + float2(
+                        0.08
+                        + rndPos.x * 0.84,
 
-            float dropSize =
-                lerp(
-                    0.032,
-                    0.115,
-                    pow(sizeRandom, 1.65)
-                );
+                        0.08
+                        + rndPos.y * 0.84
+                    );
 
+                float2 surfaceUV =
+                    spawnPos / scale;
 
-            /*
-                Each drop gets its own adhesion threshold.
+                float3 surfaceNormal =
+                    rainSurfaceNormalCamera(
+                        surfaceUV
+                    );
 
-                This is now the source of different responses between drops:
-                not an arbitrary acceleration multiplier, but different
-                resistance to starting movement.
-            */
-            float adhesion =
-                lerp(
-                    gRainAdhesionMin,
-                    gRainAdhesionMax,
-                    rndMotion.x
-                );
+                float3 gravityForce =
+                    float3(
+                        0.0,
+                        -gRainGravity,
+                        0.0
+                    );
 
+                float3 effectiveForce =
+                    gravityForce
+                    + gRainAcceleration * gRainForceScale;
 
-            /*
-                Static spawn position.
+                float2 tangentForce =
+                    rainProjectForceToUV(
+                        effectiveForce,
+                        surfaceNormal
+                    );
 
-                A drop no longer falls simply because time advances.
-                Time is used for its lifetime/spawn cycle only.
-            */
-            float dropLifetime =
-                max(
-                    gRainDropLifetime,
-                    0.1
-                );
+                float forceMagnitude =
+                    length(tangentForce);
 
-            float life01 = 0.5;
-
-            float dropAge =
-                dropLifetime * 0.5;
-
-
-            float drift =
-                (
-                    rndPos.x
-                    - 0.5
-                ) * 0.15;
-
-
-            float2 spawnPos =
-                cell
-                + float2(
-                    0.15
-                    + rndPos.x * 0.70
-                    + drift,
-
-                    0.15
-                    + rndPos.y * 0.70
-                );
-
-
-            /*
-                Evaluate the visor surface at the drop's own position.
-            */
-            float2 surfaceUV =
-                spawnPos / scale;
-
-            float3 surfaceNormal =
-                rainSurfaceNormalCamera(surfaceUV);
-
-
-            /*
-                Effective force in the visor's moving reference frame.
-
-                Gravity pulls downward.
-                Vehicle acceleration is applied in the observed flow direction.
-                The sign is intentionally aligned with the current test result.
-
-                This is deliberately a force/acceleration model, not a
-                velocity model.
-            */
-            float3 gravityForce =
-                float3(
-                    0.0,
-                    -gRainGravity,
-                    0.0
-                );
-
-            /*
-                gRainAcceleration is already gain-scaled in Lua.
-                Convert it back into the compact force space used by
-                the visor model. Gravity stays in the same space.
-            */
-            float3 effectiveForce =
-                gravityForce
-                + gRainAcceleration * gRainForceScale;
-
-
-            /*
-                Only the component tangent to the glass can move the drop.
-            */
-            float2 tangentForce =
-                rainProjectForceToUV(
-                    effectiveForce,
-                    surfaceNormal
-                );
-
-            float forceMagnitude =
-                length(tangentForce);
-
-
-            /*
-                Adhesion gate.
-
-                Below threshold:
-                    attached / essentially static.
-
-                Above threshold:
-                    the excess force progressively turns into flow.
-            */
-            float excessForce =
-                max(
-                    forceMagnitude
-                    - adhesion,
-                    0.0
-                );
-
-            float dynamic01 =
-                saturate(
-                    excessForce
-                    /
+                float excessForce =
                     max(
-                        adhesion,
-                        0.001
+                        forceMagnitude
+                        - adhesion,
+                        0.0
+                    );
+
+                float dynamic01 =
+                    saturate(
+                        excessForce
+                        /
+                        max(
+                            adhesion,
+                            0.001
+                        )
+                    );
+
+                float adhesionMobility =
+                    1.0
+                    - saturate(
+                        (adhesion - gRainAdhesionMin)
+                        /
+                        max(
+                            gRainAdhesionMax - gRainAdhesionMin,
+                            0.001
+                        )
+                    );
+
+                /*
+                    gRainFlowDistance is an accumulated environmental
+                    displacement input. It is projected independently at
+                    every drop's surface normal and then modulated by that
+                    drop's adhesion, so drops do not share one screen-space
+                    displacement.
+                */
+                float2 persistentTravel =
+                    rainProjectForceToUV(
+                        gRainFlowDistance,
+                        surfaceNormal
+                    );
+
+                float2 travel =
+                    persistentTravel
+                    * adhesionMobility
+                    * scale;
+
+                float2 dropPos =
+                    spawnPos
+                    + travel;
+
+                float2 pixelPos =
+                    grid;
+
+                float2 delta =
+                    pixelPos
+                    - dropPos;
+
+                float movementLength =
+                    length(
+                        persistentTravel
+                    );
+
+                float mobility =
+                    dynamic01;
+
+                float stretch =
+                    lerp(
+                        1.0,
+                        1.8,
+                        mobility
+                    );
+
+                if (movementLength > 0.00001)
+                {
+                    delta.y *= stretch;
+                }
+
+                float distanceToDrop =
+                    length(delta);
+
+                float drop =
+                    smoothstep(
+                        dropSize,
+                        dropSize * 0.30,
+                        distanceToDrop
+                    );
+
+                float trailAmount =
+                    smoothstep(
+                        0.25,
+                        0.75,
+                        dynamic01
                     )
-                );
+                    * saturate(
+                        adhesionMobility
+                    );
 
+                float travelLength =
+                    length(travel);
 
-            /*
-                Once a drop starts moving, stronger force produces more
-                surface velocity. The per-drop variation comes primarily
-                from adhesion, not from changing the force direction.
-            */
-            float2 flowVelocity =
-                tangentForce
-                *
-                dynamic01
-                *
-                gRainFlowSpeed;
+                float trailLength =
+                    min(
+                        travelLength,
+                        dropSize * 3.0
+                    );
 
+                trailLength *= trailAmount;
 
-            /*
-                Limit the physical flow response before converting it to
-                displacement. This keeps a very large acceleration from
-                instantly crossing the entire UV field.
-            */
-            float flowLength =
-                length(flowVelocity);
+                float trailWidth =
+                    max(
+                        dropSize * 0.18,
+                        0.0025
+                    );
 
-            if (flowLength > gRainFlowMax)
-            {
-                flowVelocity =
-                    flowVelocity
-                    / flowLength
-                    * gRainFlowMax;
-            }
+                float2 movementDir =
+                    movementLength > 0.00001
+                    ? persistentTravel / movementLength
+                    : float2(0.0, 0.0);
 
-
-            /*
-                Integrate the moving drop from its own age.
-
-                A static drop therefore stays where it spawned.
-                A moving drop accumulates displacement as it gets older.
-            */
-            /*
-                Integrate the moving drop from its own age.
-
-                Do not wrap the physical position back into the original
-                cell. A moving drop must be allowed to cross cell
-                boundaries continuously.
-            */
-            float3 persistentFlow =
-                gRainFlowDistance;
-
-            float2 persistentTravel =
-                rainProjectForceToUV(
-                    persistentFlow,
-                    surfaceNormal
-                );
-
-            float adhesionMobility =
-                1.0
-                - saturate(
-                    (adhesion - gRainAdhesionMin)
-                    / max(
-                        gRainAdhesionMax - gRainAdhesionMin,
-                        0.001
-                    )
-                );
-
-            float2 travel =
-                persistentTravel
-                * adhesionMobility
-                * scale;
-
-            float2 dropPos =
-                spawnPos
-                + travel;
-
-
-            float2 pixelPos =
-                grid;
-
-            float2 delta =
-                pixelPos
-                - dropPos;
-
-
-            /*
-                Flowing drops stretch according to their actual motion.
-            */
-            float mobility =
-                dynamic01;
-
-            float stretch =
-                lerp(
-                    1.0,
-                    1.8,
-                    mobility
-                );
-
-            float movementLength =
-                length(persistentTravel);
-
-            if (movementLength > 0.00001)
-            {
-                delta.y *= stretch;
-            }
-
-
-            float distanceToDrop =
-                length(delta);
-
-            float drop =
-                smoothstep(
-                    dropSize,
-                    dropSize * 0.30,
-                    distanceToDrop
-                );
-
-
-            /*
-                Lifecycle is purely the spawn/pop fade.
-                It is no longer responsible for downward movement.
-            */
-            float active = 1.0;
-
-            drop *= active;
-
-
-            /*
-                Trail is generated only from physical flow.
-
-                A stationary adhered drop therefore does not create a
-                trail just because its lifetime is progressing.
-            */
-            float trailAmount =
-                smoothstep(
-                    0.25,
-                    0.75,
-                    dynamic01
-                )
-                * saturate(adhesionMobility);
-
-            /*
-                Trail length must come from actual accumulated travel.
-                The previous fixed drop-size multiplier could draw a long
-                "predicted" tail even when the drop had barely moved.
-            */
-            float travelLength =
-                length(travel);
-
-            float trailLength =
-                min(
-                    travelLength,
-                    dropSize * 3.0
-                );
-
-            trailLength *= trailAmount;
-
-            float trailWidth =
-                max(
-                    dropSize * 0.18,
-                    0.0025
-                );
-
-
-            float2 movementDir =
-                movementLength > 0.00001
-                ? flowVelocity / movementLength
-                : float2(0.0, 0.0);
-
-            float trailAlong =
-                dot(
-                    -delta,
-                    movementDir
-                );
-
-            float2 perpendicular =
-                float2(
-                    -movementDir.y,
-                    movementDir.x
-                );
-
-            float trailSide =
-                abs(
+                float trailAlong =
                     dot(
-                        delta,
-                        perpendicular
+                        -delta,
+                        movementDir
+                    );
+
+                float2 perpendicular =
+                    float2(
+                        -movementDir.y,
+                        movementDir.x
+                    );
+
+                float trailSide =
+                    abs(
+                        dot(
+                            delta,
+                            perpendicular
+                        )
+                    );
+
+                float trail =
+                    movementLength > 0.00001
+                    ? smoothstep(
+                        trailWidth,
+                        0.0,
+                        trailSide
                     )
-                );
+                    : 0.0;
 
-            float trail =
-                movementLength > 0.00001
-                ? smoothstep(
-                    trailWidth,
-                    0.0,
-                    trailSide
-                )
-                : 0.0;
+                float trailFadeIn =
+                    smoothstep(
+                        0.0,
+                        trailWidth,
+                        trailAlong
+                    );
 
-            float trailFadeIn =
-                smoothstep(
-                    0.0,
-                    trailWidth,
-                    trailAlong
-                );
+                float trailFadeOut =
+                    1.0
+                    -
+                    smoothstep(
+                        trailLength * 0.65,
+                        max(
+                            trailLength,
+                            trailLength * 0.65 + trailWidth
+                        ),
+                        trailAlong
+                    );
 
-            float trailFadeOut =
-                1.0
-                -
-                smoothstep(
-                    trailLength * 0.65,
+                trail *=
+                    trailFadeIn
+                    * trailFadeOut
+                    * trailAmount;
+
+                trail *=
+                    lerp(
+                        0.15,
+                        0.65,
+                        mobility
+                    );
+
+                result =
                     max(
-                        trailLength,
-                        trailLength * 0.65 + trailWidth
-                    ),
-                    trailAlong
-                );
-
-            trail *=
-                trailFadeIn
-                * trailFadeOut;
-
-            trail *=
-                trailAmount;
-
-            trail *=
-                lerp(
-                    0.15,
-                    0.65,
-                    mobility
-                );
-
-            trail *= active;
-
-
-            result =
-                max(
-                    result,
-                    drop + trail
-                );
+                        result,
+                        drop + trail
+                    );
+            }
         }
     }
 
@@ -2949,7 +2820,7 @@ float4 main(PS_IN pin)
         rainDropLayer(
             uv,
             gRainTime,
-            14.53,
+            18.0,
             0.0
         );
 
@@ -2957,7 +2828,7 @@ float4 main(PS_IN pin)
         rainDropLayer(
             uv * 1.73 + 13.7,
             gRainTime,
-            31.30,
+            39.0,
             13.7
         );
 
