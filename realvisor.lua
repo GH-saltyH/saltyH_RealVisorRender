@@ -3779,12 +3779,6 @@ render.on('main.track.transparent', function()
         
         values = {
 
-            gRainAmount = 
-                cfg.RUNTIME.RAIN_AMOUNT,
-
-            gRainDensity =
-                cfg.RUNTIME.RAIN_DENSITY,
-
             gRainAcceleration =
                 rainAccelerationCurrent,
 
