@@ -87,6 +87,9 @@ void rainSurfaceBasisCamera(
     out float3 tangentVCamera
 )
 {
+    float3 normalCamera =
+        rainSurfaceNormalCamera(pin.Tex);
+
     float3 dPosDx = ddx(pin.PosL);
     float3 dPosDy = ddy(pin.PosL);
 
