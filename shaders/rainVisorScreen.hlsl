@@ -693,6 +693,14 @@ float rainDropLayer(
                     pin.Tex
                 );
 
+            float surfaceNormalWeight =
+                saturate(
+                    dot(
+                        surfaceNormal,
+                        surfaceNormal
+                    )
+                );
+
             float3 gravityForce =
                 float3(
                     0.0,
