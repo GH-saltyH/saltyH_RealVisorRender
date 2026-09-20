@@ -1487,6 +1487,55 @@ return float4(
 }
 
 
+float rainPersistentDropLayer(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            rainStatePoint,
+            stateUV,
+            0.0
+        );
+
+        float2 dropPosition = state.rg;
+        float2 delta = pin.Tex - dropPosition;
+
+        /*
+            Stage 2 diagnostic:
+            every state texel is rendered as an independent droplet.
+            Radius is deterministic per state index and intentionally
+            independent from the current fragment.
+        */
+        float radius01 = rainStateHash(stateIndex + 211.0);
+        float radius = lerp(0.006, 0.014, radius01);
+
+        float distanceToDrop = length(delta);
+        float drop = 1.0 - smoothstep(
+            radius * 0.35,
+            radius,
+            distanceToDrop
+        );
+
+        result = max(result, drop);
+    }
+
+    return saturate(result);
+}
+
+
 float4 rainStateDebugOutput(
     PS_IN pin
 )
@@ -1607,6 +1656,18 @@ float4 main(PS_IN pin)
     if (gRainDebug == 18)
     {
         return rainStateDebugOutput(pin);
+    }
+
+    if (gRainDebug == 19)
+    {
+        float persistentDrops = rainPersistentDropLayer(pin);
+
+        return float4(
+            0.82,
+            0.90,
+            1.0,
+            persistentDrops
+        );
     }
 
     if (gRainDebug > 0)
