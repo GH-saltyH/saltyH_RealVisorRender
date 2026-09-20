@@ -208,14 +208,17 @@ local cfg = scriptSettings:mapConfig({
         -- Maximum procedural surface speed in UV-space units per second.
         RAIN_FLOW_MAX_SPEED = 0.065,
 
-        -- Acceleration influence
+        -- World-space acceleration influence.
+        -- RainFX keeps vehicle acceleration in WORLD space and projects
+        -- it onto each droplet's local surface tangent frame in HLSL.
+        -- Use one scalar so response does not depend on the car's
+        -- orientation relative to the global world axes.
+        RAIN_ACCEL_GAIN = 0.000024,
+
+        -- Legacy per-camera-axis gains retained for config compatibility.
+        -- They are no longer used by RainFX physics.
         RAIN_ACCEL_GAIN_X = 0.00000505,
         RAIN_ACCEL_GAIN_Y = 0.000001,
-        -- Front/back acceleration needs a stronger response than
-        -- lateral acceleration because surface projection removes most
-        -- of it near the visor center. The center should still remain
-        -- comparatively resistant; curvature supplies the response
-        -- towards the sides.
         RAIN_ACCEL_GAIN_Z = 0.000024,
 
         -- Acceleration response / damping
@@ -4187,7 +4190,7 @@ end
 -- Update rain flow
 --
 -- Acceleration is filtered once per simulation frame and passed to the
--- shader as the common external-force input. Per-drop adhesion, drag,
+-- shader as a WORLD-SPACE external-force input. Per-drop adhesion, drag,
 -- terminal speed and travel are evaluated in one place in HLSL.
 ------------------------------------------------------------
 local function updateRainFlow(dt)
@@ -4234,38 +4237,21 @@ local function updateRainFlow(dt)
     rainPreviousVelocity:set(velocity)
 
     ------------------------------------------------------------
-    -- Convert world acceleration to the current camera/visor basis.
-    -- Use the same basis that the shader uses for force projection.
-    ------------------------------------------------------------
-    local forward =
-        ac.getCameraForward()
-
-    local up =
-        ac.getCameraUp()
-
-    local side =
-        ac.getCameraSide()
-
-    if not forward or not up or not side then
-        return
-    end
-
-    local localAcceleration =
-        vec3(
-            rawAcceleration:dot(side),
-            rawAcceleration:dot(up),
-            rawAcceleration:dot(forward)
-        )
-
-    ------------------------------------------------------------
-    -- Keep the user's experimental gains unchanged.
-    -- These values control inertial sensitivity only.
+    -- Keep acceleration in WORLD space.
+    --
+    -- RainFX physics must not use the camera basis: the visor can rotate
+    -- independently of the vehicle and its camera-space normal field is
+    -- intentionally almost uniform in the exposed region.
+    --
+    -- The shader receives this world-space vector and projects it onto
+    -- each drop's local surface tangent frame using the object-space
+    -- normal texture plus the rendered mesh UV derivatives.
     ------------------------------------------------------------
     local targetAcceleration =
         vec3(
-            localAcceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN_X,
-            localAcceleration.y * cfg.RUNTIME.RAIN_ACCEL_GAIN_Y,
-            localAcceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN_Z
+            rawAcceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN,
+            rawAcceleration.y * cfg.RUNTIME.RAIN_ACCEL_GAIN,
+            rawAcceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN
         )
 
     ------------------------------------------------------------
