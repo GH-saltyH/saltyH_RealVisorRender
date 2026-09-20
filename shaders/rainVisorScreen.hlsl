@@ -601,6 +601,19 @@ float rainDropLayer(
     float layerOffset
 )
 {
+    /*
+        A procedural droplet is a source object, not a property of the
+        fragment currently being rendered.
+
+        The previous implementation evaluated the force normal from pin.Tex.
+        On a curved visor that made one droplet receive a different direction
+        at every fragment around it. The result looked like a clock hand:
+        the endpoint rotated around the origin instead of translating.
+
+        Force/adhesion are now evaluated at the candidate's spawn UV and
+        remain constant for that candidate during its procedural trajectory.
+    */
+
     float2 proceduralUV =
         pin.Tex * patternScale
         + patternOffset;
@@ -613,6 +626,11 @@ float rainDropLayer(
 
     float result = 0.0;
 
+    /*
+        Keep the actual mesh-derived UV basis. The candidate normal is sampled
+        at the candidate spawn location; this removes the per-fragment normal
+        variation from the droplet trajectory.
+    */
     float3 baseTangentU;
     float3 baseTangentV;
 
@@ -671,12 +689,6 @@ float rainDropLayer(
                     pow(rndState.y, 1.65)
                 );
 
-            /*
-                Approximate droplet mass from projected area.
-                Surface-tension holding force scales roughly with radius,
-                while mass/gravity scales with area, so larger drops should
-                require less tangential force to start moving.
-            */
             float dropRadius01 =
                 saturate(
                     (dropSize - 0.032)
@@ -708,12 +720,27 @@ float rainDropLayer(
                     0.08 + rndPos.y * 0.84
                 );
 
-            // The droplet is rendered at the current surface fragment.
-            // Evaluate the force frame at that same surface point so the
-            // normal and tangent basis stay spatially consistent.
+            /*
+                Convert the procedural source coordinate back to mesh UV.
+                This makes the normal lookup belong to the droplet itself.
+            */
+            float2 spawnProceduralUV =
+                spawnPos
+                / max(
+                    cellScale,
+                    0.000001
+                );
+
+            float2 spawnUV =
+                rainPatternToMeshUV(
+                    spawnProceduralUV,
+                    patternScale,
+                    patternOffset
+                );
+
             float3 surfaceNormal =
                 rainSurfaceNormalWorld(
-                    pin.Tex
+                    spawnUV
                 );
 
             float3 gravityForce =
@@ -739,23 +766,15 @@ float rainDropLayer(
             float forceMagnitude =
                 length(tangentForce);
 
-            /*
-                Continuous procedural age:
-                The previous lifetime/respawn cycle rebuilt every droplet at
-                its original spawnPos. That produced the visible "sticker"
-                pattern and periodic blinking.
-
-                For the physics validation stage, each procedural droplet now
-                has one continuous trajectory. The randomized phase only
-                staggers when each droplet appears; it does not reset its
-                position later.
-            */
             float birthDelay =
                 rndMotion.y * 1.5;
 
             float age =
                 time
                 - birthDelay;
+
+            if (age < 0.0)
+                continue;
 
             float lifeVisibility =
                 smoothstep(
@@ -780,9 +799,6 @@ float rainDropLayer(
                         0.001
                     )
                 );
-
-            if (age < 0.0)
-                continue;
 
             if (excessForce <= 0.000001)
             {
@@ -809,31 +825,42 @@ float rainDropLayer(
                 continue;
             }
 
-            float travelDistance =
+            /*
+                Travel distance is first calculated in the force/UV domain,
+                then converted to procedural grid space exactly once.
+
+                This also makes the trail length equal to the actual movement
+                distance instead of using an unrelated visual length.
+            */
+            float travelDistanceUV =
                 rainDropTravelDistance(
                     excessForce,
                     age
                 );
 
-            travelDistance =
+            travelDistanceUV =
                 min(
-                    travelDistance,
+                    travelDistanceUV,
                     gRainFlowMax
                 );
 
+            float travelDistanceGrid =
+                travelDistanceUV
+                * patternScale
+                * cellScale;
+
             float2 movement =
-                normalize(tangentForce)
-                * travelDistance;
+                forceMagnitude > 0.000001
+                ? normalize(tangentForce)
+                    * travelDistanceGrid
+                : float2(0.0, 0.0);
 
             float2 dropPos =
                 spawnPos
                 + movement;
 
-            float2 pixelPos =
-                grid;
-
             float2 delta =
-                pixelPos
+                grid
                 - dropPos;
 
             float distanceToDrop =
@@ -846,10 +873,6 @@ float rainDropLayer(
                     distanceToDrop
                 );
 
-            /*
-                Larger drops receive a stronger visible pop.
-                This is a visual cue for the mass model, not additional physics.
-            */
             float dropOpacity =
                 lerp(
                     0.55,
@@ -859,89 +882,95 @@ float rainDropLayer(
 
             drop *= dropOpacity;
 
+            /*
+                The trail is the actual segment between spawnPos and dropPos.
+                No independent trail length is introduced.
+            */
             float movementLength =
                 length(movement);
 
-            float2 movementDir =
-                movementLength > 0.000001
-                ? movement / movementLength
-                : float2(0.0, 0.0);
-
-            float trailLength =
-                movementLength;
-
-            float trailAmount =
-                smoothstep(
-                    0.15,
-                    0.65,
-                    dynamic01
-                );
-
-            float trailWidth =
-                max(
-                    dropSize * lerp(0.16, 0.28, dynamic01),
-                    0.0020
-                );
-
-            float trailAlong =
-                dot(
-                    -delta,
-                    movementDir
-                );
-
-            float2 perpendicular =
-                float2(
-                    -movementDir.y,
-                    movementDir.x
-                );
-
-            float trailSide =
-                abs(
-                    dot(
-                        delta,
-                        perpendicular
-                    )
-                );
-
             float trail =
-                movementLength > 0.000001
-                ? smoothstep(
-                    trailWidth,
-                    0.0,
-                    trailSide
-                )
-                : 0.0;
+                0.0;
 
-            float trailFadeIn =
-                smoothstep(
-                    0.0,
-                    trailWidth,
-                    trailAlong
-                );
+            if (movementLength > dropSize * 0.35)
+            {
+                float2 movementDir =
+                    movement
+                    / movementLength;
 
-            float trailFadeOut =
-                1.0
-                - smoothstep(
-                    trailLength * 0.70,
+                float trailAlong =
+                    dot(
+                        -delta,
+                        movementDir
+                    );
+
+                float2 perpendicular =
+                    float2(
+                        -movementDir.y,
+                        movementDir.x
+                    );
+
+                float trailSide =
+                    abs(
+                        dot(
+                            delta,
+                            perpendicular
+                        )
+                    );
+
+                float trailWidth =
                     max(
-                        trailLength,
-                        trailLength * 0.70
-                        + trailWidth
-                    ),
-                    trailAlong
-                );
+                        dropSize
+                        * lerp(
+                            0.14,
+                            0.26,
+                            dynamic01
+                        ),
+                        0.0015
+                    );
 
-            trail *=
-                trailFadeIn
-                * trailFadeOut
-                * trailAmount;
+                float trailMask =
+                    smoothstep(
+                        trailWidth,
+                        0.0,
+                        trailSide
+                    );
 
-            trail *=
-                lerp(
-                    0.15,
-                    0.75,
-                    dynamic01
-                );
+                float trailHead =
+                    smoothstep(
+                        0.0,
+                        trailWidth,
+                        trailAlong
+                    );
+
+                float trailTail =
+                    1.0
+                    - smoothstep(
+                        movementLength
+                        - trailWidth,
+                        movementLength,
+                        trailAlong
+                    );
+
+                trail =
+                    trailMask
+                    * trailHead
+                    * trailTail;
+
+                trail *=
+                    smoothstep(
+                        0.10,
+                        0.45,
+                        dynamic01
+                    );
+
+                trail *=
+                    lerp(
+                        0.10,
+                        0.70,
+                        dynamic01
+                    );
+            }
 
             result =
                 max(
@@ -953,7 +982,6 @@ float rainDropLayer(
 
     return saturate(result);
 }
-
 
 float4 rainDebugOutput(
     PS_IN pin
