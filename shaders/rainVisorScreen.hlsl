@@ -1004,48 +1004,6 @@ float rainDropLayer(
     return saturate(result);
 }
 
-float4 rainStateDebugOutput(
-    PS_IN pin
-)
-{
-    float count =
-        max(
-            gRainStateCount,
-            1.0
-        );
-
-    /*
-        Map visor U across a subset of state texels so the debug output
-        visibly changes when persistent positions/velocities evolve.
-    */
-    float stateIndex =
-        floor(
-            saturate(pin.Tex.x)
-            * min(count - 1.0, 31.0)
-        );
-
-    float2 stateUV =
-        float2(
-            (stateIndex + 0.5) / count,
-            0.5
-        );
-
-    float4 state =
-        txRainState.SampleLevel(
-            rainStatePoint,
-            stateUV,
-            0.0
-        );
-
-    return float4(
-        state.r,
-        state.g,
-        saturate(length(state.ba) * 8.0),
-        1.0
-    );
-}
-
-
 float4 rainDebugOutput(
     PS_IN pin
 )
@@ -1524,6 +1482,48 @@ float4 main(PS_IN pin)
 
 
 #else
+
+float4 rainStateDebugOutput(
+    PS_IN pin
+)
+{
+    float count =
+        max(
+            gRainStateCount,
+            1.0
+        );
+
+    /*
+        Map visor U across a subset of state texels so the debug output
+        visibly changes when persistent positions/velocities evolve.
+    */
+    float stateIndex =
+        floor(
+            saturate(pin.Tex.x)
+            * min(count - 1.0, 31.0)
+        );
+
+    float2 stateUV =
+        float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+    float4 state =
+        txRainState.SampleLevel(
+            rainStatePoint,
+            stateUV,
+            0.0
+        );
+
+    return float4(
+        state.r,
+        state.g,
+        saturate(length(state.ba) * 8.0),
+        1.0
+    );
+}
+
 
 float4 main(PS_IN pin)
 {
