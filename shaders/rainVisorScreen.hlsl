@@ -44,7 +44,7 @@ float3 rainSurfaceNormalObject(float2 uv)
 }
 
 
-float3 rainSurfaceNormalCamera(float2 uv)
+float3 rainSurfaceNormalWorld(float2 uv)
 {
     float3 normalObject =
         rainSurfaceNormalObject(uv);
@@ -55,21 +55,12 @@ float3 rainSurfaceNormalCamera(float2 uv)
             (float3x3)gRainObjectToWorld
         );
 
-    normalWorld =
-        normalize(normalWorld);
-
-    return normalize(
-        float3(
-            dot(normalWorld, gRainCameraSide),
-            dot(normalWorld, gRainCameraUp),
-            dot(normalWorld, gRainCameraForward)
-        )
-    );
+    return normalize(normalWorld);
 }
 
 
 /*
-    Build the ACTUAL UV tangent frame from the rendered mesh itself.
+    Build the ACTUAL UV tangent frame from the rendered mesh itself. from the rendered mesh itself.
 
     mesh.fx exposes:
         pin.PosL = interpolated local mesh position
@@ -81,15 +72,12 @@ float3 rainSurfaceNormalCamera(float2 uv)
     This replaces the previous artificial tangent frame that was built
     only from the normal and camera-up vector.
 */
-void rainSurfaceBasisCamera(
+void rainSurfaceBasisWorld(
     PS_IN pin,
-    out float3 tangentUCamera,
-    out float3 tangentVCamera
+    out float3 tangentUWorld,
+    out float3 tangentVWorld
 )
 {
-    float3 normalCamera =
-        rainSurfaceNormalCamera(pin.Tex);
-
     float3 dPosDx = ddx(pin.PosL);
     float3 dPosDy = ddy(pin.PosL);
 
@@ -102,11 +90,14 @@ void rainSurfaceBasisCamera(
 
     if (abs(determinant) < 0.000001)
     {
+        float3 fallbackNormal =
+            rainSurfaceNormalWorld(pin.Tex);
+
         float3 fallbackU =
             normalize(
                 cross(
                     gRainCameraUp,
-                    normalCamera
+                    fallbackNormal
                 )
             );
 
@@ -116,7 +107,7 @@ void rainSurfaceBasisCamera(
                 normalize(
                     cross(
                         gRainCameraSide,
-                        normalCamera
+                        fallbackNormal
                     )
                 );
         }
@@ -124,13 +115,13 @@ void rainSurfaceBasisCamera(
         float3 fallbackV =
             normalize(
                 cross(
-                    normalCamera,
+                    fallbackNormal,
                     fallbackU
                 )
             );
 
-        tangentUCamera = fallbackU;
-        tangentVCamera = fallbackV;
+        tangentUWorld = fallbackU;
+        tangentVWorld = fallbackV;
         return;
     }
 
@@ -138,6 +129,9 @@ void rainSurfaceBasisCamera(
         Standard UV-derivative reconstruction:
             dP/du = (dPdx * dVdy - dPdy * dVdx) / det
             dP/dv = (-dPdx * dUdy + dPdy * dUdx) / det
+
+        pin.PosL is object-space mesh position, so the resulting
+        tangents are converted to world space exactly like the normal.
     */
     float3 tangentUObject =
         (
@@ -151,7 +145,7 @@ void rainSurfaceBasisCamera(
             + dPosDy * dUvDx.x
         ) / determinant;
 
-    float3 tangentUWorld =
+    tangentUWorld =
         normalize(
             mul(
                 tangentUObject,
@@ -159,56 +153,13 @@ void rainSurfaceBasisCamera(
             )
         );
 
-    float3 tangentVWorld =
+    tangentVWorld =
         normalize(
             mul(
                 tangentVObject,
                 (float3x3)gRainObjectToWorld
             )
         );
-
-    tangentUCamera =
-        normalize(
-            float3(
-                dot(tangentUWorld, gRainCameraSide),
-                dot(tangentUWorld, gRainCameraUp),
-                dot(tangentUWorld, gRainCameraForward)
-            )
-        );
-
-    tangentVCamera =
-        normalize(
-            float3(
-                dot(tangentVWorld, gRainCameraSide),
-                dot(tangentVWorld, gRainCameraUp),
-                dot(tangentVWorld, gRainCameraForward)
-            )
-        );
-
-    /*
-        The tangent frame is purely geometric/UV based.
-        It is intentionally independent of the candidate normal so
-        derivatives are evaluated once per fragment, outside candidate
-        loops. Candidate-specific normal orthogonalization is performed
-        later without gradient instructions.
-    */
-
-    /*
-        Preserve the UV V orientation after orthogonalization.
-    */
-    if (
-        dot(
-            cross(
-                normalCamera,
-                tangentUCamera
-            ),
-            tangentVCamera
-        ) < 0.0
-    )
-    {
-        tangentVCamera =
-            -tangentVCamera;
-    }
 }
 
 
@@ -219,42 +170,41 @@ void rainSurfaceBasisCamera(
     tested visor left/right orientation. The normal itself is never
     negated or modified.
 */
-float2 rainProjectForceToUV(
-    float3 force,
-    float3 normal,
-    float3 baseTangentU,
-    float3 baseTangentV,
+float2 rainProjectForceToUVWorldWorld(
+    float3 forceWorld,
+    float3 normalWorld,
+    float3 baseTangentUWorld,
+    float3 baseTangentVWorld,
     float patternScale
 )
 {
     /*
         Candidate-specific normal correction contains no ddx/ddy.
-        This keeps the physical surface normal local to the drop while
-        allowing the actual mesh UV derivatives to be evaluated once
-        per rendered fragment.
+        The force and normal are both in WORLD space, while the UV
+        tangent frame comes from the actual rendered mesh.
     */
     float3 tangentU =
         normalize(
-            baseTangentU
-            - normal * dot(
-                baseTangentU,
-                normal
+            baseTangentUWorld
+            - normalWorld * dot(
+                baseTangentUWorld,
+                normalWorld
             )
         );
 
     float3 tangentV =
         normalize(
-            baseTangentV
-            - normal * dot(
-                baseTangentV,
-                normal
+            baseTangentVWorld
+            - normalWorld * dot(
+                baseTangentVWorld,
+                normalWorld
             )
         );
 
     if (
         dot(
             cross(
-                normal,
+                normalWorld,
                 tangentU
             ),
             tangentV
@@ -266,8 +216,8 @@ float2 rainProjectForceToUV(
 
     float2 result =
         float2(
-            -dot(force, tangentU),
-            dot(force, tangentV)
+            -dot(forceWorld, tangentU),
+            dot(forceWorld, tangentV)
         );
 
     return result * patternScale;
@@ -416,12 +366,12 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
         );
 
     float3 surfaceNormal =
-        rainSurfaceNormalCamera(spawnUV);
+        rainSurfaceNormalWorld(spawnUV);
 
     float3 baseTangentU;
     float3 baseTangentV;
 
-    rainSurfaceBasisCamera(
+    rainSurfaceBasisWorld(
         pin,
         baseTangentU,
         baseTangentV
@@ -439,7 +389,7 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
         + gRainAcceleration * gRainForceScale;
 
     float2 tangentForce =
-        rainProjectForceToUV(
+        rainProjectForceToUVWorld(
             effectiveForce,
             surfaceNormal,
             baseTangentU,
@@ -634,7 +584,7 @@ float rainDropLayer(
     float3 baseTangentU;
     float3 baseTangentV;
 
-    rainSurfaceBasisCamera(
+    rainSurfaceBasisWorld(
         pin,
         baseTangentU,
         baseTangentV
@@ -711,7 +661,7 @@ float rainDropLayer(
                 );
 
             float3 surfaceNormal =
-                rainSurfaceNormalCamera(
+                rainSurfaceNormalWorld(
                     surfaceUV
                 );
 
@@ -727,7 +677,7 @@ float rainDropLayer(
                 + gRainAcceleration * gRainForceScale;
 
             float2 tangentForce =
-                rainProjectForceToUV(
+                rainProjectForceToUVWorld(
                     effectiveForce,
                     surfaceNormal,
                     baseTangentU,
@@ -1005,24 +955,29 @@ float4 rainDebugOutput(
     float accelerationMagnitude =
         length(acceleration);
 
-    float3 normal =
-        rainSurfaceNormalCamera(
+    float3 normalObject =
+        rainSurfaceNormalObject(
+            pin.Tex
+        );
+
+    float3 normalWorld =
+        rainSurfaceNormalWorld(
             pin.Tex
         );
 
     float3 baseTangentU;
     float3 baseTangentV;
 
-    rainSurfaceBasisCamera(
+    rainSurfaceBasisWorld(
         pin,
         baseTangentU,
         baseTangentV
     );
 
     float2 tangentForce =
-        rainProjectForceToUV(
+        rainProjectForceToUVWorld(
             effectiveForce,
-            normal,
+            normalWorld,
             baseTangentU,
             baseTangentV,
             1.0
@@ -1063,11 +1018,11 @@ float4 rainDebugOutput(
         );
     }
 
-    /* Surface-normal diagnostic: RGB is camera-space normal remapped to 0..1. */
+    /* Surface-normal diagnostic: RGB is OBJECT-SPACE normal remapped to 0..1. */
     if (gRainDebug == 5)
     {
         return float4(
-            normal * 0.5 + 0.5,
+            normalObject * 0.5 + 0.5,
             1.0
         );
     }
@@ -1075,8 +1030,7 @@ float4 rainDebugOutput(
     /*
         Local movement-direction diagnostic.
         Red/green encode the projected UV direction, blue encodes its strength.
-        This is intentionally based on the actual mesh tangent frame and the
-        local normal at the current fragment.
+        The force, normal and tangent frame are evaluated in WORLD space.
     */
     if (gRainDebug == 6)
     {
