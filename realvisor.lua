@@ -505,7 +505,7 @@ local rainStateUpdateParams = {
     },
 
     shader = [[
-        SamplerState samPoint
+        SamplerState samPointRain
         {
             Filter = MIN_MAG_MIP_POINT;
             AddressU = CLAMP;
@@ -565,7 +565,7 @@ local rainStateUpdateParams = {
 
             float4 state =
                 txRainState.SampleLevel(
-                    samPoint,
+                    samPointRain,
                     stateUV,
                     0.0
                 );
@@ -3709,7 +3709,7 @@ render.on('main.track.transparent', function()
 
 
 
-        ac.log('[RealVisor] texture =' .. textureRainSurfaceNormal)
+        -- ac.log('[RealVisor] texture =' .. textureRainSurfaceNormal)
 end)
 
 ------------------------------------------------------------
