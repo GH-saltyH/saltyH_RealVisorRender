@@ -267,8 +267,8 @@ local cfg = scriptSettings:mapConfig({
         -- 2 = input acceleration
         -- 3 = solid render-path test
         -- 4 = mesh UV coverage
-        -- 5 = local surface normal (camera-space RGB)
-        -- 6 = local projected movement direction / strength
+        -- 5 = local surface normal (object-space RGB)
+        -- 6 = local projected movement direction / strength (world-space physics)
         RAIN_DEBUG = 0,
 
     },
