@@ -504,7 +504,108 @@ local rainStateUpdateParams = {
         gRainStateInit = 0.0,
     },
 
-    shader = nil,
+    shader = [[
+        SamplerState samPoint
+        {
+            Filter = MIN_MAG_MIP_POINT;
+            AddressU = CLAMP;
+            AddressV = CLAMP;
+            AddressW = CLAMP;
+        };
+
+        float rainStateHash(float n)
+        {
+            return frac(
+                sin(n * 127.1 + 311.7) * 43758.5453
+            );
+        }
+
+        float4 main(PS_IN pin)
+        {
+            float count = max(gRainStateCount, 1.0);
+
+            float index =
+                min(
+                    floor(pin.Tex.x * count),
+                    count - 1.0
+                );
+
+            float2 stateUV =
+                float2(
+                    (index + 0.5) / count,
+                    0.5
+                );
+
+            if (gRainStateInit > 0.5)
+            {
+                float seed = index + 1.0;
+
+                float2 position =
+                    float2(
+                        rainStateHash(seed + 11.0),
+                        rainStateHash(seed + 47.0)
+                    );
+
+                float2 velocity =
+                    (
+                        float2(
+                            rainStateHash(seed + 83.0),
+                            rainStateHash(seed + 131.0)
+                        )
+                        * 2.0
+                        - 1.0
+                    )
+                    * 0.006;
+
+                return float4(
+                    position,
+                    velocity
+                );
+            }
+
+            float4 state =
+                txRainState.SampleLevel(
+                    samPoint,
+                    stateUV,
+                    0.0
+                );
+
+            float2 position = state.rg;
+            float2 velocity = state.ba;
+
+            float dt =
+                max(
+                    gRainStateDeltaTime,
+                    0.0
+                );
+
+            velocity +=
+                gRainStateForce * dt;
+
+            velocity *=
+                exp(
+                    -max(gRainStateDrag, 0.0) * dt
+                );
+
+            float speed = length(velocity);
+
+            if (speed > gRainStateMaxSpeed)
+            {
+                velocity =
+                    velocity
+                    / max(speed, 0.000001)
+                    * gRainStateMaxSpeed;
+            }
+
+            position += velocity * dt;
+            position = frac(position);
+
+            return float4(
+                position,
+                velocity
+            );
+        }
+    ]],
 }
     
 local motionTarget= vec3(
