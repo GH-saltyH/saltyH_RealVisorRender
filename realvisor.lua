@@ -206,7 +206,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_DRAG = 7.0,
 
         -- Maximum procedural surface speed in UV-space units per second.
-        RAIN_FLOW_MAX_SPEED = 0.065,
+        RAIN_FLOW_MAX_SPEED = 0.035,
 
         -- World-space acceleration influence.
         -- RainFX keeps vehicle acceleration in WORLD space and projects
