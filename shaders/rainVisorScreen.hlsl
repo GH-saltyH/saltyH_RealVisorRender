@@ -512,15 +512,6 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
             distanceToDrop
         );
 
-    float dropOpacity =
-        lerp(
-            0.55,
-            1.0,
-            dropRadius01
-        );
-
-    drop *= dropOpacity;
-
     float movementLength =
         length(movement);
 
@@ -896,6 +887,19 @@ float rainDropLayer(
                     dropSize * 0.30,
                     distanceToDrop
                 );
+
+            /*
+                Larger drops receive a stronger visible pop.
+                This is a visual cue for the mass model, not additional physics.
+            */
+            float dropOpacity =
+                lerp(
+                    0.55,
+                    1.0,
+                    dropRadius01
+                );
+
+            drop *= dropOpacity;
 
             float movementLength =
                 length(movement);
