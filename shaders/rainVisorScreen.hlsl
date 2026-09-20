@@ -7,6 +7,8 @@ SamplerState rainStatePoint
 };
 
 
+#ifdef RAIN_GPU_STATE_PASS
+
 float2 rainHash22(float2 p)
 {
     p = float2(
