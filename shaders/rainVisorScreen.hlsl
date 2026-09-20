@@ -839,16 +839,22 @@ float rainDropLayer(
                     age
                 );
 
-            travelDistanceUV =
-                min(
-                    travelDistanceUV,
-                    gRainFlowMax
-                );
-
             float travelDistanceGrid =
                 travelDistanceUV
                 * patternScale
                 * cellScale;
+
+            /*
+                Candidate lookup is limited to the current cell and its
+                immediate 8 neighbors. Keep the moving droplet inside that
+                search envelope; otherwise the droplet itself disappears
+                while the trail near its spawn cell remains visible.
+            */
+            travelDistanceGrid =
+                min(
+                    travelDistanceGrid,
+                    gRainFlowMax
+                );
 
             float2 movement =
                 forceMagnitude > 0.000001
@@ -893,7 +899,10 @@ float rainDropLayer(
             float trail =
                 0.0;
 
-            if (movementLength > dropSize * 0.50)
+            if (
+                movementLength > dropSize * 1.25
+                && dynamic01 > 0.50
+            )
             {
                 float2 movementDir =
                     movement
@@ -960,15 +969,15 @@ float rainDropLayer(
 
                 trail *=
                     smoothstep(
-                        0.20,
-                        0.60,
+                        0.35,
+                        0.75,
                         dynamic01
                     );
 
                 trail *=
                     lerp(
-                        0.05,
-                        0.25,
+                        0.03,
+                        0.15,
                         dynamic01
                     );
             }
