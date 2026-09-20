@@ -224,9 +224,10 @@ local cfg = scriptSettings:mapConfig({
         -- Acceleration response / damping
         RAIN_FLOW_RESPONSE = 5.0,
 
-        -- Maximum procedural travel distance per drop lifetime.
-        -- This is a physical travel guard, not a trail-length cap.
-        RAIN_FLOW_MAX = 0.20,
+        -- Maximum procedural travel distance in grid-space units.
+        -- The shader uses this guard to keep moving drops inside its
+        -- current-cell + 8-neighbor search envelope.
+        RAIN_FLOW_MAX = 0.65,
 
         -- Rain surface / adhesion model
         -- UV center is intentionally explicit so the surface model
