@@ -1,3 +1,12 @@
+SamplerState rainStatePoint
+{
+    Filter = MIN_MAG_MIP_POINT;
+    AddressU = CLAMP;
+    AddressV = CLAMP;
+    AddressW = CLAMP;
+};
+
+
 float2 rainHash22(float2 p)
 {
     p = float2(
@@ -1368,8 +1377,6 @@ float rainUVVisibilityDiagnostic(PS_IN pin)
 }
 
 
-#ifdef RAIN_GPU_STATE_PASS
-
 /*
     Stage 1 persistent GPU state validation.
 
@@ -1383,15 +1390,6 @@ float rainUVVisibilityDiagnostic(PS_IN pin)
     This pass only validates that state written in the previous frame
     can be read, integrated and written into the other canvas.
 */
-
-SamplerState rainStatePoint
-{
-    Filter = MIN_MAG_MIP_POINT;
-    AddressU = CLAMP;
-    AddressV = CLAMP;
-    AddressW = CLAMP;
-};
-
 
 float rainStateHash(float n)
 {
@@ -1514,6 +1512,12 @@ float4 rainStateMain(PS_IN pin)
         position,
         velocity
     );
+}
+
+
+float4 main(PS_IN pin)
+{
+    return rainStateMain(pin);
 }
 
 
