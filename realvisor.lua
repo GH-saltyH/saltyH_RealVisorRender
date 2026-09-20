@@ -269,7 +269,7 @@ local cfg = scriptSettings:mapConfig({
         -- 4 = mesh UV coverage
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
-        RAIN_DEBUG = 0,
+        RAIN_DEBUG = 14,
 
     },
 })
@@ -2255,8 +2255,9 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
 -- Texture Bindings
 --------------------------------------------------------
 
-local textureRaindrops = appFolder .. 'texture/drops.dds'
-local textureRainSurfaceNormal = appFolder .. 'texture/GLASS_EXT_DUMMY_surfaceNormal_objectSpace.dds'
+local textureRaindrops = appFolder .. '/texture/drops.dds'
+local textureRainSurfaceNormal = appFolder .. '/texture/GLASS_EXT_DUMMY_surfaceNormal_objectSpace.dds'
+local testtextureRainSurfaceNormal = appFolder .. '/texture/test_GLASS_EXT_DUMMY_surfaceNormal_objectSpace.dds'
 
 
 --------------------------------------------------------
@@ -3380,7 +3381,7 @@ render.on('main.track.transparent', function()
 
 
 
-        ac.log('[RealVisor] track.transparent render.mesh=' .. tostring(result))
+        ac.log('[RealVisor] texture =' .. textureRainSurfaceNormal)
 end)
 
 ------------------------------------------------------------

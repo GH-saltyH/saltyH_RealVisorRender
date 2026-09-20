@@ -28,12 +28,30 @@ float rainHash(float2 p)
 
     so it is in the same coordinate system as the acceleration force.
 */
+
+float3 rainSurfaceNormalObject_nonSaturate(float2 uv)
+{
+    float3 encoded =
+        txRainSurfaceNormal.SampleLevel(
+            samLinearSimple,
+            uv,
+            0.0
+        ).rgb;
+
+    float3 decoded =
+        encoded * 2.0 - 1.0;
+
+    return normalize(decoded);
+}
+
+
 float3 rainSurfaceNormalObject(float2 uv)
 {
     float3 encoded =
         txRainSurfaceNormal.SampleLevel(
             samLinearSimple,
-            saturate(uv),
+            // saturate(uv), -- removed
+            uv,
             0.0
         ).rgb;
 
@@ -951,6 +969,13 @@ float4 rainDebugOutput(
     PS_IN pin
 )
 {
+    float3 normalTexture = 
+    txRainSurfaceNormal.SampleLevel(
+        samLinearSimple,
+        pin.Tex,
+        0.0
+    ).rgb;
+    
     float3 acceleration =
         gRainAcceleration
         * gRainForceScale;
@@ -1048,10 +1073,7 @@ float4 rainDebugOutput(
     */
     if (gRainDebug == 5)
     {
-        return float4(
-            encodedNormal,
-            1.0
-        );
+        return float4(normalTexture, 1.0);
     }
 
     /*
@@ -1060,12 +1082,108 @@ float4 rainDebugOutput(
     */
     if (gRainDebug == 7)
     {
+        float3 normalObjectNoneSaturate = rainSurfaceNormalObject_nonSaturate(pin.Tex);
+
         return float4(
-            normalObject * 0.5 + 0.5,
+            normalObjectNoneSaturate * 0.5 + 0.5,
             1.0
         );
     }
 
+    if (gRainDebug == 8)
+    {
+        float3 decoded =
+            normalTexture * 2.0 - 1.0;
+
+        return float4(
+            decoded * 0.5 + 0.5,
+            1.0
+        );
+    }
+
+    if (gRainDebug == 9)
+    {
+        float3 decoded =
+            normalTexture * 2.0 - 1.0;
+
+        float len = length(decoded);
+
+        return float4(
+            saturate(len).xxx,
+            1.0
+        );
+    }
+
+if (gRainDebug == 10)
+{
+    float2 uv = pin.Tex;
+
+    return float4(
+        frac(uv),
+        0.0,
+        1.0
+    );
+}
+
+if (gRainDebug == 11)
+{
+    float2 uv = pin.Tex;
+    float2 clampedUV = saturate(uv);
+
+    float2 difference = abs(uv - clampedUV);
+
+    return float4(
+        saturate(difference * 4.0),
+        0.0,
+        1.0
+    );
+}
+
+if (gRainDebug == 12)
+{
+    float2 uv = pin.Tex;
+    float2 clamped = saturate(uv);
+
+    return float4(
+        frac(uv),
+        0.0,
+        1.0
+    );
+}
+if (gRainDebug == 13)
+{
+    float2 uv = pin.Tex;
+    float2 clamped = saturate(uv);
+
+    float2 diff = uv - clamped;
+
+    return float4(
+        saturate(abs(diff)),
+        0.0,
+        1.0
+    );
+}
+float2 uv = pin.Tex;
+float2 uvClamped = saturate(uv);
+
+float3 a =
+    txRainSurfaceNormal.SampleLevel(
+        samLinearSimple,
+        uv,
+        0.0
+    ).rgb;
+
+float3 b =
+    txRainSurfaceNormal.SampleLevel(
+        samLinearSimple,
+        uvClamped,
+        0.0
+    ).rgb;
+ 
+    if (gRainDebug == 14)
+{
+    return float4(abs(a - b), 1.0);
+}
     /*
         Local movement-direction diagnostic.
         Red/green encode the projected UV direction, blue encodes its strength.
