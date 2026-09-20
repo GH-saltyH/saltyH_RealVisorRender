@@ -685,16 +685,12 @@ float rainDropLayer(
                     0.08 + rndPos.y * 0.84
                 );
 
-            float2 surfaceUV =
-                rainPatternToMeshUV(
-                    spawnPos / cellScale,
-                    patternScale,
-                    patternOffset
-                );
-
+            // The droplet is rendered at the current surface fragment.
+            // Evaluate the force frame at that same surface point so the
+            // normal and tangent basis stay spatially consistent.
             float3 surfaceNormal =
                 rainSurfaceNormalWorld(
-                    surfaceUV
+                    pin.Tex
                 );
 
             float3 gravityForce =
