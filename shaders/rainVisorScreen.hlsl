@@ -739,75 +739,30 @@ float rainDropLayer(
             float forceMagnitude =
                 length(tangentForce);
 
-            float lifetime =
-                lerp(
-                    gRainDropLifetimeMin,
-                    gRainDropLifetimeMax,
-                    rndState.x
-                );
+            /*
+                Continuous procedural age:
+                The previous lifetime/respawn cycle rebuilt every droplet at
+                its original spawnPos. That produced the visible "sticker"
+                pattern and periodic blinking.
 
-            lifetime =
-                max(
-                    lifetime,
-                    0.001
-                );
+                For the physics validation stage, each procedural droplet now
+                has one continuous trajectory. The randomized phase only
+                staggers when each droplet appears; it does not reset its
+                position later.
+            */
+            float birthDelay =
+                rndMotion.y * 1.5;
 
-            float respawnGap =
-                lerp(
-                    gRainDropRespawnGapMin,
-                    gRainDropRespawnGapMax,
-                    rndState.y
-                );
-
-            float cycleDuration =
-                lifetime
-                + max(
-                    respawnGap,
-                    0.0
-                );
-
-            float cycleTime =
-                fmod(
-                    time
-                    + rndMotion.y * cycleDuration,
-                    cycleDuration
-                );
-
-            if (cycleTime >= lifetime)
-                continue;
-
-            float age = cycleTime;
-
-            float life01 =
-                saturate(
-                    age / lifetime
-                );
-
-            float lifeFadeIn =
-                smoothstep(
-                    0.0,
-                    min(
-                        0.08,
-                        lifetime * 0.20
-                    ),
-                    age
-                );
-
-            float lifeFadeOut =
-                1.0
-                - smoothstep(
-                    lifetime
-                    - min(
-                        0.12,
-                        lifetime * 0.20
-                    ),
-                    lifetime,
-                    age
-                );
+            float age =
+                time
+                - birthDelay;
 
             float lifeVisibility =
-                lifeFadeIn
-                * lifeFadeOut;
+                smoothstep(
+                    0.0,
+                    0.20,
+                    age
+                );
 
             float excessForce =
                 max(
@@ -825,6 +780,9 @@ float rainDropLayer(
                         0.001
                     )
                 );
+
+            if (age < 0.0)
+                continue;
 
             if (excessForce <= 0.000001)
             {
