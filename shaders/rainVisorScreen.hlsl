@@ -1519,7 +1519,7 @@ float rainPersistentDropLayer(PS_IN pin)
             Radius is deterministic per state index and intentionally
             independent from the current fragment.
         */
-        float radius01 = rainStateHash(stateIndex + 211.0);
+        float radius01 = rainHash(float2(stateIndex, 211.0));
         float radius = lerp(0.006, 0.014, radius01);
 
         float distanceToDrop = length(delta);
