@@ -9,6 +9,154 @@ SamplerState rainStatePoint
 
 #ifdef RAIN_GPU_STATE_PASS
 
+/*
+    Stage 1 persistent GPU state validation.
+
+    One ExtraCanvas texel represents one droplet:
+        R = position X
+        G = position Y
+        B = velocity X
+        A = velocity Y
+
+    The Lua side ping-pongs two persistent ExtraCanvas resources.
+    This pass only validates that state written in the previous frame
+    can be read, integrated and written into the other canvas.
+*/
+
+float rainStateHash(float n)
+{
+    return frac(
+        sin(n * 127.1 + 311.7) * 43758.5453
+    );
+}
+
+
+float4 rainStateMain(PS_IN pin)
+{
+    float count =
+        max(
+            gRainStateCount,
+            1.0
+        );
+
+    float index =
+        min(
+            floor(pin.Tex.x * count),
+            count - 1.0
+        );
+
+    float2 stateUV =
+        float2(
+            (index + 0.5) / count,
+            0.5
+        );
+
+    if (gRainStateInit > 0.5)
+    {
+        float seed =
+            index + 1.0;
+
+        float2 position =
+            float2(
+                rainStateHash(seed + 11.0),
+                rainStateHash(seed + 47.0)
+            );
+
+        float2 velocity =
+            (
+                float2(
+                    rainStateHash(seed + 83.0),
+                    rainStateHash(seed + 131.0)
+                )
+                * 2.0
+                - 1.0
+            )
+            * 0.006;
+
+        return float4(
+            position,
+            velocity
+        );
+    }
+
+    float4 state =
+        txRainState.SampleLevel(
+            rainStatePoint,
+            stateUV,
+            0.0
+        );
+
+    float2 position =
+        state.rg;
+
+    float2 velocity =
+        state.ba;
+
+    float dt =
+        max(
+            gRainStateDeltaTime,
+            0.0
+        );
+
+    /*
+        Minimal stateful integration:
+            v += F * dt
+            drag
+            clamp speed
+            p += v * dt
+
+        This is deliberately independent from the final RainFX
+        adhesion/normal/merge model. It exists only to prove
+        persistence and A/B ownership first.
+    */
+    velocity +=
+        gRainStateForce
+        * dt;
+
+    velocity *=
+        exp(
+            -max(gRainStateDrag, 0.0)
+            * dt
+        );
+
+    float speed =
+        length(velocity);
+
+    if (
+        speed
+        > gRainStateMaxSpeed
+    )
+    {
+        velocity =
+            velocity
+            / max(speed, 0.000001)
+            * gRainStateMaxSpeed;
+    }
+
+    position +=
+        velocity
+        * dt;
+
+    position =
+        frac(position);
+
+    return float4(
+        position,
+        velocity
+    );
+}
+
+
+float4 main(PS_IN pin)
+{
+    return rainStateMain(pin);
+}
+
+
+
+
+#else
+
 float2 rainHash22(float2 p)
 {
     p = float2(
@@ -1024,151 +1172,7 @@ float rainUVVisibilityDiagnostic(PS_IN pin)
 }
 
 
-/*
-    Stage 1 persistent GPU state validation.
 
-    One ExtraCanvas texel represents one droplet:
-        R = position X
-        G = position Y
-        B = velocity X
-        A = velocity Y
-
-    The Lua side ping-pongs two persistent ExtraCanvas resources.
-    This pass only validates that state written in the previous frame
-    can be read, integrated and written into the other canvas.
-*/
-
-float rainStateHash(float n)
-{
-    return frac(
-        sin(n * 127.1 + 311.7) * 43758.5453
-    );
-}
-
-
-float4 rainStateMain(PS_IN pin)
-{
-    float count =
-        max(
-            gRainStateCount,
-            1.0
-        );
-
-    float index =
-        min(
-            floor(pin.Tex.x * count),
-            count - 1.0
-        );
-
-    float2 stateUV =
-        float2(
-            (index + 0.5) / count,
-            0.5
-        );
-
-    if (gRainStateInit > 0.5)
-    {
-        float seed =
-            index + 1.0;
-
-        float2 position =
-            float2(
-                rainStateHash(seed + 11.0),
-                rainStateHash(seed + 47.0)
-            );
-
-        float2 velocity =
-            (
-                float2(
-                    rainStateHash(seed + 83.0),
-                    rainStateHash(seed + 131.0)
-                )
-                * 2.0
-                - 1.0
-            )
-            * 0.006;
-
-        return float4(
-            position,
-            velocity
-        );
-    }
-
-    float4 state =
-        txRainState.SampleLevel(
-            rainStatePoint,
-            stateUV,
-            0.0
-        );
-
-    float2 position =
-        state.rg;
-
-    float2 velocity =
-        state.ba;
-
-    float dt =
-        max(
-            gRainStateDeltaTime,
-            0.0
-        );
-
-    /*
-        Minimal stateful integration:
-            v += F * dt
-            drag
-            clamp speed
-            p += v * dt
-
-        This is deliberately independent from the final RainFX
-        adhesion/normal/merge model. It exists only to prove
-        persistence and A/B ownership first.
-    */
-    velocity +=
-        gRainStateForce
-        * dt;
-
-    velocity *=
-        exp(
-            -max(gRainStateDrag, 0.0)
-            * dt
-        );
-
-    float speed =
-        length(velocity);
-
-    if (
-        speed
-        > gRainStateMaxSpeed
-    )
-    {
-        velocity =
-            velocity
-            / max(speed, 0.000001)
-            * gRainStateMaxSpeed;
-    }
-
-    position +=
-        velocity
-        * dt;
-
-    position =
-        frac(position);
-
-    return float4(
-        position,
-        velocity
-    );
-}
-
-
-float4 main(PS_IN pin)
-{
-    return rainStateMain(pin);
-}
-
-
-#else
 
 float4 rainDebugOutput(
     PS_IN pin
