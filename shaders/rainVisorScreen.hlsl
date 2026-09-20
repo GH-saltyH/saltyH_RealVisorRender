@@ -512,6 +512,15 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
             distanceToDrop
         );
 
+    float dropOpacity =
+        lerp(
+            0.55,
+            1.0,
+            dropRadius01
+        );
+
+    drop *= dropOpacity;
+
     float movementLength =
         length(movement);
 
@@ -671,12 +680,35 @@ float rainDropLayer(
                     pow(rndState.y, 1.65)
                 );
 
-            float adhesion =
+            /*
+                Approximate droplet mass from projected area.
+                Surface-tension holding force scales roughly with radius,
+                while mass/gravity scales with area, so larger drops should
+                require less tangential force to start moving.
+            */
+            float dropRadius01 =
+                saturate(
+                    (dropSize - 0.032)
+                    / (0.115 - 0.032)
+                );
+
+            float massFactor =
+                lerp(
+                    1.0,
+                    9.0,
+                    dropRadius01 * dropRadius01
+                );
+
+            float adhesionBase =
                 lerp(
                     gRainAdhesionMin,
                     gRainAdhesionMax,
                     rndMotion.x
                 );
+
+            float adhesion =
+                adhesionBase
+                / sqrt(massFactor);
 
             float2 spawnPos =
                 cell
@@ -691,14 +723,6 @@ float rainDropLayer(
             float3 surfaceNormal =
                 rainSurfaceNormalWorld(
                     pin.Tex
-                );
-
-            float surfaceNormalWeight =
-                saturate(
-                    dot(
-                        surfaceNormal,
-                        surfaceNormal
-                    )
                 );
 
             float3 gravityForce =
@@ -1200,7 +1224,44 @@ if (gRainDebug == 15)
 }
 
 
-if (gRainDebug == 16)
+/*
+        17 = reference adhesion / projected force.
+        This is intentionally a global diagnostic because individual
+        procedural droplet sizes are not persistent render targets.
+    */
+    if (gRainDebug == 17)
+    {
+        float adhesionReference =
+            lerp(
+                gRainAdhesionMin,
+                gRainAdhesionMax,
+                0.5
+            );
+
+        float excess =
+            max(
+                tangentMagnitude - adhesionReference,
+                0.0
+            );
+
+        return float4(
+            saturate(
+                adhesionReference
+                / max(gRainAdhesionMax, 0.001)
+            ),
+            saturate(
+                tangentMagnitude
+                / max(gRainAdhesionMax, 0.001)
+            ),
+            saturate(
+                excess
+                / max(adhesionReference, 0.001)
+            ),
+            1.0
+        );
+    }
+
+    if (gRainDebug == 16)
 {
 
 float forceLength =
