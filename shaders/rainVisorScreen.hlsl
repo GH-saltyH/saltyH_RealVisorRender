@@ -760,7 +760,7 @@ float rainDropLayer(
                     surfaceNormal,
                     baseTangentU,
                     baseTangentV,
-                    patternScale
+                    1.0
                 );
 
             float forceMagnitude =
@@ -826,11 +826,12 @@ float rainDropLayer(
             }
 
             /*
-                Travel distance is first calculated in the force/UV domain,
-                then converted to procedural grid space exactly once.
+                Travel distance is defined in MESH-UV space.
+                Convert it to procedural grid space exactly once for rendering.
 
-                This also makes the trail length equal to the actual movement
-                distance instead of using an unrelated visual length.
+                This keeps the physical speed independent of the procedural
+                cell density (cellScale) and avoids multiplying the speed
+                domain by patternScale twice.
             */
             float travelDistanceUV =
                 rainDropTravelDistance(
@@ -892,7 +893,7 @@ float rainDropLayer(
             float trail =
                 0.0;
 
-            if (movementLength > dropSize * 0.35)
+            if (movementLength > dropSize * 0.50)
             {
                 float2 movementDir =
                     movement
@@ -959,15 +960,15 @@ float rainDropLayer(
 
                 trail *=
                     smoothstep(
-                        0.10,
-                        0.45,
+                        0.20,
+                        0.60,
                         dynamic01
                     );
 
                 trail *=
                     lerp(
-                        0.10,
-                        0.70,
+                        0.05,
+                        0.25,
                         dynamic01
                     );
             }
