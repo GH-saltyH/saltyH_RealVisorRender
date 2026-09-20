@@ -262,6 +262,28 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DROP_RESPAWN_GAP_MIN = 0.15,
         RAIN_DROP_RESPAWN_GAP_MAX = 0.75,
 
+        ------------------------------------------------------------
+        -- v0.6.1 RainFX persistent GPU state validation
+        ------------------------------------------------------------
+
+        -- Number of persistent droplet state texels.
+        -- Stage 1 uses one texel per droplet.
+        RAIN_GPU_STATE_COUNT = 256,
+
+        -- Stage 1 validation:
+        -- 0 = disabled
+        -- 1 = initialize only
+        -- 2 = persistent A/B physics update
+        RAIN_GPU_STATE_MODE = 2,
+
+        -- Synthetic force used only by the Stage 1 state validation.
+        -- This is deliberately independent from the final RainFX force model.
+        RAIN_GPU_STATE_TEST_FORCE_X = 0.035,
+        RAIN_GPU_STATE_TEST_FORCE_Y = 0.010,
+
+        RAIN_GPU_STATE_DRAG = 0.35,
+        RAIN_GPU_STATE_MAX_SPEED = 0.12,
+
         -- Debug
         -- 0 = normal rain
         -- 1 = projected force magnitude / components
@@ -270,7 +292,8 @@ local cfg = scriptSettings:mapConfig({
         -- 4 = mesh UV coverage
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
-        RAIN_DEBUG = 16,
+        -- 18 = persistent GPU state position / velocity diagnostic
+        RAIN_DEBUG = 18,
 
     },
 })
@@ -439,6 +462,50 @@ local rainAccelerationCurrent = vec3(0, 0, 0)
 local rainPreviousVelocity = nil
 local rainLastDebugMode = nil
 local rainRenderDiagnosticLogged = false
+
+------------------------------------------------------------
+-- RainFX persistent GPU state
+--
+-- Stage 1:
+--   ExtraCanvas A -> physics shader -> B
+--   ExtraCanvas B -> physics shader -> A
+--
+-- Each texel currently stores:
+--   RG = position
+--   BA = velocity
+--
+-- The state texture is intentionally independent from the
+-- procedural droplet renderer until persistence is verified.
+------------------------------------------------------------
+
+local rainStateA = nil
+local rainStateB = nil
+local rainStateReadIsA = true
+local rainStateInitialized = false
+local rainStateLastFrame = -1
+
+local rainStateUpdateParams = {
+    defines = {
+        RAIN_GPU_STATE_PASS = true,
+    },
+
+    textures = {
+        -- Kept bound for a stable shader parameter layout.
+        -- Initialization mode does not sample this texture.
+        txRainState = false,
+    },
+
+    values = {
+        gRainStateDeltaTime = 0.0,
+        gRainStateCount = 256.0,
+        gRainStateForce = vec2(0.0, 0.0),
+        gRainStateDrag = 0.35,
+        gRainStateMaxSpeed = 0.12,
+        gRainStateInit = 0.0,
+    },
+
+    shader = nil,
+}
     
 local motionTarget= vec3(
     0,
@@ -3124,6 +3191,151 @@ end
 
 
 --------------------------------------------------------
+-- RainFX persistent GPU state
+--------------------------------------------------------
+
+local function initializeRainGPUState()
+    if rainStateA and rainStateB then
+        return true
+    end
+
+    local count =
+        math.max(
+            1,
+            math.floor(
+                cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+            )
+        )
+
+    rainStateA =
+        ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State A')
+
+    rainStateB =
+        ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State B')
+
+    if not rainStateA or not rainStateB then
+        ac.warn(
+            appNameDebug
+            .. ' Rain GPU state: ExtraCanvas allocation failed'
+        )
+
+        rainStateA = nil
+        rainStateB = nil
+        return false
+    end
+
+    rainStateUpdateParams.values.gRainStateCount = count
+    rainStateUpdateParams.values.gRainStateInit = 1.0
+    rainStateUpdateParams.textures.txRainState = false
+
+    -- Initialization writes both canvases without sampling either target.
+    -- This avoids relying on the initial contents of a newly allocated canvas.
+    rainStateA:updateWithShader(rainStateUpdateParams)
+    rainStateB:updateWithShader(rainStateUpdateParams)
+
+    rainStateUpdateParams.values.gRainStateInit = 0.0
+
+    rainStateReadIsA = true
+    rainStateInitialized = true
+    rainStateLastFrame = -1
+
+    ac.log(
+        appNameDebug
+        .. ' Rain GPU state initialized: '
+        .. tostring(count)
+        .. ' texels'
+    )
+
+    return true
+end
+
+
+local function updateRainGPUState(sim)
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE <= 0 then
+        return
+    end
+
+    if not initializeRainGPUState() then
+        return
+    end
+
+    if not rainStateInitialized then
+        return
+    end
+
+    local frame =
+        sim
+        and sim.frame
+
+    if frame == nil then
+        return
+    end
+
+    -- main.track.transparent can be reached more than once around a frame.
+    -- State must advance exactly once per simulation frame.
+    if rainStateLastFrame == frame then
+        return
+    end
+
+    rainStateLastFrame = frame
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 1 then
+        return
+    end
+
+    local dt =
+        sim.dt
+
+    if not dt
+        or dt <= 0.000001 then
+        return
+    end
+
+    rainStateUpdateParams.values.gRainStateDeltaTime =
+        math.min(dt, 0.05)
+
+    rainStateUpdateParams.values.gRainStateForce:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_TEST_FORCE_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_TEST_FORCE_Y
+    )
+
+    rainStateUpdateParams.values.gRainStateDrag =
+        cfg.RUNTIME.RAIN_GPU_STATE_DRAG
+
+    rainStateUpdateParams.values.gRainStateMaxSpeed =
+        cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
+
+    local readState =
+        rainStateReadIsA
+        and rainStateA
+        or rainStateB
+
+    local writeState =
+        rainStateReadIsA
+        and rainStateB
+        or rainStateA
+
+    rainStateUpdateParams.textures.txRainState =
+        readState
+
+    writeState:updateWithShader(
+        rainStateUpdateParams
+    )
+
+    rainStateReadIsA =
+        not rainStateReadIsA
+end
+
+
+--------------------------------------------------------
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
 local UV_DEBUG_SHADER = [[
@@ -3244,6 +3456,12 @@ render.on('main.track.transparent', function()
     --------------------------------------------------------
 
     --------------------------------------------------------
+    -- Persistent GPU state update
+    --------------------------------------------------------
+
+    updateRainGPUState(sim)
+
+    --------------------------------------------------------
     -- Render
     --------------------------------------------------------
     
@@ -3278,6 +3496,11 @@ render.on('main.track.transparent', function()
 
             txRainSurfaceNormal =
                 textureRainSurfaceNormal,
+
+            txRainState =
+                rainStateReadIsA
+                and rainStateA
+                or rainStateB,
 
         },
 
@@ -3362,6 +3585,9 @@ render.on('main.track.transparent', function()
 
             gRainTime =
                 sim.time,
+
+            gRainStateCount =
+                cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
         },
 
         shader = 
