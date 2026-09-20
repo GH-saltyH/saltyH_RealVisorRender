@@ -989,7 +989,7 @@ float4 rainDebugOutput(
 
     float3 effectiveForce =
         gravityForce
-        + acceleration;
+        + gRainAcceleration * gRainForceScale;
 
     float accelerationMagnitude =
         length(acceleration);
@@ -1183,6 +1183,35 @@ float3 b =
     if (gRainDebug == 14)
 {
     return float4(abs(a - b), 1.0);
+}
+if (gRainDebug == 15)
+{
+    float3 normalWorld =
+        rainSurfaceNormalWorld(pin.Tex);
+
+    return float4(
+        normalWorld * 0.5 + 0.5,
+        1.0
+    );
+}
+
+
+if (gRainDebug == 16)
+{
+
+float forceLength =
+    length(tangentForce);
+
+float2 forceDirection =
+    forceLength > 0.000001
+    ? tangentForce / forceLength
+    : float2(0.0, 0.0);
+
+return float4(
+    forceDirection * 0.5 + 0.5,
+    saturate(forceLength),
+    0.3
+);
 }
     /*
         Local movement-direction diagnostic.
