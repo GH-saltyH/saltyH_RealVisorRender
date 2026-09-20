@@ -991,6 +991,17 @@ float4 rainDebugOutput(
         gRainAcceleration
         * gRainForceScale;
 
+    float3 gravityForce =
+        float3(
+            0.0,
+            -gRainGravity,
+            0.0
+        );
+
+    float3 effectiveForce =
+        gravityForce
+        + acceleration;
+
     float accelerationMagnitude =
         length(acceleration);
 
@@ -1010,7 +1021,7 @@ float4 rainDebugOutput(
 
     float2 tangentForce =
         rainProjectForceToUV(
-            acceleration,
+            effectiveForce,
             normal,
             baseTangentU,
             baseTangentV,
