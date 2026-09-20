@@ -291,6 +291,112 @@ float2 rainPatternToMeshUV(
 
 
 /*
+    Analytic droplet travel under linear drag.
+
+    This keeps the droplet deterministic without storing per-drop velocity
+    between frames. The force excess determines acceleration, drag determines
+    the terminal speed, and the terminal speed is capped independently.
+*/
+float rainDropTravelDistance(
+    float excessForce,
+    float age
+)
+{
+    if (excessForce <= 0.000001 || age <= 0.0)
+        return 0.0;
+
+    float acceleration =
+        excessForce * gRainFlowAcceleration;
+
+    float drag =
+        max(
+            gRainFlowDrag,
+            0.000001
+        );
+
+    float uncappedTerminalSpeed =
+        acceleration / drag;
+
+    float maxSpeed =
+        max(
+            gRainFlowMaxSpeed,
+            0.0
+        );
+
+    if (maxSpeed <= 0.0)
+        return 0.0;
+
+    /*
+        Below the speed cap, integrate:
+            v(t) = vTerminal * (1 - exp(-drag * t))
+            s(t) = vTerminal * t
+                   - vTerminal / drag * (1 - exp(-drag * t))
+    */
+    if (uncappedTerminalSpeed <= maxSpeed)
+    {
+        return
+            uncappedTerminalSpeed * age
+            - (
+                uncappedTerminalSpeed / drag
+            ) * (
+                1.0
+                - exp(
+                    -drag * age
+                )
+            );
+    }
+
+    /*
+        If the natural terminal speed is above the cap, integrate the
+        accelerating section up to the cap, then continue at max speed.
+    */
+    float speedRatio =
+        saturate(
+            maxSpeed / uncappedTerminalSpeed
+        );
+
+    float timeToMax =
+        -log(
+            max(
+                1.0 - speedRatio,
+                0.000001
+            )
+        ) / drag;
+
+    if (age <= timeToMax)
+    {
+        return
+            uncappedTerminalSpeed * age
+            - (
+                uncappedTerminalSpeed / drag
+            ) * (
+                1.0
+                - exp(
+                    -drag * age
+                )
+            );
+    }
+
+    float distanceToMax =
+        uncappedTerminalSpeed * timeToMax
+        - (
+            uncappedTerminalSpeed / drag
+        ) * (
+            1.0
+            - exp(
+                -drag * timeToMax
+            )
+        );
+
+    return
+        distanceToMax
+        + maxSpeed * (
+            age - timeToMax
+        );
+}
+
+
+/*
     Single-drop lifecycle diagnostic.
 */
 float rainSingleDropDiagnostic(PS_IN pin, float time)
@@ -393,12 +499,12 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
 
     if (excessForce > 0.000001)
     {
-        float movementSpeed =
-            excessForce * gRainFlowSpeed;
-
         float travelDistance =
             min(
-                movementSpeed * age,
+                rainDropTravelDistance(
+                    excessForce,
+                    age
+                ),
                 gRainFlowMax
             );
 
@@ -744,13 +850,11 @@ float rainDropLayer(
                 continue;
             }
 
-            float movementSpeed =
-                excessForce
-                * gRainFlowSpeed;
-
             float travelDistance =
-                movementSpeed
-                * age;
+                rainDropTravelDistance(
+                    excessForce,
+                    age
+                );
 
             travelDistance =
                 min(
@@ -944,6 +1048,35 @@ float4 rainDebugOutput(
             saturate(
                 abs(acceleration.z) * 0.1
             ),
+            1.0
+        );
+    }
+
+    /* Surface-normal diagnostic: RGB is camera-space normal remapped to 0..1. */
+    if (gRainDebug == 5)
+    {
+        return float4(
+            normal * 0.5 + 0.5,
+            1.0
+        );
+    }
+
+    /*
+        Local movement-direction diagnostic.
+        Red/green encode the projected UV direction, blue encodes its strength.
+        This is intentionally based on the actual mesh tangent frame and the
+        local normal at the current fragment.
+    */
+    if (gRainDebug == 6)
+    {
+        float2 direction =
+            tangentMagnitude > 0.000001
+            ? tangentForce / tangentMagnitude
+            : float2(0.0, 0.0);
+
+        return float4(
+            direction * 0.5 + 0.5,
+            saturate(tangentMagnitude * 0.5),
             1.0
         );
     }
