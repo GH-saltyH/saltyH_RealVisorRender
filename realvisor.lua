@@ -259,6 +259,13 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DROP_RESPAWN_GAP_MAX = 0.75,
 
         -- Debug
+        -- 0 = normal rain
+        -- 1 = projected force magnitude / components
+        -- 2 = input acceleration
+        -- 3 = solid render-path test
+        -- 4 = mesh UV coverage
+        -- 5 = local surface normal (camera-space RGB)
+        -- 6 = local projected movement direction / strength
         RAIN_DEBUG = 0,
 
     },
