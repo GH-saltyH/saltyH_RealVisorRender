@@ -992,15 +992,62 @@ float4 main(PS_IN pin)
     if (gRainDebug == 4)
     {
         /*
-            Debug 4 exposes the ACTUAL interpolated mesh UV.
-            Red = U, Green = V, Blue = 0.
-            Alpha is forced to 1 so this test cannot disappear
-            because of the diagnostic mask.
+            UV coverage diagnostic:
+            - red/green = actual mesh UV
+            - white vertical line = U 0.5
+            - white horizontal line = V 0.535
+            - blue tint = expected visor V band 0.37..0.70
+
+            Alpha is forced to 1.
         */
+        float u = saturate(pin.Tex.x);
+        float v = saturate(pin.Tex.y);
+
+        float uLine =
+            1.0
+            - smoothstep(
+                0.006,
+                0.010,
+                abs(u - 0.5)
+            );
+
+        float vLine =
+            1.0
+            - smoothstep(
+                0.006,
+                0.010,
+                abs(v - 0.535)
+            );
+
+        float visorVBand =
+            smoothstep(0.37, 0.39, v)
+            * (1.0 - smoothstep(0.68, 0.70, v));
+
+        float cross = max(uLine, vLine);
+
+        float3 uvColor =
+            float3(
+                u,
+                saturate((v - 0.37) / 0.33),
+                0.0
+            );
+
+        uvColor =
+            lerp(
+                uvColor,
+                float3(0.0, 0.20, 1.0),
+                0.35 * visorVBand
+            );
+
+        uvColor =
+            lerp(
+                uvColor,
+                float3(1.0, 1.0, 1.0),
+                cross
+            );
+
         return float4(
-            saturate(pin.Tex.x),
-            saturate(pin.Tex.y),
-            0.0,
+            uvColor,
             1.0
         );
     }
