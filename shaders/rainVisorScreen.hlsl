@@ -969,6 +969,13 @@ float4 rainDebugOutput(
     float accelerationMagnitude =
         length(acceleration);
 
+    float3 encodedNormal =
+        txRainSurfaceNormal.SampleLevel(
+            samLinearSimple,
+            saturate(pin.Tex),
+            0.0
+        ).rgb;
+
     float3 normalObject =
         rainSurfaceNormalObject(
             pin.Tex
@@ -1032,8 +1039,26 @@ float4 rainDebugOutput(
         );
     }
 
-    /* Surface-normal diagnostic: RGB is OBJECT-SPACE normal remapped to 0..1. */
+    /*
+        Texture diagnostic:
+        5 = RAW sampled normal texture RGB.
+        This deliberately does not decode or transform the value. If this
+        is flat, the problem is texture binding/content/UV rather than
+        world-space normal conversion.
+    */
     if (gRainDebug == 5)
+    {
+        return float4(
+            encodedNormal,
+            1.0
+        );
+    }
+
+    /*
+        7 = decoded OBJECT-SPACE normal RGB.
+        This is the value used by RainFX after decoding the texture.
+    */
+    if (gRainDebug == 7)
     {
         return float4(
             normalObject * 0.5 + 0.5,
