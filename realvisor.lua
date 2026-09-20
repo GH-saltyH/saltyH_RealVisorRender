@@ -198,8 +198,15 @@ local cfg = scriptSettings:mapConfig({
         -- Visual density
         RAIN_DENSITY = 1.0,
 
-        -- Drop movement
-        RAIN_FLOW_SPEED = 0.005,
+        -- Drop dynamics
+        -- Acceleration after surface adhesion is exceeded.
+        RAIN_FLOW_ACCELERATION = 0.020,
+
+        -- Linear air/viscous drag coefficient.
+        RAIN_FLOW_DRAG = 7.0,
+
+        -- Maximum procedural surface speed in UV-space units per second.
+        RAIN_FLOW_MAX_SPEED = 0.065,
 
         -- Acceleration influence
         RAIN_ACCEL_GAIN_X = 0.00000505,
@@ -3326,8 +3333,14 @@ render.on('main.track.transparent', function()
             gRainFlowMax =
                 cfg.RUNTIME.RAIN_FLOW_MAX,
 
-            gRainFlowSpeed =
-                cfg.RUNTIME.RAIN_FLOW_SPEED,
+            gRainFlowAcceleration =
+                cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
+
+            gRainFlowDrag =
+                cfg.RUNTIME.RAIN_FLOW_DRAG,
+
+            gRainFlowMaxSpeed =
+                cfg.RUNTIME.RAIN_FLOW_MAX_SPEED,
 
             gRainAmount =
                 cfg.RUNTIME.RAIN_AMOUNT,
@@ -4166,10 +4179,9 @@ end
 ------------------------------------------------------------
 -- Update rain flow
 --
--- Acceleration is filtered once per simulation frame and integrated
--- into a wrapped grid-space displacement. This keeps render-pass
--- timing out of the physical flow state and prevents absolute-time
--- multiplication from creating extreme jumps.
+-- Acceleration is filtered once per simulation frame and passed to the
+-- shader as the common external-force input. Per-drop adhesion, drag,
+-- terminal speed and travel are evaluated in one place in HLSL.
 ------------------------------------------------------------
 local function updateRainFlow(dt)
 
