@@ -24,7 +24,7 @@ float rainHash(float2 p)
     decoded = encoded * 2 - 1
 
     The normal is converted:
-        Object -> World -> Camera-local
+        Object -> World
 
     so it is in the same coordinate system as the acceleration force.
 */
@@ -60,7 +60,7 @@ float3 rainSurfaceNormalWorld(float2 uv)
 
 
 /*
-    Build the ACTUAL UV tangent frame from the rendered mesh itself. from the rendered mesh itself.
+    Build the ACTUAL UV tangent frame from the rendered mesh itself.
 
     mesh.fx exposes:
         pin.PosL = interpolated local mesh position
@@ -93,10 +93,24 @@ void rainSurfaceBasisWorld(
         float3 fallbackNormal =
             rainSurfaceNormalWorld(pin.Tex);
 
+        float3 fallbackWorldUp =
+            float3(
+                0.0,
+                1.0,
+                0.0
+            );
+
+        float3 fallbackWorldSide =
+            float3(
+                1.0,
+                0.0,
+                0.0
+            );
+
         float3 fallbackU =
             normalize(
                 cross(
-                    gRainCameraUp,
+                    fallbackWorldUp,
                     fallbackNormal
                 )
             );
@@ -106,7 +120,7 @@ void rainSurfaceBasisWorld(
             fallbackU =
                 normalize(
                     cross(
-                        gRainCameraSide,
+                        fallbackWorldSide,
                         fallbackNormal
                     )
                 );
@@ -170,7 +184,7 @@ void rainSurfaceBasisWorld(
     tested visor left/right orientation. The normal itself is never
     negated or modified.
 */
-float2 rainProjectForceToUVWorldWorld(
+float2 rainProjectForceToUVWorld(
     float3 forceWorld,
     float3 normalWorld,
     float3 baseTangentUWorld,
