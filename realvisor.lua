@@ -267,14 +267,19 @@ local cfg = scriptSettings:mapConfig({
         ------------------------------------------------------------
 
         -- Number of persistent droplet state texels.
-        -- Stage 1 uses one texel per droplet.
+        -- One texel represents one persistent droplet.
         RAIN_GPU_STATE_COUNT = 256,
 
-        -- Stage 1 validation:
+        -- Persistent state:
         -- 0 = disabled
         -- 1 = initialize only
-        -- 2 = persistent A/B physics update
-        RAIN_GPU_STATE_MODE = 2,
+        -- 2 = synthetic force validation
+        -- 3 = persistent RainFX physics
+        RAIN_GPU_STATE_MODE = 3,
+
+        RAIN_GPU_STATE_UV_SCALE = 18.0,
+        RAIN_GPU_STATE_MESH_V_MIN = -0.579,
+        RAIN_GPU_STATE_MESH_V_MAX = -0.362,
 
         -- Synthetic force used only by the Stage 1 state validation.
         -- This is deliberately independent from the final RainFX force model.
@@ -483,19 +488,19 @@ local rainRenderDiagnosticLogged = false
 
 local rainStateA = nil
 local rainStateB = nil
+local rainStateMetaA = nil
+local rainStateMetaB = nil
 local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
 
 local rainStateUpdateParams = {
-    defines = {
-        RAIN_GPU_STATE_PASS = true,
-    },
+    defines = { RAIN_GPU_STATE_PASS = true },
 
     textures = {
-        -- Kept bound for a stable shader parameter layout.
-        -- Initialization mode does not sample this texture.
         txRainState = false,
+        txRainStateMeta = false,
+        txRainSurfaceNormal = false,
     },
 
     values = {
@@ -504,113 +509,196 @@ local rainStateUpdateParams = {
         gRainStateForce = vec2(0.0, 0.0),
         gRainStateDrag = 0.35,
         gRainStateMaxSpeed = 0.12,
+        gRainStateFlowAcceleration = 0.020,
+        gRainStateUVScale = 18.0,
+        gRainStateGravity = 0.35,
+        gRainStateForceScale = 100000.0,
+        gRainStateAdhesionMin = 0.65,
+        gRainStateAdhesionMax = 2.20,
+        gRainStateMeshVMin = -0.579,
+        gRainStateMeshVMax = -0.362,
+        gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
+        gRainStatePhysics = 0.0,
     },
 
     shader = [[
-        SamplerState samPointRain
-        {
+        SamplerState samPointRain {
             Filter = MIN_MAG_MIP_POINT;
             AddressU = CLAMP;
             AddressV = CLAMP;
             AddressW = CLAMP;
         };
 
-        float rainStateHash(float n)
-        {
-            return frac(
-                sin(n * 127.1 + 311.7) * 43758.5453
-            );
+        SamplerState samLinearRain {
+            Filter = MIN_MAG_MIP_LINEAR;
+            AddressU = CLAMP;
+            AddressV = CLAMP;
+            AddressW = CLAMP;
+        };
+
+        float rainStateHash(float n) {
+            return frac(sin(n * 127.1 + 311.7) * 43758.5453);
         }
 
-        float4 main(PS_IN pin)
-        {
-            float count = max(gRainStateCount, 1.0);
-
-            float index =
-                min(
-                    floor(pin.Tex.x * count),
-                    count - 1.0
-                );
-
-            float2 stateUV =
-                float2(
-                    (index + 0.5) / count,
-                    0.5
-                );
-
-            if (gRainStateInit > 0.5)
-            {
-                float seed = index + 1.0;
-
-                float2 position =
-                    float2(
-                        rainStateHash(seed + 11.0),
-                        rainStateHash(seed + 47.0)
-                    );
-
-                float2 velocity =
-                    (
-                        float2(
-                            rainStateHash(seed + 83.0),
-                            rainStateHash(seed + 131.0)
-                        )
-                        * 2.0
-                        - 1.0
-                    )
-                    * 0.006;
-
-                return float4(
-                    position,
-                    velocity
-                );
-            }
-
-            float4 state =
-                txRainState.SampleLevel(
-                    samPointRain,
-                    stateUV,
-                    0.0
-                );
-
-            float2 position = state.rg;
-            float2 velocity = state.ba;
-
-            float dt =
-                max(
-                    gRainStateDeltaTime,
-                    0.0
-                );
-
-            velocity +=
-                gRainStateForce * dt;
-
-            velocity *=
-                exp(
-                    -max(gRainStateDrag, 0.0) * dt
-                );
-
-            float speed = length(velocity);
-
-            if (speed > gRainStateMaxSpeed)
-            {
-                velocity =
-                    velocity
-                    / max(speed, 0.000001)
-                    * gRainStateMaxSpeed;
-            }
-
-            position += velocity * dt;
-            position = frac(position);
-
-            return float4(
-                position,
-                velocity
+        float3 rainStateNormalWorld(float2 p) {
+            float2 uv = float2(
+                p.x,
+                lerp(gRainStateMeshVMin, gRainStateMeshVMax, p.y)
             );
+
+            float3 n = txRainSurfaceNormal.SampleLevel(
+                samLinearRain, uv, 0.0
+            ).rgb * 2.0 - 1.0;
+
+            n = normalize(n);
+            return normalize(mul(n, (float3x3)gRainObjectToWorld));
+        }
+
+        float2 rainStateProjectForce(float3 forceWorld, float3 normalWorld) {
+            float3 normalObject = normalize(
+                mul(normalWorld, transpose((float3x3)gRainObjectToWorld))
+            );
+
+            float3 u = float3(1.0, 0.0, 0.0);
+            u -= normalObject * dot(u, normalObject);
+
+            if (length(u) < 0.0001) {
+                u = float3(0.0, 0.0, 1.0);
+                u -= normalObject * dot(u, normalObject);
+            }
+
+            u = normalize(u);
+            float3 v = normalize(cross(normalObject, u));
+
+            float3 uWorld = normalize(mul(u, (float3x3)gRainObjectToWorld));
+            float3 vWorld = normalize(mul(v, (float3x3)gRainObjectToWorld));
+
+            return float2(-dot(forceWorld, uWorld), dot(forceWorld, vWorld));
+        }
+
+        float4 main(PS_IN pin) {
+            float count = max(gRainStateCount, 1.0);
+            float index = min(floor(pin.Tex.x * count), count - 1.0);
+            float2 suv = float2((index + 0.5) / count, 0.5);
+
+            if (gRainStateInit > 0.5) {
+                float2 p = float2(
+                    rainStateHash(index + 11.0),
+                    rainStateHash(index + 47.0)
+                );
+                return float4(p, 0.0, 0.0);
+            }
+
+            float4 state = txRainState.SampleLevel(samPointRain, suv, 0.0);
+            float4 meta = txRainStateMeta.SampleLevel(samPointRain, suv, 0.0);
+
+            float2 p = state.rg;
+            float2 v = state.ba;
+            float radius = meta.r;
+            float mass = max(meta.g, 1.0);
+            float dt = max(gRainStateDeltaTime, 0.0);
+
+            if (gRainStatePhysics > 0.5) {
+                float3 force =
+                    float3(0.0, -gRainStateGravity, 0.0)
+                    + gRainAcceleration * gRainStateForceScale;
+
+                float3 n = rainStateNormalWorld(p);
+                float2 tf = rainStateProjectForce(force, n);
+                float f = length(tf);
+
+                float radius01 = saturate(
+                    (radius - 0.032) / (0.115 - 0.032)
+                );
+
+                float adhesionBase = lerp(
+                    gRainStateAdhesionMin,
+                    gRainStateAdhesionMax,
+                    rainStateHash(index + 211.0)
+                );
+
+                float adhesion = adhesionBase / sqrt(mass);
+                float excess = max(f - adhesion, 0.0);
+
+                if (excess > 0.000001) {
+                    float2 dir = tf / f;
+                    float acceleration =
+                        excess
+                        * gRainStateFlowAcceleration
+                        / max(gRainStateUVScale, 0.000001);
+
+                    v += dir * acceleration * dt;
+                } else {
+                    v *= exp(-gRainStateDrag * 2.0 * dt);
+                }
+
+                v *= exp(-max(gRainStateDrag, 0.0) * dt);
+
+                float speed = length(v);
+                if (speed > gRainStateMaxSpeed) {
+                    v = v / max(speed, 0.000001) * gRainStateMaxSpeed;
+                }
+
+                p = frac(p + v * dt);
+            } else {
+                v += gRainStateForce * dt;
+                v *= exp(-max(gRainStateDrag, 0.0) * dt);
+
+                float speed = length(v);
+                if (speed > gRainStateMaxSpeed) {
+                    v = v / max(speed, 0.000001) * gRainStateMaxSpeed;
+                }
+
+                p = frac(p + v * dt);
+            }
+
+            return float4(p, v);
         }
     ]],
 }
-    
+
+local rainStateMetaUpdateParams = {
+    textures = { txRainStateMeta = false },
+    values = {
+        gRainStateDeltaTime = 0.0,
+        gRainStateCount = 256.0,
+        gRainStateInit = 0.0,
+    },
+
+    shader = [[
+        SamplerState samPointRainMeta {
+            Filter = MIN_MAG_MIP_POINT;
+            AddressU = CLAMP;
+            AddressV = CLAMP;
+            AddressW = CLAMP;
+        };
+
+        float rainStateHash(float n) {
+            return frac(sin(n * 127.1 + 311.7) * 43758.5453);
+        }
+
+        float4 main(PS_IN pin) {
+            float count = max(gRainStateCount, 1.0);
+            float index = min(floor(pin.Tex.x * count), count - 1.0);
+            float2 suv = float2((index + 0.5) / count, 0.5);
+
+            if (gRainStateInit > 0.5) {
+                float r01 = rainStateHash(index + 101.0);
+                float radius = lerp(0.032, 0.115, r01);
+                float mass = lerp(1.0, 9.0, r01 * r01);
+                return float4(radius, mass, 0.0, 1.0);
+            }
+
+            float4 meta = txRainStateMeta.SampleLevel(
+                samPointRainMeta, suv, 0.0
+            );
+            meta.b += max(gRainStateDeltaTime, 0.0);
+            return meta;
+        }
+    ]],
+}
+
 local motionTarget= vec3(
     0,
     0,
@@ -3348,7 +3436,21 @@ local function initializeRainGPUState()
             render.TextureFormat.R32G32B32A32.Float
         ):setName('RainFX State B')
 
-    if not rainStateA or not rainStateB then
+    rainStateMetaA =
+        ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State Meta A')
+
+    rainStateMetaB =
+        ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State Meta B')
+
+    if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB then
         ac.warn(
             appNameDebug
             .. ' Rain GPU state: ExtraCanvas allocation failed'
@@ -3356,17 +3458,26 @@ local function initializeRainGPUState()
 
         rainStateA = nil
         rainStateB = nil
+        rainStateMetaA = nil
+        rainStateMetaB = nil
         return false
     end
 
     rainStateUpdateParams.values.gRainStateCount = count
     rainStateUpdateParams.values.gRainStateInit = 1.0
+    rainStateUpdateParams.values.gRainStatePhysics = 0.0
     rainStateUpdateParams.textures.txRainState = false
+    rainStateUpdateParams.textures.txRainStateMeta = false
+    rainStateUpdateParams.textures.txRainSurfaceNormal = false
 
-    -- Initialization writes both canvases without sampling either target.
-    -- This avoids relying on the initial contents of a newly allocated canvas.
+    rainStateMetaUpdateParams.values.gRainStateCount = count
+    rainStateMetaUpdateParams.values.gRainStateInit = 1.0
+    rainStateMetaUpdateParams.textures.txRainStateMeta = false
+
     rainStateA:updateWithShader(rainStateUpdateParams)
     rainStateB:updateWithShader(rainStateUpdateParams)
+    rainStateMetaA:updateWithShader(rainStateMetaUpdateParams)
+    rainStateMetaB:updateWithShader(rainStateMetaUpdateParams)
 
     rainStateUpdateParams.values.gRainStateInit = 0.0
 
@@ -3398,17 +3509,8 @@ local function updateRainGPUState(sim)
         return
     end
 
-    local frame =
-        sim
-        and sim.frame
-
-    if frame == nil then
-        return
-    end
-
-    -- main.track.transparent can be reached more than once around a frame.
-    -- State must advance exactly once per simulation frame.
-    if rainStateLastFrame == frame then
+    local frame = sim and sim.frame
+    if frame == nil or rainStateLastFrame == frame then
         return
     end
 
@@ -3418,16 +3520,24 @@ local function updateRainGPUState(sim)
         return
     end
 
-    local dt =
-        sim.dt
-
-    if not dt
-        or dt <= 0.000001 then
+    local dt = sim.dt
+    if not dt or dt <= 0.000001 then
         return
     end
 
+    local physicsMode =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3
+
+    local transform =
+        rainTargetMesh
+        and rainTargetMesh:getWorldTransformationRaw():clone()
+        or mat4x4.identity()
+
     rainStateUpdateParams.values.gRainStateDeltaTime =
         math.min(dt, 0.05)
+
+    rainStateUpdateParams.values.gRainStateCount =
+        math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
 
     rainStateUpdateParams.values.gRainStateForce:set(
         cfg.RUNTIME.RAIN_GPU_STATE_TEST_FORCE_X,
@@ -3435,32 +3545,76 @@ local function updateRainGPUState(sim)
     )
 
     rainStateUpdateParams.values.gRainStateDrag =
-        cfg.RUNTIME.RAIN_GPU_STATE_DRAG
+        physicsMode
+        and cfg.RUNTIME.RAIN_FLOW_DRAG
+        or cfg.RUNTIME.RAIN_GPU_STATE_DRAG
 
     rainStateUpdateParams.values.gRainStateMaxSpeed =
-        cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
+        physicsMode
+        and (
+            cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
+            / max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
+        )
+        or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
+
+    rainStateUpdateParams.values.gRainStateFlowAcceleration =
+        cfg.RUNTIME.RAIN_FLOW_ACCELERATION
+
+    rainStateUpdateParams.values.gRainStateUVScale =
+        cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE
+
+    rainStateUpdateParams.values.gRainStateGravity =
+        cfg.RUNTIME.RAIN_GRAVITY
+
+    rainStateUpdateParams.values.gRainStateForceScale =
+        cfg.RUNTIME.RAIN_FORCE_SCALE
+
+    rainStateUpdateParams.values.gRainStateAdhesionMin =
+        cfg.RUNTIME.RAIN_ADHESION_MIN
+
+    rainStateUpdateParams.values.gRainStateAdhesionMax =
+        cfg.RUNTIME.RAIN_ADHESION_MAX
+
+    rainStateUpdateParams.values.gRainStateMeshVMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN
+
+    rainStateUpdateParams.values.gRainStateMeshVMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
+
+    rainStateUpdateParams.values.gRainObjectToWorld =
+        transform
+
+    rainStateUpdateParams.values.gRainStatePhysics =
+        physicsMode and 1.0 or 0.0
+
+    rainStateMetaUpdateParams.values.gRainStateCount =
+        math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+
+    rainStateMetaUpdateParams.values.gRainStateDeltaTime =
+        math.min(dt, 0.05)
 
     local readState =
-        rainStateReadIsA
-        and rainStateA
-        or rainStateB
+        rainStateReadIsA and rainStateA or rainStateB
 
     local writeState =
-        rainStateReadIsA
-        and rainStateB
-        or rainStateA
+        rainStateReadIsA and rainStateB or rainStateA
 
-    rainStateUpdateParams.textures.txRainState =
-        readState
+    local readMeta =
+        rainStateReadIsA and rainStateMetaA or rainStateMetaB
 
-    writeState:updateWithShader(
-        rainStateUpdateParams
-    )
+    local writeMeta =
+        rainStateReadIsA and rainStateMetaB or rainStateMetaA
 
-    rainStateReadIsA =
-        not rainStateReadIsA
+    rainStateUpdateParams.textures.txRainState = readState
+    rainStateUpdateParams.textures.txRainStateMeta = readMeta
+    rainStateUpdateParams.textures.txRainSurfaceNormal = textureRainSurfaceNormal
+    rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
+
+    writeState:updateWithShader(rainStateUpdateParams)
+    writeMeta:updateWithShader(rainStateMetaUpdateParams)
+
+    rainStateReadIsA = not rainStateReadIsA
 end
-
 
 --------------------------------------------------------
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
@@ -3629,6 +3783,11 @@ render.on('main.track.transparent', function()
                 and rainStateA
                 or rainStateB,
 
+            txRainStateMeta =
+                rainStateReadIsA
+                and rainStateMetaA
+                or rainStateMetaB,
+
         },
 
         
@@ -3715,6 +3874,14 @@ render.on('main.track.transparent', function()
 
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
+
+            gRainStateMaxSpeed =
+                cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3
+                and (
+                    cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
+                    / max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
+                )
+                or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED,
 
             gDebugCenter =
                 vec2(
