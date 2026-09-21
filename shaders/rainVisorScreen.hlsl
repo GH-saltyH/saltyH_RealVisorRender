@@ -2609,6 +2609,329 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
 }
 
 
+
+float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 0.0, 0.0);
+
+    /*
+        Debug 30:
+        Compare the force direction used by persistent physics against
+        the velocity already stored in the persistent state.
+
+        Orange  = projected tangent force direction.
+        Cyan    = persistent velocity direction.
+        White   = overlap / agreement.
+
+        This is a direction diagnostic only. It does not modify physics.
+    */
+    float3 effectiveForce =
+        float3(
+            0.0,
+            -gRainGravity,
+            0.0
+        )
+        + gRainAcceleration * gRainForceScale;
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state =
+            txRainState.SampleLevel(
+                samPointRain,
+                stateUV,
+                0.0
+            );
+
+        float2 p = state.rg;
+        float2 velocity = state.ba;
+
+        float2 dropPosition = float2(
+            p.x,
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                p.y
+            )
+        );
+
+        float2 localDelta = pin.Tex - dropPosition;
+
+        /*
+            Use a normalized distance so the diagnostic marker remains
+            approximately circular despite the narrow visor V domain.
+        */
+        localDelta.y /=
+            max(
+                gRainStateMeshVMax
+                - gRainStateMeshVMin,
+                0.000001
+            );
+
+        float marker =
+            1.0
+            - smoothstep(
+                0.006,
+                0.012,
+                length(localDelta)
+            );
+
+        if (marker <= result)
+            continue;
+
+        float3 normalWorld =
+            rainSurfaceNormalWorld(
+                float2(
+                    p.x,
+                    lerp(
+                        gRainStateMeshVMin,
+                        gRainStateMeshVMax,
+                        p.y
+                    )
+                )
+            );
+
+        /*
+            Reconstruct the same object-space tangent convention used by
+            the persistent physics pass. This lets us inspect the exact
+            force direction currently driving the simulation.
+        */
+        float3 normalObject =
+            normalize(
+                mul(
+                    normalWorld,
+                    transpose(
+                        (float3x3)gRainObjectToWorld
+                    )
+                )
+            );
+
+        float3 tangentUObject =
+            float3(
+                1.0,
+                0.0,
+                0.0
+            );
+
+        tangentUObject -=
+            normalObject
+            * dot(
+                tangentUObject,
+                normalObject
+            );
+
+        if (length(tangentUObject) < 0.0001)
+        {
+            tangentUObject =
+                float3(
+                    0.0,
+                    0.0,
+                    1.0
+                );
+
+            tangentUObject -=
+                normalObject
+                * dot(
+                    tangentUObject,
+                    normalObject
+                );
+        }
+
+        tangentUObject =
+            normalize(tangentUObject);
+
+        float3 tangentVObject =
+            normalize(
+                cross(
+                    normalObject,
+                    tangentUObject
+                )
+            );
+
+        float3 tangentUWorld =
+            normalize(
+                mul(
+                    tangentUObject,
+                    (float3x3)gRainObjectToWorld
+                )
+            );
+
+        float3 tangentVWorld =
+            normalize(
+                mul(
+                    tangentVObject,
+                    (float3x3)gRainObjectToWorld
+                )
+            );
+
+        float2 tangentForce =
+            float2(
+                -dot(
+                    effectiveForce,
+                    tangentUWorld
+                ),
+                dot(
+                    effectiveForce,
+                    tangentVWorld
+                )
+            );
+
+        float forceLength =
+            length(tangentForce);
+
+        float2 forceDirection =
+            tangentForce
+            / max(
+                forceLength,
+                0.000001
+            );
+
+        float velocityLength =
+            length(velocity);
+
+        float2 velocityDirection =
+            velocity
+            / max(
+                velocityLength,
+                0.000001
+            );
+
+        /*
+            Convert both normalized state-space directions to the rendered
+            mesh aspect ratio before drawing them in pin.Tex space.
+        */
+        float vRange =
+            max(
+                gRainStateMeshVMax
+                - gRainStateMeshVMin,
+                0.000001
+            );
+
+        float2 forceEnd =
+            dropPosition
+            + float2(
+                forceDirection.x,
+                forceDirection.y * vRange
+            ) * 0.020;
+
+        float2 velocityEnd =
+            dropPosition
+            + float2(
+                velocityDirection.x,
+                velocityDirection.y * vRange
+            ) * 0.020;
+
+        float2 forceLine =
+            forceEnd
+            - dropPosition;
+
+        float2 velocityLine =
+            velocityEnd
+            - dropPosition;
+
+        float forceT =
+            saturate(
+                dot(
+                    pin.Tex - dropPosition,
+                    forceLine
+                )
+                / max(
+                    dot(forceLine, forceLine),
+                    0.000001
+                )
+            );
+
+        float velocityT =
+            saturate(
+                dot(
+                    pin.Tex - dropPosition,
+                    velocityLine
+                )
+                / max(
+                    dot(velocityLine, velocityLine),
+                    0.000001
+                )
+            );
+
+        float forceDistance =
+            length(
+                pin.Tex
+                - (
+                    dropPosition
+                    + forceLine * forceT
+                )
+            );
+
+        float velocityDistance =
+            length(
+                pin.Tex
+                - (
+                    dropPosition
+                    + velocityLine * velocityT
+                )
+            );
+
+        float forceMask =
+            1.0
+            - smoothstep(
+                0.0010,
+                0.0025,
+                forceDistance
+            );
+
+        float velocityMask =
+            1.0
+            - smoothstep(
+                0.0010,
+                0.0025,
+                velocityDistance
+            );
+
+        float overlap =
+            saturate(
+                dot(
+                    forceDirection,
+                    velocityDirection
+                )
+                * 0.5
+                + 0.5
+            );
+
+        result =
+            max(
+                marker,
+                max(
+                    forceMask,
+                    velocityMask
+                )
+            );
+
+        resultColor =
+            float3(
+                forceMask,
+                velocityMask,
+                overlap
+            );
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
+
 float4 main(PS_IN pin)
 {
     
@@ -2738,6 +3061,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 29)
     {
         return rainPersistentPhysicalDropDebugOutput(pin);
+    }
+
+    if (gRainDebug == 30)
+    {
+        return rainPersistentForceVelocityDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
