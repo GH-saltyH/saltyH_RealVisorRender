@@ -697,8 +697,7 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
     float2 perpendicular =
         float2(
             -movementDir.y,
-            movementDir.x
-        );
+            movementDir.x        );
 
     float trailSide =
         abs(
@@ -1397,7 +1396,6 @@ if (gRainDebug == 15)
 {
     float3 normalWorld =
         rainSurfaceNormalWorld(pin.Tex);
-
     return float4(
         normalWorld * 0.5 + 0.5,
         1.0
@@ -2098,7 +2096,6 @@ float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
             0.0050,
             length(pin.Tex - predictedPosition)
         );
-
         if (currentMask > result)
         {
             result = currentMask;
@@ -2457,6 +2454,147 @@ float4 rainPersistentSurfaceForceDebugOutput(PS_IN pin)
     return float4(resultColor, saturate(result));
 }
 
+
+float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+
+    /*
+        Debug 29:
+        Render the persistent GPU state as actual drop-shaped markers.
+
+        Position comes directly from the persistent state.
+        Radius comes from persistent meta state.
+        Velocity is only used for a short directional tail.
+
+        This is intentionally still a diagnostic renderer:
+        no merge, residue, edge death or final drop shading yet.
+    */
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 p = state.rg;
+        float2 velocity = state.ba;
+
+        float2 dropPosition = float2(
+            p.x,
+            lerp(-0.579, -0.362, p.y)
+        );
+
+        float radius01 = saturate(
+            (meta.r - 0.032) / (0.115 - 0.032)
+        );
+
+        float radius = lerp(
+            0.0045,
+            0.0095,
+            radius01
+        );
+
+        /*
+            The persistent state uses normalized UV coordinates while
+            pin.Tex uses the actual visor mesh UV domain. Correct the
+            Y axis before measuring distance.
+        */
+        float2 delta = pin.Tex - dropPosition;
+        delta.y /= max((-0.362 + 0.579), 0.000001);
+
+        float normalizedDistance = length(delta);
+        float dropMask = 1.0 - smoothstep(
+            radius * 0.45,
+            radius,
+            normalizedDistance
+        );
+
+        float speed = length(velocity);
+        float speed01 = saturate(
+            speed / max(gRainStateMaxSpeed, 0.000001)
+        );
+
+        float2 direction = velocity / max(speed, 0.000001);
+
+        float2 directionMesh = normalize(float2(
+            direction.x,
+            direction.y * (-0.362 + 0.579)
+        ));
+
+        float tailLength = 0.012 * speed01;
+        float2 tailStart = dropPosition;
+        float2 tailEnd = tailStart + directionMesh * tailLength;
+
+        float2 lineVector = tailEnd - tailStart;
+        float lineLengthSq = dot(lineVector, lineVector);
+        float2 toPoint = pin.Tex - tailStart;
+
+        float tailT = saturate(
+            dot(toPoint, lineVector)
+            / max(lineLengthSq, 0.000001)
+        );
+
+        float2 closest = tailStart + lineVector * tailT;
+        float tailDistance = length(pin.Tex - closest);
+
+        float tailWidth = lerp(
+            0.0007,
+            0.0018,
+            speed01
+        );
+
+        float tailMask = 1.0 - smoothstep(
+            tailWidth,
+            tailWidth * 2.0,
+            tailDistance
+        );
+
+        float mask = max(dropMask, tailMask);
+
+        if (mask > result)
+        {
+            result = mask;
+
+            /*
+                Stationary drops are nearly white.
+                Faster drops gain a subtle cyan component so the
+                directional motion is easy to identify.
+            */
+            resultColor = lerp(
+                float3(1.0, 1.0, 1.0),
+                float3(0.65, 0.90, 1.0),
+                speed01
+            );
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
+
 float4 main(PS_IN pin)
 {
     
@@ -2581,6 +2719,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 28)
     {
         return rainPersistentAdhesionDebugOutput(pin);
+    }
+
+    if (gRainDebug == 29)
+    {
+        return rainPersistentPhysicalDropDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
