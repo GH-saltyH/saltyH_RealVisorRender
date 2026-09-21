@@ -3469,23 +3469,19 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
 {
     /*
         Debug 32:
-        Verify only the Lua -> render.mesh() airflow input path.
+        Multi-point airflow input verification.
 
-        gRainAirVelocityWorld is expected to be:
-            -car.velocity
+        This intentionally verifies only:
+            car.velocity -> -airflow -> camera basis
 
-        This diagnostic intentionally does not sample persistent state,
-        the normal map, or the surface tangent frame. It also does not
-        calculate physical drag.
+        No persistent state, normal map, tangent reconstruction,
+        or physical drag is used here.
 
-        Cyan line:
-            world-space airflow projected into the camera basis.
-
-        White marker:
-            diagnostic origin.
-
-        Line length:
-            relative to the magnitude of the incoming airflow vector.
+        Nine diagnostic origins are distributed across the visor.
+        Every origin receives the same world-space airflow vector.
+        Therefore all lines should rotate together when the camera/view
+        rotates, while their direction remains consistent with the same
+        incoming world-space airflow.
     */
 
     float3 airflow =
@@ -3507,116 +3503,118 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
         cameraAir
         / max(cameraAirLength, 0.000001);
 
-    float2 center =
-        float2(
-            gDebugCenter.x,
-            0.5 * (
-                gRainStateMeshVMin
-                + gRainStateMeshVMax
-            )
-        );
-
     float visualLength =
         0.12
         * saturate(
             airSpeed / 100.0
         );
 
-    float2 endPoint =
-        center
-        + direction * visualLength;
+    float result =
+        0.0;
 
-    float2 lineVector =
-        endPoint
-        - center;
+    float3 resultColor =
+        float3(1.0, 1.0, 1.0);
 
-    float2 fromCenter =
-        pin.Tex
-        - center;
+    const float xPositions[3] =
+    {
+        0.30,
+        0.50,
+        0.70
+    };
 
-    float lineT =
-        saturate(
-            dot(fromCenter, lineVector)
-            / max(dot(lineVector, lineVector), 0.000001)
-        );
+    const float yPositions[3] =
+    {
+        0.20,
+        0.50,
+        0.80
+    };
 
-    float lineDistance =
-        length(
-            pin.Tex
-            - (
-                center
-                + lineVector * lineT
-            )
-        );
+    for (int yIndex = 0; yIndex < 3; ++yIndex)
+    {
+        float centerY =
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                yPositions[yIndex]
+            );
 
-    float lineMask =
-        cameraAirLength > 0.0001
-        ? (
-            1.0
-            - smoothstep(
-                0.0012,
-                0.0035,
-                lineDistance
-            )
-        )
-        : 0.0;
+        for (int xIndex = 0; xIndex < 3; ++xIndex)
+        {
+            float2 center =
+                float2(
+                    xPositions[xIndex],
+                    centerY
+                );
 
-    float originDistance =
-        length(pin.Tex - center);
+            float2 lineVector =
+                direction * visualLength;
 
-    float originMask =
-        1.0
-        - smoothstep(
-            0.0025,
-            0.0060,
-            originDistance
-        );
+            float2 fromCenter =
+                pin.Tex
+                - center;
 
-    float endpointDistance =
-        length(pin.Tex - endPoint);
+            float lineT =
+                saturate(
+                    dot(fromCenter, lineVector)
+                    / max(dot(lineVector, lineVector), 0.000001)
+                );
 
-    float endpointMask =
-        visualLength > 0.0005
-        ? (
-            1.0
-            - smoothstep(
-                0.0020,
-                0.0050,
-                endpointDistance
-            )
-        )
-        : 0.0;
+            float lineDistance =
+                length(
+                    pin.Tex
+                    - (
+                        center
+                        + lineVector * lineT
+                    )
+                );
 
-    float mask =
-        max(
-            lineMask,
-            max(originMask, endpointMask)
-        );
+            float lineMask =
+                1.0
+                - smoothstep(
+                    0.0025,
+                    0.0055,
+                    lineDistance
+                );
 
-    float speed01 =
-        saturate(airSpeed / 100.0);
+            float pointMask =
+                1.0
+                - smoothstep(
+                    0.004,
+                    0.008,
+                    length(pin.Tex - center)
+                );
 
-    float3 color =
-        lerp(
-            float3(0.0, 0.25, 0.25),
-            float3(0.0, 1.0, 1.0),
-            speed01
-        );
+            float contribution =
+                max(
+                    lineMask * saturate(airSpeed / 3.0),
+                    pointMask
+                );
 
-    color =
-        lerp(
-            color,
-            float3(1.0, 1.0, 1.0),
-            originMask
-        );
+            if (contribution > result)
+            {
+                result =
+                    contribution;
+
+                float speed01 =
+                    saturate(
+                        airSpeed / 100.0
+                    );
+
+                resultColor =
+                    lerp(
+                        float3(0.0, 0.25, 0.25),
+                        float3(0.0, 1.0, 1.0),
+                        speed01
+                    );
+            }
+        }
+    }
 
     return float4(
-        color,
-        saturate(mask)
+        resultColor,
+        result
     );
 }
-
-
 float4 main(PS_IN pin)
 {
     
