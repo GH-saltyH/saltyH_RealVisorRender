@@ -1767,6 +1767,126 @@ float4 rainPersistentRawStateDebugOutput(PS_IN pin)
     Debug 23: current position plus a predicted endpoint using only
     current velocity. The second marker is NOT historical trajectory.
 */
+/*
+    Debug 25: actual accumulated persistent displacement.
+
+    The Lua side captures a GPU origin snapshot when entering Debug 25.
+    The state continues to integrate normally after the snapshot.
+
+    White  = current position
+    Green  = captured origin
+    Orange = amplified displacement path
+
+    Because persistent positions currently wrap with frac(), the delta is
+    unwrapped to the shortest periodic displacement before visualization.
+*/
+float4 rainPersistentAccumulatedDisplacementDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+    float visualScale = max(gRainStateDebugDisplacementScale, 1.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float2 current = txRainState.SampleLevel(
+            samPointRain, stateUV, 0.0
+        ).rg;
+
+        float2 origin = txRainStateOrigin.SampleLevel(
+            samPointRain, stateUV, 0.0
+        ).rg;
+
+        float2 delta = current - origin;
+
+        // Position is periodic because physics currently uses frac().
+        // Recover the shortest signed displacement instead of treating a
+        // wrap as a full-screen jump.
+        if (delta.x > 0.5) delta.x -= 1.0;
+        if (delta.x < -0.5) delta.x += 1.0;
+        if (delta.y > 0.5) delta.y -= 1.0;
+        if (delta.y < -0.5) delta.y += 1.0;
+
+        float2 currentPosition = float2(
+            current.x,
+            lerp(-0.579, -0.362, current.y)
+        );
+
+        float2 originPosition = float2(
+            origin.x,
+            lerp(-0.579, -0.362, origin.y)
+        );
+
+        float2 deltaMesh = float2(
+            delta.x,
+            delta.y * (-0.362 + 0.579)
+        );
+
+        float2 amplifiedEnd =
+            originPosition
+            + deltaMesh * visualScale;
+
+        float currentMask = 1.0 - smoothstep(
+            0.003,
+            0.006,
+            length(pin.Tex - currentPosition)
+        );
+
+        float originMask = 1.0 - smoothstep(
+            0.003,
+            0.006,
+            length(pin.Tex - originPosition)
+        );
+
+        float2 lineVector = amplifiedEnd - originPosition;
+        float lineLengthSq = dot(lineVector, lineVector);
+        float2 pointVector = pin.Tex - originPosition;
+        float lineT = saturate(
+            dot(pointVector, lineVector)
+            / max(lineLengthSq, 0.000001)
+        );
+        float2 closest = originPosition + lineVector * lineT;
+        float lineDistance = length(pin.Tex - closest);
+        float lineWidth = 0.0015;
+        float lineMask = 1.0 - smoothstep(
+            lineWidth,
+            lineWidth * 2.0,
+            lineDistance
+        );
+
+        if (originMask > result)
+        {
+            result = originMask;
+            resultColor = float3(0.05, 1.0, 0.15);
+        }
+
+        if (lineMask > result)
+        {
+            result = lineMask;
+            resultColor = float3(1.0, 0.35, 0.05);
+        }
+
+        if (currentMask > result)
+        {
+            result = currentMask;
+            resultColor = float3(1.0, 1.0, 1.0);
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
+
 float4 rainPersistentMotionScaleDebugOutput(PS_IN pin){float c=max(gRainStateCount,1.0),r=0.0;float3 col=float3(0,1,1);[loop]for(int i=0;i<256;++i){if((float)i>=c)break;float2 uv=float2(((float)i+0.5)/c,0.5);float4 st=txRainState.SampleLevel(samPointRain,uv,0.0);float2 p=st.rg,v=st.ba;float2 p1=frac(p+v),p10=frac(p+v*10.0),p50=frac(p+v*50.0);float2 a=float2(p.x,lerp(-0.579,-0.362,p.y));float2 b=float2(p1.x,lerp(-0.579,-0.362,p1.y));float2 d=float2(p10.x,lerp(-0.579,-0.362,p10.y));float2 e=float2(p50.x,lerp(-0.579,-0.362,p50.y));float m=1-smoothstep(.003,.006,length(pin.Tex-a));float m1=1-smoothstep(.0025,.005,length(pin.Tex-b));float m10=1-smoothstep(.0025,.005,length(pin.Tex-d));float m50=1-smoothstep(.0025,.005,length(pin.Tex-e));if(m>r){r=m;col=float3(1,1,1);}if(m1>r){r=m1;col=float3(1,.35,.05);}if(m10>r){r=m10;col=float3(1,.85,.05);}if(m50>r){r=m50;col=float3(.05,.9,1);}}return float4(col,saturate(r));}
 
 float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
@@ -2090,6 +2210,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 24)
     {
         return rainPersistentMotionScaleDebugOutput(pin);
+    }
+
+    if (gRainDebug == 25)
+    {
+        return rainPersistentAccumulatedDisplacementDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
