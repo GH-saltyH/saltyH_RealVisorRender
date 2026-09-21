@@ -3772,6 +3772,266 @@ float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
     return float4(resultColor, result);
 }
 
+
+/*
+    Debug 35:
+    Controlled droplet size / mass / adhesion threshold experiment.
+
+    Nine fixed diagnostic droplets are rendered at calibrated visor
+    positions. Radius varies deliberately while mass is derived from
+    the same radius relationship used by the current RainFX model.
+
+    Layout:
+        S M L
+        L S M
+        M L S
+
+    Marker size = test radius.
+    Green  = safely below adhesion threshold.
+    Yellow = approaching adhesion threshold.
+    Red    = threshold exceeded; flow should be possible.
+
+    This diagnostic does not integrate persistent state and does not
+    modify RainFX physics. It isolates the radius -> mass -> adhesion
+    relationship before acceleration/drag tuning.
+*/
+float4 rainPersistentDropScaleThresholdDebugOutput(PS_IN pin)
+{
+    const float xPositions[3] = { 0.30, 0.50, 0.70 };
+    const float yPositions[3] = { 0.20, 0.50, 0.80 };
+
+    const float radiusValues[9] =
+    {
+        0.032, 0.0735, 0.115,
+        0.115, 0.032, 0.0735,
+        0.0735, 0.115, 0.032
+    };
+
+    float3 forceWorld =
+        float3(0.0, -gRainGravity, 0.0)
+        + gRainAcceleration * gRainForceScale;
+
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+
+    for (int yIndex = 0; yIndex < 3; ++yIndex)
+    {
+        float centerY =
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                yPositions[yIndex]
+            );
+
+        for (int xIndex = 0; xIndex < 3; ++xIndex)
+        {
+            int index =
+                yIndex * 3
+                + xIndex;
+
+            float centerX =
+                lerp(
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    xPositions[xIndex]
+                );
+
+            float2 center =
+                float2(centerX, centerY);
+
+            float radius =
+                radiusValues[index];
+
+            float radius01 =
+                saturate(
+                    (radius - 0.032)
+                    / (0.115 - 0.032)
+                );
+
+            // Keep this exactly aligned with the current RainFX mass model.
+            float mass =
+                lerp(
+                    1.0,
+                    9.0,
+                    radius01 * radius01
+                );
+
+            float3 normalWorld =
+                rainSurfaceNormalWorld(center);
+
+            /*
+                Use the same normal-derived tangent convention as the
+                persistent Stage 1 state shader. This keeps this test
+                independent from fragment derivatives while still applying
+                the local visor normal at each diagnostic point.
+            */
+            float3 normalObject =
+                normalize(
+                    mul(
+                        normalWorld,
+                        transpose(
+                            (float3x3)gRainObjectToWorld
+                        )
+                    )
+                );
+
+            float3 tangentUObject =
+                float3(1.0, 0.0, 0.0);
+
+            tangentUObject -=
+                normalObject
+                * dot(
+                    tangentUObject,
+                    normalObject
+                );
+
+            if (length(tangentUObject) < 0.0001)
+            {
+                tangentUObject =
+                    float3(0.0, 0.0, 1.0);
+
+                tangentUObject -=
+                    normalObject
+                    * dot(
+                        tangentUObject,
+                        normalObject
+                    );
+            }
+
+            tangentUObject =
+                normalize(tangentUObject);
+
+            float3 tangentVObject =
+                normalize(
+                    cross(
+                        normalObject,
+                        tangentUObject
+                    )
+                );
+
+            float3 tangentUWorld =
+                normalize(
+                    mul(
+                        tangentUObject,
+                        (float3x3)gRainObjectToWorld
+                    )
+                );
+
+            float3 tangentVWorld =
+                normalize(
+                    mul(
+                        tangentVObject,
+                        (float3x3)gRainObjectToWorld
+                    )
+                );
+
+            float2 tangentForce =
+                float2(
+                    -dot(
+                        forceWorld,
+                        tangentUWorld
+                    ),
+                    dot(
+                        forceWorld,
+                        tangentVWorld
+                    )
+                );
+
+            float forceMagnitude =
+                length(tangentForce);
+
+            float adhesionBase =
+                lerp(
+                    gRainAdhesionMin,
+                    gRainAdhesionMax,
+                    0.5
+                );
+
+            float adhesion =
+                adhesionBase
+                / sqrt(
+                    max(
+                        mass,
+                        0.000001
+                    )
+                );
+
+            float ratio =
+                forceMagnitude
+                / max(
+                    adhesion,
+                    0.000001
+                );
+
+            float3 color;
+
+            if (ratio < 0.75)
+            {
+                color =
+                    float3(
+                        0.05,
+                        1.0,
+                        0.20
+                    );
+            }
+            else if (ratio < 1.0)
+            {
+                color =
+                    float3(
+                        1.0,
+                        0.85,
+                        0.05
+                    );
+            }
+            else
+            {
+                color =
+                    float3(
+                        1.0,
+                        0.08,
+                        0.05
+                    );
+            }
+
+            /*
+                Deliberately larger than Debug 28 so the three physical
+                test sizes are easy to distinguish in-game.
+            */
+            float markerRadius =
+                lerp(
+                    0.006,
+                    0.018,
+                    radius01
+                );
+
+            float distanceToDrop =
+                length(
+                    pin.Tex - center
+                );
+
+            float marker =
+                1.0
+                - smoothstep(
+                    markerRadius * 0.35,
+                    markerRadius,
+                    distanceToDrop
+                );
+
+            if (marker > result)
+            {
+                result = marker;
+                resultColor = color;
+            }
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
+
 float4 rainPersistentCombinedForceDebugOutput(PS_IN pin)
 {
     /*
@@ -4110,6 +4370,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 34)
     {
         return rainPersistentCombinedForceDebugOutput(pin);
+    }
+
+    if (gRainDebug == 35)
+    {
+        return rainPersistentDropScaleThresholdDebugOutput(pin);
     }
 
 
