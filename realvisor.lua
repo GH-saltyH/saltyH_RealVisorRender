@@ -3531,7 +3531,6 @@ local function initializeRainGPUState()
 
     rainStateReadIsA = true
     rainStateInitialized = true
-    rainStateDebugCapturePending = false
     rainStateLastFrame = -1
 
     ac.log(
