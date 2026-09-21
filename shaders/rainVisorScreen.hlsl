@@ -1695,6 +1695,152 @@ float4 rainPersistentPositionDebugOutput(PS_IN pin)
     );
 }
 
+/*
+    Debug 22: raw persistent-state telemetry.
+    R = normalized X, G = normalized Y, B = normalized speed.
+*/
+float4 rainPersistentRawStateDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 0.0, 0.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 statePosition = state.rg;
+        float speed01 = saturate(
+            length(state.ba) / max(gRainStateMaxSpeed, 0.000001)
+        );
+
+        float2 dropPosition = float2(
+            statePosition.x,
+            lerp(-0.579, -0.362, statePosition.y)
+        );
+
+        float markerRadius = lerp(
+            0.0040,
+            0.0065,
+            rainHash(float2(stateIndex, 731.0))
+        );
+
+        float distanceToDrop = length(
+            pin.Tex - dropPosition
+        );
+
+        float mask = 1.0 - smoothstep(
+            markerRadius,
+            markerRadius * 1.8,
+            distanceToDrop
+        );
+
+        if (mask > result)
+        {
+            result = mask;
+            resultColor = float3(
+                statePosition.x,
+                statePosition.y,
+                speed01
+            );
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
+/*
+    Debug 23: current position plus a predicted endpoint using only
+    current velocity. The second marker is NOT historical trajectory.
+*/
+float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 1.0, 1.0);
+    const float diagnosticTime = 1.0;
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 p = state.rg;
+        float2 v = state.ba;
+
+        float2 currentPosition = float2(
+            p.x,
+            lerp(-0.579, -0.362, p.y)
+        );
+
+        float2 predictedStatePosition = frac(
+            p + v * diagnosticTime
+        );
+
+        float2 predictedPosition = float2(
+            predictedStatePosition.x,
+            lerp(
+                -0.579,
+                -0.362,
+                predictedStatePosition.y
+            )
+        );
+
+        float currentMask = 1.0 - smoothstep(
+            0.003,
+            0.006,
+            length(pin.Tex - currentPosition)
+        );
+
+        float predictedMask = 1.0 - smoothstep(
+            0.0025,
+            0.0050,
+            length(pin.Tex - predictedPosition)
+        );
+
+        if (currentMask > result)
+        {
+            result = currentMask;
+            resultColor = float3(1.0, 1.0, 1.0);
+        }
+
+        if (predictedMask > result)
+        {
+            result = predictedMask;
+            resultColor = float3(1.0, 0.35, 0.05);
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
 float4 rainPersistentVelocityDebugOutput(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
@@ -1927,6 +2073,16 @@ float4 main(PS_IN pin)
     if (gRainDebug == 21)
     {
         return rainPersistentPositionDebugOutput(pin);
+    }
+
+    if (gRainDebug == 22)
+    {
+        return rainPersistentRawStateDebugOutput(pin);
+    }
+
+    if (gRainDebug == 23)
+    {
+        return rainPersistentPredictedMotionDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
