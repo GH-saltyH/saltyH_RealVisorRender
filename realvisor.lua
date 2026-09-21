@@ -300,8 +300,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_MODE = 3,
 
         RAIN_GPU_STATE_UV_SCALE = 18.0,
-        RAIN_GPU_STATE_MESH_V_MIN = -0.579,
-        RAIN_GPU_STATE_MESH_V_MAX = -0.362,
+        RAIN_GPU_STATE_MESH_V_MIN = -0.713,
+        RAIN_GPU_STATE_MESH_V_MAX = -0.302,
+        
+        RAIN_GPU_STATE_MESH_U_MIN = 0.3,
+        RAIN_GPU_STATE_MESH_U_MAX = 0.7,
 
         -- Synthetic force used only by the Stage 1 state validation.
         -- This is deliberately independent from the final RainFX force model.
@@ -326,7 +329,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 32,
+        RAIN_DEBUG = 33,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = 0.5,
@@ -4028,11 +4031,11 @@ render.on('main.track.transparent', function()
                 )
                 or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED,
 
-            gDebugCenter =
-                vec2(
-                    cfg.RUNTIME.RAIN_DEBUG_CENTER_X,
-                    cfg.RUNTIME.RAIN_DEBUG_CENTER_Y
-                ),
+            gRainUVCenterX =
+                    cfg.RUNTIME.RAIN_DEBUG_CENTER_X,                    
+            
+            gRainUVCenterY =
+                    cfg.RUNTIME.RAIN_DEBUG_CENTER_Y,
 
             gRainStateDebugDisplacementScale =
                 cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE,
@@ -4047,7 +4050,13 @@ render.on('main.track.transparent', function()
                 cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
 
             gRainStateMeshVMax =
-                cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
+                cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
+
+            gRainStateMeshUMin =
+                cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
+
+            gRainStateMeshUMax =
+                cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX
         },
 
         shader = 
@@ -6144,6 +6153,31 @@ function windowMain(dt)
     
     if changed then
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX = newVerticalUVMax
+    end
+    
+    local newHorizontalUVMin, changed = ui.slider(
+        '(UV Calibration) Horizontal Min',
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
+        -2.0,
+        2.0,
+        '%.3f'
+    )
+    
+    if changed then
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN = newHorizontalUVMin
+    end
+    
+    
+    local newHorizontalUVMax, changed = ui.slider(
+        '(UV Calibration) Horizontal Max',
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
+        -2.0,
+        2.0,
+        '%.3f'
+    )
+    
+    if changed then
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX = newHorizontalUVMax
     end
     --------------------------------------------------------
     -- Material Parameter: floating editor window

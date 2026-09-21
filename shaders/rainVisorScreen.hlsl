@@ -3642,7 +3642,7 @@ float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
     float result = 0.0;
     float3 resultColor = float3(0.0, 0.25, 0.25);
 
-    const float xPositions[3] = { 0.30, 0.50, 0.70 };
+    const float xPositions[3] = { 0.3, 0.5, 0.7 };
     const float yPositions[3] = { 0.20, 0.50, 0.80 };
 
     for (int yIndex = 0; yIndex < 3; ++yIndex)
@@ -3656,9 +3656,16 @@ float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
 
         for (int xIndex = 0; xIndex < 3; ++xIndex)
         {
+            float centerX =
+                lerp(
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    xPositions[xIndex]
+                );
+            
             float2 center =
                 float2(
-                    xPositions[xIndex],
+                    centerX,
                     centerY
                 );
 
