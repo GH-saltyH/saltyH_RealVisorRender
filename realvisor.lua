@@ -6134,7 +6134,7 @@ function windowMain(dt)
     end
     
     
-    local newVerticalUVMin, changed = ui.slider(
+    local newVerticalUVMax, changed = ui.slider(
         '(UV Calibration) Vertical Max',
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
         -2.0,
