@@ -2259,8 +2259,111 @@ float4 rainPersistentVelocityDebugOutput(PS_IN pin)
     );
 }
 
+float4 rainPersistentSurfaceForceDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+
+    float3 surfaceNormal = rainSurfaceNormalWorld(pin.Tex);
+    float3 tangentU;
+    float3 tangentV;
+    rainSurfaceBasisWorld(pin, tangentU, tangentV);
+
+    float3 effectiveForce =
+        float3(0.0, -gRainGravity, 0.0)
+        + gRainAcceleration * gRainForceScale;
+
+    float2 tangentForce = rainProjectForceToUVWorld(
+        effectiveForce,
+        surfaceNormal,
+        tangentU,
+        tangentV,
+        1.0
+    );
+
+    float forceLength = length(tangentForce);
+    float2 forceDirection =
+        tangentForce / max(forceLength, 0.000001);
+
+    // Debug only: convert the projected tangent force into a visible
+    // direction on the actual rendered visor surface.
+    float visualLength =
+        0.025 * saturate(forceLength / 3.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 p = state.rg;
+        float2 dropPosition = float2(
+            p.x,
+            lerp(-0.579, -0.362, p.y)
+        );
+
+        float2 toPoint = pin.Tex - dropPosition;
+        float pointMask = 1.0 - smoothstep(
+            0.004,
+            0.009,
+            length(toPoint)
+        );
+
+        float2 endPosition =
+            dropPosition
+            + forceDirection * visualLength;
+
+        float2 lineVector = endPosition - dropPosition;
+        float lineLengthSq = dot(lineVector, lineVector);
+        float lineT = saturate(
+            dot(toPoint, lineVector)
+            / max(lineLengthSq, 0.000001)
+        );
+
+        float2 closest =
+            dropPosition + lineVector * lineT;
+
+        float lineDistance =
+            length(pin.Tex - closest);
+
+        float lineMask = 1.0 - smoothstep(
+            0.0012,
+            0.0028,
+            lineDistance
+        );
+
+        if (lineMask > result)
+        {
+            result = lineMask;
+            resultColor = float3(1.0, 0.55, 0.05);
+        }
+
+        if (pointMask > result)
+        {
+            result = pointMask;
+            resultColor = float3(0.05, 0.85, 1.0);
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
 float4 main(PS_IN pin)
 {
+    
     if (gRainDebug == 3)
     {
         return float4(
@@ -2378,109 +2481,6 @@ float4 main(PS_IN pin)
     {
         return rainPersistentSurfaceForceDebugOutput(pin);
     }
-
-float4 rainPersistentSurfaceForceDebugOutput(PS_IN pin)
-{
-    float count = max(gRainStateCount, 1.0);
-    float result = 0.0;
-    float3 resultColor = float3(1.0, 1.0, 1.0);
-
-    float3 surfaceNormal = rainSurfaceNormalWorld(pin.Tex);
-    float3 tangentU;
-    float3 tangentV;
-    rainSurfaceBasisWorld(pin, tangentU, tangentV);
-
-    float3 effectiveForce =
-        float3(0.0, -gRainGravity, 0.0)
-        + gRainAcceleration * gRainForceScale;
-
-    float2 tangentForce = rainProjectForceToUVWorld(
-        effectiveForce,
-        surfaceNormal,
-        tangentU,
-        tangentV,
-        1.0
-    );
-
-    float forceLength = length(tangentForce);
-    float2 forceDirection =
-        tangentForce / max(forceLength, 0.000001);
-
-    // Debug only: convert the projected tangent force into a visible
-    // direction on the actual rendered visor surface.
-    float visualLength =
-        0.025 * saturate(forceLength / 3.0);
-
-    [loop]
-    for (int i = 0; i < 256; ++i)
-    {
-        if ((float)i >= count)
-            break;
-
-        float stateIndex = (float)i;
-        float2 stateUV = float2(
-            (stateIndex + 0.5) / count,
-            0.5
-        );
-
-        float4 state = txRainState.SampleLevel(
-            samPointRain,
-            stateUV,
-            0.0
-        );
-
-        float2 p = state.rg;
-        float2 dropPosition = float2(
-            p.x,
-            lerp(-0.579, -0.362, p.y)
-        );
-
-        float2 toPoint = pin.Tex - dropPosition;
-        float pointMask = 1.0 - smoothstep(
-            0.004,
-            0.009,
-            length(toPoint)
-        );
-
-        float2 endPosition =
-            dropPosition
-            + forceDirection * visualLength;
-
-        float2 lineVector = endPosition - dropPosition;
-        float lineLengthSq = dot(lineVector, lineVector);
-        float lineT = saturate(
-            dot(toPoint, lineVector)
-            / max(lineLengthSq, 0.000001)
-        );
-
-        float2 closest =
-            dropPosition + lineVector * lineT;
-
-        float lineDistance =
-            length(pin.Tex - closest);
-
-        float lineMask = 1.0 - smoothstep(
-            0.0012,
-            0.0028,
-            lineDistance
-        );
-
-        if (lineMask > result)
-        {
-            result = lineMask;
-            resultColor = float3(1.0, 0.55, 0.05);
-        }
-
-        if (pointMask > result)
-        {
-            result = pointMask;
-            resultColor = float3(0.05, 0.85, 1.0);
-        }
-    }
-
-    return float4(resultColor, saturate(result));
-}
-
 
     if (gRainDebug == 19)
     {
