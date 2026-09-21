@@ -208,6 +208,11 @@ local cfg = scriptSettings:mapConfig({
         -- Maximum procedural surface speed in UV-space units per second.
         RAIN_FLOW_MAX_SPEED = 0.035,
 
+        -- Quadratic air-drag test coefficient.
+        -- Debug 31 only: converts relative air speed squared into
+        -- the same compact force space used by RainFX.
+        RAIN_AIR_DRAG_SCALE = 0.000050,
+
         -- World-space acceleration influence.
         -- RainFX keeps vehicle acceleration in WORLD space and projects
         -- it onto each droplet's local surface tangent frame in HLSL.
@@ -304,7 +309,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 19,
+        RAIN_DEBUG = 31,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = 0.5,
@@ -517,6 +522,8 @@ local rainStateUpdateParams = {
         gRainStateCount = 256.0,
         gRainStateForce = vec2(0.0, 0.0),
         gRainAcceleration = vec3(0.0, 0.0, 0.0),
+        gRainAirVelocityWorld = vec3(0.0, 0.0, 0.0),
+        gRainAirDragScale = 0.000050,
         gRainStateDrag = 0.35,
         gRainStateMaxSpeed = 0.12,
         gRainStateFlowAcceleration = 0.020,
@@ -3910,6 +3917,19 @@ render.on('main.track.transparent', function()
 
             gRainAcceleration =
                 rainAccelerationCurrent,
+
+            -- Airflow is opposite vehicle world velocity.
+            -- Debug 31 consumes this value only; persistent physics is
+            -- intentionally unchanged until the direction test is verified.
+            gRainAirVelocityWorld =
+                vec3(
+                    -car.velocity.x,
+                    -car.velocity.y,
+                    -car.velocity.z
+                ),
+
+            gRainAirDragScale =
+                cfg.RUNTIME.RAIN_AIR_DRAG_SCALE,
 
             gRainDebug =
                 cfg.RUNTIME.RAIN_DEBUG,
