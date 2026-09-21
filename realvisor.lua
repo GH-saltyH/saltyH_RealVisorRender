@@ -507,6 +507,7 @@ local rainStateUpdateParams = {
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
         gRainStateForce = vec2(0.0, 0.0),
+        gRainAcceleration = vec3(0.0, 0.0, 0.0),
         gRainStateDrag = 0.35,
         gRainStateMaxSpeed = 0.12,
         gRainStateFlowAcceleration = 0.020,
@@ -3553,9 +3554,12 @@ local function updateRainGPUState(sim)
         physicsMode
         and (
             cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
-            / max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
+            / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
         )
         or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
+
+    rainStateUpdateParams.values.gRainAcceleration =
+        rainAccelerationCurrent
 
     rainStateUpdateParams.values.gRainStateFlowAcceleration =
         cfg.RUNTIME.RAIN_FLOW_ACCELERATION
@@ -3879,7 +3883,7 @@ render.on('main.track.transparent', function()
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3
                 and (
                     cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
-                    / max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
+                    / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
                 )
                 or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED,
 
