@@ -4011,7 +4011,13 @@ render.on('main.track.transparent', function()
                 cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL,
 
             gRainStateDebugVelocityScale =
-                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE
+                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE,
+
+            gRainStateMeshVMin =
+                cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
+
+            gRainStateMeshVMax =
+                cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
         },
 
         shader = 
