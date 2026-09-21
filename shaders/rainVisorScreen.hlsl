@@ -1667,14 +1667,33 @@ float4 main(PS_IN pin)
 
     if (gRainDebug == 19)
     {
-        float persistentDrops = rainPersistentDropLayer(pin);
+        // float persistentDrops = rainPersistentDropLayer(pin);
 
-        return float4(
-            1.0,
-            0.15,
-            0.05,
-            persistentDrops
+        // return float4(
+        //     1.0,
+        //     0.15,
+        //     0.05,
+        //     persistentDrops
+        // );
+
+        
+        // test 1 remove every state sampling
+        //return float4(1.0 ,0.0, 1.0, 1.0);
+
+
+        // test 2 draw a circle at fixed UV
+        float2 debugCenter = float2(gDebugCenter.x, gDebugCenter.y);
+        
+        float distanceToDrop = length(pin.Tex - debugCenter);
+
+        float drop = 1.0 - smoothstep(
+            0.02,
+            0.04,
+            distanceToDrop
         );
+
+        return float4(1.0, 0.15, 0.05, drop);
+
     }
 
     if (gRainDebug > 0)

@@ -295,6 +295,9 @@ local cfg = scriptSettings:mapConfig({
         -- 18 = persistent GPU state position / velocity diagnostic
         RAIN_DEBUG = 19,
 
+        RAIN_DEBUG_CENTER_X = 0.5,
+        RAIN_DEBUG_CENTER_Y = 0.5,
+
     },
 })
 
@@ -3712,6 +3715,12 @@ render.on('main.track.transparent', function()
 
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
+
+            gDebugCenter =
+                vec2(
+                    cfg.RUNTIME.RAIN_DEBUG_CENTER_X,
+                    cfg.RUNTIME.RAIN_DEBUG_CENTER_Y
+                )   
         },
 
         shader = 
@@ -5759,8 +5768,30 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_DEBUG = safe_tonumber(newText, 0)
     end
 
-
+    local newCenterX, changed = ui.slider(
+        'CENTER_X',
+        cfg.RUNTIME.RAIN_DEBUG_CENTER_X,
+        -2.0,
+        2.0,
+        '%.3f'
+    )
     
+    if changed then
+        cfg.RUNTIME.RAIN_DEBUG_CENTER_X = newCenterX
+    end
+    
+
+    local newCenterY, changed = ui.slider(
+        'CENTER_Y',
+        cfg.RUNTIME.RAIN_DEBUG_CENTER_Y,
+        -2.0,
+        2.0,
+        '%.3f'
+    )
+    
+    if changed then
+        cfg.RUNTIME.RAIN_DEBUG_CENTER_Y = newCenterY
+    end
     --------------------------------------------------------
     -- Material Parameter: floating editor window
     --------------------------------------------------------
