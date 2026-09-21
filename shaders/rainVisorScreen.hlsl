@@ -2669,8 +2669,11 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
         float2 localDelta = pin.Tex - dropPosition;
 
         /*
-            Use a normalized distance so the diagnostic marker remains
-            approximately circular despite the narrow visor V domain.
+            Debug 30 size diagnostic:
+            use the persistent radius from Meta A/B instead of a fixed marker.
+
+            The physical radius remains unchanged. Only the visible debug
+            marker is amplified so size variance can be judged clearly.
         */
         localDelta.y /=
             max(
@@ -2679,11 +2682,21 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
                 0.000001
             );
 
+        float radius01 = saturate(
+            (meta.r - 0.032) / (0.115 - 0.032)
+        );
+
+        float debugRadius = lerp(
+            0.006,
+            0.022,
+            radius01
+        );
+
         float marker =
             1.0
             - smoothstep(
-                0.006,
-                0.012,
+                debugRadius * 0.45,
+                debugRadius,
                 length(localDelta)
             );
 
