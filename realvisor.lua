@@ -6119,6 +6119,32 @@ function windowMain(dt)
     if changed then
         cfg.RUNTIME.RAIN_DEBUG_CENTER_Y = newCenterY
     end
+    
+    
+    local newVerticalUVMin, changed = ui.slider(
+        '(UV Calibration) Vertical Min',
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
+        -2.0,
+        2.0,
+        '%.3f'
+    )
+    
+    if changed then
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN = newVerticalUVMin
+    end
+    
+    
+    local newVerticalUVMin, changed = ui.slider(
+        '(UV Calibration) Vertical Max',
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
+        -2.0,
+        2.0,
+        '%.3f'
+    )
+    
+    if changed then
+        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX = newVerticalUVMax
+    end
     --------------------------------------------------------
     -- Material Parameter: floating editor window
     --------------------------------------------------------

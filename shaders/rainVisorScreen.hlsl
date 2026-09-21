@@ -1324,89 +1324,93 @@ float4 rainDebugOutput(
         );
     }
 
-if (gRainDebug == 10)
-{
+    if (gRainDebug == 10)
+    {
+        float2 uv = pin.Tex;
+
+        return float4(
+            frac(uv),
+            0.0,
+            1.0
+        );
+    }
+
+    if (gRainDebug == 11)
+    {
+        float2 uv = pin.Tex;
+        float2 clampedUV = saturate(uv);
+
+        float2 difference = abs(uv - clampedUV);
+
+        return float4(
+            saturate(difference * 4.0),
+            0.0,
+            1.0
+        );
+    }
+
+    if (gRainDebug == 12)
+    {
+        float2 uv = pin.Tex;
+        float2 clamped = saturate(uv);
+
+        return float4(
+            frac(uv),
+            0.0,
+            1.0
+        );
+    }
+
+    if (gRainDebug == 13)
+    {
+        float2 uv = pin.Tex;
+        float2 clamped = saturate(uv);
+
+        float2 diff = uv - clamped;
+
+        return float4(
+            saturate(abs(diff)),
+            0.0,
+            1.0
+        );
+    }
+
     float2 uv = pin.Tex;
 
-    return float4(
-        frac(uv),
-        0.0,
-        1.0
-    );
-}
+    float2 uvClamped = saturate(uv);
 
-if (gRainDebug == 11)
-{
-    float2 uv = pin.Tex;
-    float2 clampedUV = saturate(uv);
+    float3 a =
+        txRainSurfaceNormal.SampleLevel(
+            samLinearSimple,
+            uv,
+            0.0
+        ).rgb;
 
-    float2 difference = abs(uv - clampedUV);
+    float3 b =
+        txRainSurfaceNormal.SampleLevel(
+            samLinearSimple,
+            uvClamped,
+            0.0
+        ).rgb;
+    
+        if (gRainDebug == 14)
+    {
+        return float4(abs(a - b), 1.0);
+    }
+    
+    if (gRainDebug == 15)
+    {
+        float3 normalWorld =
+            rainSurfaceNormalWorld(pin.Tex);
 
-    return float4(
-        saturate(difference * 4.0),
-        0.0,
-        1.0
-    );
-}
-
-if (gRainDebug == 12)
-{
-    float2 uv = pin.Tex;
-    float2 clamped = saturate(uv);
-
-    return float4(
-        frac(uv),
-        0.0,
-        1.0
-    );
-}
-if (gRainDebug == 13)
-{
-    float2 uv = pin.Tex;
-    float2 clamped = saturate(uv);
-
-    float2 diff = uv - clamped;
-
-    return float4(
-        saturate(abs(diff)),
-        0.0,
-        1.0
-    );
-}
-float2 uv = pin.Tex;
-float2 uvClamped = saturate(uv);
-
-float3 a =
-    txRainSurfaceNormal.SampleLevel(
-        samLinearSimple,
-        uv,
-        0.0
-    ).rgb;
-
-float3 b =
-    txRainSurfaceNormal.SampleLevel(
-        samLinearSimple,
-        uvClamped,
-        0.0
-    ).rgb;
- 
-    if (gRainDebug == 14)
-{
-    return float4(abs(a - b), 1.0);
-}
-if (gRainDebug == 15)
-{
-    float3 normalWorld =
-        rainSurfaceNormalWorld(pin.Tex);
-
-    return float4(
-        normalWorld * 0.5 + 0.5,
-        1.0
-    );
-}
+        return float4(
+            normalWorld * 0.5 + 0.5,
+            1.0
+        );
+    }
 
 
-/*
+    /*
         17 = reference adhesion / projected force.
         This is intentionally a global diagnostic because individual
         procedural droplet sizes are not persistent render targets.
@@ -1444,22 +1448,23 @@ if (gRainDebug == 15)
     }
 
     if (gRainDebug == 16)
-{
+    {
 
-float forceLength =
-    length(tangentForce);
+    float forceLength =
+        length(tangentForce);
 
-float2 forceDirection =
-    forceLength > 0.000001
-    ? tangentForce / forceLength
-    : float2(0.0, 0.0);
+    float2 forceDirection =
+        forceLength > 0.000001
+        ? tangentForce / forceLength
+        : float2(0.0, 0.0);
 
-return float4(
-    forceDirection * 0.5 + 0.5,
-    saturate(forceLength),
-    0.3
-);
-}
+    return float4(
+        forceDirection * 0.5 + 0.5,
+        saturate(forceLength),
+        0.3
+        );
+    }   
+    
     /*
         Local movement-direction diagnostic.
         Red/green encode the projected UV direction, blue encodes its strength.
