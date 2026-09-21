@@ -292,6 +292,8 @@ local cfg = scriptSettings:mapConfig({
         -- Debug 25: amplify the measured accumulated displacement only for
         -- visualization. This does not change physics or state integration.
         RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE = 50.0,
+        RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL = 0.25,
+        RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE = 50.0,
 
         -- Debug
         -- 0 = normal rain
@@ -496,6 +498,7 @@ local rainStateMetaA = nil
 local rainStateMetaB = nil
 local rainStateDebugOrigin = nil
 local rainStateDebugCapturePending = false
+local rainStateDebugSampleTimer = 0.0
 local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
@@ -3531,6 +3534,7 @@ local function initializeRainGPUState()
 
     rainStateReadIsA = true
     rainStateInitialized = true
+    rainStateDebugSampleTimer = 0.0
     rainStateLastFrame = -1
 
     ac.log(
@@ -3681,11 +3685,41 @@ local function updateRainGPUState(sim)
         )
 
         rainStateDebugCapturePending = false
+        rainStateDebugSampleTimer = 0.0
 
         ac.log(
             appNameDebug
-            .. ' Rain Debug 25: displacement origin captured'
+            .. ' Rain Debug ' .. tostring(cfg.RUNTIME.RAIN_DEBUG)
+            .. ': displacement sample captured'
         )
+    end
+
+    if cfg.RUNTIME.RAIN_DEBUG == 26 and rainStateDebugOrigin then
+        rainStateDebugSampleTimer =
+            rainStateDebugSampleTimer + math.min(dt, 0.05)
+
+        local sampleInterval =
+            math.max(
+                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL,
+                0.01
+            )
+
+        if rainStateDebugSampleTimer >= sampleInterval then
+            local currentState =
+                rainStateReadIsA and rainStateA or rainStateB
+
+            rainStateDebugOriginUpdateParams.values.gRainStateCount =
+                math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+
+            rainStateDebugOriginUpdateParams.textures.txRainState =
+                currentState
+
+            rainStateDebugOrigin:updateWithShader(
+                rainStateDebugOriginUpdateParams
+            )
+
+            rainStateDebugSampleTimer = 0.0
+        end
     end
 end
 
@@ -3741,7 +3775,8 @@ render.on('main.track.transparent', function()
 
     if rainLastDebugMode ~= cfg.RUNTIME.RAIN_DEBUG then
         rainLastDebugMode = cfg.RUNTIME.RAIN_DEBUG
-        if cfg.RUNTIME.RAIN_DEBUG == 25 then
+        if cfg.RUNTIME.RAIN_DEBUG == 25
+            or cfg.RUNTIME.RAIN_DEBUG == 26 then
             rainStateDebugCapturePending = true
         end
 
@@ -3970,7 +4005,13 @@ render.on('main.track.transparent', function()
                 ),
 
             gRainStateDebugDisplacementScale =
-                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE
+                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE,
+
+            gRainStateDebugSampleInterval =
+                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL,
+
+            gRainStateDebugVelocityScale =
+                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE
         },
 
         shader = 
