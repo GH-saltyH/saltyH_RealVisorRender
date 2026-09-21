@@ -148,158 +148,6 @@ float4 rainStateMain(PS_IN pin)
 
 
 
-float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
-{
-    /*
-        Debug 32:
-        Verify only the Lua -> render.mesh() airflow input path.
-
-        gRainAirVelocityWorld is expected to be:
-            -car.velocity
-
-        This diagnostic intentionally does not sample persistent state,
-        the normal map, or the surface tangent frame. It also does not
-        calculate physical drag.
-
-        Cyan line:
-            world-space airflow projected into the camera basis.
-
-        White marker:
-            diagnostic origin.
-
-        Line length:
-            relative to the magnitude of the incoming airflow vector.
-    */
-
-    float3 airflow =
-        gRainAirVelocityWorld;
-
-    float airSpeed =
-        length(airflow);
-
-    float2 cameraAir =
-        float2(
-            dot(airflow, gRainCameraSide),
-            dot(airflow, gRainCameraUp)
-        );
-
-    float cameraAirLength =
-        length(cameraAir);
-
-    float2 direction =
-        cameraAir
-        / max(cameraAirLength, 0.000001);
-
-    float2 center =
-        float2(
-            gDebugCenter.x,
-            0.5 * (
-                gRainStateMeshVMin
-                + gRainStateMeshVMax
-            )
-        );
-
-    float visualLength =
-        0.12
-        * saturate(
-            airSpeed / 100.0
-        );
-
-    float2 endPoint =
-        center
-        + direction * visualLength;
-
-    float2 line =
-        endPoint
-        - center;
-
-    float2 fromCenter =
-        pin.Tex
-        - center;
-
-    float lineT =
-        saturate(
-            dot(fromCenter, line)
-            / max(dot(line, line), 0.000001)
-        );
-
-    float lineDistance =
-        length(
-            pin.Tex
-            - (
-                center
-                + line * lineT
-            )
-        );
-
-    float lineMask =
-        cameraAirLength > 0.0001
-        ? (
-            1.0
-            - smoothstep(
-                0.0012,
-                0.0035,
-                lineDistance
-            )
-        )
-        : 0.0;
-
-    float originDistance =
-        length(pin.Tex - center);
-
-    float originMask =
-        1.0
-        - smoothstep(
-            0.0025,
-            0.0060,
-            originDistance
-        );
-
-    float endpointDistance =
-        length(pin.Tex - endPoint);
-
-    float endpointMask =
-        visualLength > 0.0005
-        ? (
-            1.0
-            - smoothstep(
-                0.0020,
-                0.0050,
-                endpointDistance
-            )
-        )
-        : 0.0;
-
-    float mask =
-        max(
-            lineMask,
-            max(originMask, endpointMask)
-        );
-
-    float speed01 =
-        saturate(airSpeed / 100.0);
-
-    float3 color =
-        lerp(
-            float3(0.0, 0.25, 0.25),
-            float3(0.0, 1.0, 1.0),
-            speed01
-        );
-
-    color =
-        lerp(
-            color,
-            float3(1.0, 1.0, 1.0),
-            originMask
-        );
-
-    return float4(
-        color,
-        saturate(mask)
-    );
-}
-
-
 float4 main(PS_IN pin)
 {
     return rainStateMain(pin);
@@ -3608,6 +3456,158 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
     return float4(
         resultColor,
         saturate(result)
+    );
+}
+
+
+float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 32:
+        Verify only the Lua -> render.mesh() airflow input path.
+
+        gRainAirVelocityWorld is expected to be:
+            -car.velocity
+
+        This diagnostic intentionally does not sample persistent state,
+        the normal map, or the surface tangent frame. It also does not
+        calculate physical drag.
+
+        Cyan line:
+            world-space airflow projected into the camera basis.
+
+        White marker:
+            diagnostic origin.
+
+        Line length:
+            relative to the magnitude of the incoming airflow vector.
+    */
+
+    float3 airflow =
+        gRainAirVelocityWorld;
+
+    float airSpeed =
+        length(airflow);
+
+    float2 cameraAir =
+        float2(
+            dot(airflow, gRainCameraSide),
+            dot(airflow, gRainCameraUp)
+        );
+
+    float cameraAirLength =
+        length(cameraAir);
+
+    float2 direction =
+        cameraAir
+        / max(cameraAirLength, 0.000001);
+
+    float2 center =
+        float2(
+            gDebugCenter.x,
+            0.5 * (
+                gRainStateMeshVMin
+                + gRainStateMeshVMax
+            )
+        );
+
+    float visualLength =
+        0.12
+        * saturate(
+            airSpeed / 100.0
+        );
+
+    float2 endPoint =
+        center
+        + direction * visualLength;
+
+    float2 line =
+        endPoint
+        - center;
+
+    float2 fromCenter =
+        pin.Tex
+        - center;
+
+    float lineT =
+        saturate(
+            dot(fromCenter, line)
+            / max(dot(line, line), 0.000001)
+        );
+
+    float lineDistance =
+        length(
+            pin.Tex
+            - (
+                center
+                + line * lineT
+            )
+        );
+
+    float lineMask =
+        cameraAirLength > 0.0001
+        ? (
+            1.0
+            - smoothstep(
+                0.0012,
+                0.0035,
+                lineDistance
+            )
+        )
+        : 0.0;
+
+    float originDistance =
+        length(pin.Tex - center);
+
+    float originMask =
+        1.0
+        - smoothstep(
+            0.0025,
+            0.0060,
+            originDistance
+        );
+
+    float endpointDistance =
+        length(pin.Tex - endPoint);
+
+    float endpointMask =
+        visualLength > 0.0005
+        ? (
+            1.0
+            - smoothstep(
+                0.0020,
+                0.0050,
+                endpointDistance
+            )
+        )
+        : 0.0;
+
+    float mask =
+        max(
+            lineMask,
+            max(originMask, endpointMask)
+        );
+
+    float speed01 =
+        saturate(airSpeed / 100.0);
+
+    float3 color =
+        lerp(
+            float3(0.0, 0.25, 0.25),
+            float3(0.0, 1.0, 1.0),
+            speed01
+        );
+
+    color =
+        lerp(
+            color,
+            float3(1.0, 1.0, 1.0),
+            originMask
+        );
+
+    return float4(
+        color,
+        saturate(mask)
     );
 }
 
