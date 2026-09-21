@@ -3521,7 +3521,7 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
         center
         + direction * visualLength;
 
-    float2 line =
+    float2 lineVector =
         endPoint
         - center;
 
@@ -3531,8 +3531,8 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
 
     float lineT =
         saturate(
-            dot(fromCenter, line)
-            / max(dot(line, line), 0.000001)
+            dot(fromCenter, lineVector)
+            / max(dot(lineVector, lineVector), 0.000001)
         );
 
     float lineDistance =
@@ -3540,7 +3540,7 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
             pin.Tex
             - (
                 center
-                + line * lineT
+                + lineVector * lineT
             )
         );
 
