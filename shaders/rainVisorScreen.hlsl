@@ -2314,7 +2314,7 @@ float4 rainPersistentAdhesionDebugOutput(PS_IN pin)
         float adhesionBase = lerp(
             gRainAdhesionMin,
             gRainAdhesionMax,
-            rainStateHash(stateIndex + 211.0)
+            rainHash(float2(stateIndex, 211.0))
         );
         float adhesion = adhesionBase / sqrt(mass);
 
