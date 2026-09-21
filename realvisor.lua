@@ -289,6 +289,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_DRAG = 0.35,
         RAIN_GPU_STATE_MAX_SPEED = 0.12,
 
+        -- Debug 25: amplify the measured accumulated displacement only for
+        -- visualization. This does not change physics or state integration.
+        RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE = 50.0,
+
         -- Debug
         -- 0 = normal rain
         -- 1 = projected force magnitude / components
@@ -490,6 +494,8 @@ local rainStateA = nil
 local rainStateB = nil
 local rainStateMetaA = nil
 local rainStateMetaB = nil
+local rainStateDebugOrigin = nil
+local rainStateDebugCapturePending = false
 local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
@@ -655,6 +661,35 @@ local rainStateUpdateParams = {
             }
 
             return float4(p, v);
+        }
+    ]],
+}
+
+local rainStateDebugOriginUpdateParams = {
+    textures = {
+        txRainState = false,
+    },
+
+    values = {
+        gRainStateCount = 256.0,
+    },
+
+    shader = [[
+        SamplerState samPointRainOrigin {
+            Filter = MIN_MAG_MIP_POINT;
+            AddressU = CLAMP;
+            AddressV = CLAMP;
+            AddressW = CLAMP;
+        };
+
+        float4 main(PS_IN pin) {
+            float count = max(gRainStateCount, 1.0);
+            float index = min(floor(pin.Tex.x * count), count - 1.0);
+            float2 suv = float2((index + 0.5) / count, 0.5);
+            float2 position = txRainState.SampleLevel(
+                samPointRainOrigin, suv, 0.0
+            ).rg;
+            return float4(position, 0.0, 1.0);
         }
     ]],
 }
@@ -3451,7 +3486,14 @@ local function initializeRainGPUState()
             render.TextureFormat.R32G32B32A32.Float
         ):setName('RainFX State Meta B')
 
-    if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB then
+    rainStateDebugOrigin =
+        ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX Debug Origin')
+
+    if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB or not rainStateDebugOrigin then
         ac.warn(
             appNameDebug
             .. ' Rain GPU state: ExtraCanvas allocation failed'
@@ -3461,6 +3503,7 @@ local function initializeRainGPUState()
         rainStateB = nil
         rainStateMetaA = nil
         rainStateMetaB = nil
+        rainStateDebugOrigin = nil
         return false
     end
 
@@ -3480,10 +3523,15 @@ local function initializeRainGPUState()
     rainStateMetaA:updateWithShader(rainStateMetaUpdateParams)
     rainStateMetaB:updateWithShader(rainStateMetaUpdateParams)
 
+    rainStateDebugOriginUpdateParams.values.gRainStateCount = count
+    rainStateDebugOriginUpdateParams.textures.txRainState = rainStateA
+    rainStateDebugOrigin:updateWithShader(rainStateDebugOriginUpdateParams)
+
     rainStateUpdateParams.values.gRainStateInit = 0.0
 
     rainStateReadIsA = true
     rainStateInitialized = true
+    rainStateDebugCapturePending = false
     rainStateLastFrame = -1
 
     ac.log(
@@ -3618,6 +3666,28 @@ local function updateRainGPUState(sim)
     writeMeta:updateWithShader(rainStateMetaUpdateParams)
 
     rainStateReadIsA = not rainStateReadIsA
+
+    if rainStateDebugCapturePending and rainStateDebugOrigin then
+        local currentState =
+            rainStateReadIsA and rainStateA or rainStateB
+
+        rainStateDebugOriginUpdateParams.values.gRainStateCount =
+            math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+
+        rainStateDebugOriginUpdateParams.textures.txRainState =
+            currentState
+
+        rainStateDebugOrigin:updateWithShader(
+            rainStateDebugOriginUpdateParams
+        )
+
+        rainStateDebugCapturePending = false
+
+        ac.log(
+            appNameDebug
+            .. ' Rain Debug 25: displacement origin captured'
+        )
+    end
 end
 
 --------------------------------------------------------
@@ -3672,6 +3742,10 @@ render.on('main.track.transparent', function()
 
     if rainLastDebugMode ~= cfg.RUNTIME.RAIN_DEBUG then
         rainLastDebugMode = cfg.RUNTIME.RAIN_DEBUG
+        if cfg.RUNTIME.RAIN_DEBUG == 25 then
+            rainStateDebugCapturePending = true
+        end
+
         ac.log(
             appNameDebug
             .. ' Rain render debug=' .. tostring(cfg.RUNTIME.RAIN_DEBUG)
@@ -3792,6 +3866,9 @@ render.on('main.track.transparent', function()
                 and rainStateMetaA
                 or rainStateMetaB,
 
+            txRainStateOrigin =
+                rainStateDebugOrigin,
+
         },
 
         
@@ -3891,7 +3968,10 @@ render.on('main.track.transparent', function()
                 vec2(
                     cfg.RUNTIME.RAIN_DEBUG_CENTER_X,
                     cfg.RUNTIME.RAIN_DEBUG_CENTER_Y
-                )   
+                ),
+
+            gRainStateDebugDisplacementScale =
+                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE
         },
 
         shader = 
