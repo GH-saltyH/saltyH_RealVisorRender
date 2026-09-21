@@ -1585,6 +1585,162 @@ float4 rainStateDebugOutput(
 }
 
 
+
+/*
+    Persistent velocity-vector diagnostic.
+
+    Debug 19 proves that persistent positions are independent.
+    Debug 20 visualizes the VELOCITY stored in state.ba directly.
+
+    The line direction is the normalized stored velocity.
+    The line length is proportional to stored speed / max speed.
+    No surface normal, curvature, force projection or procedural motion
+    is involved in this diagnostic.
+*/
+float4 rainPersistentVelocityDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 1.0, 1.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            rainStatePoint,
+            stateUV,
+            0.0
+        );
+
+        float2 statePosition = state.rg;
+        float2 velocity = state.ba;
+
+        float2 dropPosition = float2(
+            statePosition.x,
+            lerp(-0.579, -0.362, statePosition.y)
+        );
+
+        float speed = length(velocity);
+        float speed01 = saturate(
+            speed / max(gRainStateMaxSpeed, 0.000001)
+        );
+
+        if (speed <= 0.000001)
+        {
+            float distanceToDrop = length(
+                pin.Tex - dropPosition
+            );
+
+            float dotMask = 1.0 - smoothstep(
+                0.003,
+                0.006,
+                distanceToDrop
+            );
+
+            if (dotMask > result)
+            {
+                result = dotMask;
+                resultColor = float3(0.15, 0.15, 1.0);
+            }
+
+            continue;
+        }
+
+        float2 direction = velocity / speed;
+
+        /*
+            State Y is mapped to the measured visor pin.Tex Y range.
+            Apply the same scale to the velocity vector so its direction
+            remains consistent with the rendered state position domain.
+        */
+        float2 directionMesh = normalize(
+            float2(
+                direction.x,
+                direction.y * (-0.362 + 0.579)
+            )
+        );
+
+        float lineLength = 0.045 * speed01;
+
+        float2 lineStart = dropPosition;
+        float2 lineEnd = lineStart + directionMesh * lineLength;
+        float2 lineVector = lineEnd - lineStart;
+
+        float lineVectorLengthSq = dot(
+            lineVector,
+            lineVector
+        );
+
+        float2 pointVector = pin.Tex - lineStart;
+
+        float lineT = saturate(
+            dot(pointVector, lineVector)
+            / max(lineVectorLengthSq, 0.000001)
+        );
+
+        float2 closestPoint =
+            lineStart + lineVector * lineT;
+
+        float distanceToLine = length(
+            pin.Tex - closestPoint
+        );
+
+        float lineWidth = lerp(
+            0.0015,
+            0.0030,
+            speed01
+        );
+
+        float lineMask = 1.0 - smoothstep(
+            lineWidth,
+            lineWidth * 2.0,
+            distanceToLine
+        );
+
+        float distanceToDrop = length(
+            pin.Tex - dropPosition
+        );
+
+        float dropMask = 1.0 - smoothstep(
+            0.003,
+            0.006,
+            distanceToDrop
+        );
+
+        float mask = max(lineMask, dropMask);
+
+        if (mask > result)
+        {
+            result = mask;
+
+            /*
+                R/G = signed direction encoded to 0..1.
+                B = normalized velocity magnitude.
+            */
+            resultColor = float3(
+                direction.x * 0.5 + 0.5,
+                direction.y * 0.5 + 0.5,
+                speed01
+            );
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
 float4 main(PS_IN pin)
 {
     if (gRainDebug == 3)
@@ -1663,6 +1819,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 18)
     {
         return rainStateDebugOutput(pin);
+    }
+
+    if (gRainDebug == 20)
+    {
+        return rainPersistentVelocityDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
