@@ -697,8 +697,8 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
     float2 perpendicular =
         float2(
             -movementDir.y,
-            movementDir.x        );
-
+            movementDir.x
+        );
     float trailSide =
         abs(
             dot(
@@ -1396,9 +1396,9 @@ if (gRainDebug == 15)
 {
     float3 normalWorld =
         rainSurfaceNormalWorld(pin.Tex);
+
     return float4(
-        normalWorld * 0.5 + 0.5,
-        1.0
+        normalWorld * 0.5 + 0.5,        1.0
     );
 }
 
@@ -2096,9 +2096,9 @@ float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
             0.0050,
             length(pin.Tex - predictedPosition)
         );
+
         if (currentMask > result)
-        {
-            result = currentMask;
+        {            result = currentMask;
             resultColor = float3(1.0, 1.0, 1.0);
         }
 
@@ -2797,7 +2797,6 @@ float4 main(PS_IN pin)
             float distanceToDrop = length(
                 pin.Tex - dropPosition
             );
-
             float drop = 1.0 - smoothstep(
                 radius * 0.25,
                 radius,
