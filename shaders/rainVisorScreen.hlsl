@@ -1667,33 +1667,68 @@ float4 main(PS_IN pin)
 
     if (gRainDebug == 19)
     {
-        // float persistentDrops = rainPersistentDropLayer(pin);
+        /*
+            Stage 2 / coordinate-space validation.
 
-        // return float4(
-        //     1.0,
-        //     0.15,
-        //     0.05,
-        //     persistentDrops
-        // );
+            The persistent state stores position in normalized [0, 1] space.
+            The visor render mesh currently exposes pin.Tex in a different
+            vertical range: approximately -0.579 .. -0.362.
 
-        
-        // test 1 remove every state sampling
-        //return float4(1.0 ,0.0, 1.0, 1.0);
+            Keep the GPU state itself normalized. Convert only at render time
+            so the persistent physics state remains independent from the
+            mesh's current texture-coordinate convention.
 
+            State texel 0 is intentionally sampled first. Once this marker
+            is visible, the next test can restore the full 256-drop loop.
+        */
+        float count = max(gRainStateCount, 1.0);
 
-        // test 2 draw a circle at fixed UV
-        float2 debugCenter = float2(gDebugCenter.x, gDebugCenter.y);
-        
-        float distanceToDrop = length(pin.Tex - debugCenter);
+        float2 stateUV = float2(
+            0.5 / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            rainStatePoint,
+            stateUV,
+            0.0
+        );
+
+        float2 statePosition = state.rg;
+
+        /*
+            X already matches the measured pin.Tex horizontal space.
+            Y is remapped from normalized state space into the measured
+            visor mesh range.
+
+            gDebugCenter remains available for the existing fixed-point
+            test; this state-0 test deliberately does not depend on it.
+        */
+        float2 dropPosition = float2(
+            statePosition.x,
+            lerp(
+                -0.579,
+                -0.362,
+                statePosition.y
+            )
+        );
+
+        float distanceToDrop = length(
+            pin.Tex - dropPosition
+        );
 
         float drop = 1.0 - smoothstep(
-            0.02,
-            0.04,
+            0.025,
+            0.045,
             distanceToDrop
         );
 
-        return float4(1.0, 0.15, 0.05, drop);
-
+        return float4(
+            1.0,
+            0.15,
+            0.05,
+            drop
+        );
     }
 
     if (gRainDebug > 0)
