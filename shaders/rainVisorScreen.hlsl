@@ -2654,6 +2654,13 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
                 0.0
             );
 
+        float4 meta =
+            txRainStateMeta.SampleLevel(
+                samPointRain,
+                stateUV,
+                0.0
+            );
+
         float2 p = state.rg;
         float2 velocity = state.ba;
 
