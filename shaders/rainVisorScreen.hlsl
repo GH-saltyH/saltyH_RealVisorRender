@@ -2610,6 +2610,455 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
 
 
 
+float4 rainPersistentAirDragDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 0.0, 0.0);
+
+    /*
+        Debug 31:
+        Visualize the three force components at every persistent drop.
+
+        Purple = gravity + vehicle acceleration.
+        Cyan   = relative-air drag.
+        White  = total force (base + air drag).
+
+        The air velocity supplied by Lua is opposite vehicle world velocity.
+        Drag magnitude is quadratic in air speed for this diagnostic:
+            F_drag = airflow * |airflow| * scale
+
+        This stage does NOT modify persistent physics.
+    */
+    float3 baseForce =
+        float3(
+            0.0,
+            -gRainGravity,
+            0.0
+        )
+        + gRainAcceleration * gRainForceScale;
+
+    float airSpeed = length(gRainAirVelocityWorld);
+
+    float3 airDragForce =
+        gRainAirVelocityWorld
+        * airSpeed
+        * max(gRainAirDragScale, 0.0);
+
+    float3 totalForce =
+        baseForce
+        + airDragForce;
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state =
+            txRainState.SampleLevel(
+                samPointRain,
+                stateUV,
+                0.0
+            );
+
+        float4 meta =
+            txRainStateMeta.SampleLevel(
+                samPointRain,
+                stateUV,
+                0.0
+            );
+
+        float2 p = state.rg;
+
+        float2 dropPosition = float2(
+            p.x,
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                p.y
+            )
+        );
+
+        float2 localDelta =
+            pin.Tex
+            - dropPosition;
+
+        localDelta.y /=
+            max(
+                gRainStateMeshVMax
+                - gRainStateMeshVMin,
+                0.000001
+            );
+
+        float radius01 = saturate(
+            (meta.r - 0.032)
+            / (0.115 - 0.032)
+        );
+
+        float markerRadius = lerp(
+            0.005,
+            0.014,
+            radius01
+        );
+
+        float marker =
+            1.0
+            - smoothstep(
+                markerRadius * 0.45,
+                markerRadius,
+                length(localDelta)
+            );
+
+        /*
+            The normal/tangent reconstruction intentionally matches
+            Debug 30 and the persistent physics convention.
+        */
+        float3 normalWorld =
+            rainSurfaceNormalWorld(
+                float2(
+                    p.x,
+                    lerp(
+                        gRainStateMeshVMin,
+                        gRainStateMeshVMax,
+                        p.y
+                    )
+                )
+            );
+
+        float3 normalObject =
+            normalize(
+                mul(
+                    normalWorld,
+                    transpose(
+                        (float3x3)gRainObjectToWorld
+                    )
+                )
+            );
+
+        float3 tangentUObject =
+            float3(
+                1.0,
+                0.0,
+                0.0
+            );
+
+        tangentUObject -=
+            normalObject
+            * dot(
+                tangentUObject,
+                normalObject
+            );
+
+        if (length(tangentUObject) < 0.0001)
+        {
+            tangentUObject =
+                float3(
+                    0.0,
+                    0.0,
+                    1.0
+                );
+
+            tangentUObject -=
+                normalObject
+                * dot(
+                    tangentUObject,
+                    normalObject
+                );
+        }
+
+        tangentUObject =
+            normalize(tangentUObject);
+
+        float3 tangentVObject =
+            normalize(
+                cross(
+                    normalObject,
+                    tangentUObject
+                )
+            );
+
+        float3 tangentUWorld =
+            normalize(
+                mul(
+                    tangentUObject,
+                    (float3x3)gRainObjectToWorld
+                )
+            );
+
+        float3 tangentVWorld =
+            normalize(
+                mul(
+                    tangentVObject,
+                    (float3x3)gRainObjectToWorld
+                )
+            );
+
+        float2 baseUVForce =
+            float2(
+                -dot(
+                    baseForce,
+                    tangentUWorld
+                ),
+                dot(
+                    baseForce,
+                    tangentVWorld
+                )
+            );
+
+        float2 airUVForce =
+            float2(
+                -dot(
+                    airDragForce,
+                    tangentUWorld
+                ),
+                dot(
+                    airDragForce,
+                    tangentVWorld
+                )
+            );
+
+        float2 totalUVForce =
+            float2(
+                -dot(
+                    totalForce,
+                    tangentUWorld
+                ),
+                dot(
+                    totalForce,
+                    tangentVWorld
+                )
+            );
+
+        float baseLength =
+            length(baseUVForce);
+
+        float airLength =
+            length(airUVForce);
+
+        float totalLength =
+            length(totalUVForce);
+
+        float2 baseDirection =
+            baseUVForce
+            / max(
+                baseLength,
+                0.000001
+            );
+
+        float2 airDirection =
+            airUVForce
+            / max(
+                airLength,
+                0.000001
+            );
+
+        float2 totalDirection =
+            totalUVForce
+            / max(
+                totalLength,
+                0.000001
+            );
+
+        float vRange =
+            max(
+                gRainStateMeshVMax
+                - gRainStateMeshVMin,
+                0.000001
+            );
+
+        float baseVisualLength =
+            0.018
+            * saturate(
+                baseLength / 3.0
+            );
+
+        float airVisualLength =
+            0.018
+            * saturate(
+                airLength / 3.0
+            );
+
+        float totalVisualLength =
+            0.018
+            * saturate(
+                totalLength / 3.0
+            );
+
+        float2 baseEnd =
+            dropPosition
+            + float2(
+                baseDirection.x,
+                baseDirection.y * vRange
+            )
+            * baseVisualLength;
+
+        float2 airEnd =
+            dropPosition
+            + float2(
+                airDirection.x,
+                airDirection.y * vRange
+            )
+            * airVisualLength;
+
+        float2 totalEnd =
+            dropPosition
+            + float2(
+                totalDirection.x,
+                totalDirection.y * vRange
+            )
+            * totalVisualLength;
+
+        float2 baseLine =
+            baseEnd
+            - dropPosition;
+
+        float2 airLine =
+            airEnd
+            - dropPosition;
+
+        float2 totalLine =
+            totalEnd
+            - dropPosition;
+
+        float2 fromDrop =
+            pin.Tex
+            - dropPosition;
+
+        float baseT =
+            saturate(
+                dot(
+                    fromDrop,
+                    baseLine
+                )
+                / max(
+                    dot(
+                        baseLine,
+                        baseLine
+                    ),
+                    0.000001
+                )
+            );
+
+        float airT =
+            saturate(
+                dot(
+                    fromDrop,
+                    airLine
+                )
+                / max(
+                    dot(
+                        airLine,
+                        airLine
+                    ),
+                    0.000001
+                )
+            );
+
+        float totalT =
+            saturate(
+                dot(
+                    fromDrop,
+                    totalLine
+                )
+                / max(
+                    dot(
+                        totalLine,
+                        totalLine
+                    ),
+                    0.000001
+                )
+            );
+
+        float baseDistance =
+            length(
+                pin.Tex
+                - (
+                    dropPosition
+                    + baseLine * baseT
+                )
+            );
+
+        float airDistance =
+            length(
+                pin.Tex
+                - (
+                    dropPosition
+                    + airLine * airT
+                )
+            );
+
+        float totalDistance =
+            length(
+                pin.Tex
+                - (
+                    dropPosition
+                    + totalLine * totalT
+                )
+            );
+
+        float baseMask =
+            1.0
+            - smoothstep(
+                0.0010,
+                0.0024,
+                baseDistance
+            );
+
+        float airMask =
+            1.0
+            - smoothstep(
+                0.0010,
+                0.0024,
+                airDistance
+            );
+
+        float totalMask =
+            1.0
+            - smoothstep(
+                0.0010,
+                0.0024,
+                totalDistance
+            );
+
+        float3 composite =
+            baseMask * float3(1.0, 0.0, 1.0)
+            + airMask * float3(0.0, 1.0, 1.0)
+            + totalMask * float3(1.0, 1.0, 1.0);
+
+        float compositeMask =
+            max(
+                marker * 0.65,
+                max(
+                    baseMask,
+                    max(
+                        airMask,
+                        totalMask
+                    )
+                )
+            );
+
+        if (compositeMask > result)
+        {
+            result = compositeMask;
+            resultColor = saturate(composite);
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
+
 float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
@@ -3086,6 +3535,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 30)
     {
         return rainPersistentForceVelocityDebugOutput(pin);
+    }
+
+    if (gRainDebug == 31)
+    {
+        return rainPersistentAirDragDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
