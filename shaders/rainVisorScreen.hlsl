@@ -3615,6 +3615,156 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
         result
     );
 }
+float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 33:
+        Multi-point airflow + surface-normal projection.
+
+        Debug 32 verified the -car.velocity input and camera projection.
+        This stage adds only the corrected RainSurfaceNormal:
+            airflow -> normal projection -> camera basis
+
+        It intentionally does not use persistent state or mesh derivatives.
+        Nine points show how the new normal map changes airflow direction
+        across the visor.
+    */
+
+    float3 airflow = gRainAirVelocityWorld;
+    float airSpeed = length(airflow);
+
+    float3 cameraSide = gRainCameraSide;
+    float3 cameraUp = gRainCameraUp;
+
+    float visualLength =
+        0.12 * saturate(airSpeed / 100.0);
+
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 0.25, 0.25);
+
+    const float xPositions[3] = { 0.30, 0.50, 0.70 };
+    const float yPositions[3] = { 0.20, 0.50, 0.80 };
+
+    for (int yIndex = 0; yIndex < 3; ++yIndex)
+    {
+        float centerY =
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                yPositions[yIndex]
+            );
+
+        for (int xIndex = 0; xIndex < 3; ++xIndex)
+        {
+            float2 center =
+                float2(
+                    xPositions[xIndex],
+                    centerY
+                );
+
+            float3 normalWorld =
+                rainSurfaceNormalWorld(center);
+
+            float3 projectedAirflow =
+                airflow
+                - normalWorld
+                * dot(airflow, normalWorld);
+
+            float projectedSpeed =
+                length(projectedAirflow);
+
+            float2 cameraProjected =
+                float2(
+                    dot(projectedAirflow, cameraSide),
+                    dot(projectedAirflow, cameraUp)
+                );
+
+            float cameraLength =
+                length(cameraProjected);
+
+            float2 direction =
+                cameraProjected
+                / max(cameraLength, 0.000001);
+
+            float2 lineVector =
+                direction
+                * visualLength
+                * saturate(
+                    projectedSpeed
+                    / max(airSpeed, 0.000001)
+                );
+
+            float2 fromCenter =
+                pin.Tex - center;
+
+            float lineT =
+                saturate(
+                    dot(fromCenter, lineVector)
+                    / max(
+                        dot(lineVector, lineVector),
+                        0.000001
+                    )
+                );
+
+            float lineDistance =
+                length(
+                    pin.Tex
+                    - (
+                        center
+                        + lineVector * lineT
+                    )
+                );
+
+            float lineMask =
+                1.0
+                - smoothstep(
+                    0.0025,
+                    0.0055,
+                    lineDistance
+                );
+
+            float pointMask =
+                1.0
+                - smoothstep(
+                    0.004,
+                    0.008,
+                    length(pin.Tex - center)
+                );
+
+            float contribution =
+                max(
+                    lineMask * saturate(projectedSpeed / 3.0),
+                    pointMask
+                );
+
+            if (contribution > result)
+            {
+                result = contribution;
+
+                float projection01 =
+                    saturate(
+                        projectedSpeed
+                        / max(airSpeed, 0.000001)
+                    );
+
+                resultColor =
+                    lerp(
+                        float3(0.0, 0.20, 0.20),
+                        float3(0.0, 1.0, 1.0),
+                        projection01
+                    );
+            }
+        }
+    }
+
+    if (airSpeed < 0.01)
+    {
+        resultColor = float3(1.0, 1.0, 1.0);
+    }
+
+    return float4(resultColor, result);
+}
+
 float4 main(PS_IN pin)
 {
     
@@ -3760,6 +3910,12 @@ float4 main(PS_IN pin)
     {
         return rainPersistentAirflowInputDebugOutput(pin);
     }
+
+    if (gRainDebug == 33)
+    {
+        return rainPersistentAirflowNormalProjectionDebugOutput(pin);
+    }
+
 
     if (gRainDebug == 19)
     {
