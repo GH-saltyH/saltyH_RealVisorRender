@@ -1,4 +1,4 @@
-SamplerState rainStatePoint
+SamplerState samPointRain
 {
     Filter = MIN_MAG_MIP_POINT;
     AddressU = CLAMP;
@@ -81,7 +81,7 @@ float4 rainStateMain(PS_IN pin)
 
     float4 state =
         txRainState.SampleLevel(
-            rainStatePoint,
+            samPointRain,
             stateUV,
             0.0
         );
@@ -1505,7 +1505,7 @@ float rainPersistentDropLayer(PS_IN pin)
         );
 
         float4 state = txRainState.SampleLevel(
-            rainStatePoint,
+            samPointRain,
             stateUV,
             0.0
         );
@@ -1519,7 +1519,15 @@ float rainPersistentDropLayer(PS_IN pin)
             Radius is deterministic per state index and intentionally
             independent from the current fragment.
         */
-        float radius01 = rainHash(float2(stateIndex, 211.0));
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float radius01 = saturate(
+            (meta.r - 0.032) / (0.115 - 0.032)
+        );
 
         /*
             Stage 2 visibility diagnostic:
@@ -1571,7 +1579,7 @@ float4 rainStateDebugOutput(
 
     float4 state =
         txRainState.SampleLevel(
-            rainStatePoint,
+            samPointRain,
             stateUV,
             0.0
         );
@@ -1617,7 +1625,7 @@ float4 rainPersistentVelocityDebugOutput(PS_IN pin)
         );
 
         float4 state = txRainState.SampleLevel(
-            rainStatePoint,
+            samPointRain,
             stateUV,
             0.0
         );
@@ -1857,7 +1865,7 @@ float4 main(PS_IN pin)
             );
 
             float4 state = txRainState.SampleLevel(
-                rainStatePoint,
+                samPointRain,
                 stateUV,
                 0.0
             );
@@ -1878,8 +1886,14 @@ float4 main(PS_IN pin)
                 The intentionally generous range makes this stage easy to
                 distinguish from the existing procedural rain layer.
             */
-            float radius01 = rainHash(
-                float2(stateIndex, 211.0)
+            float4 meta = txRainStateMeta.SampleLevel(
+                samPointRain,
+                stateUV,
+                0.0
+            );
+
+            float radius01 = saturate(
+                (meta.r - 0.032) / (0.115 - 0.032)
             );
 
             float radius = lerp(
