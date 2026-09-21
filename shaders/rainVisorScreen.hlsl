@@ -1605,6 +1605,96 @@ float4 rainStateDebugOutput(
     No surface normal, curvature, force projection or procedural motion
     is involved in this diagnostic.
 */
+/*
+    Debug 21:
+    Render only the persistent state position.
+
+    Unlike Debug 20 this deliberately does not visualize velocity.
+    The purpose is to verify that the RG position written by the
+    persistent physics pass is actually changing over time.
+
+    No normal, force, trail or velocity information is used here.
+*/
+float4 rainPersistentPositionDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 statePosition = state.rg;
+
+        float2 dropPosition = float2(
+            statePosition.x,
+            lerp(-0.579, -0.362, statePosition.y)
+        );
+
+        float distanceToDrop = length(
+            pin.Tex - dropPosition
+        );
+
+        float radius01 = rainHash(
+            float2(stateIndex, 271.0)
+        );
+
+        float markerRadius = lerp(
+            0.0035,
+            0.0070,
+            radius01
+        );
+
+        float mask = 1.0 - smoothstep(
+            markerRadius,
+            markerRadius * 1.8,
+            distanceToDrop
+        );
+
+        if (mask > result)
+        {
+            result = mask;
+
+            float r = rainHash(
+                float2(stateIndex, 401.0)
+            );
+            float g = rainHash(
+                float2(stateIndex, 509.0)
+            );
+            float b = rainHash(
+                float2(stateIndex, 617.0)
+            );
+
+            resultColor = float3(
+                0.35 + r * 0.65,
+                0.35 + g * 0.65,
+                0.35 + b * 0.65
+            );
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
 float4 rainPersistentVelocityDebugOutput(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
@@ -1832,6 +1922,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 20)
     {
         return rainPersistentVelocityDebugOutput(pin);
+    }
+
+    if (gRainDebug == 21)
+    {
+        return rainPersistentPositionDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
