@@ -1887,6 +1887,158 @@ float4 rainPersistentAccumulatedDisplacementDebugOutput(PS_IN pin)
 }
 
 
+/*
+    Debug 26: compare persistent velocity with measured displacement rate.
+
+    Lua periodically snapshots the current persistent position into
+    txRainStateOrigin. The render pass then measures:
+
+        measuredVelocity = shortestWrappedDelta(P, Psample) / sampleInterval
+
+    Cyan   = velocity stored in persistent state
+    Orange = velocity measured from actual position displacement
+    White  = current position
+
+    Both vectors use the same visualization scale. This diagnostic does not
+    modify physics or persistent state.
+*/
+float2 rainShortestWrappedDelta(float2 current, float2 previous)
+{
+    float2 delta = current - previous;
+
+    if (delta.x > 0.5) delta.x -= 1.0;
+    if (delta.x < -0.5) delta.x += 1.0;
+    if (delta.y > 0.5) delta.y -= 1.0;
+    if (delta.y < -0.5) delta.y += 1.0;
+
+    return delta;
+}
+
+float4 rainPersistentVelocityDeltaDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+    float visualScale = max(gRainStateDebugVelocityScale, 1.0);
+    float sampleInterval = max(gRainStateDebugSampleInterval, 0.01);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain, stateUV, 0.0
+        );
+
+        float2 current = state.rg;
+        float2 velocity = state.ba;
+        float2 previous = txRainStateOrigin.SampleLevel(
+            samPointRain, stateUV, 0.0
+        ).rg;
+
+        float2 delta = rainShortestWrappedDelta(current, previous);
+        float2 measuredVelocity = delta / sampleInterval;
+
+        float2 currentPosition = float2(
+            current.x,
+            lerp(-0.579, -0.362, current.y)
+        );
+
+        // Keep the diagnostic vectors in the same normalized state space.
+        // The mesh V range is applied only when projecting them to pin.Tex.
+        float2 velocityMesh = float2(
+            velocity.x,
+            velocity.y * (-0.362 + 0.579)
+        );
+
+        float2 measuredMesh = float2(
+            measuredVelocity.x,
+            measuredVelocity.y * (-0.362 + 0.579)
+        );
+
+        float2 velocityEnd =
+            currentPosition + velocityMesh * visualScale;
+
+        float2 measuredEnd =
+            currentPosition + measuredMesh * visualScale;
+
+        float2 velocityVector = velocityEnd - currentPosition;
+        float velocityLengthSq = dot(velocityVector, velocityVector);
+        float2 measuredVector = measuredEnd - currentPosition;
+        float measuredLengthSq = dot(measuredVector, measuredVector);
+
+        float2 toPoint = pin.Tex - currentPosition;
+
+        float velocityT = saturate(
+            dot(toPoint, velocityVector)
+            / max(velocityLengthSq, 0.000001)
+        );
+        float2 velocityClosest =
+            currentPosition + velocityVector * velocityT;
+        float velocityDistance =
+            length(pin.Tex - velocityClosest);
+
+        float measuredT = saturate(
+            dot(toPoint, measuredVector)
+            / max(measuredLengthSq, 0.000001)
+        );
+        float2 measuredClosest =
+            currentPosition + measuredVector * measuredT;
+        float measuredDistance =
+            length(pin.Tex - measuredClosest);
+
+        float velocityMask =
+            1.0 - smoothstep(
+                0.0015,
+                0.0030,
+                velocityDistance
+            );
+
+        float measuredMask =
+            1.0 - smoothstep(
+                0.0015,
+                0.0030,
+                measuredDistance
+            );
+
+        float pointMask =
+            1.0 - smoothstep(
+                0.003,
+                0.006,
+                length(pin.Tex - currentPosition)
+            );
+
+        if (velocityMask > result)
+        {
+            result = velocityMask;
+            resultColor = float3(0.05, 0.85, 1.0);
+        }
+
+        if (measuredMask > result)
+        {
+            result = measuredMask;
+            resultColor = float3(1.0, 0.35, 0.05);
+        }
+
+        if (pointMask > result)
+        {
+            result = pointMask;
+            resultColor = float3(1.0, 1.0, 1.0);
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
+
 float4 rainPersistentMotionScaleDebugOutput(PS_IN pin){float c=max(gRainStateCount,1.0),r=0.0;float3 col=float3(0,1,1);[loop]for(int i=0;i<256;++i){if((float)i>=c)break;float2 uv=float2(((float)i+0.5)/c,0.5);float4 st=txRainState.SampleLevel(samPointRain,uv,0.0);float2 p=st.rg,v=st.ba;float2 p1=frac(p+v),p10=frac(p+v*10.0),p50=frac(p+v*50.0);float2 a=float2(p.x,lerp(-0.579,-0.362,p.y));float2 b=float2(p1.x,lerp(-0.579,-0.362,p1.y));float2 d=float2(p10.x,lerp(-0.579,-0.362,p10.y));float2 e=float2(p50.x,lerp(-0.579,-0.362,p50.y));float m=1-smoothstep(.003,.006,length(pin.Tex-a));float m1=1-smoothstep(.0025,.005,length(pin.Tex-b));float m10=1-smoothstep(.0025,.005,length(pin.Tex-d));float m50=1-smoothstep(.0025,.005,length(pin.Tex-e));if(m>r){r=m;col=float3(1,1,1);}if(m1>r){r=m1;col=float3(1,.35,.05);}if(m10>r){r=m10;col=float3(1,.85,.05);}if(m50>r){r=m50;col=float3(.05,.9,1);}}return float4(col,saturate(r));}
 
 float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
@@ -2215,6 +2367,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 25)
     {
         return rainPersistentAccumulatedDisplacementDebugOutput(pin);
+    }
+
+    if (gRainDebug == 26)
+    {
+        return rainPersistentVelocityDeltaDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
