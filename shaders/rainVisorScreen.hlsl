@@ -1668,66 +1668,83 @@ float4 main(PS_IN pin)
     if (gRainDebug == 19)
     {
         /*
-            Stage 2 / coordinate-space validation.
+            Stage 2 / persistent independent-drop validation.
 
-            The persistent state stores position in normalized [0, 1] space.
-            The visor render mesh currently exposes pin.Tex in a different
-            vertical range: approximately -0.579 .. -0.362.
+            Persistent state positions are normalized to [0, 1].
+            The current visor mesh uses the measured pin.Tex Y range
+            approximately -0.579 .. -0.362, so conversion is performed
+            only at render time. Physics state remains normalized.
 
-            Keep the GPU state itself normalized. Convert only at render time
-            so the persistent physics state remains independent from the
-            mesh's current texture-coordinate convention.
-
-            State texel 0 is intentionally sampled first. Once this marker
-            is visible, the next test can restore the full 256-drop loop.
+            Every state texel is rendered independently. This deliberately
+            uses a simple circle marker: no procedural drop generation,
+            normal projection, merge or residue is involved yet.
         */
         float count = max(gRainStateCount, 1.0);
+        float result = 0.0;
 
-        float2 stateUV = float2(
-            0.5 / count,
-            0.5
-        );
+        [loop]
+        for (int i = 0; i < 256; ++i)
+        {
+            if ((float)i >= count)
+                break;
 
-        float4 state = txRainState.SampleLevel(
-            rainStatePoint,
-            stateUV,
-            0.0
-        );
+            float stateIndex = (float)i;
 
-        float2 statePosition = state.rg;
+            float2 stateUV = float2(
+                (stateIndex + 0.5) / count,
+                0.5
+            );
 
-        /*
-            X already matches the measured pin.Tex horizontal space.
-            Y is remapped from normalized state space into the measured
-            visor mesh range.
+            float4 state = txRainState.SampleLevel(
+                rainStatePoint,
+                stateUV,
+                0.0
+            );
 
-            gDebugCenter remains available for the existing fixed-point
-            test; this state-0 test deliberately does not depend on it.
-        */
-        float2 dropPosition = float2(
-            statePosition.x,
-            lerp(
-                -0.579,
-                -0.362,
-                statePosition.y
-            )
-        );
+            float2 statePosition = state.rg;
 
-        float distanceToDrop = length(
-            pin.Tex - dropPosition
-        );
+            float2 dropPosition = float2(
+                statePosition.x,
+                lerp(
+                    -0.579,
+                    -0.362,
+                    statePosition.y
+                )
+            );
 
-        float drop = 1.0 - smoothstep(
-            0.025,
-            0.045,
-            distanceToDrop
-        );
+            /*
+                Keep marker size deterministic per persistent state index.
+                The intentionally generous range makes this stage easy to
+                distinguish from the existing procedural rain layer.
+            */
+            float radius01 = rainHash(
+                float2(stateIndex, 211.0)
+            );
+
+            float radius = lerp(
+                0.012,
+                0.024,
+                radius01
+            );
+
+            float distanceToDrop = length(
+                pin.Tex - dropPosition
+            );
+
+            float drop = 1.0 - smoothstep(
+                radius * 0.25,
+                radius,
+                distanceToDrop
+            );
+
+            result = max(result, drop);
+        }
 
         return float4(
             1.0,
             0.15,
             0.05,
-            drop
+            saturate(result)
         );
     }
 
