@@ -293,7 +293,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 18,
+        RAIN_DEBUG = 19,
 
     },
 })
@@ -2446,6 +2446,29 @@ local function clampValue(value, minimum, maximum)
     return value
 end
 
+--------------------------------------------------------
+-- Helper function: String to number safely 
+--------------------------------------------------------
+local function safe_tonumber(str, default)
+    -- 1. Default value fallback (ensures we return a number even if 'default' isn't passed)
+    local fallback = default or 0
+    
+    -- 2. Nil check
+    if str == nil then 
+        return fallback 
+    end
+    
+    -- 3. Clean up the string (remove leading/trailing spaces if it's a string)
+    if type(str) == "string" then
+        str = str:match("^%s*(.-)%s*$")
+    end
+    
+    -- 4. Attempt conversion
+    local num = tonumber(str)
+    
+    -- 5. Return the successfully parsed number or the fallback
+    return num or fallback
+end
 
 ------------------------------------------------------------
 -- Material Parameter Prototype: helpers
@@ -5714,6 +5737,28 @@ function windowMain(dt)
         ui.text('\t\t*' .. textDebugCamRotation)
     end
     
+
+    --------------------------------------------------------
+    -- RainFX Debug controls
+    --------------------------------------------------------
+    ui.separator()
+    ui.text('RainFX Debug Code')
+
+    
+    local strRainDebug = string.format('%d', cfg.RUNTIME.RAIN_DEBUG)
+
+
+    local newText, changed, enterPressed =
+        ui.inputText(
+                'Debug mode',
+
+                strRainDebug
+            )
+
+    if changed then
+        cfg.RUNTIME.RAIN_DEBUG = safe_tonumber(newText, 0)
+    end
+
 
     
     --------------------------------------------------------
