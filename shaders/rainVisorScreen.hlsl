@@ -1520,11 +1520,18 @@ float rainPersistentDropLayer(PS_IN pin)
             independent from the current fragment.
         */
         float radius01 = rainHash(float2(stateIndex, 211.0));
-        float radius = lerp(0.006, 0.014, radius01);
+
+        /*
+            Stage 2 visibility diagnostic:
+            use deliberately oversized markers first. This test is not
+            intended to look like a physical raindrop yet; it proves that
+            persistent state UV positions can be consumed by the visor mesh.
+        */
+        float radius = lerp(0.018, 0.032, radius01);
 
         float distanceToDrop = length(delta);
         float drop = 1.0 - smoothstep(
-            radius * 0.35,
+            radius * 0.25,
             radius,
             distanceToDrop
         );
@@ -1663,9 +1670,9 @@ float4 main(PS_IN pin)
         float persistentDrops = rainPersistentDropLayer(pin);
 
         return float4(
-            0.82,
-            0.90,
             1.0,
+            0.15,
+            0.05,
             persistentDrops
         );
     }
