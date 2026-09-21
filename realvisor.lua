@@ -22,12 +22,29 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 
 local scriptSettings = ac.INIConfig.scriptSettings()
 
+--------------------------------------------------------
+-- Path
+--------------------------------------------------------
 local appFolder = 
     ac.dirname()
     -- ac.getFolder(ac.FolderID.ACApps) .. '/lua/realvisor/'
 
-local settingsFile = 
-    appFolder .. 'settings.ini'
+
+    --------------------------------------------------------
+    -- Path: Textures
+    --------------------------------------------------------
+    
+    local textureRaindrops = appFolder .. '/texture/drops.dds'
+    local textureRainSurfaceNormal = appFolder .. '/texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds'
+    local testtextureRainSurfaceNormal = appFolder .. '/texture/test_objectSpace.dds'
+
+    
+    --------------------------------------------------------
+    -- Path: Settings
+    --------------------------------------------------------
+
+    local settingsFile = 
+        appFolder .. 'settings.ini'
 
 
 local shaders = {
@@ -2557,13 +2574,6 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
     }    
 
 
---------------------------------------------------------
--- Texture Bindings
---------------------------------------------------------
-
-local textureRaindrops = appFolder .. '/texture/drops.dds'
-local textureRainSurfaceNormal = appFolder .. '/texture/GLASS_EXT_DUMMY_surfaceNormal_objectSpace.dds'
-local testtextureRainSurfaceNormal = appFolder .. '/texture/test_GLASS_EXT_DUMMY_surfaceNormal_objectSpace.dds'
 
 
 --------------------------------------------------------
