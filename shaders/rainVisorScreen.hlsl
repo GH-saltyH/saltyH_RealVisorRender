@@ -3004,11 +3004,27 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
                 )
             );
 
+        /*
+            Keep the three layers visually separable.
+
+            Base force:
+                thick purple line.
+
+            Air drag:
+                thinner cyan line.
+
+            Total force:
+                DO NOT draw the whole line white, because it would cover
+                the two source layers. Only draw a small white endpoint
+                marker for the resulting direction.
+
+            This is a visualization change only.
+        */
         float baseMask =
             1.0
             - smoothstep(
                 0.0010,
-                0.0024,
+                0.0032,
                 baseDistance
             );
 
@@ -3017,25 +3033,63 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
             ? (
                 1.0
                 - smoothstep(
-                    0.0010,
-                    0.0024,
+                    0.0007,
+                    0.0022,
                     airDistance
                 )
             )
             : 0.0;
 
-        float totalMask =
-            1.0
-            - smoothstep(
-                0.0010,
-                0.0024,
-                totalDistance
+        float2 totalEndpoint =
+            totalEnd;
+
+        float totalEndpointDistance =
+            length(
+                pin.Tex
+                - totalEndpoint
             );
 
+        float totalEndpointMask =
+            1.0
+            - smoothstep(
+                0.0020,
+                0.0045,
+                totalEndpointDistance
+            );
+
+        /*
+            Endpoint marker is suppressed near the drop center so it
+            cannot turn the whole origin into a white blob.
+        */
+        totalEndpointMask *=
+            smoothstep(
+                0.0030,
+                0.0080,
+                length(
+                    pin.Tex
+                    - dropPosition
+                )
+            );
+
+        /*
+            Draw source forces independently.
+
+            The white total-force marker is deliberately evaluated last,
+            but only exists around the predicted endpoint.
+        */
+        float3 baseColor =
+            float3(1.0, 0.0, 1.0);
+
+        float3 airColor =
+            float3(0.0, 1.0, 1.0);
+
+        float3 totalColor =
+            float3(1.0, 1.0, 1.0);
+
         float3 composite =
-            baseMask * float3(1.0, 0.0, 1.0)
-            + airMask * float3(0.0, 1.0, 1.0)
-            + totalMask * float3(1.0, 1.0, 1.0);
+            baseMask * baseColor
+            + airMask * airColor
+            + totalEndpointMask * totalColor;
 
         float compositeMask =
             max(
@@ -3044,7 +3098,7 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
                     baseMask,
                     max(
                         airMask,
-                        totalMask
+                        totalEndpointMask
                     )
                 )
             );
