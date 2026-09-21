@@ -2259,6 +2259,102 @@ float4 rainPersistentVelocityDebugOutput(PS_IN pin)
     );
 }
 
+float4 rainPersistentAdhesionDebugOutput(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain, stateUV, 0.0
+        );
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain, stateUV, 0.0
+        );
+
+        float2 p = state.rg;
+        float radius = meta.r;
+        float mass = max(meta.g, 1.0);
+
+        float2 dropPosition = float2(
+            p.x,
+            lerp(-0.579, -0.362, p.y)
+        );
+
+        float3 normalWorld = rainSurfaceNormalWorld(p);
+        float3 tangentUWorld;
+        float3 tangentVWorld;
+        rainSurfaceBasisWorld(pin, tangentUWorld, tangentVWorld);
+
+        float3 forceWorld =
+            float3(0.0, -gRainGravity, 0.0)
+            + gRainAcceleration * gRainForceScale;
+
+        float2 tangentForce = rainProjectForceToUVWorld(
+            forceWorld,
+            normalWorld,
+            tangentUWorld,
+            tangentVWorld,
+            1.0
+        );
+
+        float forceMagnitude = length(tangentForce);
+        float adhesionBase = lerp(
+            gRainAdhesionMin,
+            gRainAdhesionMax,
+            rainStateHash(stateIndex + 211.0)
+        );
+        float adhesion = adhesionBase / sqrt(mass);
+
+        float ratio =
+            forceMagnitude / max(adhesion, 0.000001);
+
+        // Green: safely attached.
+        // Yellow: approaching the adhesion threshold.
+        // Red: threshold exceeded and flow is active.
+        float3 color;
+        if (ratio < 0.75)
+            color = float3(0.05, 1.0, 0.20);
+        else if (ratio < 1.0)
+            color = float3(1.0, 0.85, 0.05);
+        else
+            color = float3(1.0, 0.08, 0.05);
+
+        float radius01 = saturate(
+            (radius - 0.032) / (0.115 - 0.032)
+        );
+        float markerRadius = lerp(0.004, 0.010, radius01);
+
+        float distanceToDrop = length(pin.Tex - dropPosition);
+        float mask = 1.0 - smoothstep(
+            markerRadius * 0.35,
+            markerRadius,
+            distanceToDrop
+        );
+
+        if (mask > result)
+        {
+            result = mask;
+            resultColor = color;
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
+
 float4 rainPersistentSurfaceForceDebugOutput(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
@@ -2480,6 +2576,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 27)
     {
         return rainPersistentSurfaceForceDebugOutput(pin);
+    }
+
+    if (gRainDebug == 28)
+    {
+        return rainPersistentAdhesionDebugOutput(pin);
     }
 
     if (gRainDebug == 19)
