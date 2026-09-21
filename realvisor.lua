@@ -309,7 +309,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 31,
+        RAIN_DEBUG = 32,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = 0.5,
