@@ -3772,6 +3772,190 @@ float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
     return float4(resultColor, result);
 }
 
+float4 rainPersistentCombinedForceDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 34:
+        Combined external force before persistent integration.
+
+        This is the final cheap force-stage diagnostic before changing
+        persistent physics. It combines:
+            gravity
+            vehicle acceleration
+            airflow force
+
+        The combined force is then projected onto the corrected visor
+        normal at nine calibrated points.
+
+        White point  = diagnostic origin
+        Cyan line    = combined tangent force direction
+        Brightness   = tangent force magnitude
+    */
+
+    float3 airflow =
+        gRainAirVelocityWorld;
+
+    float airSpeed =
+        length(airflow);
+
+    float3 baseForce =
+        float3(0.0, -gRainGravity, 0.0)
+        + gRainAcceleration * gRainForceScale;
+
+    /*
+        Keep the current Debug 31 airflow-force convention for this
+        diagnostic only. Persistent physics is not modified here.
+    */
+    float3 airflowForce =
+        airflow
+        * airSpeed
+        * max(gRainAirDragScale, 0.0);
+
+    float3 totalForce =
+        baseForce
+        + airflowForce;
+
+    float totalForceLength =
+        length(totalForce);
+
+    float visualLength =
+        0.14
+        * saturate(totalForceLength / 100.0);
+
+    float result = 0.0;
+    float3 resultColor = float3(0.0, 0.25, 0.25);
+
+    const float xPositions[3] = { 0.30, 0.50, 0.70 };
+    const float yPositions[3] = { 0.20, 0.50, 0.80 };
+
+    for (int yIndex = 0; yIndex < 3; ++yIndex)
+    {
+        float centerY =
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                yPositions[yIndex]
+            );
+
+        for (int xIndex = 0; xIndex < 3; ++xIndex)
+        {
+            float centerX =
+                lerp(
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    xPositions[xIndex]
+                );
+
+            float2 center =
+                float2(centerX, centerY);
+
+            float3 normalWorld =
+                rainSurfaceNormalWorld(center);
+
+            float3 tangentForce =
+                totalForce
+                - normalWorld
+                * dot(
+                    totalForce,
+                    normalWorld
+                );
+
+            float tangentSpeed =
+                length(tangentForce);
+
+            float2 cameraForce =
+                float2(
+                    dot(tangentForce, gRainCameraSide),
+                    dot(tangentForce, gRainCameraUp)
+                );
+
+            float cameraLength =
+                length(cameraForce);
+
+            float2 direction =
+                cameraForce
+                / max(cameraLength, 0.000001);
+
+            float2 lineVector =
+                direction
+                * visualLength
+                * saturate(
+                    tangentSpeed
+                    / max(totalForceLength, 0.000001)
+                );
+
+            float2 fromCenter =
+                pin.Tex - center;
+
+            float lineT =
+                saturate(
+                    dot(fromCenter, lineVector)
+                    / max(
+                        dot(lineVector, lineVector),
+                        0.000001
+                    )
+                );
+
+            float lineDistance =
+                length(
+                    pin.Tex
+                    - (
+                        center
+                        + lineVector * lineT
+                    )
+                );
+
+            float lineMask =
+                1.0
+                - smoothstep(
+                    0.0025,
+                    0.0055,
+                    lineDistance
+                );
+
+            float pointMask =
+                1.0
+                - smoothstep(
+                    0.004,
+                    0.008,
+                    length(pin.Tex - center)
+                );
+
+            float contribution =
+                max(
+                    lineMask
+                    * saturate(tangentSpeed / 3.0),
+                    pointMask
+                );
+
+            if (contribution > result)
+            {
+                result = contribution;
+
+                float tangent01 =
+                    saturate(
+                        tangentSpeed
+                        / max(totalForceLength, 0.000001)
+                    );
+
+                resultColor =
+                    lerp(
+                        float3(0.0, 0.20, 0.20),
+                        float3(0.0, 1.0, 1.0),
+                        tangent01
+                    );
+            }
+        }
+    }
+
+    if (totalForceLength < 0.01)
+    {
+        resultColor = float3(1.0, 1.0, 1.0);
+    }
+
+    return float4(resultColor, result);
+}
+
 float4 main(PS_IN pin)
 {
     
@@ -3921,6 +4105,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 33)
     {
         return rainPersistentAirflowNormalProjectionDebugOutput(pin);
+    }
+
+    if (gRainDebug == 34)
+    {
+        return rainPersistentCombinedForceDebugOutput(pin);
     }
 
 
