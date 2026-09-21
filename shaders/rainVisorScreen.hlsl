@@ -3013,12 +3013,16 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
             );
 
         float airMask =
-            1.0
-            - smoothstep(
-                0.0010,
-                0.0024,
-                airDistance
-            );
+            airLength > 0.0001
+            ? (
+                1.0
+                - smoothstep(
+                    0.0010,
+                    0.0024,
+                    airDistance
+                )
+            )
+            : 0.0;
 
         float totalMask =
             1.0
