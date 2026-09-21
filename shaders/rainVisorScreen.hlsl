@@ -699,6 +699,7 @@ float rainSingleDropDiagnostic(PS_IN pin, float time)
             -movementDir.y,
             movementDir.x
         );
+
     float trailSide =
         abs(
             dot(
@@ -1398,7 +1399,8 @@ if (gRainDebug == 15)
         rainSurfaceNormalWorld(pin.Tex);
 
     return float4(
-        normalWorld * 0.5 + 0.5,        1.0
+        normalWorld * 0.5 + 0.5,
+        1.0
     );
 }
 
@@ -2098,7 +2100,8 @@ float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
         );
 
         if (currentMask > result)
-        {            result = currentMask;
+        {
+            result = currentMask;
             resultColor = float3(1.0, 1.0, 1.0);
         }
 
@@ -2515,14 +2518,15 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
         );
 
         /*
-            The persistent state uses normalized UV coordinates while
-            pin.Tex uses the actual visor mesh UV domain. Correct the
-            Y axis before measuring distance.
+            Persistent state is normalized to [0, 1], while pin.Tex uses
+            the actual visor mesh V range. Convert the measured distance
+            back into the normalized state domain for a circular drop.
         */
         float2 delta = pin.Tex - dropPosition;
         delta.y /= max((-0.362 + 0.579), 0.000001);
 
         float normalizedDistance = length(delta);
+
         float dropMask = 1.0 - smoothstep(
             radius * 0.45,
             radius,
@@ -2534,28 +2538,43 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
             speed / max(gRainStateMaxSpeed, 0.000001)
         );
 
-        float2 direction = velocity / max(speed, 0.000001);
+        float2 direction =
+            velocity / max(speed, 0.000001);
 
-        float2 directionMesh = normalize(float2(
-            direction.x,
-            direction.y * (-0.362 + 0.579)
-        ));
-
-        float tailLength = 0.012 * speed01;
-        float2 tailStart = dropPosition;
-        float2 tailEnd = tailStart + directionMesh * tailLength;
-
-        float2 lineVector = tailEnd - tailStart;
-        float lineLengthSq = dot(lineVector, lineVector);
-        float2 toPoint = pin.Tex - tailStart;
-
-        float tailT = saturate(
-            dot(toPoint, lineVector)
-            / max(lineLengthSq, 0.000001)
+        float2 directionMesh = normalize(
+            float2(
+                direction.x,
+                direction.y * (-0.362 + 0.579)
+            )
         );
 
-        float2 closest = tailStart + lineVector * tailT;
-        float tailDistance = length(pin.Tex - closest);
+        float tailLength = 0.012 * speed01;
+
+        float2 tailStart = dropPosition;
+        float2 tailEnd =
+            tailStart
+            + directionMesh * tailLength;
+
+        float2 lineVector =
+            tailEnd - tailStart;
+
+        float lineLengthSq =
+            dot(lineVector, lineVector);
+
+        float2 toPoint =
+            pin.Tex - tailStart;
+
+        float tailT =
+            saturate(
+                dot(toPoint, lineVector)
+                / max(lineLengthSq, 0.000001)
+            );
+
+        float2 closest =
+            tailStart + lineVector * tailT;
+
+        float tailDistance =
+            length(pin.Tex - closest);
 
         float tailWidth = lerp(
             0.0007,
@@ -2569,17 +2588,12 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
             tailDistance
         );
 
-        float mask = max(dropMask, tailMask);
+        float mask =
+            max(dropMask, tailMask);
 
         if (mask > result)
         {
             result = mask;
-
-            /*
-                Stationary drops are nearly white.
-                Faster drops gain a subtle cyan component so the
-                directional motion is easy to identify.
-            */
             resultColor = lerp(
                 float3(1.0, 1.0, 1.0),
                 float3(0.65, 0.90, 1.0),
@@ -2797,6 +2811,7 @@ float4 main(PS_IN pin)
             float distanceToDrop = length(
                 pin.Tex - dropPosition
             );
+
             float drop = 1.0 - smoothstep(
                 radius * 0.25,
                 radius,
