@@ -339,7 +339,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 25,
+        RAIN_DEBUG = 36,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = 0.5,
@@ -3813,7 +3813,14 @@ local function updateRainGPUState(sim)
             rainStateReadIsA and rainStateA or rainStateB
 
         rainStateDebugOriginUpdateParams.values.gRainStateCount =
-            math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+            math.max(
+                1,
+                math.floor(
+                    cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                    and 9
+                    or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+                )
+            )
 
         rainStateDebugOriginUpdateParams.textures.txRainState =
             currentState
@@ -3914,7 +3921,8 @@ render.on('main.track.transparent', function()
     if rainLastDebugMode ~= cfg.RUNTIME.RAIN_DEBUG then
         rainLastDebugMode = cfg.RUNTIME.RAIN_DEBUG
         if cfg.RUNTIME.RAIN_DEBUG == 25
-            or cfg.RUNTIME.RAIN_DEBUG == 26 then
+            or cfg.RUNTIME.RAIN_DEBUG == 26
+            or cfg.RUNTIME.RAIN_DEBUG == 36 then
             rainStateDebugCapturePending = true
         end
 
