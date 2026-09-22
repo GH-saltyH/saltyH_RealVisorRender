@@ -1803,7 +1803,11 @@ float4 rainPersistentMeasuredGridDebugOutput(PS_IN pin)
 
         float2 current = state.rg;
         float2 origin = originState.rg;
-        float2 delta = rainShortestWrappedDelta(current, origin);
+        float2 delta = current - origin;
+        if (delta.x > 0.5) delta.x -= 1.0;
+        if (delta.x < -0.5) delta.x += 1.0;
+        if (delta.y > 0.5) delta.y -= 1.0;
+        if (delta.y < -0.5) delta.y += 1.0;
         float2 currentPosition = float2(current.x, lerp(gRainStateMeshVMin, gRainStateMeshVMax, current.y));
         float2 originPosition = float2(origin.x, lerp(gRainStateMeshVMin, gRainStateMeshVMax, origin.y));
         float2 deltaMesh = float2(delta.x, delta.y * (gRainStateMeshVMax - gRainStateMeshVMin));
