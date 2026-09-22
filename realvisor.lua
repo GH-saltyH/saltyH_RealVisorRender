@@ -3515,7 +3515,9 @@ local function initializeRainGPUState()
         math.max(
             1,
             math.floor(
-                cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
 
@@ -3575,6 +3577,8 @@ local function initializeRainGPUState()
         and 1.0
         or 0.0
     rainStateUpdateParams.values.gRainStatePhysics = 0.0
+    rainStateUpdateParams.values.gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN
+    rainStateUpdateParams.values.gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
     rainStateUpdateParams.textures.txRainState = false
     rainStateUpdateParams.textures.txRainStateMeta = false
     rainStateUpdateParams.textures.txRainSurfaceNormal = false
@@ -3655,7 +3659,14 @@ local function updateRainGPUState(sim)
         math.min(dt, 0.05)
 
     rainStateUpdateParams.values.gRainStateCount =
-        math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+        math.max(
+            1,
+            math.floor(
+                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+            )
+        )
 
     rainStateUpdateParams.values.gRainStateForce:set(
         cfg.RUNTIME.RAIN_GPU_STATE_TEST_FORCE_X,
@@ -3714,7 +3725,14 @@ local function updateRainGPUState(sim)
         or 0.0
 
     rainStateMetaUpdateParams.values.gRainStateCount =
-        math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+        math.max(
+            1,
+            math.floor(
+                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+            )
+        )
 
     rainStateMetaUpdateParams.values.gRainStateDeltaTime =
         math.min(dt, 0.05)
