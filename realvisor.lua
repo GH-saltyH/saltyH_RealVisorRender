@@ -5634,7 +5634,7 @@ function windowMain(dt)
         ac.log(
             appNameDebug 
             .. ' Visor ' 
-            .. (cfg.GENERAL.ENABLE and 'Enabled' or 'Disabled')
+            .. (cfg.GENERAL.ENABLE == 1 and 'Enabled' or 'Disabled')
         )
     
     end
