@@ -574,6 +574,8 @@ local rainStateUpdateParams = {
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
         gRainStateTestGrid = 0.0,
+        -- Keep disabled for Debug 36 baseline; enable after persistent airflow validation.
+        gRainStateUseAirDrag = 0.0,
     },
 
     shader = [[
@@ -631,6 +633,33 @@ local rainStateUpdateParams = {
             return float2(-dot(forceWorld, uWorld), dot(forceWorld, vWorld));
         }
 
+        /*
+            Consolidated external force entry point.
+
+            Gravity and vehicle acceleration are always part of the persistent
+            physics baseline. Airflow remains opt-in until its direction and
+            magnitude are revalidated against the persistent state.
+        */
+        float3 rainStateExternalForceWorld()
+        {
+            float3 force =
+                float3(0.0, -gRainStateGravity, 0.0)
+                + gRainAcceleration * gRainStateForceScale;
+
+            if (gRainStateUseAirDrag > 0.5)
+            {
+                float3 airflow = gRainAirVelocityWorld;
+                float airSpeed = length(airflow);
+
+                force +=
+                    airflow
+                    * airSpeed
+                    * max(gRainAirDragScale, 0.0);
+            }
+
+            return force;
+        }
+
         float4 main(PS_IN pin) {
             float count = max(gRainStateCount, 1.0);
             float index = min(floor(pin.Tex.x * count), count - 1.0);
@@ -679,8 +708,7 @@ local rainStateUpdateParams = {
 
             if (gRainStatePhysics > 0.5) {
                 float3 force =
-                    float3(0.0, -gRainStateGravity, 0.0)
-                    + gRainAcceleration * gRainStateForceScale;
+                    rainStateExternalForceWorld();
 
                 float3 n = rainStateNormalWorld(p);
                 float2 tf = rainStateProjectForce(force, n);
