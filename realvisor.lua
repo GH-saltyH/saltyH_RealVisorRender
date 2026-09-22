@@ -329,6 +329,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE = 50.0,
         RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL = 0.25,
         RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE = 50.0,
+        -- Production persistent airflow is opt-in until direction/magnitude is revalidated.
+        RAIN_GPU_STATE_USE_AIR_DRAG = false,
 
         -- Debug
         -- 0 = normal rain
@@ -3795,6 +3797,9 @@ local function updateRainGPUState(sim)
 
     rainStateUpdateParams.values.gRainStatePhysics =
         physicsMode and 1.0 or 0.0
+
+    rainStateUpdateParams.values.gRainStateUseAirDrag =
+        cfg.RUNTIME.RAIN_GPU_STATE_USE_AIR_DRAG and 1.0 or 0.0
 
     rainStateUpdateParams.values.gRainStateTestGrid =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
