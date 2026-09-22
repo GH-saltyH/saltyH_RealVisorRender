@@ -725,13 +725,19 @@ local rainStateUpdateParams = {
                 tangentForce
                 / forceMagnitude;
 
+            /*
+                Flow acceleration is already expressed in normalized
+                persistent-state coordinates. Do not divide it by the
+                procedural UV cell scale: that scale describes the rain
+                pattern density, not the physical state coordinate unit.
+
+                Keeping these domains separate is important because an
+                increase in procedural cell density must not make a real
+                droplet physically slower.
+            */
             float acceleration =
                 excess
-                * gRainStateFlowAcceleration
-                / max(
-                    gRainStateUVScale,
-                    0.000001
-                );
+                * gRainStateFlowAcceleration;
 
             return
                 direction
