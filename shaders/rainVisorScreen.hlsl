@@ -3558,6 +3558,380 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
         result
     );
 }
+
+/*
+    Debug 37:
+    Compare the UV force direction produced by Debug 33's actual normal
+    projection path against the tangent basis currently used by persistent
+    physics.
+
+    Cyan:
+        actual rendered-mesh UV tangent basis
+        (rainSurfaceBasisWorld + rainProjectForceToUVWorld)
+
+    Red:
+        persistent physics tangent basis
+        (object-space X projected onto the sampled surface normal)
+
+    Both paths use the exact same world-space airflow and surface normal.
+    This test therefore isolates only the UV tangent-frame interpretation.
+
+    The comparison is rendered around the same 3x3 diagnostic points.
+    If the two lines overlap, the persistent tangent basis agrees with the
+    actual mesh UV orientation. If they separate, the error is between the
+    normal projection and the persistent UV-coordinate conversion.
+*/
+float4 rainPersistentUVProjectionComparisonDebugOutput(PS_IN pin)
+{
+    float3 forceWorld =
+        gRainAirVelocityWorld;
+
+    float forceLength =
+        length(forceWorld);
+
+    if (forceLength < 0.00001)
+    {
+        return float4(1.0, 1.0, 1.0, 0.0);
+    }
+
+    float result =
+        0.0;
+
+    float3 resultColor =
+        float3(1.0, 1.0, 1.0);
+
+    const float xPositions[3] =
+    {
+        0.30,
+        0.50,
+        0.70
+    };
+
+    const float yPositions[3] =
+    {
+        0.20,
+        0.50,
+        0.80
+    };
+
+    for (int yIndex = 0; yIndex < 3; ++yIndex)
+    {
+        float centerY =
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                yPositions[yIndex]
+            );
+
+        for (int xIndex = 0; xIndex < 3; ++xIndex)
+        {
+            float centerX =
+                lerp(
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    xPositions[xIndex]
+                );
+
+            float2 center =
+                float2(
+                    centerX,
+                    centerY
+                );
+
+            float2 fromCenter =
+                pin.Tex - center;
+
+            /*
+                Only use the actual mesh derivative frame in the local
+                neighborhood of this diagnostic point. This keeps the
+                comparison tied to the real rendered mesh rather than
+                inventing a tangent frame from the normal map.
+            */
+            float localMask =
+                1.0
+                - smoothstep(
+                    0.018,
+                    0.032,
+                    length(fromCenter)
+                );
+
+            if (localMask <= 0.0)
+            {
+                continue;
+            }
+
+            float3 normalWorld =
+                rainSurfaceNormalWorld(center);
+
+            float3 actualTangentUWorld;
+            float3 actualTangentVWorld;
+
+            rainSurfaceBasisWorld(
+                pin,
+                actualTangentUWorld,
+                actualTangentVWorld
+            );
+
+            float2 actualUVForce =
+                rainProjectForceToUVWorld(
+                    forceWorld,
+                    normalWorld,
+                    actualTangentUWorld,
+                    actualTangentVWorld,
+                    1.0
+                );
+
+            /*
+                Reproduce the persistent physics tangent construction
+                exactly. No physics parameter is changed here.
+            */
+            float3 normalObject =
+                normalize(
+                    mul(
+                        normalWorld,
+                        transpose(
+                            (float3x3)gRainObjectToWorld
+                        )
+                    )
+                );
+
+            float3 persistentUObject =
+                float3(
+                    1.0,
+                    0.0,
+                    0.0
+                );
+
+            persistentUObject -=
+                normalObject
+                * dot(
+                    persistentUObject,
+                    normalObject
+                );
+
+            if (length(persistentUObject) < 0.0001)
+            {
+                persistentUObject =
+                    float3(
+                        0.0,
+                        0.0,
+                        1.0
+                    );
+
+                persistentUObject -=
+                    normalObject
+                    * dot(
+                        persistentUObject,
+                        normalObject
+                    );
+            }
+
+            persistentUObject =
+                normalize(
+                    persistentUObject
+                );
+
+            float3 persistentVObject =
+                normalize(
+                    cross(
+                        normalObject,
+                        persistentUObject
+                    )
+                );
+
+            float3 persistentUWorld =
+                normalize(
+                    mul(
+                        persistentUObject,
+                        (float3x3)gRainObjectToWorld
+                    )
+                );
+
+            float3 persistentVWorld =
+                normalize(
+                    mul(
+                        persistentVObject,
+                        (float3x3)gRainObjectToWorld
+                    )
+                );
+
+            float2 persistentUVForce =
+                float2(
+                    -dot(
+                        forceWorld,
+                        persistentUWorld
+                    ),
+                    dot(
+                        forceWorld,
+                        persistentVWorld
+                    )
+                );
+
+            float2 actualDirection =
+                actualUVForce
+                / max(
+                    length(actualUVForce),
+                    0.000001
+                );
+
+            float2 persistentDirection =
+                persistentUVForce
+                / max(
+                    length(persistentUVForce),
+                    0.000001
+                );
+
+            /*
+                The lines are deliberately short. This is a direction
+                comparison, not a motion-scale test.
+            */
+            const float visualLength = 0.035;
+
+            float2 actualEnd =
+                center
+                + actualDirection
+                * visualLength;
+
+            float2 persistentEnd =
+                center
+                + persistentDirection
+                * visualLength;
+
+            float actualLineT =
+                saturate(
+                    dot(
+                        fromCenter,
+                        actualEnd - center
+                    )
+                    / max(
+                        dot(
+                            actualEnd - center,
+                            actualEnd - center
+                        ),
+                        0.000001
+                    )
+                );
+
+            float actualLineDistance =
+                length(
+                    pin.Tex
+                    - (
+                        center
+                        + (
+                            actualEnd - center
+                        )
+                        * actualLineT
+                    )
+                );
+
+            float persistentLineT =
+                saturate(
+                    dot(
+                        fromCenter,
+                        persistentEnd - center
+                    )
+                    / max(
+                        dot(
+                            persistentEnd - center,
+                            persistentEnd - center
+                        ),
+                        0.000001
+                    )
+                );
+
+            float persistentLineDistance =
+                length(
+                    pin.Tex
+                    - (
+                        center
+                        + (
+                            persistentEnd - center
+                        )
+                        * persistentLineT
+                    )
+                );
+
+            float actualLineMask =
+                (
+                    1.0
+                    - smoothstep(
+                        0.0015,
+                        0.0035,
+                        actualLineDistance
+                    )
+                )
+                * localMask;
+
+            float persistentLineMask =
+                (
+                    1.0
+                    - smoothstep(
+                        0.0015,
+                        0.0035,
+                        persistentLineDistance
+                    )
+                )
+                * localMask;
+
+            float pointMask =
+                (
+                    1.0
+                    - smoothstep(
+                        0.003,
+                        0.006,
+                        length(fromCenter)
+                    )
+                )
+                * localMask;
+
+            if (actualLineMask > result)
+            {
+                result =
+                    actualLineMask;
+
+                resultColor =
+                    float3(
+                        0.0,
+                        1.0,
+                        1.0
+                    );
+            }
+
+            if (persistentLineMask > result)
+            {
+                result =
+                    persistentLineMask;
+
+                resultColor =
+                    float3(
+                        1.0,
+                        0.15,
+                        0.05
+                    );
+            }
+
+            if (pointMask > result)
+            {
+                result =
+                    pointMask;
+
+                resultColor =
+                    float3(
+                        1.0,
+                        1.0,
+                        1.0
+                    );
+            }
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
+
 float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
 {
     /*
@@ -4315,6 +4689,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 33)
     {
         return rainPersistentAirflowNormalProjectionDebugOutput(pin);
+    }
+
+    if (gRainDebug == 37)
+    {
+        return rainPersistentUVProjectionComparisonDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
