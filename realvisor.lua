@@ -329,7 +329,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE = 50.0,
         RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL = 0.25,
         RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE = 50.0,
-        -- Production persistent airflow is opt-in until direction/magnitude is revalidated.
+        -- Reserved; production drag remains disabled until the velocity-relative model is integrated.
         RAIN_GPU_STATE_USE_AIR_DRAG = false,
 
         -- Debug
@@ -576,7 +576,7 @@ local rainStateUpdateParams = {
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
         gRainStateTestGrid = 0.0,
-        -- Keep disabled for Debug 36 baseline; enable after persistent airflow validation.
+        -- Reserved. Persistent air drag is not applied until its velocity-relative model is integrated.
         gRainStateUseAirDrag = 0.0,
     },
 
@@ -636,30 +636,19 @@ local rainStateUpdateParams = {
         }
 
         /*
-            Consolidated external force entry point.
+            Consolidated baseline external force entry point.
 
-            Gravity and vehicle acceleration are always part of the persistent
-            physics baseline. Airflow remains opt-in until its direction and
-            magnitude are revalidated against the persistent state.
+            Gravity and vehicle acceleration are part of the persistent
+            physics baseline. Air drag is intentionally kept outside this
+            function because the verified Debug 31 airflow value is an
+            incoming relative-air velocity, not a complete drag force.
+            Production drag must oppose the droplet's surface velocity.
         */
         float3 rainStateExternalForceWorld()
         {
-            float3 force =
+            return
                 float3(0.0, -gRainStateGravity, 0.0)
                 + gRainAcceleration * gRainStateForceScale;
-
-            if (gRainStateUseAirDrag > 0.5)
-            {
-                float3 airflow = gRainAirVelocityWorld;
-                float airSpeed = length(airflow);
-
-                force +=
-                    airflow
-                    * airSpeed
-                    * max(gRainAirDragScale, 0.0);
-            }
-
-            return force;
         }
 
         float4 main(PS_IN pin) {
