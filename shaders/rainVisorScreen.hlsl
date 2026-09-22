@@ -4365,11 +4365,23 @@ float4 main(PS_IN pin)
 
             float2 statePosition = state.rg;
 
+            /*
+                Step B render mapping:
+                persistent state position is normalized and is converted to
+                the calibrated visor mesh UV range only at render time.
+
+                Do not use the old hardcoded V range here. The physics state
+                and Debug 36 calibration use the same U/V calibration.
+            */
             float2 dropPosition = float2(
-                statePosition.x,
                 lerp(
-                    -0.567,
-                    -0.466,
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    statePosition.x
+                ),
+                lerp(
+                    gRainStateMeshVMin,
+                    gRainStateMeshVMax,
                     statePosition.y
                 )
             );
