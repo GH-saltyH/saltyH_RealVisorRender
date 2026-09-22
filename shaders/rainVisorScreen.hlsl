@@ -3802,9 +3802,9 @@ float4 rainPersistentDropScaleThresholdDebugOutput(PS_IN pin)
 
     const float radiusValues[9] =
     {
-        0.032, 0.0735, 0.115,
-        0.115, 0.032, 0.0735,
-        0.0735, 0.115, 0.032
+        0.115, 0.0735, 0.032,
+        0.0735, 0.032, 0.115,
+        0.032, 0.115, 0.0735
     };
 
     float3 forceWorld =
