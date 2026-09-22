@@ -4268,6 +4268,11 @@ float4 main(PS_IN pin)
         return rainPersistentAccumulatedDisplacementDebugOutput(pin);
     }
 
+    if (gRainDebug == 36)
+    {
+        return rainPersistentMeasuredGridDebugOutput(pin);
+    }
+
     if (gRainDebug == 26)
     {
         return rainPersistentVelocityDeltaDebugOutput(pin);
