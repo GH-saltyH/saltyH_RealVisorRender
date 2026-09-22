@@ -4379,7 +4379,6 @@ float4 main(PS_IN pin)
         return rainPersistentDropScaleThresholdDebugOutput(pin);
     }
 
-
     if (gRainDebug == 19)
     {
         /*
@@ -4421,8 +4420,8 @@ float4 main(PS_IN pin)
             float2 dropPosition = float2(
                 statePosition.x,
                 lerp(
-                    -0.579,
-                    -0.362,
+                    -0.567,
+                    -0.466,
                     statePosition.y
                 )
             );

@@ -45,7 +45,7 @@ local appFolder =
     --------------------------------------------------------
     
     local settingsFile = 
-    appFolder .. 'settings.ini'
+    appFolder .. '/settings.ini'
     
     
     --------------------------------------------------------
@@ -69,9 +69,9 @@ local cfg = scriptSettings:mapConfig({
     -- Active profile
     --------------------------------------------------------
 
-    PROFILE = {
+    GENERAL = {
         ACTIVE = 1,
-        ENABLE = true,
+        ENABLE = 1,
     },
 
 
@@ -96,7 +96,7 @@ local cfg = scriptSettings:mapConfig({
 
         NEARCLIP = 0.0181,
         
-        ENABLE_MOTION   = true,
+        ENABLE_MOTION   = 1,
         
         MOTION_GAIN_X   = 0.00009,
         MOTION_GAIN_Y   = 0.00006,
@@ -108,6 +108,8 @@ local cfg = scriptSettings:mapConfig({
         MOTION_LIMIT_X  = 0.025,
         MOTION_LIMIT_Y  = 0.020,
         MOTION_LIMIT_Z  = 0.020,        
+
+        HIDE_DRIVER_HELMET = 1,
     },
 
 
@@ -132,7 +134,7 @@ local cfg = scriptSettings:mapConfig({
 
         NEARCLIP = 0.0081,
 
-        ENABLE_MOTION   = true,
+        ENABLE_MOTION   = 1,
         
         MOTION_GAIN_X   = 0.00009,
         MOTION_GAIN_Y   = 0.00006,
@@ -144,6 +146,8 @@ local cfg = scriptSettings:mapConfig({
         MOTION_LIMIT_X  = 0.025,
         MOTION_LIMIT_Y  = 0.020,
         MOTION_LIMIT_Z  = 0.020,
+
+        HIDE_DRIVER_HELMET = 1,
     },
     
     
@@ -192,7 +196,6 @@ local cfg = scriptSettings:mapConfig({
         -- Neck / Head Debug Controls
         --------------------------------------------------------
 
-        HIDE_DRIVER_HELMET = true,
         HIDE_DRIVER_HELMET_SCALE = mat4x4.scaling(
                                         vec3.new(0.00001)
                                     ),
@@ -365,7 +368,7 @@ local DEFAULT_PROFILE1 = {
 
     NEARCLIP = 0.0181,
 
-    ENABLE_MOTION   = true,
+    ENABLE_MOTION   = 1,
     
     MOTION_GAIN_X   = 0.00009,
     MOTION_GAIN_Y   = 0.00006,
@@ -377,6 +380,8 @@ local DEFAULT_PROFILE1 = {
     MOTION_LIMIT_X  = 0.025,
     MOTION_LIMIT_Y  = 0.020,
     MOTION_LIMIT_Z  = 0.020,
+
+    HIDE_DRIVER_HELMET = 1,
 }
 
 
@@ -394,7 +399,7 @@ local DEFAULT_PROFILE2 = {
 
     NEARCLIP = 0.0081,
 
-    ENABLE_MOTION   = true,
+    ENABLE_MOTION   = 1,
     
     MOTION_GAIN_X   = 0.00009,
     MOTION_GAIN_Y   = 0.00006,
@@ -406,6 +411,8 @@ local DEFAULT_PROFILE2 = {
     MOTION_LIMIT_X  = 0.025,
     MOTION_LIMIT_Y  = 0.020,
     MOTION_LIMIT_Z  = 0.020,
+
+    HIDE_DRIVER_HELMET = 1,
 }
 
 
@@ -500,6 +507,7 @@ local motionCurrent = vec3(
     0
 )
 
+
 --------------------------------------------------------
 -- Rain flow state
 --------------------------------------------------------
@@ -508,6 +516,7 @@ local rainAccelerationCurrent = vec3(0, 0, 0)
 local rainPreviousVelocity = nil
 local rainLastDebugMode = nil
 local rainRenderDiagnosticLogged = false
+
 
 ------------------------------------------------------------
 -- RainFX persistent GPU state
@@ -629,19 +638,26 @@ local rainStateUpdateParams = {
 
             if (gRainStateInit > 0.5) {
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
-                    const float2 measuredX[3] = {
+                    const float measuredX[3] = {
                         0.682, 0.491, 0.300
                     };
-                    const float2 measuredY[3] = {
+
+                    const float measuredY[3] = {
                         -0.410, -0.501, -0.591
                     };
+
                     int i = (int)index;
                     int ix = i % 3;
                     int iy = i / 3;
+
                     float y01 = saturate(
                         (measuredY[iy] - gRainStateMeshVMin)
-                        / max(gRainStateMeshVMax - gRainStateMeshVMin, 0.000001)
+                        / max(
+                            gRainStateMeshVMax - gRainStateMeshVMin, 
+                            0.000001
+                        )
                     );
+
                     return float4(measuredX[ix], y01, 0.0, 0.0);
                 }
 
@@ -819,13 +835,12 @@ local textDebugMotion = nil
 local worldUp = vec3(0, 1, 0)
 
 
-
 ------------------------------------------------------------
 -- Active profile helpers
 ------------------------------------------------------------
 
 local activeProfile = 1
-local activeEnableMode = true
+local activeEnableMode = 1
 
 
 local function getProfile(profileIndex)
@@ -858,7 +873,7 @@ local activeRoll = 0.0
 
 local activeNearclip = 0.0181
 
-local activeEnableMotion = true
+local activeEnableMotion = 1
 local activeMotionGainX = 0.0
 local activeMotionGainY = 0.0
 local activeMotionGainZ = 0.0
@@ -867,7 +882,6 @@ local activeMotionSharpness = 0.0
 local activeMotionLimitX = 0.0
 local activeMotionLimitY = 0.0
 local activeMotionLimitZ = 0.0
-
 
 local lastScale = -1
 
@@ -891,32 +905,53 @@ local function loadProfiles()
     for key, value in pairs(p1) do
         cfg.PROFILE_1[key] = value
     end
-
-
+    
+    
     for key, value in pairs(p2) do
         cfg.PROFILE_2[key] = value
     end
 
-    local generalProfile = config:mapSection('PROFILE', cfg.PROFILE)
 
-    local active = generalProfile.ACTIVE or 1
+    local generalProfile = config:mapSection('GENERAL', cfg.GENERAL)
 
-    local enableMod = generalProfile.ENABLE or true
+    local activePrfRaw = generalProfile.ACTIVE or 1
+
+    local enableModRaw = generalProfile.ENABLE
+
+
+    ac.log(
+        appNameDebug
+        .. ' generalProfile.ENABLE = '
+        .. tostring( generalProfile.ENABLE)
+    )
 
 
     activeProfile = math.clamp(
-        math.floor(active or 1),
+        math.floor(activePrfRaw or 1),
         1,
         2
     )
+    
+    local enableModClamped = math.clamp(
+        math.floor(enableModRaw or 1),
+        1,
+        2
+    )
+    
+    cfg.GENERAL.ACTIVE = activeProfile
 
-    activeEnableMode = enableMod
+    cfg.GENERAL.ENABLE = enableModClamped
+
+
+    activeEnableMode = enableModClamped
     -- (tonumber(enableMod.ENABLE) or 1) ~= 0
 
 
-    cfg.PROFILE.ACTIVE = activeProfile
-
-    cfg.PROFILE.ENABLE = activeEnableMode
+    ac.log(
+        appNameDebug
+        .. ' cfg.GENERAL.ENABLE = '
+        .. tostring(cfg.GENERAL.ENABLE)
+    )
 
 end
 
@@ -926,9 +961,9 @@ local function saveProfiles()
     local p2 = cfg.PROFILE_2
 
     local content = string.format([[
-[PROFILE]
+[GENERAL]
 ACTIVE=%d
-ENABLE=%s
+ENABLE=%d
 
 [PROFILE_1]
 PITCH=%.6f
@@ -939,7 +974,7 @@ OFFSET_Y=%.6f
 OFFSET_Z=%.6f
 SCALE=%.6f
 NEARCLIP=%.6f
-ENABLE_MOTION=%s
+ENABLE_MOTION=%d
 MOTION_GAIN_X=%.8f
 MOTION_GAIN_Y=%.8f
 MOTION_GAIN_Z=%.8f
@@ -948,6 +983,7 @@ MOTION_SHARPNESS=%.6f
 MOTION_LIMIT_X=%.6f
 MOTION_LIMIT_Y=%.6f
 MOTION_LIMIT_Z=%.6f
+HIDE_DRIVER_HELMET=%d
 
 [PROFILE_2]
 PITCH=%.6f
@@ -958,7 +994,7 @@ OFFSET_Y=%.6f
 OFFSET_Z=%.6f
 SCALE=%.6f
 NEARCLIP=%.6f
-ENABLE_MOTION=%s
+ENABLE_MOTION=%d
 MOTION_GAIN_X=%.8f
 MOTION_GAIN_Y=%.8f
 MOTION_GAIN_Z=%.8f
@@ -967,9 +1003,10 @@ MOTION_SHARPNESS=%.6f
 MOTION_LIMIT_X=%.6f
 MOTION_LIMIT_Y=%.6f
 MOTION_LIMIT_Z=%.6f
+HIDE_DRIVER_HELMET=%d
 ]],
-        activeProfile,
-        tostring(cfg.PROFILE.ENABLE),
+        cfg.GENERAL.ACTIVE,
+        cfg.GENERAL.ENABLE,
 
         p1.PITCH,
         p1.YAW,
@@ -979,7 +1016,7 @@ MOTION_LIMIT_Z=%.6f
         p1.OFFSET_Z,
         p1.SCALE,
         p1.NEARCLIP,
-        tostring(p1.ENABLE_MOTION),
+        p1.ENABLE_MOTION,
         p1.MOTION_GAIN_X,
         p1.MOTION_GAIN_Y,
         p1.MOTION_GAIN_Z,
@@ -988,6 +1025,7 @@ MOTION_LIMIT_Z=%.6f
         p1.MOTION_LIMIT_X,
         p1.MOTION_LIMIT_Y,
         p1.MOTION_LIMIT_Z,
+        p1.HIDE_DRIVER_HELMET,
 
         p2.PITCH,
         p2.YAW,
@@ -997,7 +1035,7 @@ MOTION_LIMIT_Z=%.6f
         p2.OFFSET_Z,
         p2.SCALE,
         p2.NEARCLIP,
-        tostring(p2.ENABLE_MOTION),
+        p2.ENABLE_MOTION,
         p2.MOTION_GAIN_X,
         p2.MOTION_GAIN_Y,
         p2.MOTION_GAIN_Z,
@@ -1005,7 +1043,8 @@ MOTION_LIMIT_Z=%.6f
         p2.MOTION_SHARPNESS,
         p2.MOTION_LIMIT_X,
         p2.MOTION_LIMIT_Y,
-        p2.MOTION_LIMIT_Z
+        p2.MOTION_LIMIT_Z,
+        p2.HIDE_DRIVER_HELMET
     )
 
     io.save(settingsFile, content)
@@ -1018,7 +1057,7 @@ local function applyActiveProfileToRuntime()
     local p = getActiveProfile()
 
 
-    activeEnableMode = cfg.PROFILE.ENABLE
+    activeEnableMode = cfg.GENERAL.ENABLE
 
 
     activeOffset:set(
@@ -1076,7 +1115,7 @@ local function setActiveProfile(index)
 
     activeProfile = index
 
-    cfg.PROFILE.ACTIVE =
+    cfg.GENERAL.ACTIVE =
         activeProfile
 
 
@@ -1113,10 +1152,17 @@ local function setProfileValue(
         getActiveProfile()
 
 
-    if key ~= 'ENABLE_MODE' then
+    if p[key] == value then
+        return
+    end
+
+
+    if key == 'ENABLE_MODE' then        
+        cfg.GENERAL.ENABLE = value
+
+    else        
         p[key] = value        
-    else
-        cfg.PROFILE.ENABLE = value
+
     end
 
     
@@ -2600,7 +2646,7 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             materialQueryRef = nil,
 
             parameters = 
-                PARAMS_KS_PERPIXEL_NM,
+                PARAMS_KS_PERPIXEL_MULTIMAP,
 
             values = {},
 
@@ -3050,6 +3096,8 @@ end
 
 local function updateHelmetVisibility()
 
+    local p = getActiveProfile()
+
     if not driverHeads
 
         or #driverHeads == 0 then
@@ -3066,30 +3114,31 @@ local function updateHelmetVisibility()
             helmet:getTransformationRaw()
         
 
-        if cfg.RUNTIME.HIDE_DRIVER_HELMET then
-            
-            if transform then
-                
+        if transform then
+
+            if p.HIDE_DRIVER_HELMET == 1 then                
+                    
                 transform:set(
 
                     cfg.RUNTIME.HIDE_DRIVER_HELMET_SCALE
 
                 )
 
+            else
+                
+                transform:set(
+                
+                    cfg.RUNTIME.SHOW_DRIVER_HELMET_SCALE
+
+                )
+
+
             end
 
-
-        else
-            
-            transform:set(
-            
-                cfg.RUNTIME.SHOW_DRIVER_HELMET_SCALE
-
-            )
-
         end
-
+        
     end
+    
 
 end
 
@@ -4391,11 +4440,11 @@ local function initializeScene()
     -- Apply profile
     --------------------------------------------------------
 
-    activeProfile = math.clamp(
-            tonumber(cfg.PROFILE.ACTIVE) or 1,
-            1,
-            2
-    )
+    -- activeProfile = math.clamp(
+    --         tonumber(cfg.GENERAL.ACTIVE) or 1,
+    --         1,
+    --         2
+    -- )
 
     loadProfiles()
 
@@ -4586,7 +4635,7 @@ local function updateMotion(dt)
     ------------------------------------------------------------
     -- Disabled
     ------------------------------------------------------------
-    if not activeEnableMotion then
+    if activeEnableMotion ~= 1 then
 
         motionCurrent:set(
             0,
@@ -5100,11 +5149,11 @@ function script.update(dt)
     --------------------------------------------------------
 
     visor:setVisible(
-        activeEnableMode
+        activeEnableMode == 1 and true or false
     )
 
 
-    if not activeEnableMode then
+    if activeEnableMode ~= 1 then
         -- ac.log(appNameDebug .. ' cfg.RUNTIME.ENABLED = false update terminated')
         return
     end
@@ -5566,42 +5615,48 @@ function windowMain(dt)
     --------------------------------------------------------
     -- Enable
     --------------------------------------------------------
-    
-    changed, _ = ui.checkbox(
 
-            'Enable Real Visor',
+    local changedEnableMode, _ =
+    ui.checkbox(
 
-            cfg.PROFILE.ENABLE
+        'Enable Real Visor',
+
+        cfg.GENERAL.ENABLE == 1
+    )
+
+    if changedEnableMode then
+
+        setProfileValue(
+            'ENABLE_MODE',
+            1 - cfg.GENERAL.ENABLE
         )
-
-
-    if changed then
-
-        -- cfg.PROFILE.ENABLE = not cfg.PROFILE.ENABLE
-
-        setProfileValue('ENABLE_MODE', not cfg.PROFILE.ENABLE)
 
         ac.log(
             appNameDebug 
             .. ' Visor ' 
-            .. (cfg.PROFILE.ENABLE and 'Enabled' or 'Disabled')
+            .. (cfg.GENERAL.ENABLE and 'Enabled' or 'Disabled')
         )
+    
+    end
 
-    end        
 
     ui.sameLine(0, 20)
 
-    changed, _ = ui.checkbox(
+    local changedHideHelmet, _= ui.checkbox(
 
             'Hide driver head&helmet (to avoid light render conflicts)',
 
-            cfg.RUNTIME.HIDE_DRIVER_HELMET
+            p.HIDE_DRIVER_HELMET == 1
         )
 
 
-    if changed then
+    if changedHideHelmet then
 
-        cfg.RUNTIME.HIDE_DRIVER_HELMET = not cfg.RUNTIME.HIDE_DRIVER_HELMET
+        setProfileValue(
+            'HIDE_DRIVER_HELMET',
+            1- p.HIDE_DRIVER_HELMET
+        )
+
 
     end
 
@@ -5802,20 +5857,19 @@ function windowMain(dt)
         --------------------------------------------------------
         -- G-Force Motion: Enable / Disable
         --------------------------------------------------------
-        changed, _ =
+        local changedEnableMotion, newEnableMotion =
             ui.checkbox(
 
                 'Enable Motion',
 
-                p.ENABLE_MOTION
+                p.ENABLE_MOTION == 1
             )
 
-        if changed then
-            -- p.ENABLE_MOTION = not p.ENABLE_MOTION
+        if changedEnableMotion then
 
             setProfileValue(
                 'ENABLE_MOTION',
-                not p.ENABLE_MOTION
+                1 - p.ENABLE_MOTION
             )
 
         end
