@@ -303,7 +303,8 @@ local cfg = scriptSettings:mapConfig({
         -- 1 = initialize only
         -- 2 = synthetic force validation
         -- 3 = persistent RainFX physics
-        RAIN_GPU_STATE_MODE = 3,
+        -- 4 = persistent physics with the measured 3x3 L/M/S test grid
+        RAIN_GPU_STATE_MODE = 4,
 
         RAIN_GPU_STATE_UV_SCALE = 18.0,
         RAIN_GPU_STATE_MESH_V_MIN = -0.713,
@@ -563,6 +564,7 @@ local rainStateUpdateParams = {
         gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
+        gRainStateTestGrid = 0.0,
     },
 
     shader = [[
@@ -626,6 +628,23 @@ local rainStateUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+                if (gRainStateTestGrid > 0.5 && index < 9.0) {
+                    const float2 measuredX[3] = {
+                        0.682, 0.491, 0.300
+                    };
+                    const float2 measuredY[3] = {
+                        -0.410, -0.501, -0.591
+                    };
+                    int i = (int)index;
+                    int ix = i % 3;
+                    int iy = i / 3;
+                    float y01 = saturate(
+                        (measuredY[iy] - gRainStateMeshVMin)
+                        / max(gRainStateMeshVMax - gRainStateMeshVMin, 0.000001)
+                    );
+                    return float4(measuredX[ix], y01, 0.0, 0.0);
+                }
+
                 float2 p = float2(
                     rainStateHash(index + 11.0),
                     rainStateHash(index + 47.0)
@@ -736,6 +755,7 @@ local rainStateMetaUpdateParams = {
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
         gRainStateInit = 0.0,
+        gRainStateTestGrid = 0.0,
     },
 
     shader = [[
@@ -756,6 +776,18 @@ local rainStateMetaUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+                if (gRainStateTestGrid > 0.5 && index < 9.0) {
+                    const float radiusValues[9] = {
+                        0.115, 0.0735, 0.032,
+                        0.0735, 0.032, 0.115,
+                        0.032, 0.115, 0.0735
+                    };
+                    float radius = radiusValues[(int)index];
+                    float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
+                    float mass = lerp(1.0, 9.0, radius01 * radius01);
+                    return float4(radius, mass, 0.0, 1.0);
+                }
+
                 float r01 = rainStateHash(index + 101.0);
                 float radius = lerp(0.032, 0.115, r01);
                 float mass = lerp(1.0, 9.0, r01 * r01);
@@ -3538,6 +3570,10 @@ local function initializeRainGPUState()
 
     rainStateUpdateParams.values.gRainStateCount = count
     rainStateUpdateParams.values.gRainStateInit = 1.0
+    rainStateUpdateParams.values.gRainStateTestGrid =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+        and 1.0
+        or 0.0
     rainStateUpdateParams.values.gRainStatePhysics = 0.0
     rainStateUpdateParams.textures.txRainState = false
     rainStateUpdateParams.textures.txRainStateMeta = false
@@ -3545,6 +3581,10 @@ local function initializeRainGPUState()
 
     rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateInit = 1.0
+    rainStateMetaUpdateParams.values.gRainStateTestGrid =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+        and 1.0
+        or 0.0
     rainStateMetaUpdateParams.textures.txRainStateMeta = false
 
     rainStateA:updateWithShader(rainStateUpdateParams)
@@ -3667,6 +3707,11 @@ local function updateRainGPUState(sim)
 
     rainStateUpdateParams.values.gRainStatePhysics =
         physicsMode and 1.0 or 0.0
+
+    rainStateUpdateParams.values.gRainStateTestGrid =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+        and 1.0
+        or 0.0
 
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
