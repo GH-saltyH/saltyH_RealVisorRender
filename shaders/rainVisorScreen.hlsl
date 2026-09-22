@@ -1786,107 +1786,46 @@ float4 rainPersistentRawStateDebugOutput(PS_IN pin)
     Because persistent positions currently wrap with frac(), the delta is
     unwrapped to the shortest periodic displacement before visualization.
 */
-float4 rainPersistentAccumulatedDisplacementDebugOutput(PS_IN pin)
+float4 rainPersistentMeasuredGridDebugOutput(PS_IN pin)
 {
-    float count = max(gRainStateCount, 1.0);
+    const float count = 9.0;
+    const float visualScale = max(gRainStateDebugDisplacementScale, 1.0);
     float result = 0.0;
     float3 resultColor = float3(1.0, 1.0, 1.0);
-    float visualScale = max(gRainStateDebugDisplacementScale, 1.0);
 
     [loop]
-    for (int i = 0; i < 256; ++i)
+    for (int i = 0; i < 9; ++i)
     {
-        if ((float)i >= count)
-            break;
+        float2 stateUV = float2((float(i) + 0.5) / count, 0.5);
+        float4 state = txRainState.SampleLevel(samPointRain, stateUV, 0.0);
+        float4 meta = txRainStateMeta.SampleLevel(samPointRain, stateUV, 0.0);
+        float4 originState = txRainStateOrigin.SampleLevel(samPointRain, stateUV, 0.0);
 
-        float stateIndex = (float)i;
-        float2 stateUV = float2(
-            (stateIndex + 0.5) / count,
-            0.5
-        );
+        float2 current = state.rg;
+        float2 origin = originState.rg;
+        float2 delta = rainShortestWrappedDelta(current, origin);
+        float2 currentPosition = float2(current.x, lerp(gRainStateMeshVMin, gRainStateMeshVMax, current.y));
+        float2 originPosition = float2(origin.x, lerp(gRainStateMeshVMin, gRainStateMeshVMax, origin.y));
+        float2 deltaMesh = float2(delta.x, delta.y * (gRainStateMeshVMax - gRainStateMeshVMin));
+        float2 amplifiedEnd = originPosition + deltaMesh * visualScale;
 
-        float2 current = txRainState.SampleLevel(
-            samPointRain, stateUV, 0.0
-        ).rg;
-
-        float2 origin = txRainStateOrigin.SampleLevel(
-            samPointRain, stateUV, 0.0
-        ).rg;
-
-        float2 delta = current - origin;
-
-        // Position is periodic because physics currently uses frac().
-        // Recover the shortest signed displacement instead of treating a
-        // wrap as a full-screen jump.
-        if (delta.x > 0.5) delta.x -= 1.0;
-        if (delta.x < -0.5) delta.x += 1.0;
-        if (delta.y > 0.5) delta.y -= 1.0;
-        if (delta.y < -0.5) delta.y += 1.0;
-
-        float2 currentPosition = float2(
-            current.x,
-            lerp(-0.579, -0.362, current.y)
-        );
-
-        float2 originPosition = float2(
-            origin.x,
-            lerp(-0.579, -0.362, origin.y)
-        );
-
-        float2 deltaMesh = float2(
-            delta.x,
-            delta.y * (-0.362 + 0.579)
-        );
-
-        float2 amplifiedEnd =
-            originPosition
-            + deltaMesh * visualScale;
-
-        float currentMask = 1.0 - smoothstep(
-            0.003,
-            0.006,
-            length(pin.Tex - currentPosition)
-        );
-
-        float originMask = 1.0 - smoothstep(
-            0.003,
-            0.006,
-            length(pin.Tex - originPosition)
-        );
+        float radius = meta.r;
+        float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
+        float radiusVisual = lerp(0.0045, 0.012, radius01);
+        float currentMask = 1.0 - smoothstep(radiusVisual, radiusVisual * 1.25, length(pin.Tex - currentPosition));
+        float originMask = 1.0 - smoothstep(0.0025, 0.0045, length(pin.Tex - originPosition));
 
         float2 lineVector = amplifiedEnd - originPosition;
         float lineLengthSq = dot(lineVector, lineVector);
         float2 pointVector = pin.Tex - originPosition;
-        float lineT = saturate(
-            dot(pointVector, lineVector)
-            / max(lineLengthSq, 0.000001)
-        );
+        float lineT = saturate(dot(pointVector, lineVector) / max(lineLengthSq, 0.000001));
         float2 closest = originPosition + lineVector * lineT;
         float lineDistance = length(pin.Tex - closest);
-        float lineWidth = 0.0015;
-        float lineMask = 1.0 - smoothstep(
-            lineWidth,
-            lineWidth * 2.0,
-            lineDistance
-        );
+        float lineMask = 1.0 - smoothstep(0.0012, 0.0024, lineDistance);
 
-        if (originMask > result)
-        {
-            result = originMask;
-            resultColor = float3(0.05, 1.0, 0.15);
-        }
-
-        if (lineMask > result)
-        {
-            result = lineMask;
-            resultColor = float3(1.0, 0.35, 0.05);
-        }
-
-        if (currentMask > result)
-        {
-            result = currentMask;
-            resultColor = float3(1.0, 1.0, 1.0);
-        }
+        if (originMask > result) { result = originMask; resultColor = float3(0.05, 1.0, 0.15); }
+        if (lineMask > result) { result = lineMask; resultColor = float3(1.0, 0.35, 0.05); }
+        if (currentMask > result) { result = currentMask; resultColor = lerp(float3(0.2, 0.7, 1.0), float3(1.0, 0.75, 0.1), radius01); }
     }
 
     return float4(resultColor, saturate(result));
