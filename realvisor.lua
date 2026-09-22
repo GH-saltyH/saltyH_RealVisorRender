@@ -978,7 +978,6 @@ local rainStateUpdateParams = {
                 dt
             );
         }
-        }
     ]],
 }
 
