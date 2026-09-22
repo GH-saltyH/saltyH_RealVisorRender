@@ -22,6 +22,7 @@ local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
 
 local scriptSettings = ac.INIConfig.scriptSettings()
 
+
 --------------------------------------------------------
 -- Path
 --------------------------------------------------------
@@ -42,21 +43,26 @@ local appFolder =
     --------------------------------------------------------
     -- Path: Settings
     --------------------------------------------------------
-
-    local settingsFile = 
-        appFolder .. 'settings.ini'
-
-
-local shaders = {
-
-    {
-        ID = 'RAINFXVISOR',
-        PATH = appFolder .. '/shaders/rainVisorScreen.hlsl',
-        LOADED = false,
-        HLSL = nil,
-    },
-}
     
+    local settingsFile = 
+    appFolder .. 'settings.ini'
+    
+    
+    --------------------------------------------------------
+    -- Path: Shaders
+    --------------------------------------------------------
+    
+    local shaders = {
+
+        {
+            ID = 'RAINFXVISOR',
+            PATH = appFolder .. '/shaders/rainVisorScreen.hlsl',
+            LOADED = false,
+            HLSL = nil,
+        },
+    }
+        
+
 local cfg = scriptSettings:mapConfig({
 
     --------------------------------------------------------

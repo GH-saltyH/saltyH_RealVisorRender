@@ -3797,8 +3797,8 @@ float4 rainPersistentAirflowNormalProjectionDebugOutput(PS_IN pin)
 */
 float4 rainPersistentDropScaleThresholdDebugOutput(PS_IN pin)
 {
-    const float xPositions[3] = { 0.30, 0.50, 0.70 };
-    const float yPositions[3] = { 0.20, 0.50, 0.80 };
+    const float xPositions[3] = { gRainStateMeshUMin, gRainUVCenterX, gRainStateMeshUMax };
+    const float yPositions[3] = { gRainStateMeshVMin, gRainUVCenterY, gRainStateMeshVMax };
 
     const float radiusValues[9] =
     {
@@ -3816,12 +3816,13 @@ float4 rainPersistentDropScaleThresholdDebugOutput(PS_IN pin)
 
     for (int yIndex = 0; yIndex < 3; ++yIndex)
     {
-        float centerY =
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                yPositions[yIndex]
-            );
+        float centerY = 
+            yPositions[yIndex];
+            // lerp(
+            //     gRainStateMeshVMin,
+            //     gRainStateMeshVMax,
+            //     yPositions[yIndex]
+            // );
 
         for (int xIndex = 0; xIndex < 3; ++xIndex)
         {
@@ -3830,11 +3831,12 @@ float4 rainPersistentDropScaleThresholdDebugOutput(PS_IN pin)
                 + xIndex;
 
             float centerX =
-                lerp(
-                    gRainStateMeshUMin,
-                    gRainStateMeshUMax,
-                    xPositions[xIndex]
-                );
+                xPositions[xIndex];
+                // lerp(
+                //     gRainStateMeshUMin,
+                //     gRainStateMeshUMax,
+                //     xPositions[xIndex]
+                // );
 
             float2 center =
                 float2(centerX, centerY);
