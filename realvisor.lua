@@ -803,9 +803,20 @@ local rainStateUpdateParams = {
             float dt
         )
         {
-            return frac(
+            /*
+                Persistent state coordinates are normalized surface coordinates.
+                Do not wrap with frac(): wrapping would teleport a droplet from
+                one visor edge to the opposite edge. Lifecycle/exit handling
+                will own the final boundary behavior.
+
+                Until lifecycle is implemented, clamp the position so boundary
+                handling remains deterministic without a false discontinuity.
+            */
+            return clamp(
                 position
-                + velocity * dt
+                + velocity * dt,
+                0.0,
+                1.0
             );
         }
 
