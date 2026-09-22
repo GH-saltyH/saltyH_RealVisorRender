@@ -644,11 +644,263 @@ local rainStateUpdateParams = {
             incoming relative-air velocity, not a complete drag force.
             Production drag must oppose the droplet's surface velocity.
         */
+        /*
+            Persistent physics is kept as an explicit pipeline.
+
+            The current tangent basis is intentionally unchanged from the
+            validated Debug 36 implementation: object-space X is projected
+            onto the local surface normal and V is derived by cross product.
+            This is the part that will be replaced when a true mesh-UV tangent
+            source is introduced; it must not be silently changed here.
+        */
         float3 rainStateExternalForceWorld()
         {
             return
                 float3(0.0, -gRainStateGravity, 0.0)
                 + gRainAcceleration * gRainStateForceScale;
+        }
+
+        float2 rainStateSurfaceForce(
+            float2 position,
+            out float forceMagnitude
+        )
+        {
+            float3 forceWorld =
+                rainStateExternalForceWorld();
+
+            float3 normalWorld =
+                rainStateNormalWorld(position);
+
+            float2 tangentForce =
+                rainStateProjectForce(
+                    forceWorld,
+                    normalWorld
+                );
+
+            forceMagnitude =
+                length(tangentForce);
+
+            return tangentForce;
+        }
+
+        float rainStateAdhesion(
+            float stateIndex,
+            float mass
+        )
+        {
+            float adhesionBase =
+                lerp(
+                    gRainStateAdhesionMin,
+                    gRainStateAdhesionMax,
+                    rainStateHash(stateIndex + 211.0)
+                );
+
+            return
+                adhesionBase
+                / sqrt(max(mass, 0.000001));
+        }
+
+        float2 rainStateFlowAcceleration(
+            float2 tangentForce,
+            float forceMagnitude,
+            float adhesion,
+            float dt
+        )
+        {
+            float excess =
+                max(
+                    forceMagnitude - adhesion,
+                    0.0
+                );
+
+            if (
+                excess <= 0.000001
+                || forceMagnitude <= 0.000001
+            )
+            {
+                return float2(0.0, 0.0);
+            }
+
+            float2 direction =
+                tangentForce
+                / forceMagnitude;
+
+            float acceleration =
+                excess
+                * gRainStateFlowAcceleration
+                / max(
+                    gRainStateUVScale,
+                    0.000001
+                );
+
+            return
+                direction
+                * acceleration
+                * dt;
+        }
+
+        float2 rainStateApplyDrag(
+            float2 velocity,
+            float forceMagnitude,
+            float adhesion,
+            float dt
+        )
+        {
+            /*
+                Keep the existing numerical behavior:
+                below adhesion the droplet receives the stronger
+                attachment damping, then the normal flow drag is applied.
+            */
+            if (forceMagnitude <= adhesion)
+            {
+                velocity *=
+                    exp(
+                        -gRainStateDrag
+                        * 2.0
+                        * dt
+                    );
+            }
+
+            velocity *=
+                exp(
+                    -max(
+                        gRainStateDrag,
+                        0.0
+                    )
+                    * dt
+                );
+
+            return velocity;
+        }
+
+        float2 rainStateClampSpeed(
+            float2 velocity
+        )
+        {
+            float speed =
+                length(velocity);
+
+            if (
+                speed
+                > gRainStateMaxSpeed
+            )
+            {
+                velocity =
+                    velocity
+                    / max(
+                        speed,
+                        0.000001
+                    )
+                    * gRainStateMaxSpeed;
+            }
+
+            return velocity;
+        }
+
+        float2 rainStateIntegratePosition(
+            float2 position,
+            float2 velocity,
+            float dt
+        )
+        {
+            return frac(
+                position
+                + velocity * dt
+            );
+        }
+
+        float4 rainStateUpdatePhysics(
+            float2 position,
+            float2 velocity,
+            float radius,
+            float mass,
+            float stateIndex,
+            float dt
+        )
+        {
+            float forceMagnitude = 0.0;
+
+            float2 tangentForce =
+                rainStateSurfaceForce(
+                    position,
+                    forceMagnitude
+                );
+
+            float adhesion =
+                rainStateAdhesion(
+                    stateIndex,
+                    mass
+                );
+
+            velocity +=
+                rainStateFlowAcceleration(
+                    tangentForce,
+                    forceMagnitude,
+                    adhesion,
+                    dt
+                );
+
+            velocity =
+                rainStateApplyDrag(
+                    velocity,
+                    forceMagnitude,
+                    adhesion,
+                    dt
+                );
+
+            velocity =
+                rainStateClampSpeed(
+                    velocity
+                );
+
+            position =
+                rainStateIntegratePosition(
+                    position,
+                    velocity,
+                    dt
+                );
+
+            return float4(
+                position,
+                velocity
+            );
+        }
+
+        float4 rainStateUpdateTest(
+            float2 position,
+            float2 velocity,
+            float dt
+        )
+        {
+            velocity +=
+                gRainStateForce
+                * dt;
+
+            velocity *=
+                exp(
+                    -max(
+                        gRainStateDrag,
+                        0.0
+                    )
+                    * dt
+                );
+
+            velocity =
+                rainStateClampSpeed(
+                    velocity
+                );
+
+            position =
+                rainStateIntegratePosition(
+                    position,
+                    velocity,
+                    dt
+                );
+
+            return float4(
+                position,
+                velocity
+            );
         }
 
         float4 main(PS_IN pin) {
@@ -673,7 +925,7 @@ local rainStateUpdateParams = {
                     float y01 = saturate(
                         (measuredY[iy] - gRainStateMeshVMin)
                         / max(
-                            gRainStateMeshVMax - gRainStateMeshVMin, 
+                            gRainStateMeshVMax - gRainStateMeshVMin,
                             0.000001
                         )
                     );
@@ -685,11 +937,23 @@ local rainStateUpdateParams = {
                     rainStateHash(index + 11.0),
                     rainStateHash(index + 47.0)
                 );
+
                 return float4(p, 0.0, 0.0);
             }
 
-            float4 state = txRainState.SampleLevel(samPointRain, suv, 0.0);
-            float4 meta = txRainStateMeta.SampleLevel(samPointRain, suv, 0.0);
+            float4 state =
+                txRainState.SampleLevel(
+                    samPointRain,
+                    suv,
+                    0.0
+                );
+
+            float4 meta =
+                txRainStateMeta.SampleLevel(
+                    samPointRain,
+                    suv,
+                    0.0
+                );
 
             float2 p = state.rg;
             float2 v = state.ba;
@@ -698,59 +962,22 @@ local rainStateUpdateParams = {
             float dt = max(gRainStateDeltaTime, 0.0);
 
             if (gRainStatePhysics > 0.5) {
-                float3 force =
-                    rainStateExternalForceWorld();
-
-                float3 n = rainStateNormalWorld(p);
-                float2 tf = rainStateProjectForce(force, n);
-                float f = length(tf);
-
-                float radius01 = saturate(
-                    (radius - 0.032) / (0.115 - 0.032)
+                return rainStateUpdatePhysics(
+                    p,
+                    v,
+                    radius,
+                    mass,
+                    index,
+                    dt
                 );
-
-                float adhesionBase = lerp(
-                    gRainStateAdhesionMin,
-                    gRainStateAdhesionMax,
-                    rainStateHash(index + 211.0)
-                );
-
-                float adhesion = adhesionBase / sqrt(mass);
-                float excess = max(f - adhesion, 0.0);
-
-                if (excess > 0.000001) {
-                    float2 dir = tf / f;
-                    float acceleration =
-                        excess
-                        * gRainStateFlowAcceleration
-                        / max(gRainStateUVScale, 0.000001);
-
-                    v += dir * acceleration * dt;
-                } else {
-                    v *= exp(-gRainStateDrag * 2.0 * dt);
-                }
-
-                v *= exp(-max(gRainStateDrag, 0.0) * dt);
-
-                float speed = length(v);
-                if (speed > gRainStateMaxSpeed) {
-                    v = v / max(speed, 0.000001) * gRainStateMaxSpeed;
-                }
-
-                p = frac(p + v * dt);
-            } else {
-                v += gRainStateForce * dt;
-                v *= exp(-max(gRainStateDrag, 0.0) * dt);
-
-                float speed = length(v);
-                if (speed > gRainStateMaxSpeed) {
-                    v = v / max(speed, 0.000001) * gRainStateMaxSpeed;
-                }
-
-                p = frac(p + v * dt);
             }
 
-            return float4(p, v);
+            return rainStateUpdateTest(
+                p,
+                v,
+                dt
+            );
+        }
         }
     ]],
 }
