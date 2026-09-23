@@ -193,6 +193,24 @@ float rainHash(float2 p)
     */
     float rainStateBoundaryMask(float2 position)
     {
+        /*
+            The persistent state domain is explicitly normalized to [0, 1].
+            samLinearRain uses CLAMP addressing, so sampling the boundary mask
+            with an out-of-domain state would otherwise clamp to the nearest
+            texture edge and could incorrectly report that the drop is still
+            valid. Out-of-domain state must therefore be rejected before the
+            mesh-UV conversion/sample.
+        */
+        if (
+            position.x < 0.0
+            || position.x > 1.0
+            || position.y < 0.0
+            || position.y > 1.0
+        )
+        {
+            return 0.0;
+        }
+
         float2 uv = float2(
             lerp(
                 gRainStateMeshUMin,
