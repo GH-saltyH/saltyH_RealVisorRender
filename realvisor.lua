@@ -321,6 +321,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_TEST_FORCE_X = 0.035,
         RAIN_GPU_STATE_TEST_FORCE_Y = 0.010,
 
+        -- C2 controlled radius/mass/adhesion isolation.
+        -- Force is expressed directly in persistent tangent-state coordinates.
+        RAIN_GPU_STATE_C2_FORCE_X = 1.500,
+        RAIN_GPU_STATE_C2_FORCE_Y = 0.000,
+        RAIN_GPU_STATE_C2_ADHESION_BASE = 1.200,
+
         RAIN_GPU_STATE_DRAG = 0.35,
         RAIN_GPU_STATE_MAX_SPEED = 0.12,
 
@@ -545,6 +551,7 @@ local rainStateDebugSampleTimer = 0.0
 local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
+local rainStateConfiguredMode = nil
 
 ------------------------------------------------------------
 -- RainFX debug UI option labels
@@ -592,6 +599,7 @@ local RAIN_DEBUG_OPTIONS = {
     '[35] Radius / mass / adhesion',
     '[36] Measured 3x3 L/M/S grid',
     '[37] UV tangent comparison',
+    '[38] C2 controlled L/M/S movement',
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -600,6 +608,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[2] Synthetic force validation',
     '[3] Persistent RainFX physics',
     '[4] Persistent physics + 3x3 L/M/S grid',
+    '[5] Persistent physics + C2 controlled L/M/S isolation',
 }
 
 local rainStateUpdateParams = {
@@ -632,6 +641,9 @@ local rainStateUpdateParams = {
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
         gRainStateTestGrid = 0.0,
+        gRainStateC2Isolation = 0.0,
+        gRainStateC2Force = vec2(1.5, 0.0),
+        gRainStateC2AdhesionBase = 1.2,
         -- Reserved. Persistent air drag is not applied until its velocity-relative model is integrated.
         gRainStateUseAirDrag = 0.0,
     },
@@ -3934,6 +3946,8 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
@@ -3993,6 +4007,16 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
         and 1.0
         or 0.0
+    rainStateUpdateParams.values.gRainStateC2Isolation =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+        and 1.0
+        or 0.0
+    rainStateUpdateParams.values.gRainStateC2Force:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y
+    )
+    rainStateUpdateParams.values.gRainStateC2AdhesionBase =
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
     rainStateUpdateParams.values.gRainStatePhysics = 0.0
     rainStateUpdateParams.values.gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN
     rainStateUpdateParams.values.gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
@@ -4021,6 +4045,7 @@ local function initializeRainGPUState()
 
     rainStateReadIsA = true
     rainStateInitialized = true
+    rainStateConfiguredMode = cfg.RUNTIME.RAIN_GPU_STATE_MODE
     rainStateDebugSampleTimer = 0.0
     rainStateLastFrame = -1
 
@@ -4036,6 +4061,19 @@ end
 
 
 local function updateRainGPUState(sim)
+    if rainStateConfiguredMode ~= nil
+        and rainStateConfiguredMode ~= cfg.RUNTIME.RAIN_GPU_STATE_MODE then
+        rainStateA = nil
+        rainStateB = nil
+        rainStateMetaA = nil
+        rainStateMetaB = nil
+        rainStateDebugOrigin = nil
+        rainStateInitialized = false
+        rainStateReadIsA = true
+        rainStateLastFrame = -1
+        rainStateConfiguredMode = nil
+    end
+
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE <= 0 then
         return
     end
@@ -4081,6 +4119,8 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
@@ -4143,6 +4183,17 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
         and 1.0
         or 0.0
+
+    rainStateUpdateParams.values.gRainStateC2Isolation =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+        and 1.0
+        or 0.0
+    rainStateUpdateParams.values.gRainStateC2Force:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y
+    )
+    rainStateUpdateParams.values.gRainStateC2AdhesionBase =
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
 
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(
@@ -6691,6 +6742,43 @@ function windowMain(dt)
     if changed then
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX = newHorizontalUVMax
     end
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 then
+        ui.text('C2: same physical spawn/force/adhesion base; only radius/mass differs')
+        local c2x, c2changed = ui.slider(
+            'C2_FORCE_X',
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
+            0.0,
+            3.0,
+            '%.3f'
+        )
+        if c2changed then
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X = c2x
+        end
+
+        local c2y, c2changedY = ui.slider(
+            'C2_FORCE_Y',
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y,
+            -3.0,
+            3.0,
+            '%.3f'
+        )
+        if c2changedY then
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y = c2y
+        end
+
+        local c2adh, c2adhChanged = ui.slider(
+            'C2_ADHESION_BASE',
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE,
+            0.1,
+            3.0,
+            '%.3f'
+        )
+        if c2adhChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE = c2adh
+        end
+    end
+
     --------------------------------------------------------
     -- Material Parameter: floating editor window
     --------------------------------------------------------
