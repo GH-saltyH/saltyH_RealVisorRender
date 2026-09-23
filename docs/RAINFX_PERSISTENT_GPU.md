@@ -73,6 +73,9 @@ This is evidence that surface orientation plus mass/adhesion plus persistent int
 34 combined force
 35 radius/mass/adhesion threshold
 36 measured 3x3 L/M/S grid
+39 lifecycle live/dead/respawn diagnostic
+40 boundary mask sampled directly from pin.Tex
+41 boundary crossing decision diagnostic
 
 ## 11. Existing procedural baseline
 rainDropLayer() remains intentionally available.
