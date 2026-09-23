@@ -2851,29 +2851,22 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
                 totalLength / 3.0
             );
 
+        /*
+            baseDirection / airDirection / totalDirection are already expressed
+            in raw visor UV coordinates. There is no V-axis calibration scale
+            in this coordinate system.
+        */
         float2 baseEnd =
             dropPosition
-            + float2(
-                baseDirection.x,
-                baseDirection.y * vRange
-            )
-            * baseVisualLength;
+            + baseDirection * baseVisualLength;
 
         float2 airEnd =
             dropPosition
-            + float2(
-                airDirection.x,
-                airDirection.y * vRange
-            )
-            * airVisualLength;
+            + airDirection * airVisualLength;
 
         float2 totalEnd =
             dropPosition
-            + float2(
-                totalDirection.x,
-                totalDirection.y * vRange
-            )
-            * totalVisualLength;
+            + totalDirection * totalVisualLength;
 
         float2 baseLine =
             baseEnd
