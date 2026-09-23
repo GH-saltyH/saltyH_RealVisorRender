@@ -900,15 +900,10 @@ local rainStateUpdateParams = {
         {
             /*
                 Persistent state coordinates are normalized surface coordinates.
-                C3 does not wrap with frac(): lifecycle owns edge exit.
-                Clamp remains only as a numerical guard for an alive state.
+                C3 owns boundary handling explicitly, so this integration
+                function itself never wraps or clamps the physical result.
             */
-            return clamp(
-                position
-                + velocity * dt,
-                0.0,
-                1.0
-            );
+            return position + velocity * dt;
         }
 
         float2 rainStateRespawnPosition(
@@ -967,6 +962,15 @@ local rainStateUpdateParams = {
                     dt
                 );
 
+                if (gRainStateLifecycle > 0.5)
+                {
+                    position = clamp(
+                        position,
+                        0.0,
+                        1.0
+                    );
+                }
+
                 return float4(position, velocity);
             }
 
@@ -1009,6 +1013,20 @@ local rainStateUpdateParams = {
                     velocity,
                     dt
                 );
+
+            if (gRainStateLifecycle > 0.5)
+            {
+                /*
+                    Boundary handling is explicit: the meta pass marks this
+                    identity dead, while the state is parked exactly at the
+                    surface edge until the respawn gap expires.
+                */
+                position = clamp(
+                    position,
+                    0.0,
+                    1.0
+                );
+            }
 
             return float4(
                 position,
