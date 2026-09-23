@@ -619,6 +619,7 @@ local RAIN_DEBUG_OPTIONS = {
     '[37] UV tangent comparison',
     '[38] C2 controlled L/M/S movement',
     '[39] C3 boundary lifecycle',
+    '[40] Boundary Mask'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -658,6 +659,8 @@ local rainStateUpdateParams = {
         gRainStateAdhesionMax = 2.20,
         gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
         gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
+        gRainStateMeshUMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
+        gRainStateMeshUMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
         gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
@@ -708,7 +711,11 @@ local rainStateUpdateParams = {
         float rainStateBoundaryMask(float2 position)
         {
             float2 uv = float2(
-                position.x,
+                lerp(
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    position.x
+                ),
                 lerp(
                     gRainStateMeshVMin,
                     gRainStateMeshVMax,
@@ -1341,6 +1348,8 @@ local rainStateMetaUpdateParams = {
         gRainStateRespawnGapMax = 0.75,
         gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
         gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
+        gRainStateMeshUMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
+        gRainStateMeshUMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
     },
 
     shader = [[
@@ -1374,7 +1383,11 @@ local rainStateMetaUpdateParams = {
         float rainStateBoundaryMask(float2 position)
         {
             float2 uv = float2(
-                position.x,
+                lerp(
+                    gRainStateMeshUMin,
+                    gRainStateMeshUMax,
+                    position.x
+                ),
                 lerp(
                     gRainStateMeshVMin,
                     gRainStateMeshVMax,
@@ -4451,6 +4464,8 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
     rainStateMetaUpdateParams.textures.txRainStateMeta = false
     rainStateMetaUpdateParams.textures.txRainState = false
+    rainStateMetaUpdateParams.textures.txRainBoundaryMask =
+        textureRainBoundaryMask
 
     rainStateA:updateWithShader(rainStateUpdateParams)
     rainStateB:updateWithShader(rainStateUpdateParams)

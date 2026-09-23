@@ -6,6 +6,12 @@ SamplerState samPointRain
     AddressW = CLAMP;
 };
 
+SamplerState samLinearRain {
+    Filter = MIN_MAG_MIP_LINEAR;
+    AddressU = CLAMP;
+    AddressV = CLAMP;
+    AddressW = CLAMP;
+};
 
 #ifdef RAIN_GPU_STATE_PASS
 
@@ -4948,6 +4954,17 @@ float4 main(PS_IN pin)
     if (gRainDebug == 39)
     {
         return rainPersistentLifecycleDebugOutput(pin);
+    }
+
+    if (gRainDebug == 40)
+    {
+        float mask = txRainBoundaryMask.SampleLevel(
+            samLinearRain,
+            pin.Tex,
+            0.0
+        ).r;
+
+        return float4(mask, mask, mask, 1.0);
     }
 
     if (gRainDebug == 34)
