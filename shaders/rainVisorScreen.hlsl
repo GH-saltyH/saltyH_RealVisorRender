@@ -4696,6 +4696,113 @@ float4 rainPersistentCombinedForceDebugOutput(PS_IN pin)
     return float4(resultColor, result);
 }
 
+float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 41 / C3 boundary decision:
+        Visualize the exact boundary-mask result used by lifecycle logic.
+
+        White: current and predicted position are valid.
+        Red: current position is valid, but the next predicted position is
+             outside the calibrated visor mask.
+        Yellow: current position is already outside the mask.
+
+        This intentionally does not modify lifecycle state or physics.
+    */
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+
+    float dt = max(gRainStateDeltaTime, 0.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        if (meta.a < 0.5)
+            continue;
+
+        float2 position = state.rg;
+        float2 velocity = state.ba;
+        float2 predicted = position + velocity * dt;
+
+        float currentMask = rainStateBoundaryMask(position);
+        float predictedMask = rainStateBoundaryMask(predicted);
+
+        float2 currentUV = float2(
+            lerp(gRainStateMeshUMin, gRainStateMeshUMax, position.x),
+            lerp(gRainStateMeshVMin, gRainStateMeshVMax, position.y)
+        );
+
+        float2 predictedUV = float2(
+            lerp(gRainStateMeshUMin, gRainStateMeshUMax, predicted.x),
+            lerp(gRainStateMeshVMin, gRainStateMeshVMax, predicted.y)
+        );
+
+        float radius01 = saturate(
+            (meta.r - 0.032)
+            / (0.115 - 0.032)
+        );
+
+        float radius = lerp(
+            0.008,
+            0.016,
+            radius01
+        );
+
+        float currentMarker = 1.0 - smoothstep(
+            radius * 0.35,
+            radius,
+            length(pin.Tex - currentUV)
+        );
+
+        float predictedMarker = 1.0 - smoothstep(
+            radius * 0.35,
+            radius,
+            length(pin.Tex - predictedUV)
+        );
+
+        float marker = max(currentMarker, predictedMarker);
+
+        if (currentMask < 0.5)
+        {
+            resultColor = float3(1.0, 0.85, 0.0);
+        }
+        else if (predictedMask < 0.5)
+        {
+            resultColor = float3(1.0, 0.0, 0.0);
+        }
+        else
+        {
+            resultColor = float3(1.0, 1.0, 1.0);
+        }
+
+        result = max(result, marker);
+    }
+
+    return float4(resultColor, result);
+}
+
 float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
 {
     /*
