@@ -119,6 +119,27 @@ After lifecycle stability: overlap detection -> combine mass/radius -> recompute
 ### F1 — Residue / shrink
 Last priority. Validate slow, plausible material loss without using residue to hide incorrect movement.
 
+## 18.1 C3 lifecycle validation speed preset
+
+Because the current physical persistent droplet motion is intentionally much slower than the time scale needed to visually validate lifecycle behavior, C3 now has an isolated validation-speed preset.
+
+Default C3 validation values:
+- RAIN_GPU_STATE_C3_TEST_SPEED = true
+- RAIN_GPU_STATE_C3_FLOW_ACCELERATION = 0.20
+- RAIN_GPU_STATE_C3_DRAG = 3.0
+- RAIN_GPU_STATE_C3_MAX_SPEED = 0.15
+
+These values are used only when persistent lifecycle handling is active. They do not overwrite or redefine the final RainFX physics parameters.
+
+The purpose of this preset is strictly to make the following observable within a short in-game test:
+1. a persistent drop reaches the normalized visor boundary;
+2. the drop becomes hidden/dead;
+3. it remains absent for the configured respawn gap;
+4. the same state identity respawns at a different hashed position;
+5. unrelated persistent drops continue without teleporting.
+
+The C3 speed preset must not be used to judge final real-world droplet speed, mass/adhesion tuning, airflow behavior, or visual trail length. After lifecycle validation passes, disable the preset and return to the baseline physics before testing the next physical subsystem.
+
 ## 19. Stage gate rule
 
 Do not change multiple physical concepts at once. C movement must pass before lifecycle, lifecycle before merge, merge before residue. Visual trail length must never compensate for insufficient physical displacement.
