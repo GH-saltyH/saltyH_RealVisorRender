@@ -4700,19 +4700,16 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
 {
     /*
         Debug 41 / C3 boundary decision:
-        Visualize the exact boundary-mask result used by lifecycle logic.
+        White: current and predicted positions are valid.
+        Red: current position is valid, but predicted position is outside.
+        Yellow: current position is already outside.
 
-        White: current and predicted position are valid.
-        Red: current position is valid, but the next predicted position is
-             outside the calibrated visor mask.
-        Yellow: current position is already outside the mask.
-
-        This intentionally does not modify lifecycle state or physics.
+        This is a read-only visualization of the lifecycle decision.
     */
     float count = max(gRainStateCount, 1.0);
-    float result = 0.0;
-    float3 resultColor = float3(1.0, 1.0, 1.0);
-
+    float white = 0.0;
+    float red = 0.0;
+    float yellow = 0.0;
     float dt = max(gRainStateDeltaTime, 0.0);
 
     [loop]
@@ -4743,8 +4740,7 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
             continue;
 
         float2 position = state.rg;
-        float2 velocity = state.ba;
-        float2 predicted = position + velocity * dt;
+        float2 predicted = position + state.ba * dt;
 
         float currentMask = rainStateBoundaryMask(position);
         float predictedMask = rainStateBoundaryMask(predicted);
@@ -4782,25 +4778,29 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
             length(pin.Tex - predictedUV)
         );
 
-        float marker = max(currentMarker, predictedMarker);
-
         if (currentMask < 0.5)
         {
-            resultColor = float3(1.0, 0.85, 0.0);
+            yellow = max(yellow, currentMarker);
         }
         else if (predictedMask < 0.5)
         {
-            resultColor = float3(1.0, 0.0, 0.0);
+            red = max(red, max(currentMarker, predictedMarker));
         }
         else
         {
-            resultColor = float3(1.0, 1.0, 1.0);
+            white = max(white, currentMarker);
         }
-
-        result = max(result, marker);
     }
 
-    return float4(resultColor, result);
+    float marker = max(max(white, red), yellow);
+
+    if (yellow >= max(red, white) && yellow > 0.0)
+        return float4(1.0, 0.85, 0.0, marker);
+
+    if (red >= white && red > 0.0)
+        return float4(1.0, 0.0, 0.0, marker);
+
+    return float4(1.0, 1.0, 1.0, marker);
 }
 
 float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
