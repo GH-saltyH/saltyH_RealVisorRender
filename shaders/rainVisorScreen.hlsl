@@ -194,12 +194,9 @@ float rainHash(float2 p)
     float rainStateBoundaryMask(float2 position)
     {
         /*
-            The persistent state domain is explicitly normalized to [0, 1].
-            samLinearRain uses CLAMP addressing, so sampling the boundary mask
-            with an out-of-domain state would otherwise clamp to the nearest
-            texture edge and could incorrectly report that the drop is still
-            valid. Out-of-domain state must therefore be rejected before the
-            mesh-UV conversion/sample.
+            Boundary validity is defined by the mask in the same raw UV
+            coordinate system as pin.Tex. CLAMP addressing must not turn an
+            out-of-texture state into a valid edge sample.
         */
         if (
             position.x < 0.0
@@ -211,22 +208,9 @@ float rainHash(float2 p)
             return 0.0;
         }
 
-        float2 uv = float2(
-            lerp(
-                gRainStateMeshUMin,
-                gRainStateMeshUMax,
-                position.x
-            ),
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                position.y
-            )
-        );
-
         return txRainBoundaryMask.SampleLevel(
             samLinearRain,
-            uv,
+            position,
             0.0
         ).r;
     }
