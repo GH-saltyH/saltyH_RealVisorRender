@@ -4644,8 +4644,15 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateRespawnGapMax =
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
 
+    -- The accelerated C3 physics override is a lifecycle-validation tool only.
+    -- Never let it alter the normal persistent physics modes.
     rainStateUpdateParams.values.gRainStateC3TestSpeed =
-        cfg.RUNTIME.RAIN_GPU_STATE_C3_TEST_SPEED and 1.0 or 0.0
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            and cfg.RUNTIME.RAIN_GPU_STATE_C3_TEST_SPEED
+        )
+        and 1.0
+        or 0.0
     rainStateUpdateParams.values.gRainStateC3FlowAcceleration =
         cfg.RUNTIME.RAIN_GPU_STATE_C3_FLOW_ACCELERATION
     rainStateUpdateParams.values.gRainStateC3Drag =
