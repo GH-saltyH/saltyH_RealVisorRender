@@ -5105,6 +5105,11 @@ float4 main(PS_IN pin)
         return float4(mask, mask, mask, 1.0);
     }
 
+    if (gRainDebug == 41)
+    {
+        return rainPersistentBoundaryLifecycleDebugOutput(pin);
+    }
+
     if (gRainDebug == 34)
     {
         return rainPersistentCombinedForceDebugOutput(pin);
