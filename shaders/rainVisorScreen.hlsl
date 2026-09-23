@@ -148,95 +148,6 @@ float4 rainStateMain(PS_IN pin)
 
 
 
-float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
-{
-    /*
-        Debug 39 / C3:
-        Render only live persistent states. A state that reaches the calibrated
-        normalized boundary is hidden while dead, then returns at a new hashed
-        position after its respawn gap.
-
-        This debug view intentionally does not draw a trail: the test is about
-        identity, exit, waiting, and respawn distribution.
-    */
-    float count = max(gRainStateCount, 1.0);
-    float result = 0.0;
-    float3 resultColor = float3(0.25, 0.95, 1.0);
-
-    [loop]
-    for (int i = 0; i < 256; ++i)
-    {
-        if ((float)i >= count)
-            break;
-
-        float stateIndex = (float)i;
-        float2 stateUV = float2(
-            (stateIndex + 0.5) / count,
-            0.5
-        );
-
-        float4 state = txRainState.SampleLevel(
-            samPointRain,
-            stateUV,
-            0.0
-        );
-
-        float4 meta = txRainStateMeta.SampleLevel(
-            samPointRain,
-            stateUV,
-            0.0
-        );
-
-        if (meta.a < 0.5)
-            continue;
-
-        float2 dropPosition = float2(
-            lerp(
-                gRainStateMeshUMin,
-                gRainStateMeshUMax,
-                state.r
-            ),
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                state.g
-            )
-        );
-
-        float radius01 = saturate(
-            (meta.r - 0.032)
-            / (0.115 - 0.032)
-        );
-
-        float radius = lerp(
-            0.008,
-            0.016,
-            radius01
-        );
-
-        float marker = 1.0 - smoothstep(
-            radius * 0.35,
-            radius,
-            length(pin.Tex - dropPosition)
-        );
-
-        if (marker > result)
-        {
-            result = marker;
-
-            if (meta.a > 1.5)
-                resultColor = float3(1.0, 0.85, 0.10);
-            else
-                resultColor = float3(0.25, 0.95, 1.0);
-        }
-    }
-
-    return float4(
-        resultColor,
-        saturate(result)
-    );
-}
-
 
 float4 main(PS_IN pin)
 {
@@ -4777,6 +4688,95 @@ float4 rainPersistentCombinedForceDebugOutput(PS_IN pin)
     }
 
     return float4(resultColor, result);
+}
+
+float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 39 / C3:
+        Render only live persistent states. A state that reaches the calibrated
+        normalized boundary is hidden while dead, then returns at a new hashed
+        position after its respawn gap.
+
+        This debug view intentionally does not draw a trail: the test is about
+        identity, exit, waiting, and respawn distribution.
+    */
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.25, 0.95, 1.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        if (meta.a < 0.5)
+            continue;
+
+        float2 dropPosition = float2(
+            lerp(
+                gRainStateMeshUMin,
+                gRainStateMeshUMax,
+                state.r
+            ),
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                state.g
+            )
+        );
+
+        float radius01 = saturate(
+            (meta.r - 0.032)
+            / (0.115 - 0.032)
+        );
+
+        float radius = lerp(
+            0.008,
+            0.016,
+            radius01
+        );
+
+        float marker = 1.0 - smoothstep(
+            radius * 0.35,
+            radius,
+            length(pin.Tex - dropPosition)
+        );
+
+        if (marker > result)
+        {
+            result = marker;
+
+            if (meta.a > 1.5)
+                resultColor = float3(1.0, 0.85, 0.10);
+            else
+                resultColor = float3(0.25, 0.95, 1.0);
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
 }
 
 float4 main(PS_IN pin)
