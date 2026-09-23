@@ -656,8 +656,8 @@ local rainStateUpdateParams = {
         gRainStateForceScale = 100000.0,
         gRainStateAdhesionMin = 0.65,
         gRainStateAdhesionMax = 2.20,
-        gRainStateMeshVMin = -0.579,
-        gRainStateMeshVMax = -0.362,
+        gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
+        gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
         gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
@@ -1339,6 +1339,8 @@ local rainStateMetaUpdateParams = {
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
+        gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
+        gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
     },
 
     shader = [[
@@ -1349,10 +1351,44 @@ local rainStateMetaUpdateParams = {
             AddressW = CLAMP;
         };
 
+        SamplerState samLinearRain {
+            Filter = MIN_MAG_MIP_LINEAR;
+            AddressU = CLAMP;
+            AddressV = CLAMP;
+            AddressW = CLAMP;
+        };
+
         float rainStateHash(float n) {
             return frac(sin(n * 127.1 + 311.7) * 43758.5453);
         }
 
+        /*
+            The supplied boundary mask uses the same mesh UV space as the
+            visor surface-normal texture:
+                R >= 0.5 : valid droplet surface
+                R <  0.5 : outside / invalid
+
+            Persistent state position remains normalized. Only this helper
+            converts it to the calibrated visor UV domain.
+        */
+        float rainStateBoundaryMask(float2 position)
+        {
+            float2 uv = float2(
+                position.x,
+                lerp(
+                    gRainStateMeshVMin,
+                    gRainStateMeshVMax,
+                    position.y
+                )
+            );
+
+            return txRainBoundaryMask.SampleLevel(
+                samLinearRain,
+                uv,
+                0.0
+            ).r;
+        }
+        
         float4 main(PS_IN pin) {
             float count = max(gRainStateCount, 1.0);
             float index = min(floor(pin.Tex.x * count), count - 1.0);
