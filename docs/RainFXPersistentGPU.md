@@ -14,7 +14,7 @@ This is a physics correction, not a visualization multiplier. It removes an arch
 
 This change should be validated in-game for displacement, radius/mass ordering, adhesion behavior, and stability before any further parameter tuning.
 
-## 13. What does not need further investigation right now\n\nDo not repeatedly pursue large-scale artificial experiments merely to prove exact tangent equivalence.\nA theoretical experiment requiring an effectively flat, enormous reference surface and hundreds of repeated identical turns is not an efficient validation method for this project's actual goal.\n\nThe project does not require research-lab fluid dynamics.\n\nThe acceptance criterion is:\n\n> Does the droplet move, accelerate, adhere, bend with the visor surface, respond to vehicle motion, and eventually flow in a way that looks physically believable at game-view scale?\n\nIf the answer is yes, preserve the model unless a concrete visual/physical failure is observed.\n\n## 14. Engineering rules\n\n1. Preserve validated behavior when refactoring.\n2. Do not mix visualization scale with physics.\n3. Do not silently change coordinate conventions.\n4. Do not reintroduce saturate(pin.Tex) for the visor normal lookup.\n5. Do not enable air drag before relative droplet/air velocity is modeled.\n6. Do not replace the current tangent solely because a diagnostic frame differs from mesh UV tangent.\n7. Keep the procedural rainDropLayer() comparison path available.\n8. Treat each state texel as an independent droplet identity.\n9. Prefer simple stable approximations over unnecessary fluid-dynamics complexity.\n10. When a change affects physical behavior, record the reason and the observed result.\n11. Record important debugging discoveries in this document so later refactors do not repeat discarded hypotheses.\n12. Physics and rendering must remain separable.\n\n## 15. Current repository state\n\nRepository: GH-saltyH/saltyH_RealVisorRender\nActive branch: feature-RainFXPersistentGPU\nLatest implementation commit: 17d223c3bb8552be2eeae75a21a3c82ba3bee944\n\nRelevant files:\n- realvisor.lua\n- shaders/rainVisorScreen.hlsl\n- texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds\n- texture/drops.dds\n\nRecent architectural commits:\n- 389c02b6ba35f04f8c103c730377335f82bf6445 — persistent physics consolidation\n- e527bfe1cd95d6b13a167fb40250d45f2c4e5a70 — calibrated persistent droplet renderer\n- af2ed00beb1250204f18fdbe5e7b4b982295a1 — Debug 37 tangent-frame comparison\n\n## 17. 2026-09-23 validation result: STATE_MODE 4 / Debug 36
+## 13. What does not need further investigation right now\n\nDo not repeatedly pursue large-scale artificial experiments merely to prove exact tangent equivalence.\nA theoretical experiment requiring an effectively flat, enormous reference surface and hundreds of repeated identical turns is not an efficient validation method for this project's actual goal.\n\nThe project does not require research-lab fluid dynamics.\n\nThe acceptance criterion is:\n\n> Does the droplet move, accelerate, adhere, bend with the visor surface, respond to vehicle motion, and eventually flow in a way that looks physically believable at game-view scale?\n\nIf the answer is yes, preserve the model unless a concrete visual/physical failure is observed.\n\n## 14. Engineering rules\n\n1. Preserve validated behavior when refactoring.\n2. Do not mix visualization scale with physics.\n3. Do not silently change coordinate conventions.\n4. Do not reintroduce saturate(pin.Tex) for the visor normal lookup.\n5. Do not enable air drag before relative droplet/air velocity is modeled.\n6. Do not replace the current tangent solely because a diagnostic frame differs from mesh UV tangent.\n7. Keep the procedural rainDropLayer() comparison path available.\n8. Treat each state texel as an independent droplet identity.\n9. Prefer simple stable approximations over unnecessary fluid-dynamics complexity.\n10. When a change affects physical behavior, record the reason and the observed result.\n11. Record important debugging discoveries in this document so later refactors do not repeat discarded hypotheses.\n12. Physics and rendering must remain separable.\n\n## 15. Current repository state\n\nRepository: GH-saltyH/saltyH_RealVisorRender\nActive branch: feature-RainFXPersistentGPU\nLatest implementation commit: ebda6e9f39f369ab23107faee4a7d2ba7dfc0b0b\n\nRelevant files:\n- realvisor.lua\n- shaders/rainVisorScreen.hlsl\n- texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds\n- texture/drops.dds\n\nRecent architectural commits:\n- 389c02b6ba35f04f8c103c730377335f82bf6445 — persistent physics consolidation\n- e527bfe1cd95d6b13a167fb40250d45f2c4e5a70 — calibrated persistent droplet renderer\n- af2ed00beb1250204f18fdbe5e7b4b982295a1 — Debug 37 tangent-frame comparison\n\n## 17. 2026-09-23 validation result: STATE_MODE 4 / Debug 36
 
 Current in-game observation:
 - L/M/S drops remain persistent during long tests and do not respawn at their original point.
@@ -25,12 +25,46 @@ This is not yet accepted as a radius-only causal result. The current adhesion fu
 
 ## 18. Validation plan
 
-### C1 — Persistent movement baseline
+### C1 — Persistent movement baseline — PASS
 Use STATE_MODE 4 + Debug 36.
-Check: no wrap/teleport, stable A/B ping-pong, persistent identity, bounded position, and long-run stability. Do not tune trail presentation here.
+Observed long-duration result:
+- no teleport or sudden state jump;
+- A/B ping-pong remained stable;
+- drops did not return to their initial spawn positions;
+- no opposite-edge wrapping or later pop at another mesh location was observed;
+- movement remained consistent through different visor corners/tracks.
 
-### C2 — Radius / mass / adhesion isolation
-Add a controlled diagnostic that holds surface position, force, and adhesion base constant while varying only radius/mass. This determines whether the observed large<small result comes from the intended model or the current per-state adhesion randomization.
+C1 is therefore closed. Do not alter physics or trail presentation to “improve” C1.
+
+### C2 — Radius / mass / adhesion isolation — IMPLEMENTED
+Use STATE_MODE 5 + Debug 38.
+
+C2 deliberately removes the variables that made Debug 36 ambiguous:
+- three states share the same normalized physical spawn position;
+- all three use the same fixed tangent-force vector;
+- all three use the same fixed adhesion base;
+- only radius/mass differs;
+- per-state hashed adhesion is bypassed;
+- visual left/center/right offsets in Debug 38 are visualization-only and do not affect physics.
+
+Initial controlled values:
+- S radius = 0.032, mass = 1.0;
+- M radius = 0.0735, mass = 3.0;
+- L radius = 0.115, mass = 9.0;
+- adhesion base = 1.20;
+- controlled tangent force = (1.50, 0.00).
+
+With the current adhesion model:
+adhesion = adhesionBase / sqrt(mass)
+
+the expected thresholds are approximately:
+- S: 1.20;
+- M: 0.693;
+- L: 0.400.
+
+Force 1.50 therefore places all three above threshold while preserving a clear excess-force difference. This is a controlled test of the current model, not a final parameter decision.
+
+Debug 38 shows actual persistent displacement from the common physical origin and the current velocity direction/magnitude. S/M/L are separated only for visibility.
 
 ### C3 — Boundary behavior
 Replace temporary position clamping with explicit surface exit -> death -> respawn. Never wrap a droplet to the opposite edge.
