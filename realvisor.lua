@@ -1292,16 +1292,18 @@ local rainStateMetaUpdateParams = {
                 if (meta.a > 1.5)
                 {
                     /*
-                        Consume the pending respawn. Meta.C was incremented
-                        when the previous life exited, so the state shader
-                        can use it as the respawn seed.
+                        Consume the pending respawn. Meta is float4, so there
+                        is no Meta.C channel: use the accumulated waiting-age
+                        value as the respawn seed before resetting age.
                     */
+                    float respawnSeed = meta.b;
+
                     meta.a = 1.0;
                     meta.b = 0.0;
 
                     float r01 = rainStateHash(
                         index
-                        + meta.c * 17.123
+                        + respawnSeed * 17.123
                         + 101.0
                     );
 
@@ -1344,8 +1346,11 @@ local rainStateMetaUpdateParams = {
 
                     if (meta.b >= respawnGap)
                     {
-                        meta.b = 0.0;
-                        meta.c += 1.0;
+                        /*
+                            Preserve the accumulated wait value for the
+                            pending-respawn seed. It is reset only after the
+                            state shader consumes the respawn.
+                        */
                         meta.a = 2.0;
                     }
 
@@ -1375,7 +1380,6 @@ local rainStateMetaUpdateParams = {
                 {
                     meta.a = 0.0;
                     meta.b = 0.0;
-                    meta.c += 1.0;
                     return meta;
                 }
             }
