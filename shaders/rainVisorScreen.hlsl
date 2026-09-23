@@ -3581,6 +3581,160 @@ float4 rainPersistentAirflowInputDebugOutput(PS_IN pin)
     actual mesh UV orientation. If they separate, the error is between the
     normal projection and the persistent UV-coordinate conversion.
 */
+float4 rainPersistentC2ControlledMovementDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 38 / C2:
+        The three persistent states share the same physical spawn point,
+        external tangent force and adhesion base. Only radius/mass differs.
+
+        Visual offsets are diagnostic-only so the three drops can be seen
+        separately. Physics state itself is NOT offset.
+            S = state 0
+            M = state 1
+            L = state 2
+    */
+    const float2 visualOffsets[3] =
+    {
+        float2(-0.055, 0.0),
+        float2( 0.000, 0.0),
+        float2( 0.055, 0.0)
+    };
+
+    float result = 0.0;
+    float3 resultColor = float3(1.0, 1.0, 1.0);
+    float vRange = max(
+        gRainStateMeshVMax - gRainStateMeshVMin,
+        0.000001
+    );
+
+    [loop]
+    for (int i = 0; i < 3; ++i)
+    {
+        float2 stateUV = float2(
+            ((float)i + 0.5) / max(gRainStateCount, 3.0),
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 current = float2(
+            lerp(gRainStateMeshUMin, gRainStateMeshUMax, state.r),
+            lerp(gRainStateMeshVMin, gRainStateMeshVMax, state.g)
+        );
+
+        float2 origin = float2(
+            0.5,
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                0.5
+            )
+        );
+
+        current += visualOffsets[i];
+        origin += visualOffsets[i];
+
+        float2 movement = current - origin;
+        float movementLength = length(movement);
+
+        float speed = length(state.ba);
+        float speed01 = saturate(
+            speed / max(gRainStateMaxSpeed, 0.000001)
+        );
+
+        float radius01 = saturate(
+            (meta.r - 0.032) / (0.115 - 0.032)
+        );
+
+        float markerRadius = lerp(
+            0.007,
+            0.015,
+            radius01
+        );
+
+        float pointMask = 1.0 - smoothstep(
+            markerRadius * 0.35,
+            markerRadius,
+            length(pin.Tex - current)
+        );
+
+        float lineMask = 0.0;
+        if (movementLength > 0.00001)
+        {
+            float2 line = movement;
+            float t = saturate(
+                dot(pin.Tex - origin, line)
+                / max(dot(line, line), 0.000001)
+            );
+            float2 closest = origin + line * t;
+
+            lineMask = 1.0 - smoothstep(
+                0.0015,
+                0.0035,
+                length(pin.Tex - closest)
+            );
+        }
+
+        float speedLineLength = 0.025 * speed01;
+        float2 velocityDirection = state.ba / max(speed, 0.000001);
+        float2 velocityEnd = current
+            + float2(
+                velocityDirection.x,
+                velocityDirection.y * vRange
+            ) * speedLineLength;
+
+        float2 velocityLine = velocityEnd - current;
+        float velocityMask = 0.0;
+
+        if (speed > 0.000001)
+        {
+            float t = saturate(
+                dot(pin.Tex - current, velocityLine)
+                / max(dot(velocityLine, velocityLine), 0.000001)
+            );
+            float2 closest = current + velocityLine * t;
+
+            velocityMask = 1.0 - smoothstep(
+                0.0010,
+                0.0025,
+                length(pin.Tex - closest)
+            );
+        }
+
+        float contribution = max(
+            pointMask,
+            max(lineMask, velocityMask)
+        );
+
+        if (contribution > result)
+        {
+            result = contribution;
+
+            /* S/M/L are deliberately distinct diagnostic colors. */
+            if (i == 0)
+                resultColor = float3(0.25, 0.75, 1.0);
+            else if (i == 1)
+                resultColor = float3(1.0, 0.85, 0.15);
+            else
+                resultColor = float3(1.0, 0.30, 0.10);
+        }
+    }
+
+    return float4(resultColor, saturate(result));
+}
+
+
 float4 rainPersistentUVProjectionComparisonDebugOutput(PS_IN pin)
 {
     float3 forceWorld =
@@ -4694,6 +4848,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 37)
     {
         return rainPersistentUVProjectionComparisonDebugOutput(pin);
+    }
+
+    if (gRainDebug == 38)
+    {
+        return rainPersistentC2ControlledMovementDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
