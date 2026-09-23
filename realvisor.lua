@@ -727,7 +727,18 @@ local rainStateUpdateParams = {
         */
         float rainStateBoundaryMask(float2 position)
         {
-            // Persistent state position is already raw visor UV.
+            // Boundary validity is defined directly by the mask in raw UV.
+            // Reject texture-domain positions before CLAMP sampling so an
+            // out-of-domain state cannot appear valid at the texture edge.
+            if (
+                position.x < 0.0
+                || position.x > 1.0
+                || position.y < 0.0
+                || position.y > 1.0
+            ) {
+                return 0.0;
+            }
+
             return txRainBoundaryMask.SampleLevel(
                 samLinearRain,
                 position,
@@ -1363,7 +1374,18 @@ local rainStateMetaUpdateParams = {
         */
         float rainStateBoundaryMask(float2 position)
         {
-            // Persistent state position is already raw visor UV.
+            // Boundary validity is defined directly by the mask in raw UV.
+            // Reject texture-domain positions before CLAMP sampling so an
+            // out-of-domain state cannot appear valid at the texture edge.
+            if (
+                position.x < 0.0
+                || position.x > 1.0
+                || position.y < 0.0
+                || position.y > 1.0
+            ) {
+                return 0.0;
+            }
+
             return txRainBoundaryMask.SampleLevel(
                 samLinearRain,
                 position,
