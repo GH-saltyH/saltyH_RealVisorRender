@@ -1862,9 +1862,9 @@ float4 rainPersistentMeasuredGridDebugOutput(PS_IN pin)
         if (delta.x < -0.5) delta.x += 1.0;
         if (delta.y > 0.5) delta.y -= 1.0;
         if (delta.y < -0.5) delta.y += 1.0;
-        float2 currentPosition = float2(current.x, lerp(gRainStateMeshVMin, gRainStateMeshVMax, current.y));
-        float2 originPosition = float2(origin.x, lerp(gRainStateMeshVMin, gRainStateMeshVMax, origin.y));
-        float2 deltaMesh = float2(delta.x, delta.y * (gRainStateMeshVMax - gRainStateMeshVMin));
+        float2 currentPosition = current;
+        float2 originPosition = origin;
+        float2 deltaMesh = delta;
         float2 amplifiedEnd = originPosition + deltaMesh * visualScale;
 
         float radius = meta.r;
@@ -2681,25 +2681,11 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
 
         float2 p = state.rg;
 
-        float2 dropPosition = float2(
-            p.x,
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                p.y
-            )
-        );
+        float2 dropPosition = p;
 
         float2 localDelta =
             pin.Tex
             - dropPosition;
-
-        localDelta.y /=
-            max(
-                gRainStateMeshVMax
-                - gRainStateMeshVMin,
-                0.000001
-            );
 
         float radius01 = saturate(
             (meta.r - 0.032)
@@ -2726,14 +2712,7 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
         */
         float3 normalWorld =
             rainSurfaceNormalWorld(
-                float2(
-                    p.x,
-                    lerp(
-                        gRainStateMeshVMin,
-                        gRainStateMeshVMax,
-                        p.y
-                    )
-                )
+                p
             );
 
         float3 normalObject =
@@ -2867,13 +2846,6 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
             totalUVForce
             / max(
                 totalLength,
-                0.000001
-            );
-
-        float vRange =
-            max(
-                gRainStateMeshVMax
-                - gRainStateMeshVMin,
                 0.000001
             );
 
@@ -3174,14 +3146,7 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
         float2 p = state.rg;
         float2 velocity = state.ba;
 
-        float2 dropPosition = float2(
-            p.x,
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                p.y
-            )
-        );
+        float2 dropPosition = p;
 
         float2 localDelta = pin.Tex - dropPosition;
 
@@ -3192,13 +3157,6 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
             The physical radius remains unchanged. Only the visible debug
             marker is amplified so size variance can be judged clearly.
         */
-        localDelta.y /=
-            max(
-                gRainStateMeshVMax
-                - gRainStateMeshVMin,
-                0.000001
-            );
-
         float radius01 = saturate(
             (meta.r - 0.032) / (0.115 - 0.032)
         );
@@ -3222,14 +3180,7 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
 
         float3 normalWorld =
             rainSurfaceNormalWorld(
-                float2(
-                    p.x,
-                    lerp(
-                        gRainStateMeshVMin,
-                        gRainStateMeshVMax,
-                        p.y
-                    )
-                )
+                p
             );
 
         /*
@@ -3341,26 +3292,13 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
             Convert both normalized state-space directions to the rendered
             mesh aspect ratio before drawing them in pin.Tex space.
         */
-        float vRange =
-            max(
-                gRainStateMeshVMax
-                - gRainStateMeshVMin,
-                0.000001
-            );
-
         float2 forceEnd =
             dropPosition
-            + float2(
-                forceDirection.x,
-                forceDirection.y * vRange
-            ) * 0.020;
+            + forceDirection * 0.020;
 
         float2 velocityEnd =
             dropPosition
-            + float2(
-                velocityDirection.x,
-                velocityDirection.y * vRange
-            ) * 0.020;
+            + velocityDirection * 0.020;
 
         float2 forceLine =
             forceEnd
@@ -3682,19 +3620,8 @@ float4 rainPersistentC2ControlledMovementDebugOutput(PS_IN pin)
             0.0
         );
 
-        float2 current = float2(
-            lerp(gRainStateMeshUMin, gRainStateMeshUMax, state.r),
-            lerp(gRainStateMeshVMin, gRainStateMeshVMax, state.g)
-        );
-
-        float2 origin = float2(
-            0.5,
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                0.5
-            )
-        );
+        float2 current = state.rg;
+        float2 origin = float2(0.5, 0.5);
 
         current += visualOffsets[i];
         origin += visualOffsets[i];
@@ -4794,15 +4721,8 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
         float midpointMask = rainStateBoundaryMask(midpoint);
         float predictedMask = rainStateBoundaryMask(predicted);
 
-        float2 currentUV = float2(
-            lerp(gRainStateMeshUMin, gRainStateMeshUMax, position.x),
-            lerp(gRainStateMeshVMin, gRainStateMeshVMax, position.y)
-        );
-
-        float2 predictedUV = float2(
-            lerp(gRainStateMeshUMin, gRainStateMeshUMax, predicted.x),
-            lerp(gRainStateMeshVMin, gRainStateMeshVMax, predicted.y)
-        );
+        float2 currentUV = position;
+        float2 predictedUV = predicted;
 
         float radius01 = saturate(
             (meta.r - 0.032)
@@ -4894,18 +4814,7 @@ float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
         if (meta.a < 0.5)
             continue;
 
-        float2 dropPosition = float2(
-            lerp(
-                gRainStateMeshUMin,
-                gRainStateMeshUMax,
-                state.r
-            ),
-            lerp(
-                gRainStateMeshVMin,
-                gRainStateMeshVMax,
-                state.g
-            )
-        );
+        float2 dropPosition = state.rg;
 
         float radius01 = saturate(
             (meta.r - 0.032)
@@ -5143,10 +5052,8 @@ float4 main(PS_IN pin)
         /*
             Stage 2 / persistent independent-drop validation.
 
-            Persistent state positions are normalized to [0, 1].
-            The current visor mesh uses the measured pin.Tex Y range
-            approximately -0.579 .. -0.362, so conversion is performed
-            only at render time. Physics state remains normalized.
+            Persistent state positions are raw visor UV.
+            No normalized-to-mesh calibration is applied at render time.
 
             Every state texel is rendered independently. This deliberately
             uses a simple circle marker: no procedural drop generation,
