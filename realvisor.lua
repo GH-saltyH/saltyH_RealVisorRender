@@ -317,6 +317,15 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
         RAIN_GPU_STATE_RESPAWN_GAP_MAX = 0.75,
 
+        -- C3 lifecycle validation only.
+        -- These values temporarily accelerate persistent physics so
+        -- boundary exit/death/respawn can be observed quickly.
+        -- They do not modify the final RainFX physics parameters.
+        RAIN_GPU_STATE_C3_TEST_SPEED = true,
+        RAIN_GPU_STATE_C3_FLOW_ACCELERATION = 0.20,
+        RAIN_GPU_STATE_C3_DRAG = 3.0,
+        RAIN_GPU_STATE_C3_MAX_SPEED = 0.15,
+
         RAIN_GPU_STATE_UV_SCALE = 18.0,
         RAIN_GPU_STATE_MESH_V_MIN = -0.700,
         RAIN_GPU_STATE_MESH_V_MAX = -0.300,
@@ -658,6 +667,10 @@ local rainStateUpdateParams = {
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
+        gRainStateC3TestSpeed = 0.0,
+        gRainStateC3FlowAcceleration = 0.20,
+        gRainStateC3Drag = 3.0,
+        gRainStateC3MaxSpeed = 0.15,
         -- Reserved. Persistent air drag is not applied until its velocity-relative model is integrated.
         gRainStateUseAirDrag = 0.0,
     },
@@ -679,6 +692,34 @@ local rainStateUpdateParams = {
 
         float rainStateHash(float n) {
             return frac(sin(n * 127.1 + 311.7) * 43758.5453);
+        }
+
+        bool rainStateC3SpeedTestActive()
+        {
+            return
+                gRainStateLifecycle > 0.5
+                && gRainStateC3TestSpeed > 0.5;
+        }
+
+        float rainStateFlowAccelerationValue()
+        {
+            return rainStateC3SpeedTestActive()
+                ? gRainStateC3FlowAcceleration
+                : gRainStateFlowAcceleration;
+        }
+
+        float rainStateDragValue()
+        {
+            return rainStateC3SpeedTestActive()
+                ? gRainStateC3Drag
+                : gRainStateDrag;
+        }
+
+        float rainStateMaxSpeedValue()
+        {
+            return rainStateC3SpeedTestActive()
+                ? gRainStateC3MaxSpeed
+                : gRainStateMaxSpeed;
         }
 
         float3 rainStateNormalWorld(float2 p) {
@@ -826,7 +867,7 @@ local rainStateUpdateParams = {
             */
             float acceleration =
                 excess
-                * gRainStateFlowAcceleration;
+                * rainStateFlowAccelerationValue();
 
             return
                 direction
@@ -850,7 +891,7 @@ local rainStateUpdateParams = {
             {
                 velocity *=
                     exp(
-                        -gRainStateDrag
+                        -rainStateDragValue()
                         * 2.0
                         * dt
                     );
@@ -859,7 +900,7 @@ local rainStateUpdateParams = {
             velocity *=
                 exp(
                     -max(
-                        gRainStateDrag,
+                        rainStateDragValue(),
                         0.0
                     )
                     * dt
@@ -875,9 +916,12 @@ local rainStateUpdateParams = {
             float speed =
                 length(velocity);
 
+            float maxSpeed =
+                rainStateMaxSpeedValue();
+
             if (
                 speed
-                > gRainStateMaxSpeed
+                > maxSpeed
             )
             {
                 velocity =
@@ -886,7 +930,7 @@ local rainStateUpdateParams = {
                         speed,
                         0.000001
                     )
-                    * gRainStateMaxSpeed;
+                    * maxSpeed;
             }
 
             return velocity;
@@ -4452,6 +4496,15 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateRespawnGapMax =
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
 
+    rainStateUpdateParams.values.gRainStateC3TestSpeed =
+        cfg.RUNTIME.RAIN_GPU_STATE_C3_TEST_SPEED and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateC3FlowAcceleration =
+        cfg.RUNTIME.RAIN_GPU_STATE_C3_FLOW_ACCELERATION
+    rainStateUpdateParams.values.gRainStateC3Drag =
+        cfg.RUNTIME.RAIN_GPU_STATE_C3_DRAG
+    rainStateUpdateParams.values.gRainStateC3MaxSpeed =
+        cfg.RUNTIME.RAIN_GPU_STATE_C3_MAX_SPEED
+
     rainStateUpdateParams.values.gRainStatePhysics =
         physicsMode and 1.0 or 0.0
 
@@ -7073,6 +7126,54 @@ function windowMain(dt)
         if c2adhChanged then
             cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE = c2adh
         end
+    end
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6 then
+        ui.separator()
+        ui.text('C3 lifecycle validation speed override')
+
+        local c3test, c3changed = ui.checkbox(
+            'C3_TEST_SPEED',
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_TEST_SPEED
+        )
+        if c3changed then
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_TEST_SPEED = c3test
+        end
+
+        local c3accel, c3accelChanged = ui.slider(
+            'C3_FLOW_ACCELERATION',
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_FLOW_ACCELERATION,
+            0.001,
+            1.0,
+            '%.3f'
+        )
+        if c3accelChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_FLOW_ACCELERATION = c3accel
+        end
+
+        local c3drag, c3dragChanged = ui.slider(
+            'C3_DRAG',
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_DRAG,
+            0.0,
+            10.0,
+            '%.3f'
+        )
+        if c3dragChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_DRAG = c3drag
+        end
+
+        local c3maxSpeed, c3maxSpeedChanged = ui.slider(
+            'C3_MAX_SPEED',
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_MAX_SPEED,
+            0.001,
+            0.5,
+            '%.3f'
+        )
+        if c3maxSpeedChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_C3_MAX_SPEED = c3maxSpeed
+        end
+
+        ui.text('Temporary C3-only override; final RainFX physics is unchanged.')
     end
 
     --------------------------------------------------------
