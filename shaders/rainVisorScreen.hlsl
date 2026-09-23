@@ -3595,11 +3595,6 @@ float4 rainPersistentC2ControlledMovementDebugOutput(PS_IN pin)
 
     float result = 0.0;
     float3 resultColor = float3(1.0, 1.0, 1.0);
-    float vRange = max(
-        gRainStateMeshVMax - gRainStateMeshVMin,
-        0.000001
-    );
-
     [loop]
     for (int i = 0; i < 3; ++i)
     {
@@ -3669,11 +3664,9 @@ float4 rainPersistentC2ControlledMovementDebugOutput(PS_IN pin)
 
         float speedLineLength = 0.025 * speed01;
         float2 velocityDirection = state.ba / max(speed, 0.000001);
-        float2 velocityEnd = current
-            + float2(
-                velocityDirection.x,
-                velocityDirection.y * vRange
-            ) * speedLineLength;
+        float2 velocityEnd =
+            current
+            + velocityDirection * speedLineLength;
 
         float2 velocityLine = velocityEnd - current;
         float velocityMask = 0.0;
@@ -5084,25 +5077,10 @@ float4 main(PS_IN pin)
             float2 statePosition = state.rg;
 
             /*
-                Step B render mapping:
-                persistent state position is normalized and is converted to
-                the calibrated visor mesh UV range only at render time.
-
-                Do not use the old hardcoded V range here. The physics state
-                and Debug 36 calibration use the same U/V calibration.
+                Persistent state position is already raw visor UV.
+                Render directly in the same coordinate system as pin.Tex.
             */
-            float2 dropPosition = float2(
-                lerp(
-                    gRainStateMeshUMin,
-                    gRainStateMeshUMax,
-                    statePosition.x
-                ),
-                lerp(
-                    gRainStateMeshVMin,
-                    gRainStateMeshVMax,
-                    statePosition.y
-                )
-            );
+            float2 dropPosition = statePosition;
 
             /*
                 Keep marker size deterministic per persistent state index.
