@@ -1252,8 +1252,20 @@ local rainStateMetaUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+                /*
+                    Meta initialization intentionally does not consume
+                    gRainStateC2Isolation from the physics parameter block.
+                    C2 is uniquely represented here by the 3-state allocation
+                    (mode 5) while the 9-state test grid remains mode 4.
+                    Keep this decision local to the meta shader so the two
+                    update parameter sets remain independent.
+                */
+                bool c2Isolation =
+                    gRainStateTestGrid < 0.5
+                    && count == 3.0;
+
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
-                    if (gRainStateC2Isolation > 0.5 && index < 3.0)
+                    if (c2Isolation && index < 3.0)
                     {
                         const float radiusValues[3] = {
                             0.032, 0.0735, 0.115
