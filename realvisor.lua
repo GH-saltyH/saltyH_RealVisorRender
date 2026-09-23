@@ -307,6 +307,8 @@ local cfg = scriptSettings:mapConfig({
         -- 2 = synthetic force validation
         -- 3 = persistent RainFX physics
         -- 4 = persistent physics with the measured 3x3 L/M/S test grid
+        -- 5 = C2 controlled L/M/S isolation
+        -- 6 = C3 persistent boundary lifecycle validation
         RAIN_GPU_STATE_MODE = 6,
 
         -- C3: explicit surface exit/death/respawn. No edge wrapping.
