@@ -147,3 +147,19 @@ Do not change multiple physical concepts at once. C movement must pass before li
 The long-duration persistent test is now a major validation advantage because cumulative drift, clamping, and identity errors remain observable instead of being hidden by spawn reset.
 
 ## 16. Decision record\n\nThe project has passed the initial physics-prototyping stage.\n\nThe current priority is architectural completion:\npersistent state -> physically plausible movement -> robust surface/boundary handling -> lifecycle -> merge -> residue\n\nThe definition of success is visual/physical plausibility at game-view scale, not exact reconstruction of a fluid solver.\n\nWhen evidence conflicts, prefer direct observation of the actual droplet behavior over a diagnostic that only proves equality to an intermediate mathematical representation.\n
+
+## 19. 2026-09-23 C3 lifecycle boundary test preparation
+
+The previous Debug 41 observation must not be interpreted as proof that a droplet was permanently removed when it briefly became red. A moving droplet can cross the predicted boundary and then return inward after braking or a force-direction change. Therefore the red marker is only a per-frame boundary decision diagnostic.
+
+A stationary test also showed that a newly spawned droplet whose radius overlaps the visor boundary can appear yellow at the edge. This confirms that center-position lifecycle validation and radius-aware occupancy are separate concerns. Radius-aware boundary handling is intentionally deferred until the persistent lifecycle transition itself is verified.
+
+For the next C3 test, the temporary normalized-state clamp in rainStateUpdatePhysics() has been removed from both the normal and C2-isolation paths. A live state is therefore allowed to cross normalized 0..1 coordinates instead of being pinned to the rectangular state box. The boundary mask remains authoritative for lifecycle exit.
+
+The primary acceptance sequence for this test is:
+
+spawn inside valid mask -> move toward boundary -> observe boundary/red decision -> verify whether the state actually becomes dead -> wait for respawn gap -> observe a new droplet appearing at a new valid mask position.
+
+Do not infer death from the red marker alone. In particular, observe whether a red-marked droplet can later reverse direction and return to the valid surface.
+
+This test does not change physics parameters, mask coordinates, calibration, radius-aware boundary rules, trail rendering, or merge behavior.
