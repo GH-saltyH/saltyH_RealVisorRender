@@ -4350,7 +4350,14 @@ end
 --------------------------------------------------------
 
 local function initializeRainGPUState()
-    if rainStateA and rainStateB then
+    if
+        rainStateA
+        and rainStateB
+        and rainStateMetaA
+        and rainStateMetaB
+        and rainStateDebugOrigin
+        and rainStateInitialized
+    then
         return true
     end
 
@@ -4510,11 +4517,10 @@ end
 
 local function updateRainGPUState(sim)
     if rainStateSingleDropDirty then
-        rainStateA = nil
-        rainStateB = nil
-        rainStateMetaA = nil
-        rainStateMetaB = nil
-        rainStateDebugOrigin = nil
+        -- Do not discard ExtraCanvas objects here. Reallocating five GPU
+        -- canvases on every slider change can accumulate GPU resources and
+        -- can destabilize CSP. Keep the existing canvases and rerun the
+        -- initialization shader into them.
         rainStateInitialized = false
         rainStateReadIsA = true
         rainStateLastFrame = -1
