@@ -751,6 +751,13 @@ local rainStateUpdateParams = {
             return tangentForce;
         }
 
+        float rainStateControlledAdhesion(float mass)
+        {
+            return
+                gRainStateC2AdhesionBase
+                / sqrt(max(mass, 0.000001));
+        }
+
         float rainStateAdhesion(
             float stateIndex,
             float mass
@@ -905,6 +912,38 @@ local rainStateUpdateParams = {
         {
             float forceMagnitude = 0.0;
 
+            if (gRainStateC2Isolation > 0.5)
+            {
+                float2 tangentForce = gRainStateC2Force;
+                forceMagnitude = length(tangentForce);
+
+                float adhesion = rainStateControlledAdhesion(mass);
+
+                velocity += rainStateFlowAcceleration(
+                    tangentForce,
+                    forceMagnitude,
+                    adhesion,
+                    dt
+                );
+
+                velocity = rainStateApplyDrag(
+                    velocity,
+                    forceMagnitude,
+                    adhesion,
+                    dt
+                );
+
+                velocity = rainStateClampSpeed(velocity);
+
+                position = rainStateIntegratePosition(
+                    position,
+                    velocity,
+                    dt
+                );
+
+                return float4(position, velocity);
+            }
+
             float2 tangentForce =
                 rainStateSurfaceForce(
                     position,
@@ -994,6 +1033,10 @@ local rainStateUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+                if (gRainStateC2Isolation > 0.5 && index < 3.0) {
+                    return float4(0.5, 0.5, 0.0, 0.0);
+                }
+
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
                     const float measuredX[3] = {
                         0.682, 0.491, 0.300
@@ -1123,6 +1166,17 @@ local rainStateMetaUpdateParams = {
 
             if (gRainStateInit > 0.5) {
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
+                    if (gRainStateC2Isolation > 0.5 && index < 3.0)
+                    {
+                        const float radiusValues[3] = {
+                            0.032, 0.0735, 0.115
+                        };
+                        float radius = radiusValues[(int)index];
+                        float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
+                        float mass = lerp(1.0, 9.0, radius01 * radius01);
+                        return float4(radius, mass, 0.0, 1.0);
+                    }
+
                     const float radiusValues[9] = {
                         0.115, 0.0735, 0.032,
                         0.0735, 0.032, 0.115,
@@ -4569,7 +4623,11 @@ render.on('main.track.transparent', function()
                 sim.time,
 
             gRainStateCount =
-                cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
+                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                and 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
 
             gRainStateMaxSpeed =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3
