@@ -4255,6 +4255,8 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
@@ -4294,6 +4296,8 @@ local function updateRainGPUState(sim)
                 math.floor(
                     cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                     and 9
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                    and 3
                     or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
                 )
             )
