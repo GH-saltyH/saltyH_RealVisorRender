@@ -1075,15 +1075,6 @@ local rainStateUpdateParams = {
                     dt
                 );
 
-                if (gRainStateLifecycle > 0.5)
-                {
-                    position = clamp(
-                        position,
-                        0.0,
-                        1.0
-                    );
-                }
-
                 return float4(position, velocity);
             }
 
@@ -1126,20 +1117,6 @@ local rainStateUpdateParams = {
                     velocity,
                     dt
                 );
-
-            if (gRainStateLifecycle > 0.5)
-            {
-                /*
-                    Boundary handling is explicit: the meta pass marks this
-                    identity dead, while the state is parked exactly at the
-                    surface edge until the respawn gap expires.
-                */
-                position = clamp(
-                    position,
-                    0.0,
-                    1.0
-                );
-            }
 
             return float4(
                 position,
