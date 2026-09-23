@@ -310,7 +310,12 @@ local cfg = scriptSettings:mapConfig({
         -- 4 = persistent physics with the measured 3x3 L/M/S test grid
         -- 5 = C2 controlled L/M/S isolation
         -- 6 = C3 persistent boundary lifecycle validation
+        -- 7 = single persistent droplet position probe
         RAIN_GPU_STATE_MODE = 6,
+
+        -- Normalized persistent-state position used by the single-drop probe.
+        RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
+        RAIN_GPU_STATE_SINGLE_DROP_Y = 0.500,
 
         -- C3: explicit surface exit/death/respawn. No edge wrapping.
         RAIN_GPU_STATE_LIFECYCLE = true,
@@ -570,6 +575,7 @@ local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
 local rainStateConfiguredMode = nil
+local rainStateSingleDropDirty = false
 
 ------------------------------------------------------------
 -- RainFX debug UI option labels
@@ -631,6 +637,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[4] Persistent physics + 3x3 L/M/S grid',
     '[5] Persistent physics + C2 controlled L/M/S isolation',
     '[6] Persistent physics + C3 boundary lifecycle',
+    '[7] Single persistent droplet position probe',
 }
 
 local rainStateUpdateParams = {
@@ -679,6 +686,11 @@ local rainStateUpdateParams = {
         gRainStateC3MaxSpeed = 0.15,
         -- Reserved. Persistent air drag is not applied until its velocity-relative model is integrated.
         gRainStateUseAirDrag = 0.0,
+        gRainStateSingleDropTest = 0.0,
+        gRainStateSingleDropPosition = vec2(
+            cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+            cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+        ),
     },
 
     shader = [[
@@ -1167,6 +1179,10 @@ local rainStateUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+                if (gRainStateSingleDropTest > 0.5) {
+                    return float4(gRainStateSingleDropPosition, 0.0, 0.0);
+                }
+
                 if (gRainStateC2Isolation > 0.5 && index < 3.0) {
                     return float4(0.5, 0.5, 0.0, 0.0);
                 }
@@ -1328,6 +1344,7 @@ local rainStateMetaUpdateParams = {
         gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
         gRainStateMeshUMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
         gRainStateMeshUMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
+        gRainStateSingleDropTest = 0.0,
     },
 
     shader = [[
@@ -1386,6 +1403,10 @@ local rainStateMetaUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+                if (gRainStateSingleDropTest > 0.5) {
+                    return float4(0.0735, 3.0, 0.0, 1.0);
+                }
+
                 /*
                     Meta initialization intentionally does not consume
                     gRainStateC2Isolation from the physics parameter block.
@@ -4341,6 +4362,8 @@ local function initializeRainGPUState()
                 and 9
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
                 and 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+                and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
@@ -4410,6 +4433,12 @@ local function initializeRainGPUState()
     )
     rainStateUpdateParams.values.gRainStateC2AdhesionBase =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
+    rainStateUpdateParams.values.gRainStateSingleDropTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+    )
     rainStateUpdateParams.values.gRainStateLifecycle =
         cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateBoundaryMargin =
@@ -4440,6 +4469,8 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
     rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+    rainStateMetaUpdateParams.values.gRainStateSingleDropTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
     rainStateMetaUpdateParams.textures.txRainStateMeta = false
     rainStateMetaUpdateParams.textures.txRainState = false
     rainStateMetaUpdateParams.textures.txRainBoundaryMask =
@@ -4474,6 +4505,18 @@ end
 
 
 local function updateRainGPUState(sim)
+    if rainStateSingleDropDirty then
+        rainStateA = nil
+        rainStateB = nil
+        rainStateMetaA = nil
+        rainStateMetaB = nil
+        rainStateDebugOrigin = nil
+        rainStateInitialized = false
+        rainStateReadIsA = true
+        rainStateLastFrame = -1
+        rainStateSingleDropDirty = false
+    end
+
     if rainStateConfiguredMode ~= nil
         and rainStateConfiguredMode ~= cfg.RUNTIME.RAIN_GPU_STATE_MODE then
         rainStateA = nil
@@ -4534,6 +4577,8 @@ local function updateRainGPUState(sim)
                 and 9
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
                 and 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+                and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
@@ -4610,6 +4655,13 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateUseAirDrag =
         cfg.RUNTIME.RAIN_GPU_STATE_USE_AIR_DRAG and 1.0 or 0.0
 
+    rainStateUpdateParams.values.gRainStateSingleDropTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+    )
+
     rainStateUpdateParams.values.gRainStateTestGrid =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
         and 1.0
@@ -4634,6 +4686,8 @@ local function updateRainGPUState(sim)
                 and 9
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
                 and 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+                and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
             )
         )
@@ -4648,6 +4702,8 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
     rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+    rainStateMetaUpdateParams.values.gRainStateSingleDropTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
 
     local readState =
         rainStateReadIsA and rainStateA or rainStateB
@@ -5022,6 +5078,8 @@ render.on('main.track.transparent', function()
                 and 9
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
                 and 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+                and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
 
             gRainStateMaxSpeed =
@@ -7233,6 +7291,38 @@ function windowMain(dt)
         if c2adhChanged then
             cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE = c2adh
         end
+    end
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
+        ui.separator()
+        ui.text('Single persistent droplet position probe')
+        ui.text('Normalized state coordinates; changing either value re-spawns the single drop with zero velocity.')
+
+        local singleX, singleXChanged = ui.slider(
+            'SINGLE_DROP_X',
+            cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+            0.0,
+            1.0,
+            '%.4f'
+        )
+        if singleXChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X = singleX
+            rainStateSingleDropDirty = true
+        end
+
+        local singleY, singleYChanged = ui.slider(
+            'SINGLE_DROP_Y',
+            cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y,
+            0.0,
+            1.0,
+            '%.4f'
+        )
+        if singleYChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y = singleY
+            rainStateSingleDropDirty = true
+        end
+
+        ui.text('RAIN_DEBUG 41: white = current position valid, yellow = current position outside mask, red = predicted boundary crossing.')
     end
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6 then
