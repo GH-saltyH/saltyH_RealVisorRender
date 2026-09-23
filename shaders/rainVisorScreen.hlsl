@@ -3672,12 +3672,12 @@ float4 rainPersistentC2ControlledMovementDebugOutput(PS_IN pin)
         float lineMask = 0.0;
         if (movementLength > 0.00001)
         {
-            float2 line = movement;
+            float2 segment = movement;
             float t = saturate(
-                dot(pin.Tex - origin, line)
-                / max(dot(line, line), 0.000001)
+                dot(pin.Tex - origin, segment)
+                / max(dot(segment, segment), 0.000001)
             );
-            float2 closest = origin + line * t;
+            float2 closest = origin + segment * t;
 
             lineMask = 1.0 - smoothstep(
                 0.0015,
