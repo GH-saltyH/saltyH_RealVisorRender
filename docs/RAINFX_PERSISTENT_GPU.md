@@ -13,7 +13,7 @@ Persistent GPU State -> Physics Update -> Surface Normal/Tangent -> Gravity + Ve
 
 ## 3. Current status
 Already validated: persistent A/B GPU state, independent persistent drop state, position integration, object-space normal to world normal, tangent force projection, gravity, vehicle acceleration, adhesion threshold, radius-to-mass relationship, force-to-acceleration, linear drag, maximum speed, airflow diagnostics, combined force diagnostics, and the measured 3x3 size/mass/displacement test.
-Not finalized: one consolidated production physics update path, final surface movement/rendering, lifecycle, merge, residue/shrink, boundary handling, and final drop appearance.
+Not finalized: final surface movement/rendering, merge, residue/shrink, and final drop appearance. Persistent dead -> waiting -> respawn lifecycle is implemented; the next validation task is to verify it under the finalized signed coordinate contract.
 Therefore the current task is NOT to redesign the physics from zero. It is to consolidate the already tested physics into one persistent simulation.
 
 ## 4. Persistent state
@@ -85,23 +85,60 @@ The normal texture is object-space and must be decoded and transformed.
 Using saturate(pin.Tex) for the normal lookup caused invalid/black behavior for this visor UV arrangement and was removed.
 Actual mesh UV tangent reconstruction was added for the procedural path.
 
-## 13. Coordinate rules
-Persistent state position is now stored and simulated directly in the raw visor UV coordinate system used by pin.Tex.
+## 13. Coordinate rules — FINAL CONTRACT
 
-There is no persistent-state -> mesh-UV calibration/remapping step.
+The project-wide canonical droplet coordinate system is the actual visor mesh UV exposed by `pin.Tex`. Persistent state coordinates, physics position/velocity, boundary sampling, normal sampling, rendering, diagnostics, spawn points and lifecycle decisions use this same coordinate system.
 
-The boundary mask is authoritative for the valid droplet area:
-- boundary sampling receives raw UV directly;
-- normal-map sampling receives raw UV directly;
-- persistent drop rendering compares raw state UV directly against pin.Tex;
-- lifecycle/boundary decisions use the raw-UV mask;
-- position integration therefore moves the state in the same coordinate system that is rendered.
+### 13.1 Signed visor UV contract
 
-The texture domain is still respected explicitly: because the boundary sampler uses CLAMP addressing, positions outside [0, 1] are rejected before sampling instead of being allowed to become a false valid edge sample. This is texture-domain validity, not a coordinate calibration.
+- **U / X:** `0.0` = left edge, `1.0` = right edge.
+- **V / Y:** `-1.0` = top edge, `0.0` = bottom edge.
+- Center reference: approximately `(0.5, -0.5)`.
+- Typical measured/debug region: approximately `U=0.30..0.70`, `V=-0.70..-0.30`.
+- There is **no hidden Y inversion**, no normalized-to-mesh remapping, and no old `lerp(min,max,state)` conversion in the production persistent-state path.
 
-RAIN_GPU_STATE_MESH_U_MIN/U_MAX and RAIN_GPU_STATE_MESH_V_MIN/V_MAX are retained for settings compatibility, but they are now TEST-POINT BOUNDS ONLY. They may constrain fixed diagnostic points such as Debug 36; they must not be used to transform persistent state coordinates.
+The persistent state texture ABI therefore remains:
+- `R = position.U`
+- `G = position.V` (signed, normally `-1..0`)
+- `B = velocity.U`
+- `A = velocity.V`
 
-Debug 36 now writes its measured 3x3 points directly as raw UV. The legacy bound values only clamp those test points. Debug 35 and the fixed force/airflow diagnostic grids likewise use the values as explicit test-point bounds, not as a global coordinate transform.
+The state is an actual physical position, not a normalized index that must later be converted for rendering.
+
+### 13.2 Experimental evidence that established the contract
+
+The coordinate direction was established by direct shader sampling experiments on the real visor mesh:
+1. Testing `pin.Tex.y < 0` versus `>= 0` proved that the rendered visor fragments have negative V values.
+2. Testing `pin.Tex.x < 0` versus `>= 0` proved that the rendered visor fragments have positive U values.
+3. Directly sampling the boundary mask with `pin.Tex` in Debug 40 produced the correct visible mask.
+4. Direct normal-texture sampling with raw `pin.Tex` preserved the expected mapped result; applying `saturate(pin.Tex)` caused invalid/black behavior.
+5. The measured Debug 36 points were already recorded in the signed coordinate system and continue to show the expected spatial ordering.
+
+These are empirical project facts. Do not reintroduce a coordinate conversion unless a new experiment proves a specific texture/API requires one.
+
+### 13.3 Boundary and texture validity
+
+The boundary mask is the authoritative definition of the physical droplet surface.
+
+The sampler uses CLAMP addressing, so the helper rejects positions outside the signed visor texture domain before sampling:
+- `U < 0` or `U > 1` => invalid
+- `V < -1` or `V > 0` => invalid
+
+This is a texture-domain guard, not a calibration transform. The boundary mask itself decides whether an in-domain point is a valid visor surface.
+
+### 13.4 Spawn / respawn coordinates
+
+Initial and respawn candidates are generated directly in signed UV: `candidate = (hashU, -hashV)`.
+
+Candidates are accepted only when the authoritative boundary mask reports a valid surface. This keeps random distribution independent of the old fixed test-point bounds.
+
+`RAIN_GPU_STATE_MESH_U_MIN/MAX` and `RAIN_GPU_STATE_MESH_V_MIN/MAX` remain only for fixed diagnostic/test-point constraints such as Debug 36. They must never transform persistent state.
+
+### 13.5 Lifecycle coordinate rule
+
+Lifecycle never wraps position with `frac()` and never clamps the physical state back onto the edge.
+
+A flowing droplet is integrated normally. If the current step crosses the authoritative boundary, its state becomes dead. The dead state remains hidden while waiting for its deterministic respawn gap. After the gap, the state becomes respawn-pending; the next state pass creates a new valid signed-UV position with zero velocity. This preserves droplet identity while preventing edge wrapping or teleport-like correction.
 
 ## 14. Do not mix physics and visualization
 RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE and RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE are visualization controls.
@@ -112,7 +149,7 @@ Debug amplification must never be used to hide an incorrect physics model.
 Step A: consolidate the already validated normal, tangent, gravity, acceleration, airflow, mass, adhesion, drag, max-speed and integration logic into one persistent physics path.
 Step B: render independent persistent drops from state position/radius.
 Step C: make surface movement and coordinate/boundary handling robust.
-Step D: implement lifecycle: spawn -> attached -> threshold -> flowing -> exit/death -> respawn.
+Step D: validate lifecycle: spawn -> attached -> threshold -> flowing -> boundary exit/death -> respawn wait -> respawn pending -> new valid spawn.
 Step E: implement merge and recompute radius/mass/velocity.
 Step F: implement residue/shrink.
 
@@ -132,3 +169,20 @@ No visual scale multiplier is used to compensate for incorrect physics.
 
 ## 17. Key conclusion
 The RainFX project is past the initial physics-prototyping stage. The important work now is architectural consolidation: preserve the validated experiments, remove temporary duplication only when equivalent behavior is retained, and connect the persistent physics state to a real visor droplet renderer.
+
+## 18. Coordinate/lifecycle consolidation record — 2026-09-24
+
+The signed `pin.Tex` coordinate discovery is now treated as a project-wide architectural decision, not a debug-only observation.
+
+The old normalized `[0,1]` persistent-state V coordinate and the `lerp(-0.579,-0.362, state.y)` diagnostic/render conversions are removed from the canonical model. Persistent state is generated and integrated directly in signed visor UV.
+
+The C3 lifecycle is likewise defined in that same coordinate system. It has three Meta.A states:
+- `0.0` = dead / waiting for respawn
+- `1.0` = alive
+- `2.0` = respawn pending; consumed by the state pass
+
+Meta.B is the age/wait timer. Boundary exit is detected using the current-step midpoint and predicted position against the authoritative boundary mask. No wrapping is permitted.
+
+The respawn position is generated by deterministic rejection sampling directly in signed UV and must pass the boundary mask. Respawn resets velocity to zero; Meta state then becomes alive.
+
+This lifecycle intentionally does not yet implement merge or residue/shrink. Those remain later stages after final persistent rendering is validated.
