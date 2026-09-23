@@ -4643,7 +4643,7 @@ float4 main(PS_IN pin)
 
     if (gRainDebug == 25)
     {
-        return rainPersistentAccumulatedDisplacementDebugOutput(pin);
+        // function removed return rainPersistentAccumulatedDisplacementDebugOutput(pin);
     }
 
     if (gRainDebug == 36)

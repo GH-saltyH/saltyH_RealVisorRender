@@ -310,8 +310,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_MODE = 4,
 
         RAIN_GPU_STATE_UV_SCALE = 18.0,
-        RAIN_GPU_STATE_MESH_V_MIN = -0.713,
-        RAIN_GPU_STATE_MESH_V_MAX = -0.302,
+        RAIN_GPU_STATE_MESH_V_MIN = -0.700,
+        RAIN_GPU_STATE_MESH_V_MAX = -0.300,
         
         RAIN_GPU_STATE_MESH_U_MIN = 0.3,
         RAIN_GPU_STATE_MESH_U_MAX = 0.7,
@@ -344,7 +344,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DEBUG = 36,
 
         RAIN_DEBUG_CENTER_X = 0.5,
-        RAIN_DEBUG_CENTER_Y = 0.5,
+        RAIN_DEBUG_CENTER_Y = -0.5,
 
     },
 })
@@ -2775,6 +2775,56 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
         ------------------------------------------------------------
         -- materials profile: visor_lando_2025Champion_maxquality.kn5 
         ------------------------------------------------------------
+
+        {
+            id = 'BODYFRAME',
+
+            meshName = 
+                'BODY_FRAME',
+
+            materialName = 
+                'mtBODY_FRAME',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'BODYFRAMEFLIP',
+
+            meshName = 
+                'BODY_FRAME_FLIP',
+
+            materialName = 
+                'mtBODY_FRAME',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
 
         {
             id = 'GLASSRUBBER',
