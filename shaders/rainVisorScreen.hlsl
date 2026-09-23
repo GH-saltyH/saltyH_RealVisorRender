@@ -4741,8 +4741,10 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
 
         float2 position = state.rg;
         float2 predicted = position + state.ba * dt;
+        float2 midpoint = lerp(position, predicted, 0.5);
 
         float currentMask = rainStateBoundaryMask(position);
+        float midpointMask = rainStateBoundaryMask(midpoint);
         float predictedMask = rainStateBoundaryMask(predicted);
 
         float2 currentUV = float2(
@@ -4782,7 +4784,7 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
         {
             yellow = max(yellow, currentMarker);
         }
-        else if (predictedMask < 0.5)
+        else if (midpointMask < 0.5 || predictedMask < 0.5)
         {
             red = max(red, max(currentMarker, predictedMarker));
         }
