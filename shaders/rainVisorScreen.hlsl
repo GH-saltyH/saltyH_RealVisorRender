@@ -153,8 +153,6 @@ float4 rainStateMain(PS_IN pin)
 }
 
 
-
-
 float4 main(PS_IN pin)
 {
     return rainStateMain(pin);
@@ -163,7 +161,12 @@ float4 main(PS_IN pin)
 
 
 
+
 #else
+
+
+
+
 
 float2 rainHash22(float2 p)
 {
@@ -182,38 +185,40 @@ float rainHash(float2 p)
         sin(dot(p, float2(127.1, 311.7))) * 43758.5453
     );
 }
+
+
+/*
+    The supplied boundary mask uses the same mesh UV space as the
+    visor surface-normal texture:
+        R >= 0.5 : valid droplet surface
+        R <  0.5 : outside / invalid
+
+    Persistent state position is already raw visor UV. The mask is sampled
+    directly in that same coordinate system.
+*/
+float rainStateBoundaryMask(float2 position)
+{
     /*
-        The supplied boundary mask uses the same mesh UV space as the
-        visor surface-normal texture:
-            R >= 0.5 : valid droplet surface
-            R <  0.5 : outside / invalid
-
-        Persistent state position is already raw visor UV. The mask is sampled
-        directly in that same coordinate system.
+        Boundary validity is defined by the mask in the same raw UV
+        coordinate system as pin.Tex. CLAMP addressing must not turn an
+        out-of-texture state into a valid edge sample.
     */
-    float rainStateBoundaryMask(float2 position)
+    if (
+        position.x < 0.0
+        || position.x > 1.0
+        || position.y > 0.0
+        || position.y < -1.0
+    )
     {
-        /*
-            Boundary validity is defined by the mask in the same raw UV
-            coordinate system as pin.Tex. CLAMP addressing must not turn an
-            out-of-texture state into a valid edge sample.
-        */
-        if (
-            position.x < 0.0
-            || position.x > 1.0
-            || position.y < 0.0
-            || position.y > 1.0
-        )
-        {
-            return 0.0;
-        }
-
-        return txRainBoundaryMask.SampleLevel(
-            samLinearRain,
-            position,
-            0.0
-        ).r;
+        return 0.0;
     }
+
+    return txRainBoundaryMask.SampleLevel(
+        samLinearRain,
+        position,
+        0.0
+    ).r;
+}
 
 /*
     The supplied normal map is OBJECT-SPACE.
@@ -1211,12 +1216,11 @@ float rainUVVisibilityDiagnostic(PS_IN pin)
 }
 
 
-
-
 float4 rainDebugOutput(
     PS_IN pin
 )
 {
+
     float3 normalTexture = 
     txRainSurfaceNormal.SampleLevel(
         samLinearSimple,
@@ -1245,7 +1249,7 @@ float4 rainDebugOutput(
     float3 encodedNormal =
         txRainSurfaceNormal.SampleLevel(
             samLinearSimple,
-            saturate(pin.Tex),
+            pin.Tex,
             0.0
         ).rgb;
 
@@ -1321,7 +1325,26 @@ float4 rainDebugOutput(
     */
     if (gRainDebug == 5)
     {
-        return float4(normalTexture, 1.0);
+        return float4(normalTexture, 0.7);
+    }
+    
+    /*
+        Local movement-direction diagnostic.
+        Red/green encode the projected UV direction, blue encodes its strength.
+        The force, normal and tangent frame are evaluated in WORLD space.
+    */
+    if (gRainDebug == 6)
+    {
+        float2 direction =
+            tangentMagnitude > 0.000001
+            ? tangentForce / tangentMagnitude
+            : float2(0.0, 0.0);
+
+        return float4(
+            direction * 0.5 + 0.5,
+            saturate(tangentMagnitude * 0.7),
+            1.0
+        );
     }
 
     /*
@@ -1413,28 +1436,31 @@ float4 rainDebugOutput(
         );
     }
 
-    float2 uv = pin.Tex;
-
-    float2 uvClamped = saturate(uv);
-
-    float3 a =
-        txRainSurfaceNormal.SampleLevel(
-            samLinearSimple,
-            uv,
-            0.0
-        ).rgb;
-
-    float3 b =
-        txRainSurfaceNormal.SampleLevel(
-            samLinearSimple,
-            uvClamped,
-            0.0
-        ).rgb;
     
-        if (gRainDebug == 14)
+    if (gRainDebug == 14)
     {
+        
+        float2 uv = pin.Tex;
+
+        float2 uvClamped = saturate(uv);
+
+        float3 a =
+            txRainSurfaceNormal.SampleLevel(
+                samLinearSimple,
+                uv,
+                0.0
+            ).rgb;
+
+        float3 b =
+            txRainSurfaceNormal.SampleLevel(
+                samLinearSimple,
+                uvClamped,
+                0.0
+            ).rgb;
+
         return float4(abs(a - b), 1.0);
     }
+
     
     if (gRainDebug == 15)
     {
@@ -1447,6 +1473,23 @@ float4 rainDebugOutput(
         );
     }
 
+    if (gRainDebug == 16)
+    {
+
+    float forceLength =
+        length(tangentForce);
+
+    float2 forceDirection =
+        forceLength > 0.000001
+        ? tangentForce / forceLength
+        : float2(0.0, 0.0);
+
+    return float4(
+        forceDirection * 0.5 + 0.5,
+        saturate(forceLength),
+        0.8
+        );
+    }   
 
     /*
         17 = reference adhesion / projected force.
@@ -1485,42 +1528,7 @@ float4 rainDebugOutput(
         );
     }
 
-    if (gRainDebug == 16)
-    {
 
-    float forceLength =
-        length(tangentForce);
-
-    float2 forceDirection =
-        forceLength > 0.000001
-        ? tangentForce / forceLength
-        : float2(0.0, 0.0);
-
-    return float4(
-        forceDirection * 0.5 + 0.5,
-        saturate(forceLength),
-        0.3
-        );
-    }   
-    
-    /*
-        Local movement-direction diagnostic.
-        Red/green encode the projected UV direction, blue encodes its strength.
-        The force, normal and tangent frame are evaluated in WORLD space.
-    */
-    if (gRainDebug == 6)
-    {
-        float2 direction =
-            tangentMagnitude > 0.000001
-            ? tangentForce / tangentMagnitude
-            : float2(0.0, 0.0);
-
-        return float4(
-            direction * 0.5 + 0.5,
-            saturate(tangentMagnitude * 0.5),
-            1.0
-        );
-    }
 
     return float4(
         0.0,
@@ -2026,7 +2034,62 @@ float4 rainPersistentVelocityDeltaDebugOutput(PS_IN pin)
 }
 
 
-float4 rainPersistentMotionScaleDebugOutput(PS_IN pin){float c=max(gRainStateCount,1.0),r=0.0;float3 col=float3(0,1,1);[loop]for(int i=0;i<256;++i){if((float)i>=c)break;float2 uv=float2(((float)i+0.5)/c,0.5);float4 st=txRainState.SampleLevel(samPointRain,uv,0.0);float2 p=st.rg,v=st.ba;float2 p1=frac(p+v),p10=frac(p+v*10.0),p50=frac(p+v*50.0);float2 a=float2(p.x,lerp(-0.579,-0.362,p.y));float2 b=float2(p1.x,lerp(-0.579,-0.362,p1.y));float2 d=float2(p10.x,lerp(-0.579,-0.362,p10.y));float2 e=float2(p50.x,lerp(-0.579,-0.362,p50.y));float m=1-smoothstep(.003,.006,length(pin.Tex-a));float m1=1-smoothstep(.0025,.005,length(pin.Tex-b));float m10=1-smoothstep(.0025,.005,length(pin.Tex-d));float m50=1-smoothstep(.0025,.005,length(pin.Tex-e));if(m>r){r=m;col=float3(1,1,1);}if(m1>r){r=m1;col=float3(1,.35,.05);}if(m10>r){r=m10;col=float3(1,.85,.05);}if(m50>r){r=m50;col=float3(.05,.9,1);}}return float4(col,saturate(r));}
+float4 rainPersistentMotionScaleDebugOutput(PS_IN pin)
+{
+    float c=max(gRainStateCount,1.0),r=0.0;
+    float3 col=float3(0,1,1);
+    [loop]
+    for(int i=0;i<256;++i)
+    {
+        if ((float) i >= c )
+            break;
+            
+        float2 uv = float2(((float)i + 0.5) / c, 0.5);
+        float4 st = txRainState.SampleLevel(samPointRain,uv,0.0);
+
+        float2 p = st.rg, v = st.ba;
+        float2 p1 = frac(p+v)
+                , p10 = frac(p+v*10.0)
+                , p50 = frac(p+v*50.0);
+
+        float2 a = float2(p.x, lerp(-0.579, -0.362, p.y));
+        float2 b = float2(p1.x, lerp(-0.579, -0.362, p1.y));
+        float2 d = float2(p10.x, lerp(-0.579,-0.362, p10.y));
+        float2 e = float2(p50.x, lerp(-0.579,-0.362,p50.y));
+
+        float m = 1 - smoothstep(.003, .006, length(pin.Tex-a));
+        float m1 = 1 - smoothstep(.0025, .005, length(pin.Tex-b));
+        float m10= 1 - smoothstep(.0025, .005, length(pin.Tex-d));
+        float m50= 1 - smoothstep(.0025, .005, length(pin.Tex-e));
+
+        if (m > r)
+        {
+            r = m;
+            col = float3(1,1,1);
+        }
+
+        if (m1 > r)
+        {
+            r = m1;
+            col = float3(1, .35, .05);
+        }
+
+        if(m10 > r)
+        {
+            r = m10;
+            col = float3(1, .85, .05);
+        }
+        
+        if(m50 > r)
+        {
+            r = m50;
+            col = float3(.05, .9, 1);
+        }
+    }
+    
+    return float4(col, saturate(r));
+}
+
 
 float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
 {
@@ -4683,7 +4746,7 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
         if (meta.a < 0.5)
             continue;
 
-        float2 position = state.rg;
+        float2 position = float2(state.r, -state.g);
         float2 predicted = position + state.ba * dt;
         float2 midpoint = lerp(position, predicted, 0.5);
 
@@ -4844,8 +4907,8 @@ float4 main(PS_IN pin)
 
             Alpha is forced to 1.
         */
-        float u = saturate(pin.Tex.x);
-        float v = saturate(pin.Tex.y);
+        float u = pin.Tex.x;
+        float v = pin.Tex.y;
 
         float uLine =
             1.0

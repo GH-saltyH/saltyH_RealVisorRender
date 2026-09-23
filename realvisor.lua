@@ -311,7 +311,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = C2 controlled L/M/S isolation
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
-        RAIN_GPU_STATE_MODE = 6,
+        RAIN_GPU_STATE_MODE = 7,
 
         -- Normalized persistent-state position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -694,8 +694,6 @@ local rainStateUpdateParams = {
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
         ),
-        gRainStateSingleDropX = cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
-        gRainStateSingleDropY = cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y,
     },
 
     shader = [[
@@ -1178,10 +1176,8 @@ local rainStateUpdateParams = {
 
             if (gRainStateInit > 0.5) {
 
-                //float2 singleDropPosition = float2(gRainStateSingleDropX, gRainStateSingleDropY);
-
                 if (gRainStateSingleDropTest > 0.5) {
-                    return float4(gRainStateSingleDropPosition, 0.0, 0.0);
+                    return float4(gRainStateSingleDropPosition.x, gRainStateSingleDropPosition.y , 0.0, 0.0);
                 }
 
                 if (gRainStateC2Isolation > 0.5 && index < 3.0) {
@@ -4440,10 +4436,6 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
     )
-    rainStateUpdateParams.values.gRainStateSingleDropX = 
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X
-    rainStateUpdateParams.values.gRainStateSingleDropY = 
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
     
     rainStateUpdateParams.values.gRainStateLifecycle =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
@@ -4673,11 +4665,6 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
     )
-    rainStateUpdateParams.values.gRainStateSingleDropX = 
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X
-    rainStateUpdateParams.values.gRainStateSingleDropY = 
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
-    
 
     rainStateUpdateParams.values.gRainStateTestGrid =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
@@ -7320,8 +7307,8 @@ function windowMain(dt)
         local singleX, singleXChanged = ui.slider(
             'SINGLE_DROP_X',
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
-            0.0,
-            1.0,
+            -2.0,
+            2.0,
             '%.4f'
         )
         if singleXChanged then
@@ -7332,8 +7319,8 @@ function windowMain(dt)
         local singleY, singleYChanged = ui.slider(
             'SINGLE_DROP_Y',
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y,
-            0.0,
-            1.0,
+            -2.0,
+            2.0,
             '%.4f'
         )
         if singleYChanged then
