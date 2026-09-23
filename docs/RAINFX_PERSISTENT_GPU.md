@@ -86,9 +86,22 @@ Using saturate(pin.Tex) for the normal lookup caused invalid/black behavior for 
 Actual mesh UV tangent reconstruction was added for the procedural path.
 
 ## 13. Coordinate rules
-Persistent state position is not directly identical to pin.Tex. State coordinates are normalized and converted to the calibrated visor UV range at render time.
-Current calibration is represented by RAIN_GPU_STATE_MESH_U_MIN/U_MAX and MESH_V_MIN/V_MAX.
-Changing these values requires checking Debug 4 UV coverage and the measured state grid together.
+Persistent state position is now stored and simulated directly in the raw visor UV coordinate system used by pin.Tex.
+
+There is no persistent-state -> mesh-UV calibration/remapping step.
+
+The boundary mask is authoritative for the valid droplet area:
+- boundary sampling receives raw UV directly;
+- normal-map sampling receives raw UV directly;
+- persistent drop rendering compares raw state UV directly against pin.Tex;
+- lifecycle/boundary decisions use the raw-UV mask;
+- position integration therefore moves the state in the same coordinate system that is rendered.
+
+The texture domain is still respected explicitly: because the boundary sampler uses CLAMP addressing, positions outside [0, 1] are rejected before sampling instead of being allowed to become a false valid edge sample. This is texture-domain validity, not a coordinate calibration.
+
+RAIN_GPU_STATE_MESH_U_MIN/U_MAX and RAIN_GPU_STATE_MESH_V_MIN/V_MAX are retained for settings compatibility, but they are now TEST-POINT BOUNDS ONLY. They may constrain fixed diagnostic points such as Debug 36; they must not be used to transform persistent state coordinates.
+
+Debug 36 now writes its measured 3x3 points directly as raw UV. The legacy bound values only clamp those test points. Debug 35 and the fixed force/airflow diagnostic grids likewise use the values as explicit test-point bounds, not as a global coordinate transform.
 
 ## 14. Do not mix physics and visualization
 RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE and RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE are visualization controls.
