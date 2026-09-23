@@ -193,3 +193,63 @@ Next validation remains:
 5. verify the same state reappears at a different valid mask position.
 
 Debug 41 remains a diagnostic only: red means the current frame predicts a boundary crossing; it is not itself proof of permanent death.
+
+
+## 21. 2026-09-23 single-drop position probe
+
+The next diagnostic isolates position-dependent behavior from multi-drop interaction.
+
+### Purpose
+
+Use exactly one persistent droplet and keep the existing Debug 41 mask interpretation:
+
+- white = current droplet position is inside the boundary mask;
+- yellow = current droplet position is outside the boundary mask;
+- red = the current frame predicts a boundary crossing.
+
+The probe answers two questions independently:
+
+1. At multiple manually selected positions inside the real visor region, does the droplet receive a locally consistent movement direction?
+2. Does the boundary-mask decision coincide with the actual visible visor surface boundary rather than an artificial rectangular state boundary?
+
+### Implementation
+
+STATE_MODE = 7 allocates exactly one persistent state texel.
+
+The UI exposes:
+
+- SINGLE_DROP_X: normalized persistent-state X, 0..1
+- SINGLE_DROP_Y: normalized persistent-state Y, 0..1
+
+Changing either value reinitializes the single state on the next simulation frame with zero velocity. This makes the UI position an actual test spawn point rather than a per-frame position override, so the droplet can immediately resume normal persistent physics from that location.
+
+The probe uses a fixed medium drop:
+
+- radius = 0.0735
+- mass = 3.0
+
+Radius/mass variation is intentionally removed from this test.
+
+Lifecycle respawn is disabled for STATE_MODE = 7. Once the state leaves the valid mask, it is allowed to remain outside so Debug 41 can directly show the yellow invalid state instead of replacing it with a new randomized respawn. This keeps the test focused on position and boundary mapping.
+
+### Test procedure
+
+Keep RAIN_DEBUG = 41.
+
+For each test point:
+
+1. Set SINGLE_DROP_X/Y to a position clearly inside the visible visor.
+2. Let the single drop move under the normal persistent force model.
+3. Observe the movement direction over time.
+4. Repeat at left, center, right, upper, and lower portions of the valid visor area.
+5. Move the UI position close to the visually observed boundary and compare the yellow transition with the actual image boundary.
+6. Repeat the same points under the same straight acceleration/braking input.
+
+Interpretation:
+
+- If the same external acceleration produces a stable local direction at each manually selected point, the position-to-surface-force path is behaving consistently.
+- If the direction suddenly rotates, stalls, or points toward an artificial common center only at certain positions, the position-dependent normal/tangent reconstruction becomes the primary suspect.
+- If yellow appears substantially inside the visible visor or remains white substantially outside it, the state-to-mesh-UV mapping or boundary-mask calibration is incorrect.
+- A red marker remains only a predicted crossing diagnostic; in this mode the absence of lifecycle respawn makes yellow directly useful for inspecting the mask boundary.
+
+This test deliberately does not modify drag, mass/adhesion, merge, residue, or the normal-map asset.
