@@ -333,6 +333,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_C3_MAX_SPEED = 0.15,
 
         RAIN_GPU_STATE_UV_SCALE = 18.0,
+        -- Legacy names retained for settings compatibility.
+        -- TEST-POINT BOUNDS ONLY: these values no longer transform
+        -- persistent state, rendering, physics, normal sampling, or masks.
         RAIN_GPU_STATE_MESH_V_MIN = -0.700,
         RAIN_GPU_STATE_MESH_V_MAX = -0.300,
         
@@ -720,27 +723,14 @@ local rainStateUpdateParams = {
                 R >= 0.5 : valid droplet surface
                 R <  0.5 : outside / invalid
 
-            Persistent state position remains normalized. Only this helper
-            converts it to the calibrated visor UV domain.
+            Persistent state position is already raw visor UV. The boundary mask is sampled directly in that coordinate system.
         */
         float rainStateBoundaryMask(float2 position)
         {
-            float2 uv = float2(
-                lerp(
-                    gRainStateMeshUMin,
-                    gRainStateMeshUMax,
-                    position.x
-                ),
-                lerp(
-                    gRainStateMeshVMin,
-                    gRainStateMeshVMax,
-                    position.y
-                )
-            );
-
+            // Persistent state position is already raw visor UV.
             return txRainBoundaryMask.SampleLevel(
                 samLinearRain,
-                uv,
+                position,
                 0.0
             ).r;
         }
@@ -811,13 +801,8 @@ local rainStateUpdateParams = {
         }
 
         float3 rainStateNormalWorld(float2 p) {
-            float2 uv = float2(
-                p.x,
-                lerp(gRainStateMeshVMin, gRainStateMeshVMax, p.y)
-            );
-
             float3 n = txRainSurfaceNormal.SampleLevel(
-                samLinearRain, uv, 0.0
+                samLinearRain, p, 0.0
             ).rgb * 2.0 - 1.0;
 
             n = normalize(n);
@@ -1031,7 +1016,7 @@ local rainStateUpdateParams = {
         )
         {
             /*
-                Persistent state coordinates are normalized surface coordinates.
+                Persistent state coordinates are raw visor UV coordinates.
                 C3 owns boundary handling explicitly, so this integration
                 function itself never wraps or clamps the physical result.
             */
@@ -1205,15 +1190,12 @@ local rainStateUpdateParams = {
                     int ix = i % 3;
                     int iy = i / 3;
 
-                    float y01 = saturate(
-                        (measuredY[iy] - gRainStateMeshVMin)
-                        / max(
-                            gRainStateMeshVMax - gRainStateMeshVMin,
-                            0.000001
-                        )
-                    );
-
-                    return float4(measuredX[ix], y01, 0.0, 0.0);
+                    // Debug 36 test points are raw visor UV values.
+                    // Legacy calibration values only constrain this fixed
+                    // measurement set; they do not remap state coordinates.
+                    float testX = clamp(measuredX[ix], gRainStateMeshUMin, gRainStateMeshUMax);
+                    float testY = clamp(measuredY[iy], gRainStateMeshVMin, gRainStateMeshVMax);
+                    return float4(testX, testY, 0.0, 0.0);
                 }
 
                 float2 p =
@@ -1377,27 +1359,14 @@ local rainStateMetaUpdateParams = {
                 R >= 0.5 : valid droplet surface
                 R <  0.5 : outside / invalid
 
-            Persistent state position remains normalized. Only this helper
-            converts it to the calibrated visor UV domain.
+            Persistent state position is already raw visor UV. The boundary mask is sampled directly in that coordinate system.
         */
         float rainStateBoundaryMask(float2 position)
         {
-            float2 uv = float2(
-                lerp(
-                    gRainStateMeshUMin,
-                    gRainStateMeshUMax,
-                    position.x
-                ),
-                lerp(
-                    gRainStateMeshVMin,
-                    gRainStateMeshVMax,
-                    position.y
-                )
-            );
-
+            // Persistent state position is already raw visor UV.
             return txRainBoundaryMask.SampleLevel(
                 samLinearRain,
-                uv,
+                position,
                 0.0
             ).r;
         }
@@ -7236,7 +7205,7 @@ function windowMain(dt)
     
     
     local newVerticalUVMin, changed = ui.slider(
-        '(UV Calibration) Vertical Min',
+        '(Test Boundary) V Min',
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
         -2.0,
         2.0,
@@ -7249,7 +7218,7 @@ function windowMain(dt)
     
     
     local newVerticalUVMax, changed = ui.slider(
-        '(UV Calibration) Vertical Max',
+        '(Test Boundary) V Max',
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
         -2.0,
         2.0,
@@ -7261,7 +7230,7 @@ function windowMain(dt)
     end
     
     local newHorizontalUVMin, changed = ui.slider(
-        '(UV Calibration) Horizontal Min',
+        '(Test Boundary) U Min',
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
         -2.0,
         2.0,
@@ -7274,7 +7243,7 @@ function windowMain(dt)
     
     
     local newHorizontalUVMax, changed = ui.slider(
-        '(UV Calibration) Horizontal Max',
+        '(Test Boundary) U Max',
         cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
         -2.0,
         2.0,
