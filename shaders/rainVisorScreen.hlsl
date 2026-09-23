@@ -188,8 +188,8 @@ float rainHash(float2 p)
             R >= 0.5 : valid droplet surface
             R <  0.5 : outside / invalid
 
-        Persistent state position remains normalized. Only this helper
-        converts it to the calibrated visor UV domain.
+        Persistent state position is already raw visor UV. The mask is sampled
+        directly in that same coordinate system.
     */
     float rainStateBoundaryMask(float2 position)
     {
