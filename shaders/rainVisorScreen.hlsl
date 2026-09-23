@@ -182,7 +182,36 @@ float rainHash(float2 p)
         sin(dot(p, float2(127.1, 311.7))) * 43758.5453
     );
 }
+    /*
+        The supplied boundary mask uses the same mesh UV space as the
+        visor surface-normal texture:
+            R >= 0.5 : valid droplet surface
+            R <  0.5 : outside / invalid
 
+        Persistent state position remains normalized. Only this helper
+        converts it to the calibrated visor UV domain.
+    */
+    float rainStateBoundaryMask(float2 position)
+    {
+        float2 uv = float2(
+            lerp(
+                gRainStateMeshUMin,
+                gRainStateMeshUMax,
+                position.x
+            ),
+            lerp(
+                gRainStateMeshVMin,
+                gRainStateMeshVMax,
+                position.y
+            )
+        );
+
+        return txRainBoundaryMask.SampleLevel(
+            samLinearRain,
+            uv,
+            0.0
+        ).r;
+    }
 
 /*
     The supplied normal map is OBJECT-SPACE.
