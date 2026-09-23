@@ -265,7 +265,7 @@ local cfg = scriptSettings:mapConfig({
         -- UV center is intentionally explicit so the surface model
         -- can later be remapped without rewriting the physics.
         RAIN_SURFACE_CENTER_X = 0.5,
-        RAIN_SURFACE_CENTER_Y = 0.5,
+        RAIN_SURFACE_CENTER_Y = -0.5,
 
         -- Approximate visor curvature in UV space.
         -- X controls lateral curvature; Y controls upper/lower curvature.
@@ -313,9 +313,9 @@ local cfg = scriptSettings:mapConfig({
         -- 7 = single persistent droplet position probe
         RAIN_GPU_STATE_MODE = 7,
 
-        -- Normalized persistent-state position used by the single-drop probe.
+        -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
-        RAIN_GPU_STATE_SINGLE_DROP_Y = 0.500,
+        RAIN_GPU_STATE_SINGLE_DROP_Y = -0.500,
 
         -- C3: explicit surface exit/death/respawn. No edge wrapping.
         RAIN_GPU_STATE_LIFECYCLE = true,
@@ -726,13 +726,13 @@ local rainStateUpdateParams = {
         float rainStateBoundaryMask(float2 position)
         {
             // Boundary validity is defined directly by the mask in raw UV.
-            // Reject texture-domain positions before CLAMP sampling so an
-            // out-of-domain state cannot appear valid at the texture edge.
+            // Reject positions outside the signed visor UV domain before
+            // CLAMP sampling so an out-of-domain state cannot appear valid.
             if (
                 position.x < 0.0
                 || position.x > 1.0
-                || position.y < 0.0
-                || position.y > 1.0
+                || position.y < -1.0
+                || position.y > 0.0
             ) {
                 return 0.0;
             }
@@ -764,7 +764,7 @@ local rainStateUpdateParams = {
 
                 float2 candidate = float2(
                     rainStateHash(seed + 13.0),
-                    rainStateHash(seed + 47.0)
+                    -rainStateHash(seed + 47.0)
                 );
 
                 if (rainStateBoundaryMask(candidate) >= 0.5)
@@ -778,7 +778,7 @@ local rainStateUpdateParams = {
                 not create undefined state; normal lifecycle validation will
                 still expose such a mask immediately.
             */
-            return float2(0.5, 0.5);
+            return float2(0.5, -0.5);
         }
 
         bool rainStateC3SpeedTestActive()
@@ -1181,7 +1181,7 @@ local rainStateUpdateParams = {
                 }
 
                 if (gRainStateC2Isolation > 0.5 && index < 3.0) {
-                    return float4(0.5, 0.5, 0.0, 0.0);
+                    return float4(0.5, -0.5, 0.0, 0.0);
                 }
 
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
@@ -1376,8 +1376,8 @@ local rainStateMetaUpdateParams = {
             if (
                 position.x < 0.0
                 || position.x > 1.0
-                || position.y < 0.0
-                || position.y > 1.0
+                || position.y < -1.0
+                || position.y > 0.0
             ) {
                 return 0.0;
             }
@@ -7302,13 +7302,13 @@ function windowMain(dt)
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
         ui.separator()
         ui.text('Single persistent droplet position probe')
-        ui.text('Normalized state coordinates; changing either value re-spawns the single drop with zero velocity.')
+        ui.text('Signed visor UV coordinates (U 0..1, V -1..0); changing either value re-spawns the single drop with zero velocity.')
 
         local singleX, singleXChanged = ui.slider(
             'SINGLE_DROP_X',
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
-            -2.0,
-            2.0,
+            0.0,
+            1.0,
             '%.4f'
         )
         if singleXChanged then
@@ -7319,8 +7319,8 @@ function windowMain(dt)
         local singleY, singleYChanged = ui.slider(
             'SINGLE_DROP_Y',
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y,
-            -2.0,
-            2.0,
+            -1.0,
+            0.0,
             '%.4f'
         )
         if singleYChanged then
