@@ -65,8 +65,8 @@ float4 rainStateMain(PS_IN pin)
         float2 position =
             float2(
                 rainStateHash(seed + 11.0),
-                rainStateHash(seed + 47.0)
-            );
+                -rainStateHash(seed + 47.0)
+        );
 
         float2 velocity =
             (
@@ -143,8 +143,8 @@ float4 rainStateMain(PS_IN pin)
         velocity
         * dt;
 
-    position =
-        frac(position);
+    // Signed visor UV is the physical state domain; never wrap it.
+    position = position;
 
     return float4(
         position,
@@ -586,7 +586,7 @@ float rainDropTravelDistance(
 */
 float rainSingleDropDiagnostic(PS_IN pin, float time)
 {
-    const float2 spawnUV = float2(0.5, 0.535);
+    const float2 spawnUV = float2(0.5, -0.5);
     const float dropSize = 0.085;
 
     float2 proceduralUV = pin.Tex;
@@ -1201,7 +1201,7 @@ float rainDropLayer(
 */
 float rainUVVisibilityDiagnostic(PS_IN pin)
 {
-    const float2 centerUV = float2(0.5, 0.535);
+    const float2 centerUV = float2(0.5, -0.5);
     const float radiusUV = 0.025;
 
     float distanceToCenter =
@@ -1694,10 +1694,7 @@ float4 rainPersistentPositionDebugOutput(PS_IN pin)
 
         float2 statePosition = state.rg;
 
-        float2 dropPosition = float2(
-            statePosition.x,
-            lerp(-0.579, -0.362, statePosition.y)
-        );
+        float2 dropPosition = statePosition;
 
         float distanceToDrop = length(
             pin.Tex - dropPosition
@@ -1749,7 +1746,7 @@ float4 rainPersistentPositionDebugOutput(PS_IN pin)
 
 /*
     Debug 22: raw persistent-state telemetry.
-    R = normalized X, G = normalized Y, B = normalized speed.
+    R = signed visor-U X, G = signed visor-V Y, B = normalized speed.
 */
 float4 rainPersistentRawStateDebugOutput(PS_IN pin)
 {
@@ -1780,10 +1777,7 @@ float4 rainPersistentRawStateDebugOutput(PS_IN pin)
             length(state.ba) / max(gRainStateMaxSpeed, 0.000001)
         );
 
-        float2 dropPosition = float2(
-            statePosition.x,
-            lerp(-0.579, -0.362, statePosition.y)
-        );
+        float2 dropPosition = statePosition;
 
         float markerRadius = lerp(
             0.0040,
@@ -1942,22 +1936,12 @@ float4 rainPersistentVelocityDeltaDebugOutput(PS_IN pin)
         float2 delta = rainShortestWrappedDelta(current, previous);
         float2 measuredVelocity = delta / sampleInterval;
 
-        float2 currentPosition = float2(
-            current.x,
-            lerp(-0.579, -0.362, current.y)
-        );
+        float2 currentPosition = current;
 
-        // Keep the diagnostic vectors in the same normalized state space.
-        // The mesh V range is applied only when projecting them to pin.Tex.
-        float2 velocityMesh = float2(
-            velocity.x,
-            velocity.y * (-0.362 + 0.579)
-        );
+        // Keep the diagnostic vectors in the same signed visor-UV state space.
+        float2 velocityMesh = velocity;
 
-        float2 measuredMesh = float2(
-            measuredVelocity.x,
-            measuredVelocity.y * (-0.362 + 0.579)
-        );
+        float2 measuredMesh = measuredVelocity;
 
         float2 velocityEnd =
             currentPosition + velocityMesh * visualScale;
@@ -2048,14 +2032,14 @@ float4 rainPersistentMotionScaleDebugOutput(PS_IN pin)
         float4 st = txRainState.SampleLevel(samPointRain,uv,0.0);
 
         float2 p = st.rg, v = st.ba;
-        float2 p1 = frac(p+v)
-                , p10 = frac(p+v*10.0)
-                , p50 = frac(p+v*50.0);
+        float2 p1 = p+v
+                , p10 = p+v*10.0
+                , p50 = p+v*50.0;
 
-        float2 a = float2(p.x, lerp(-0.579, -0.362, p.y));
-        float2 b = float2(p1.x, lerp(-0.579, -0.362, p1.y));
-        float2 d = float2(p10.x, lerp(-0.579,-0.362, p10.y));
-        float2 e = float2(p50.x, lerp(-0.579,-0.362,p50.y));
+        float2 a = p;
+        float2 b = p1;
+        float2 d = p10;
+        float2 e = p50;
 
         float m = 1 - smoothstep(.003, .006, length(pin.Tex-a));
         float m1 = 1 - smoothstep(.0025, .005, length(pin.Tex-b));
@@ -2119,23 +2103,11 @@ float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
         float2 p = state.rg;
         float2 v = state.ba;
 
-        float2 currentPosition = float2(
-            p.x,
-            lerp(-0.579, -0.362, p.y)
-        );
+        float2 currentPosition = p;
 
-        float2 predictedStatePosition = frac(
-            p + v * diagnosticTime
-        );
+        float2 predictedStatePosition = p + v * diagnosticTime;
 
-        float2 predictedPosition = float2(
-            predictedStatePosition.x,
-            lerp(
-                -0.579,
-                -0.362,
-                predictedStatePosition.y
-            )
-        );
+        float2 predictedPosition = predictedStatePosition;
 
         float currentMask = 1.0 - smoothstep(
             0.003,
@@ -2193,10 +2165,7 @@ float4 rainPersistentVelocityDebugOutput(PS_IN pin)
         float2 statePosition = state.rg;
         float2 velocity = state.ba;
 
-        float2 dropPosition = float2(
-            statePosition.x,
-            lerp(-0.579, -0.362, statePosition.y)
-        );
+        float2 dropPosition = statePosition;
 
         float speed = length(velocity);
         float speed01 = saturate(
@@ -2231,12 +2200,7 @@ float4 rainPersistentVelocityDebugOutput(PS_IN pin)
             Apply the same scale to the velocity vector so its direction
             remains consistent with the rendered state position domain.
         */
-        float2 directionMesh = normalize(
-            float2(
-                direction.x,
-                direction.y * (-0.362 + 0.579)
-            )
-        );
+        float2 directionMesh = direction;
 
         float lineLength = 0.045 * speed01;
 
@@ -2338,10 +2302,7 @@ float4 rainPersistentAdhesionDebugOutput(PS_IN pin)
         float radius = meta.r;
         float mass = max(meta.g, 1.0);
 
-        float2 dropPosition = float2(
-            p.x,
-            lerp(-0.579, -0.362, p.y)
-        );
+        float2 dropPosition = p;
 
         float3 normalWorld = rainSurfaceNormalWorld(p);
         float3 tangentUWorld;
@@ -2456,10 +2417,7 @@ float4 rainPersistentSurfaceForceDebugOutput(PS_IN pin)
         );
 
         float2 p = state.rg;
-        float2 dropPosition = float2(
-            p.x,
-            lerp(-0.579, -0.362, p.y)
-        );
+        float2 dropPosition = p;
 
         float2 toPoint = pin.Tex - dropPosition;
         float pointMask = 1.0 - smoothstep(
@@ -2552,10 +2510,7 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
         float2 p = state.rg;
         float2 velocity = state.ba;
 
-        float2 dropPosition = float2(
-            p.x,
-            lerp(-0.579, -0.362, p.y)
-        );
+        float2 dropPosition = p;
 
         float radius01 = saturate(
             (meta.r - 0.032) / (0.115 - 0.032)
@@ -2568,14 +2523,9 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
         );
 
         /*
-            Persistent state is normalized to [0, 1], while pin.Tex uses
-            the actual visor mesh V range. Convert the measured distance
-            back into the normalized state domain for a circular drop.
+            Persistent state and pin.Tex share the same signed visor-UV coordinate system; no range conversion is required.
         */
-        float2 delta = pin.Tex - dropPosition;
-        delta.y /= max((-0.362 + 0.579), 0.000001);
-
-        float normalizedDistance = length(delta);
+        float normalizedDistance = length(pin.Tex - dropPosition);
 
         float dropMask = 1.0 - smoothstep(
             radius * 0.45,
@@ -2591,12 +2541,7 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
         float2 direction =
             velocity / max(speed, 0.000001);
 
-        float2 directionMesh = normalize(
-            float2(
-                direction.x,
-                direction.y * (-0.362 + 0.579)
-            )
-        );
+        float2 directionMesh = direction;
 
         float tailLength = 0.012 * speed01;
 
@@ -3329,8 +3274,7 @@ float4 rainPersistentForceVelocityDebugOutput(PS_IN pin)
             );
 
         /*
-            Convert both normalized state-space directions to the rendered
-            mesh aspect ratio before drawing them in pin.Tex space.
+            State and render coordinates are identical signed visor-UV vectors.
         */
         float2 forceEnd =
             dropPosition
@@ -4902,8 +4846,8 @@ float4 main(PS_IN pin)
             UV coverage diagnostic:
             - red/green = actual mesh UV
             - white vertical line = U 0.5
-            - white horizontal line = V 0.535
-            - blue tint = expected visor V band 0.37..0.70
+            - white horizontal line = V -0.5
+            - blue tint = expected visor V band -0.70..-0.30
 
             Alpha is forced to 1.
         */
@@ -4923,19 +4867,19 @@ float4 main(PS_IN pin)
             - smoothstep(
                 0.006,
                 0.010,
-                abs(v - 0.535)
+                abs(v + 0.5)
             );
 
         float visorVBand =
-            smoothstep(0.37, 0.39, v)
-            * (1.0 - smoothstep(0.68, 0.70, v));
+            smoothstep(-0.70, -0.68, v)
+            * (1.0 - smoothstep(-0.32, -0.30, v));
 
         float cross = max(uLine, vLine);
 
         float3 uvColor =
             float3(
                 u,
-                saturate((v - 0.37) / 0.33),
+                saturate((-v - 0.30) / 0.40),
                 0.0
             );
 
