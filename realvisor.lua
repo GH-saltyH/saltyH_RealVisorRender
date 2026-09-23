@@ -696,6 +696,70 @@ local rainStateUpdateParams = {
             return frac(sin(n * 127.1 + 311.7) * 43758.5453);
         }
 
+        /*
+            The supplied boundary mask uses the same mesh UV space as the
+            visor surface-normal texture:
+                R >= 0.5 : valid droplet surface
+                R <  0.5 : outside / invalid
+
+            Persistent state position remains normalized. Only this helper
+            converts it to the calibrated visor UV domain.
+        */
+        float rainStateBoundaryMask(float2 position)
+        {
+            float2 uv = float2(
+                position.x,
+                lerp(
+                    gRainStateMeshVMin,
+                    gRainStateMeshVMax,
+                    position.y
+                )
+            );
+
+            return txRainBoundaryMask.SampleLevel(
+                samLinearRain,
+                uv,
+                0.0
+            ).r;
+        }
+
+        /*
+            Deterministic rejection sampling for initial/respawn positions.
+            This runs only when creating/recreating a droplet, not for every
+            live state every frame.
+        */
+        float2 rainStateFindValidPosition(
+            float stateIndex,
+            float cycleSeed
+        )
+        {
+            for (int attempt = 0; attempt < 24; ++attempt)
+            {
+                float seed =
+                    stateIndex
+                    + cycleSeed * 17.123
+                    + (float)attempt * 37.719
+                    + 911.731;
+
+                float2 candidate = float2(
+                    rainStateHash(seed + 13.0),
+                    rainStateHash(seed + 47.0)
+                );
+
+                if (rainStateBoundaryMask(candidate) >= 0.5)
+                {
+                    return candidate;
+                }
+            }
+
+            /*
+                Safe deterministic fallback. A malformed/empty mask should
+                not create undefined state; normal lifecycle validation will
+                still expose such a mask immediately.
+            */
+            return float2(0.5, 0.5);
+        }
+
         bool rainStateC3SpeedTestActive()
         {
             return
@@ -957,14 +1021,9 @@ local rainStateUpdateParams = {
             float respawnCycle
         )
         {
-            float seed =
-                stateIndex
-                + respawnCycle * 17.123
-                + 911.731;
-
-            return float2(
-                rainStateHash(seed + 13.0),
-                rainStateHash(seed + 47.0)
+            return rainStateFindValidPosition(
+                stateIndex,
+                respawnCycle
             );
         }
 
@@ -1151,10 +1210,11 @@ local rainStateUpdateParams = {
                     return float4(measuredX[ix], y01, 0.0, 0.0);
                 }
 
-                float2 p = float2(
-                    rainStateHash(index + 11.0),
-                    rainStateHash(index + 47.0)
-                );
+                float2 p =
+                    rainStateFindValidPosition(
+                        index,
+                        0.0
+                    );
 
                 return float4(p, 0.0, 0.0);
             }
@@ -1268,6 +1328,7 @@ local rainStateMetaUpdateParams = {
     textures = {
         txRainStateMeta = false,
         txRainState = false,
+        txRainBoundaryMask = false,
     },
     values = {
         gRainStateDeltaTime = 0.0,
@@ -1424,15 +1485,21 @@ local rainStateMetaUpdateParams = {
                 float2 p = state.rg;
                 float2 v = state.ba;
                 float2 predicted = p + v * dt;
-                float margin = saturate(
-                    gRainStateBoundaryMargin
+                float2 midpoint = lerp(
+                    p,
+                    predicted,
+                    0.5
                 );
 
+                /*
+                    The supplied visor mask is now the authoritative
+                    lifecycle boundary. A droplet is considered to have
+                    exited when either the midpoint or predicted state lies
+                    outside the valid mask.
+                */
                 bool exits =
-                    predicted.x < margin
-                    || predicted.x > (1.0 - margin)
-                    || predicted.y < margin
-                    || predicted.y > (1.0 - margin);
+                    rainStateBoundaryMask(midpoint) < 0.5
+                    || rainStateBoundaryMask(predicted) < 0.5;
 
                 if (exits)
                 {
@@ -4571,6 +4638,7 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
     rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
     rainStateMetaUpdateParams.textures.txRainState = readState
+    rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
 
     writeState:updateWithShader(rainStateUpdateParams)
     writeMeta:updateWithShader(rainStateMetaUpdateParams)
