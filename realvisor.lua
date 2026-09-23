@@ -1139,7 +1139,8 @@ local rainStateUpdateParams = {
                     1 = alive
                     2 = respawn pending; consume on this state pass
 
-                Meta.B remains age. Meta.C is the deterministic respawn cycle.
+                Meta.B remains the accumulated age/waiting timer.
+                The respawn cycle is derived deterministically from stateIndex.
             */
             if (gRainStateLifecycle > 0.5)
             {
@@ -1148,7 +1149,7 @@ local rainStateUpdateParams = {
                     float2 respawn =
                         rainStateRespawnPosition(
                             index,
-                            meta.c
+                            meta.b
                         );
 
                     return float4(
@@ -1334,7 +1335,6 @@ local rainStateMetaUpdateParams = {
 
                     float gap01 = rainStateHash(
                         index
-                        + meta.c * 13.37
                         + 701.0
                     );
 
@@ -6998,76 +6998,3 @@ function windowMain(dt)
         '%.3f'
     )
     
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX = newVerticalUVMax
-    end
-    
-    local newHorizontalUVMin, changed = ui.slider(
-        '(UV Calibration) Horizontal Min',
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN = newHorizontalUVMin
-    end
-    
-    
-    local newHorizontalUVMax, changed = ui.slider(
-        '(UV Calibration) Horizontal Max',
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX = newHorizontalUVMax
-    end
-
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 then
-        ui.text('C2: same physical spawn/force/adhesion base; only radius/mass differs')
-        local c2x, c2changed = ui.slider(
-            'C2_FORCE_X',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
-            0.0,
-            3.0,
-            '%.3f'
-        )
-        if c2changed then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X = c2x
-        end
-
-        local c2y, c2changedY = ui.slider(
-            'C2_FORCE_Y',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y,
-            -3.0,
-            3.0,
-            '%.3f'
-        )
-        if c2changedY then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y = c2y
-        end
-
-        local c2adh, c2adhChanged = ui.slider(
-            'C2_ADHESION_BASE',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE,
-            0.1,
-            3.0,
-            '%.3f'
-        )
-        if c2adhChanged then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE = c2adh
-        end
-    end
-
-    --------------------------------------------------------
-    -- Material Parameter: floating editor window
-    --------------------------------------------------------
-
-    drawMaterialEditorWindow(activeMaterialEditor)
-
-
-end
