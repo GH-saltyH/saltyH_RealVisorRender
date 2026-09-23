@@ -4440,7 +4440,9 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
     )
     rainStateUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+        and 0.0
+        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
     rainStateUpdateParams.values.gRainStateBoundaryMargin =
         cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
     rainStateUpdateParams.values.gRainStateRespawnGapMin =
@@ -4462,7 +4464,9 @@ local function initializeRainGPUState()
         and 1.0
         or 0.0
     rainStateMetaUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+        and 0.0
+        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
     rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
         cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
     rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
@@ -4632,7 +4636,9 @@ local function updateRainGPUState(sim)
         transform
 
     rainStateUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+        and 0.0
+        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
     rainStateUpdateParams.values.gRainStateBoundaryMargin =
         cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
     rainStateUpdateParams.values.gRainStateRespawnGapMin =
@@ -4695,7 +4701,9 @@ local function updateRainGPUState(sim)
     rainStateMetaUpdateParams.values.gRainStateDeltaTime =
         math.min(dt, 0.05)
     rainStateMetaUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+        and 0.0
+        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
     rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
         cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
     rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
