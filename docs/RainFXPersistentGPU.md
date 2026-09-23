@@ -163,3 +163,33 @@ spawn inside valid mask -> move toward boundary -> observe boundary/red decision
 Do not infer death from the red marker alone. In particular, observe whether a red-marked droplet can later reverse direction and return to the valid surface.
 
 This test does not change physics parameters, mask coordinates, calibration, radius-aware boundary rules, trail rendering, or merge behavior.
+
+
+## 20. 2026-09-23 C3 boundary sampler domain fix
+
+The persistent boundary-mask helper now explicitly rejects normalized state positions outside [0, 1] before converting them to visor mesh UVs and sampling the DDS mask.
+
+Reason:
+- samLinearRain uses CLAMP addressing;
+- an out-of-domain persistent state could therefore be sampled at the texture edge instead of being treated as outside;
+- this could prevent the lifecycle exit condition from becoming true and make an escaping state appear to continue elsewhere.
+
+The change is intentionally limited to rainStateBoundaryMask().
+
+No changes were made to:
+- physics force/acceleration;
+- drag or max speed;
+- boundary mask texture;
+- mesh UV calibration;
+- radius/mass/adhesion;
+- trail rendering;
+- merge/residue logic.
+
+Next validation remains:
+1. accelerate a persistent drop toward an actual mask boundary;
+2. verify it can leave the normalized state domain;
+3. verify lifecycle transitions to dead/waiting rather than bouncing/pinning;
+4. observe the respawn gap;
+5. verify the same state reappears at a different valid mask position.
+
+Debug 41 remains a diagnostic only: red means the current frame predicts a boundary crossing; it is not itself proof of permanent death.
