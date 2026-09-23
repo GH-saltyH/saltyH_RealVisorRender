@@ -546,6 +546,62 @@ local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
 
+------------------------------------------------------------
+-- RainFX debug UI option labels
+--
+-- The UI uses combo indices, while cfg.RUNTIME keeps the original
+-- numeric debug/state values so shader branches and diagnostics do
+-- not need to change when the UI wording changes.
+------------------------------------------------------------
+local RAIN_DEBUG_OPTIONS = {
+    '[0] Normal rain',
+    '[1] Force magnitude / components',
+    '[2] Input acceleration',
+    '[3] Solid render-path test',
+    '[4] Mesh UV coverage',
+    '[5] Surface normal (object RGB)',
+    '[6] Projected movement direction / strength',
+    '[7] Normal processing (legacy)',
+    '[8] Normal sampling / no saturate',
+    '[9] UV sampling (legacy)',
+    '[10] UV behavior',
+    '[11] UV behavior (legacy)',
+    '[12] UV behavior (legacy)',
+    '[13] UV transform (legacy)',
+    '[14] UV transform (legacy)',
+    '[15] World-space normal gradient',
+    '[16] Force projection',
+    '[17] Velocity response',
+    '[18] Persistent state position / velocity',
+    '[19] Persistent independent drops',
+    '[20] Persistent velocity',
+    '[21] Persistent position integration',
+    '[22] Raw persistent state',
+    '[23] Predicted motion',
+    '[24] Motion scale',
+    '[25] Accumulated displacement (historical)',
+    '[26] Velocity delta',
+    '[27] Surface force',
+    '[28] Adhesion threshold',
+    '[29] Physical drop',
+    '[30] Force -> velocity',
+    '[31] Air drag input',
+    '[32] Airflow input',
+    '[33] Airflow normal projection',
+    '[34] Combined force',
+    '[35] Radius / mass / adhesion',
+    '[36] Measured 3x3 L/M/S grid',
+    '[37] UV tangent comparison',
+}
+
+local RAIN_GPU_STATE_MODE_OPTIONS = {
+    '[0] Disabled',
+    '[1] Initialize only',
+    '[2] Synthetic force validation',
+    '[3] Persistent RainFX physics',
+    '[4] Persistent physics + 3x3 L/M/S grid',
+}
+
 local rainStateUpdateParams = {
     defines = { RAIN_GPU_STATE_PASS = true },
 
@@ -6485,19 +6541,29 @@ function windowMain(dt)
     ui.separator()
     ui.text('RainFX Debug Code')
 
-    
-    local strRainDebug = string.format('%d', cfg.RUNTIME.RAIN_DEBUG)
+    -- Select the original numeric RAIN_DEBUG value by readable test name.
+    -- ui.combo() is 1-based, while the shader/debug code remains 0-based.
+    local rainDebugIndex = math.max(0, math.min(#RAIN_DEBUG_OPTIONS - 1, math.floor(cfg.RUNTIME.RAIN_DEBUG))) + 1
+    local newRainDebugIndex, rainDebugChanged = ui.combo(
+        'RAIN_DEBUG',
+        rainDebugIndex,
+        RAIN_DEBUG_OPTIONS
+    )
 
+    if rainDebugChanged then
+        cfg.RUNTIME.RAIN_DEBUG = newRainDebugIndex - 1
+    end
 
-    local newText, changed, enterPressed =
-        ui.inputText(
-                'Debug mode',
+    -- STATE_MODE is another important branch point, so expose it here too.
+    local stateModeIndex = math.max(0, math.min(#RAIN_GPU_STATE_MODE_OPTIONS - 1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_MODE))) + 1
+    local newStateModeIndex, stateModeChanged = ui.combo(
+        'STATE_MODE',
+        stateModeIndex,
+        RAIN_GPU_STATE_MODE_OPTIONS
+    )
 
-                strRainDebug
-            )
-
-    if changed then
-        cfg.RUNTIME.RAIN_DEBUG = safe_tonumber(newText, 0)
+    if stateModeChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE = newStateModeIndex - 1
     end
 
     local newCenterX, changed = ui.slider(
