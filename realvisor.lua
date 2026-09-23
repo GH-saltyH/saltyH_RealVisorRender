@@ -37,6 +37,7 @@ local appFolder =
     
     local textureRaindrops = appFolder .. '/texture/drops.dds'
     local textureRainSurfaceNormal = appFolder .. '/texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds'
+    local textureRainBoundaryMask = appFolder .. '/texture/GLASS_EXT_RAINFX_boundaryMask_2K.dds'
     local testtextureRainSurfaceNormal = appFolder .. '/texture/test_objectSpace.dds'
 
     
@@ -637,6 +638,7 @@ local rainStateUpdateParams = {
         txRainState = false,
         txRainStateMeta = false,
         txRainSurfaceNormal = false,
+        txRainBoundaryMask = false,
     },
 
     values = {
@@ -4328,6 +4330,7 @@ local function initializeRainGPUState()
     rainStateUpdateParams.textures.txRainState = false
     rainStateUpdateParams.textures.txRainStateMeta = false
     rainStateUpdateParams.textures.txRainSurfaceNormal = false
+    rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
 
     rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateInit = 1.0
@@ -4565,6 +4568,7 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.textures.txRainState = readState
     rainStateUpdateParams.textures.txRainStateMeta = readMeta
     rainStateUpdateParams.textures.txRainSurfaceNormal = textureRainSurfaceNormal
+    rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
     rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
     rainStateMetaUpdateParams.textures.txRainState = readState
 
@@ -4802,6 +4806,9 @@ render.on('main.track.transparent', function()
 
             txRainSurfaceNormal =
                 textureRainSurfaceNormal,
+
+            txRainBoundaryMask =
+                textureRainBoundaryMask,
 
             txRainState =
                 rainStateReadIsA
