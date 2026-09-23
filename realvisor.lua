@@ -307,7 +307,13 @@ local cfg = scriptSettings:mapConfig({
         -- 2 = synthetic force validation
         -- 3 = persistent RainFX physics
         -- 4 = persistent physics with the measured 3x3 L/M/S test grid
-        RAIN_GPU_STATE_MODE = 4,
+        RAIN_GPU_STATE_MODE = 6,
+
+        -- C3: explicit surface exit/death/respawn. No edge wrapping.
+        RAIN_GPU_STATE_LIFECYCLE = true,
+        RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
+        RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
+        RAIN_GPU_STATE_RESPAWN_GAP_MAX = 0.75,
 
         RAIN_GPU_STATE_UV_SCALE = 18.0,
         RAIN_GPU_STATE_MESH_V_MIN = -0.700,
@@ -609,6 +615,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[3] Persistent RainFX physics',
     '[4] Persistent physics + 3x3 L/M/S grid',
     '[5] Persistent physics + C2 controlled L/M/S isolation',
+    '[6] Persistent physics + C3 boundary lifecycle',
 }
 
 local rainStateUpdateParams = {
@@ -644,6 +651,10 @@ local rainStateUpdateParams = {
         gRainStateC2Isolation = 0.0,
         gRainStateC2Force = vec2(1.5, 0.0),
         gRainStateC2AdhesionBase = 1.2,
+        gRainStateLifecycle = 0.0,
+        gRainStateBoundaryMargin = 0.005,
+        gRainStateRespawnGapMin = 0.15,
+        gRainStateRespawnGapMax = 0.75,
         -- Reserved. Persistent air drag is not applied until its velocity-relative model is integrated.
         gRainStateUseAirDrag = 0.0,
     },
@@ -886,18 +897,30 @@ local rainStateUpdateParams = {
         {
             /*
                 Persistent state coordinates are normalized surface coordinates.
-                Do not wrap with frac(): wrapping would teleport a droplet from
-                one visor edge to the opposite edge. Lifecycle/exit handling
-                will own the final boundary behavior.
-
-                Until lifecycle is implemented, clamp the position so boundary
-                handling remains deterministic without a false discontinuity.
+                C3 does not wrap with frac(): lifecycle owns edge exit.
+                Clamp remains only as a numerical guard for an alive state.
             */
             return clamp(
                 position
                 + velocity * dt,
                 0.0,
                 1.0
+            );
+        }
+
+        float2 rainStateRespawnPosition(
+            float stateIndex,
+            float respawnCycle
+        )
+        {
+            float seed =
+                stateIndex
+                + respawnCycle * 17.123
+                + 911.731;
+
+            return float2(
+                rainStateHash(seed + 13.0),
+                rainStateHash(seed + 47.0)
             );
         }
 
@@ -1089,6 +1112,41 @@ local rainStateUpdateParams = {
             float mass = max(meta.g, 1.0);
             float dt = max(gRainStateDeltaTime, 0.0);
 
+            /*
+                C3 lifecycle flags in Meta.A:
+                    0 = dead / waiting for respawn gap
+                    1 = alive
+                    2 = respawn pending; consume on this state pass
+
+                Meta.B remains age. Meta.C is the deterministic respawn cycle.
+            */
+            if (gRainStateLifecycle > 0.5)
+            {
+                if (meta.a > 1.5)
+                {
+                    float2 respawn =
+                        rainStateRespawnPosition(
+                            index,
+                            meta.c
+                        );
+
+                    return float4(
+                        respawn,
+                        0.0,
+                        0.0
+                    );
+                }
+
+                if (meta.a < 0.5)
+                {
+                    return float4(
+                        p,
+                        0.0,
+                        0.0
+                    );
+                }
+            }
+
             if (gRainStatePhysics > 0.5) {
                 return rainStateUpdatePhysics(
                     p,
@@ -1139,12 +1197,19 @@ local rainStateDebugOriginUpdateParams = {
 }
 
 local rainStateMetaUpdateParams = {
-    textures = { txRainStateMeta = false },
+    textures = {
+        txRainStateMeta = false,
+        txRainState = false,
+    },
     values = {
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
         gRainStateInit = 0.0,
         gRainStateTestGrid = 0.0,
+        gRainStateLifecycle = 0.0,
+        gRainStateBoundaryMargin = 0.005,
+        gRainStateRespawnGapMin = 0.15,
+        gRainStateRespawnGapMax = 0.75,
     },
 
     shader = [[
@@ -1191,13 +1256,110 @@ local rainStateMetaUpdateParams = {
                 float r01 = rainStateHash(index + 101.0);
                 float radius = lerp(0.032, 0.115, r01);
                 float mass = lerp(1.0, 9.0, r01 * r01);
+
                 return float4(radius, mass, 0.0, 1.0);
             }
 
             float4 meta = txRainStateMeta.SampleLevel(
                 samPointRainMeta, suv, 0.0
             );
-            meta.b += max(gRainStateDeltaTime, 0.0);
+
+            float dt = max(gRainStateDeltaTime, 0.0);
+
+            if (gRainStateLifecycle > 0.5)
+            {
+                if (meta.a > 1.5)
+                {
+                    /*
+                        Consume the pending respawn. Meta.C was incremented
+                        when the previous life exited, so the state shader
+                        can use it as the respawn seed.
+                    */
+                    meta.a = 1.0;
+                    meta.b = 0.0;
+
+                    float r01 = rainStateHash(
+                        index
+                        + meta.c * 17.123
+                        + 101.0
+                    );
+
+                    float radius = lerp(
+                        0.032,
+                        0.115,
+                        r01
+                    );
+
+                    float radius01 = saturate(
+                        (radius - 0.032)
+                        / (0.115 - 0.032)
+                    );
+
+                    meta.r = radius;
+                    meta.g = lerp(
+                        1.0,
+                        9.0,
+                        radius01 * radius01
+                    );
+
+                    return meta;
+                }
+
+                if (meta.a < 0.5)
+                {
+                    meta.b += dt;
+
+                    float gap01 = rainStateHash(
+                        index
+                        + meta.c * 13.37
+                        + 701.0
+                    );
+
+                    float respawnGap = lerp(
+                        gRainStateRespawnGapMin,
+                        gRainStateRespawnGapMax,
+                        gap01
+                    );
+
+                    if (meta.b >= respawnGap)
+                    {
+                        meta.b = 0.0;
+                        meta.c += 1.0;
+                        meta.a = 2.0;
+                    }
+
+                    return meta;
+                }
+
+                float4 state = txRainState.SampleLevel(
+                    samPointRainMeta,
+                    suv,
+                    0.0
+                );
+
+                float2 p = state.rg;
+                float2 v = state.ba;
+                float2 predicted = p + v * dt;
+                float margin = saturate(
+                    gRainStateBoundaryMargin
+                );
+
+                bool exits =
+                    predicted.x < margin
+                    || predicted.x > (1.0 - margin)
+                    || predicted.y < margin
+                    || predicted.y > (1.0 - margin);
+
+                if (exits)
+                {
+                    meta.a = 0.0;
+                    meta.b = 0.0;
+                    meta.c += 1.0;
+                    return meta;
+                }
+            }
+
+            meta.b += dt;
             return meta;
         }
     ]],
@@ -4071,6 +4233,14 @@ local function initializeRainGPUState()
     )
     rainStateUpdateParams.values.gRainStateC2AdhesionBase =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
+    rainStateUpdateParams.values.gRainStateLifecycle =
+        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateBoundaryMargin =
+        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
+    rainStateUpdateParams.values.gRainStateRespawnGapMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
+    rainStateUpdateParams.values.gRainStateRespawnGapMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
     rainStateUpdateParams.values.gRainStatePhysics = 0.0
     rainStateUpdateParams.values.gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN
     rainStateUpdateParams.values.gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
@@ -4084,7 +4254,16 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
         and 1.0
         or 0.0
+    rainStateMetaUpdateParams.values.gRainStateLifecycle =
+        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+    rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
+        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
+    rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
+    rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
     rainStateMetaUpdateParams.textures.txRainStateMeta = false
+    rainStateMetaUpdateParams.textures.txRainState = false
 
     rainStateA:updateWithShader(rainStateUpdateParams)
     rainStateB:updateWithShader(rainStateUpdateParams)
@@ -4227,6 +4406,15 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainObjectToWorld =
         transform
 
+    rainStateUpdateParams.values.gRainStateLifecycle =
+        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateBoundaryMargin =
+        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
+    rainStateUpdateParams.values.gRainStateRespawnGapMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
+    rainStateUpdateParams.values.gRainStateRespawnGapMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+
     rainStateUpdateParams.values.gRainStatePhysics =
         physicsMode and 1.0 or 0.0
 
@@ -4263,6 +4451,14 @@ local function updateRainGPUState(sim)
 
     rainStateMetaUpdateParams.values.gRainStateDeltaTime =
         math.min(dt, 0.05)
+    rainStateMetaUpdateParams.values.gRainStateLifecycle =
+        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0
+    rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
+        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
+    rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
+    rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
 
     local readState =
         rainStateReadIsA and rainStateA or rainStateB
@@ -4280,6 +4476,7 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.textures.txRainStateMeta = readMeta
     rainStateUpdateParams.textures.txRainSurfaceNormal = textureRainSurfaceNormal
     rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
+    rainStateMetaUpdateParams.textures.txRainState = readState
 
     writeState:updateWithShader(rainStateUpdateParams)
     writeMeta:updateWithShader(rainStateMetaUpdateParams)
