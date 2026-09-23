@@ -691,6 +691,8 @@ local rainStateUpdateParams = {
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
         ),
+        gRainStateSingleDropX = cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+        gRainStateSingleDropY = cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y,
     },
 
     shader = [[
@@ -1179,6 +1181,9 @@ local rainStateUpdateParams = {
             float2 suv = float2((index + 0.5) / count, 0.5);
 
             if (gRainStateInit > 0.5) {
+
+                //float2 singleDropPosition = float2(gRainStateSingleDropX, gRainStateSingleDropY);
+
                 if (gRainStateSingleDropTest > 0.5) {
                     return float4(gRainStateSingleDropPosition, 0.0, 0.0);
                 }
@@ -1401,11 +1406,16 @@ local rainStateMetaUpdateParams = {
             float count = max(gRainStateCount, 1.0);
             float index = min(floor(pin.Tex.x * count), count - 1.0);
             float2 suv = float2((index + 0.5) / count, 0.5);
+            
+            float4 singdroptest = float4(0.0735, 3.0, 0.0, 1.0);
 
             if (gRainStateInit > 0.5) {
+                
+
                 if (gRainStateSingleDropTest > 0.5) {
-                    return float4(0.0735, 3.0, 0.0, 1.0);
+                    // cause crashing if returning anything here
                 }
+
 
                 /*
                     Meta initialization intentionally does not consume
@@ -4350,14 +4360,7 @@ end
 --------------------------------------------------------
 
 local function initializeRainGPUState()
-    if
-        rainStateA
-        and rainStateB
-        and rainStateMetaA
-        and rainStateMetaB
-        and rainStateDebugOrigin
-        and rainStateInitialized
-    then
+    if rainStateA and rainStateB then
         return true
     end
 
@@ -4446,6 +4449,11 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
     )
+    rainStateUpdateParams.values.gRainStateSingleDropX = 
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X
+    rainStateUpdateParams.values.gRainStateSingleDropY = 
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+    
     rainStateUpdateParams.values.gRainStateLifecycle =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
         and 0.0
@@ -4517,10 +4525,11 @@ end
 
 local function updateRainGPUState(sim)
     if rainStateSingleDropDirty then
-        -- Do not discard ExtraCanvas objects here. Reallocating five GPU
-        -- canvases on every slider change can accumulate GPU resources and
-        -- can destabilize CSP. Keep the existing canvases and rerun the
-        -- initialization shader into them.
+        rainStateA = nil
+        rainStateB = nil
+        rainStateMetaA = nil
+        rainStateMetaB = nil
+        rainStateDebugOrigin = nil
         rainStateInitialized = false
         rainStateReadIsA = true
         rainStateLastFrame = -1
@@ -4673,6 +4682,11 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
         cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
     )
+    rainStateUpdateParams.values.gRainStateSingleDropX = 
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X
+    rainStateUpdateParams.values.gRainStateSingleDropY = 
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+    
 
     rainStateUpdateParams.values.gRainStateTestGrid =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
