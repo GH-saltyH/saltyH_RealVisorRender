@@ -14,7 +14,11 @@ This is a physics correction, not a visualization multiplier. It removes an arch
 
 This change should be validated in-game for displacement, radius/mass ordering, adhesion behavior, and stability before any further parameter tuning.
 
-## 13. What does not need further investigation right now\n\nDo not repeatedly pursue large-scale artificial experiments merely to prove exact tangent equivalence.\nA theoretical experiment requiring an effectively flat, enormous reference surface and hundreds of repeated identical turns is not an efficient validation method for this project's actual goal.\n\nThe project does not require research-lab fluid dynamics.\n\nThe acceptance criterion is:\n\n> Does the droplet move, accelerate, adhere, bend with the visor surface, respond to vehicle motion, and eventually flow in a way that looks physically believable at game-view scale?\n\nIf the answer is yes, preserve the model unless a concrete visual/physical failure is observed.\n\n## 14. Engineering rules\n\n1. Preserve validated behavior when refactoring.\n2. Do not mix visualization scale with physics.\n3. Do not silently change coordinate conventions.\n4. Do not reintroduce saturate(pin.Tex) for the visor normal lookup.\n5. Do not enable air drag before relative droplet/air velocity is modeled.\n6. Do not replace the current tangent solely because a diagnostic frame differs from mesh UV tangent.\n7. Keep the procedural rainDropLayer() comparison path available.\n8. Treat each state texel as an independent droplet identity.\n9. Prefer simple stable approximations over unnecessary fluid-dynamics complexity.\n10. When a change affects physical behavior, record the reason and the observed result.\n11. Record important debugging discoveries in this document so later refactors do not repeat discarded hypotheses.\n12. Physics and rendering must remain separable.\n\n## 15. Current repository state\n\nRepository: GH-saltyH/saltyH_RealVisorRender\nActive branch: feature-RainFXPersistentGPU\nLatest implementation commit: ebda6e9f39f369ab23107faee4a7d2ba7dfc0b0b\n\nRelevant files:\n- realvisor.lua\n- shaders/rainVisorScreen.hlsl\n- texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds\n- texture/drops.dds\n\nRecent architectural commits:\n- 389c02b6ba35f04f8c103c730377335f82bf6445 — persistent physics consolidation\n- e527bfe1cd95d6b13a167fb40250d45f2c4e5a70 — calibrated persistent droplet renderer\n- af2ed00beb1250204f18fdbe5e7b4b982295a1 — Debug 37 tangent-frame comparison\n\n## 17. 2026-09-23 validation result: STATE_MODE 4 / Debug 36
+## 13. What does not need further investigation right now\n\nDo not repeatedly pursue large-scale artificial experiments merely to prove exact tangent equivalence.\nA theoretical experiment requiring an effectively flat, enormous reference surface and hundreds of repeated identical turns is not an efficient validation method for this project's actual goal.\n\nThe project does not require research-lab fluid dynamics.\n\nThe acceptance criterion is:\n\n> Does the droplet move, accelerate, adhere, bend with the visor surface, respond to vehicle motion, and eventually flow in a way that looks physically believable at game-view scale?\n\nIf the answer is yes, preserve the model unless a concrete visual/physical failure is observed.\n\n## 14. Engineering rules\n\n1. Preserve validated behavior when refactoring.\n2. Do not mix visualization scale with physics.\n3. Do not silently change coordinate conventions.\n4. Do not reintroduce saturate(pin.Tex) for the visor normal lookup.\n5. Do not enable air drag before relative droplet/air velocity is modeled.\n6. Do not replace the current tangent solely because a diagnostic frame differs from mesh UV tangent.\n7. Keep the procedural rainDropLayer() comparison path available.\n8. Treat each state texel as an independent droplet identity.\n9. Prefer simple stable approximations over unnecessary fluid-dynamics complexity.\n10. When a change affects physical behavior, record the reason and the observed result.\n11. Record important debugging discoveries in this document so later refactors do not repeat discarded hypotheses.\n12. Physics and rendering must remain separable.\n\n## 15. Current repository state\n\nRepository: GH-saltyH/saltyH_RealVisorRender\nActive branch: feature-RainFXPersistentGPU\nLatest implementation commits before this documentation update:
+- 72731558888385fb3373b2223320b163f941dcc4 — document C3 state mode
+- 82d61c643675b7dff1994d97d1eae4bbcdf7944a — enable C3 validation debug mode
+- aa1a2651c3004d1868750086a33022b4804136f5 — C3 lifecycle debug renderer
+- e7e97b7895507b3b1e236a336f249ce23c709c9f — persistent C3 boundary/death/respawn implementation\n\nRelevant files:\n- realvisor.lua\n- shaders/rainVisorScreen.hlsl\n- texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds\n- texture/drops.dds\n\nRecent architectural commits:\n- 389c02b6ba35f04f8c103c730377335f82bf6445 — persistent physics consolidation\n- e527bfe1cd95d6b13a167fb40250d45f2c4e5a70 — calibrated persistent droplet renderer\n- af2ed00beb1250204f18fdbe5e7b4b982295a1 — Debug 37 tangent-frame comparison\n\n## 17. 2026-09-23 validation result: STATE_MODE 4 / Debug 36
 
 Current in-game observation:
 - L/M/S drops remain persistent during long tests and do not respawn at their original point.
@@ -66,8 +70,41 @@ Force 1.50 therefore places all three above threshold while preserving a clear e
 
 Debug 38 shows actual persistent displacement from the common physical origin and the current velocity direction/magnitude. S/M/L are separated only for visibility.
 
-### C3 — Boundary behavior
-Replace temporary position clamping with explicit surface exit -> death -> respawn. Never wrap a droplet to the opposite edge.
+Observed controlled test on 2026-09-23:
+- 60 s: red/blue ≈ 4 cm, yellow ≈ 2.5 cm;
+- 120 s: red/blue ≈ 8.3 cm, yellow ≈ 5.3 cm;
+- 240 s: red/blue ≈ 18.5 cm, yellow ≈ 11 cm;
+- 300 s: red/blue ≈ 19.4 cm, yellow ≈ 14.7 cm;
+- 360 s: red/blue ≈ 19.4 cm, yellow ≈ 17.1 cm;
+- 420 s: red/blue ≈ 19.4 cm, yellow ≈ 19.4 cm;
+- 450 s: red/blue ≈ 19.4 cm, yellow ≈ 19.4 cm.
+
+The leading states stopped at the same approximately 19.4 cm monitor distance before the slower state caught up. This is consistent with the temporary normalized-position clamp/boundary, so the observation is treated as evidence that the mass/adhesion ordering is functioning, not as evidence that the physical speed reaches a hard 19.4 cm limit.
+
+### C3 — Boundary behavior — IMPLEMENTED
+
+The temporary clamp remains only as a numerical guard for an alive state. Explicit lifecycle ownership now handles the visor edge:
+
+spawn -> alive -> boundary exit -> dead/waiting -> respawn pending -> new spawn
+
+Implementation details:
+- no `frac(position)` wraparound;
+- normalized state coordinates remain the physics domain;
+- Meta.A lifecycle flag: 0 = dead/waiting, 1 = alive, 2 = respawn pending;
+- Meta.B remains age;
+- Meta.C is a deterministic respawn-cycle counter used to decorrelate repeated respawns;
+- boundary detection uses the predicted persistent position and a configurable normalized margin;
+- a dead drop is hidden by the renderer while waiting for its respawn gap;
+- respawn position and radius are deterministically re-hashed per state and respawn cycle;
+- unrelated state entries continue through the same A/B ping-pong path.
+
+Initial C3 parameters:
+- boundary margin = 0.005 normalized state units;
+- respawn gap = 0.15..0.75 seconds;
+- STATE_MODE = 6;
+- Debug = 39.
+
+This is an architectural lifecycle implementation, not yet a visual acceptance result. The next in-game test must verify that drops actually disappear at the visor boundary, remain absent briefly, and return at a different valid location without cross-edge teleportation.
 
 ### D1 — Lifecycle
 Implement spawn -> attached -> threshold -> flowing -> exit/death -> respawn. Verify that each drop keeps its identity until death and respawn does not disturb unrelated state.
