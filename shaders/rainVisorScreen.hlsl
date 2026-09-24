@@ -4841,12 +4841,24 @@ float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
 
 float4 rainPersistentLifecycleTexelProbeDebugOutput(PS_IN pin)
 {
-    /* Debug 43: fill the entire visor from exactly one persistent Meta texel. */
+    /*
+        Debug 43 / single-texel lifecycle probe.
+
+        Background: alpha 0.5
+        Selected texel marker: alpha 1.0
+
+        This keeps the full-area lifecycle state visible while also showing
+        exactly where the selected persistent particle is currently located.
+    */
     float count = max(gRainStateCount, 1.0);
     float2 stateUV = float2(0.5 / count, 0.5);
-    float a = txRainStateMeta.SampleLevel(samPointRain, stateUV, 0.0).a;
 
+    float4 meta = txRainStateMeta.SampleLevel(samPointRain, stateUV, 0.0);
+    float2 position = txRainState.SampleLevel(samPointRain, stateUV, 0.0).rg;
+
+    float a = meta.a;
     float3 color;
+
     if (abs(a - 0.0) < 0.25)
         color = float3(0.0, 0.0, 0.0);
     else if (abs(a - 1.0) < 0.25)
@@ -4856,23 +4868,41 @@ float4 rainPersistentLifecycleTexelProbeDebugOutput(PS_IN pin)
     else
         color = float3(1.0, 0.0, 0.0);
 
-    return float4(color, 1.0);
+    float radius01 = saturate((meta.r - 0.032) / (0.115 - 0.032));
+    float radius = lerp(0.008, 0.016, radius01);
+    float marker = 1.0 - smoothstep(
+        radius * 0.35,
+        radius,
+        length(pin.Tex - position)
+    );
+
+    return float4(color, lerp(0.5, 1.0, marker));
 }
 
 
 float4 rainPersistentLifecycleTexelMapDebugOutput(PS_IN pin)
 {
     /*
-        Debug 44: one screen-space horizontal band maps to one physical
-        persistent texel. This makes the multi-particle lifecycle state
-        visible without relying on particle screen positions.
+        Debug 44 / physical texel lifecycle map.
+
+        Background alpha: 0.5
+        Active texel region alpha: 1.0
+
+        Every horizontal band represents one physical Meta texel. The
+        particle position is additionally drawn as an opaque marker inside
+        its corresponding texel band, so lifecycle state and actual State
+        position can be observed simultaneously.
     */
     float count = max(gRainStateCount, 1.0);
     float index = min(floor(pin.Tex.x * count), count - 1.0);
     float2 stateUV = float2((index + 0.5) / count, 0.5);
-    float a = txRainStateMeta.SampleLevel(samPointRain, stateUV, 0.0).a;
 
+    float4 meta = txRainStateMeta.SampleLevel(samPointRain, stateUV, 0.0);
+    float2 position = txRainState.SampleLevel(samPointRain, stateUV, 0.0).rg;
+
+    float a = meta.a;
     float3 color;
+
     if (abs(a - 0.0) < 0.25)
         color = float3(0.0, 0.0, 0.0);
     else if (abs(a - 1.0) < 0.25)
@@ -4882,7 +4912,15 @@ float4 rainPersistentLifecycleTexelMapDebugOutput(PS_IN pin)
     else
         color = float3(1.0, 0.0, 0.0);
 
-    return float4(color, 1.0);
+    float radius01 = saturate((meta.r - 0.032) / (0.115 - 0.032));
+    float radius = lerp(0.008, 0.016, radius01);
+    float marker = 1.0 - smoothstep(
+        radius * 0.35,
+        radius,
+        length(pin.Tex - position)
+    );
+
+    return float4(color, lerp(0.5, 1.0, marker));
 }
 
 
