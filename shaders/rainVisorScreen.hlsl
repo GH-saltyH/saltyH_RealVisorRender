@@ -4761,10 +4761,16 @@ float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
           yellow = respawn pending (Meta.A = 2)
           black/transparent = dead/waiting (Meta.A = 0)
 
-        The position itself is not used to decide the lifecycle color.
-        This test exists specifically to determine whether Debug 41's
-        boundary decision is actually committed into the persistent Meta
-        texture.
+        The authoritative boundary mask is sampled here as well.
+        This lets the test distinguish:
+          - valid + alive      = cyan
+          - outside + alive    = red  (boundary decision was NOT committed)
+          - dead/waiting       = black/transparent
+          - respawn pending    = yellow
+
+        This deliberately combines the same mask decision used by Debug 41
+        with the persistent Meta state, so the writeback can be validated
+        without losing the boundary context.
     */
     float count = max(gRainStateCount, 1.0);
     float result = 0.0;
@@ -4794,6 +4800,8 @@ float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
             0.0
         ).rg;
 
+        float currentMask = rainStateBoundaryMask(statePosition);
+
         float radius01 = saturate(
             (meta.r - 0.032) / (0.115 - 0.032)
         );
@@ -4818,6 +4826,8 @@ float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
                 resultColor = float3(0.0, 0.0, 0.0);
             else if (meta.a > 1.5)
                 resultColor = float3(1.0, 0.85, 0.10);
+            else if (currentMask < 0.5)
+                resultColor = float3(1.0, 0.0, 0.0);
             else
                 resultColor = float3(0.25, 0.95, 1.0);
         }
