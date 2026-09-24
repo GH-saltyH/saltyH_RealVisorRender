@@ -311,7 +311,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = C2 controlled L/M/S isolation
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
-        RAIN_GPU_STATE_MODE = 5,
+        RAIN_GPU_STATE_MODE = 8,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -352,6 +352,14 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_C2_FORCE_X = 0.500,
         RAIN_GPU_STATE_C2_FORCE_Y = 0.000,
         RAIN_GPU_STATE_C2_ADHESION_BASE = 1.200,
+
+        -- Gravity reference model for persistent C2 validation.
+        -- AC StateSim.gravity is normally about -9.81 m/s².
+        -- The gain converts physical gravity magnitude into the compact
+        -- persistent-force space. Default preserves the existing 0.35 gravity input.
+        RAIN_GPU_STATE_GRAVITY_REFERENCE = 9.81,
+        RAIN_GPU_STATE_GRAVITY_GAIN = 0.03567788,
+        RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER = 1.0,
 
         RAIN_GPU_STATE_DRAG = 0.35,
         RAIN_GPU_STATE_MAX_SPEED = 0.12,
@@ -647,6 +655,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[5] Persistent physics + C2 controlled L/M/S isolation',
     '[6] Persistent physics + C3 boundary lifecycle',
     '[7] Single persistent droplet position probe',
+    '[8] Persistent C2 gravity-derived L/M/S test',
 }
 
 local rainStateUpdateParams = {
@@ -685,6 +694,8 @@ local rainStateUpdateParams = {
         gRainStateC2Isolation = 0.0,
         gRainStateC2Force = vec2(1.5, 0.0),
         gRainStateC2AdhesionBase = 1.2,
+        gRainStateC2UseGravity = 0.0,
+        gRainStateC2GravityMultiplier = 1.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -4363,7 +4374,7 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
@@ -4440,6 +4451,10 @@ local function initializeRainGPUState()
     )
     rainStateUpdateParams.values.gRainStateC2AdhesionBase =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
+    rainStateUpdateParams.values.gRainStateC2UseGravity =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
     rainStateUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
@@ -4592,7 +4607,7 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
@@ -4627,8 +4642,26 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateUVScale =
         cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE
 
+    local stateSimGravity =
+        ac.StateSim
+        and ac.StateSim.gravity
+        or -cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_REFERENCE
+
+    local gravityMagnitude =
+        math.abs(stateSimGravity)
+
+    local gravityReference =
+        math.max(
+            cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_REFERENCE,
+            0.000001
+        )
+
+    local gravityGain =
+        cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN
+
     rainStateUpdateParams.values.gRainStateGravity =
-        cfg.RUNTIME.RAIN_GRAVITY
+        gravityMagnitude
+        * gravityGain
 
     rainStateUpdateParams.values.gRainStateForceScale =
         cfg.RUNTIME.RAIN_FORCE_SCALE
@@ -4707,6 +4740,10 @@ local function updateRainGPUState(sim)
     )
     rainStateUpdateParams.values.gRainStateC2AdhesionBase =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
+    rainStateUpdateParams.values.gRainStateC2UseGravity =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
+        cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
 
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(
@@ -4714,7 +4751,7 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
@@ -5108,7 +5145,7 @@ render.on('main.track.transparent', function()
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
@@ -7421,10 +7458,10 @@ function windowMain(dt)
         if cfg.RUNTIME.RAIN_DEBUG == 47 then
             ui.separator()
             ui.text('Debug 47: C2 adhesion threshold / actual persistent movement')
-            ui.text('Mode 5 only. Left/center/right bands = small/medium/large mass (1/3/9).')
+            ui.text('Mode 5: manual C2 force. Mode 8: AC StateSim.gravity-derived C2 force.')
             ui.text('White = actual persistent velocity, black = effectively stationary.')
-            ui.text('Expected adhesion thresholds at base 1.20: small=1.20, medium=0.693, large=0.400.')
-            ui.text('Set C2_FORCE_X to 0.50 -> large only; 0.80 -> medium+large; 1.30 -> all three.')
+            ui.text('Mode 8 uses |ac.StateSim.gravity| as the physical reference and converts it with GRAVITY_GAIN.')
+            ui.text('Default gain maps 9.81 m/s² to the existing compact gravity magnitude 0.35.')
         end
 
     end
