@@ -1525,29 +1525,56 @@ local rainStateMetaUpdateParams = {
                     meta.a = 1.0;
                     meta.b = 0.0;
 
-                    float r01 = rainStateHash(
-                        index
-                        + respawnSeed * 17.123
-                        + 101.0
-                    );
+                    if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                    {
+                        float profile = floor(index / 3.0);
+                        float slot = index - profile * 3.0;
+                        float diameterMM;
 
-                    float radius = lerp(
-                        0.032,
-                        0.115,
-                        r01
-                    );
+                        if (profile < 0.5)
+                            diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
+                        else if (profile < 1.5)
+                            diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
+                        else
+                            diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
 
-                    float radius01 = saturate(
-                        (radius - 0.032)
-                        / (0.115 - 0.032)
-                    );
+                        meta.r = lerp(0.032, 0.115, saturate((diameterMM - 0.5) / 5.5));
 
-                    meta.r = radius;
-                    meta.g = lerp(
-                        1.0,
-                        9.0,
-                        radius01 * radius01
-                    );
+                        float volumeMin = 0.5 * 0.5 * 0.5;
+                        float volumeMax = 6.0 * 6.0 * 6.0;
+                        float volume = diameterMM * diameterMM * diameterMM;
+                        meta.g = lerp(
+                            1.0,
+                            9.0,
+                            saturate((volume - volumeMin) / (volumeMax - volumeMin))
+                        );
+                    }
+                    else
+                    {
+                        float r01 = rainStateHash(
+                            index
+                            + respawnSeed * 17.123
+                            + 101.0
+                        );
+
+                        float radius = lerp(
+                            0.032,
+                            0.115,
+                            r01
+                        );
+
+                        float radius01 = saturate(
+                            (radius - 0.032)
+                            / (0.115 - 0.032)
+                        );
+
+                        meta.r = radius;
+                        meta.g = lerp(
+                            1.0,
+                            9.0,
+                            radius01 * radius01
+                        );
+                    }
 
                     return meta;
                 }
