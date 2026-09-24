@@ -300,7 +300,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 1,
+        RAIN_GPU_STATE_COUNT = 9,
 
         -- Persistent state:
         -- 0 = disabled
@@ -312,7 +312,7 @@ local cfg = scriptSettings:mapConfig({
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
         -- 8 = C2 gravity-derived L/M/S momentum validation
-        RAIN_GPU_STATE_MODE = 8,
+        RAIN_GPU_STATE_MODE = 9,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -7490,7 +7490,8 @@ function windowMain(dt)
         ui.text('Diameters: L 0.5/0.95/2.0 mm | M 0.5/1.5/4.0 mm | H 0.5/2.5/6.0 mm')
     end
 
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 then
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 
+        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 then
         ui.separator()
         ui.text('C2 gravity test: |ac.getSim().gravity| -> compact force -> adhesion -> velocity')
         ui.text('Reference: 9.81 m/s². Default gain maps 9.81 -> 0.35 compact force.')
@@ -7499,7 +7500,7 @@ function windowMain(dt)
             'GRAVITY_GAIN',
             cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN,
             0.001,
-            0.300,
+            1.000,
             '%.5f'
         )
         if gravityGainChanged then

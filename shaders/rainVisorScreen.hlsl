@@ -4972,7 +4972,7 @@ float4 rainPersistentCSPPhysicalNineDropDebugOutput(PS_IN pin)
     }
 
     float anyMoving = 0.0;
-    float point = 0.0;
+    float fpoint = 0.0;
     float3 pointColor = float3(1.0, 0.15, 0.65);
 
     [loop]
@@ -5016,15 +5016,15 @@ float4 rainPersistentCSPPhysicalNineDropDebugOutput(PS_IN pin)
             distanceToDrop
         );
 
-        if (marker > point)
-            point = marker;
+        if (marker > fpoint)
+            fpoint = marker;
     }
 
-    if (point > 0.0)
+    if (fpoint > 0.0)
     {
         return float4(
             pointColor,
-            saturate(point)
+            saturate(fpoint)
         );
     }
 
