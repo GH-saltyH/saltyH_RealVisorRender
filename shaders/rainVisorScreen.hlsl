@@ -4907,12 +4907,16 @@ float4 rainPersistentC2SixPanelVelocityDebugOutput(PS_IN pin)
         return float4(0.10, 0.10, 0.10, 1.0);
     }
 
-    float row = min(
-        floor(saturate(pin.Tex.y + 1.0) * 3.0),
-        2.0
+    float col6 = min(
+        floor(saturate(pin.Tex.x) * 6.0),
+        5.0
     );
 
-    float stateUVX = (row + 0.5) / 3.0;
+    // Col 0,1 -> index 0 (Small)
+    // Col 2,3 -> index 1 (Medium)
+    // Col 4,5 -> index 2 (Large)
+    float stateIndex = floor(col6 / 2.0);
+    float stateUVX = (stateIndex + 0.5) / 3.0;
 
     float2 velocity = txRainState.SampleLevel(
         samPointRain,
@@ -4927,15 +4931,14 @@ float4 rainPersistentC2SixPanelVelocityDebugOutput(PS_IN pin)
         speed * max(gRainStateDebugVelocityScale, 0.000001)
     );
 
-    if (pin.Tex.x < 0.5)
-    {
-        return float4(moving, moving, moving, 1.0);
-    }
+    float isVelocityCol = step(1.0, fmod(col6, 2.0));
+
+    float finalValue = lerp(moving, velocityValue, isVelocityCol);
 
     return float4(
-        velocityValue,
-        velocityValue,
-        velocityValue,
+        finalValue,
+        finalValue,
+        finalValue,
         1.0
     );
 }

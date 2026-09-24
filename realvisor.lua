@@ -7385,7 +7385,7 @@ function windowMain(dt)
             'GRAVITY_GAIN',
             cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN,
             0.001,
-            0.100,
+            0.300,
             '%.5f'
         )
         if gravityGainChanged then
