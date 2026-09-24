@@ -4532,6 +4532,8 @@ local function initializeRainGPUState()
         (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9) and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
+    rainStateUpdateParams.values.gRainStatePhysicalTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
@@ -4559,6 +4561,8 @@ local function initializeRainGPUState()
 
     rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateInit = 1.0
+    rainStateMetaUpdateParams.values.gRainStatePhysicalTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 and 1.0 or 0.0
     rainStateMetaUpdateParams.values.gRainStateTestGrid =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
