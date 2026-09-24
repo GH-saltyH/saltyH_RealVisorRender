@@ -384,7 +384,8 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 47,
+        -- 49 = C2 six-panel movement + velocity diagnostic
+        RAIN_DEBUG = 49,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = -0.5,
@@ -647,7 +648,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[45] Direct State RG + Boundary Mask diagnostic',
     '[46] Boundary Mask only (selected State texel)',
     '[47] C2 adhesion threshold / actual movement',
-    '[48] C2 persistent velocity magnitude'
+    '[48] C2 persistent velocity magnitude',
+    '[49] C2 six-panel movement + velocity'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
