@@ -157,3 +157,15 @@ Colors:
 The Lua allocation path was verified: `ui.ExtraCanvas(vec2(count, 1), ...)` allocates the persistent State/Meta canvases at exactly `count x 1`. Therefore `COUNT = 1` really is a 1x1 physical canvas, while `COUNT = 128` is a 128x1 physical canvas.
 
 Debug 43/44 use the same point-sampled texel identity convention as the update shaders, so this test does not introduce a separate coordinate mapping.
+
+
+## Debug 43/44 visibility enhancement — background + particle separation
+
+The lifecycle diagnostics now separate the lifecycle field from the particle marker through alpha:
+
+- background / lifecycle field: **alpha 0.5**
+- particle position marker: **alpha 1.0**
+
+Debug 43 still fills the entire visor with the selected texel's lifecycle color, but additionally samples that texel's State position and draws its particle marker at that position. This means the particle remains observable even when it moves outside the valid boundary, while the semi-transparent lifecycle field remains visible behind it.
+
+Debug 44 applies the same principle per texel band: each band shows its Meta.A lifecycle color at alpha 0.5, while the corresponding State position is drawn with alpha 1.0. The lifecycle state and physical position can therefore be distinguished in the same output.
