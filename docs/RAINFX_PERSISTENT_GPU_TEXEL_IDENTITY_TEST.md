@@ -183,8 +183,8 @@ The observed Debug 43 result was a persistent cyan field with no visible particl
 
 Debug 43 alone cannot distinguish between:
 
-1. `Meta.A) remaining alive;
-2. `State.RG) being outside the rendered visor coordinate region;
+1. `Meta.A` remaining alive;
+2. `State.RG` being outside the rendered visor coordinate region;
 3. the boundary mask evaluating the State position as invalid;
 4. the marker simply being outside the visible fragment domain.
 
