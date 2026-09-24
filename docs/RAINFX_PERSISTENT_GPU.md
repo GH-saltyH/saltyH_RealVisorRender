@@ -311,7 +311,8 @@ Debug 49 separates the two observations spatially:
 
 - Left half: movement state, white when persistent velocity is non-zero and black when effectively stationary.
 - Right half: current persistent velocity magnitude as grayscale.
-- Three horizontal rows correspond to C2 indices 0/1/2 (L/M/S).
+- Six vertical strips are used left-to-right: L movement, L velocity, M movement, M velocity, S movement, S velocity.
+- The six-strip layout is a display-only mapping; the persistent state remains three texels.
 
 This allows the test to answer two independent questions at once:
 1. Has the droplet crossed the adhesion gate and actually started moving?
@@ -337,3 +338,73 @@ Run Mode 8 with Debug 49 and compare:
 - whether higher `GRAVITY_GAIN` increases the rate of velocity growth without changing the qualitative mass ordering.
 
 Do not introduce the proposed resting zig-zag/stick-slip behavior until this gravity-to-velocity chain is characterized.
+
+## 22. CSP physical 9-drop reference test — 2026-09-24
+
+The next tuning stage uses direct persistent droplet rendering instead of relying only on binary/grayscale diagnostics.
+
+### 22.1 Fixed CSP-style test population
+
+Mode 9 / Debug 50 creates exactly nine fixed droplets, arranged as three profiles with three diameter samples each:
+
+| Profile | Min | Representative Average/Median | Max |
+|---|---:|---:|---:|
+| Light Rain | 0.5 mm | 0.95 mm | 2.0 mm |
+| Moderate Rain | 0.5 mm | 1.50 mm | 4.0 mm |
+| Heavy Rain | 0.5 mm | 2.50 mm | 6.0 mm |
+
+The representative values 0.95, 1.50 and 2.50 mm are the midpoints of the supplied Average/Median ranges (0.8–1.1, 1.2–1.8 and 2.0–3.0 mm).
+
+The nine positions are fixed across the configured test U range and share the center V of the configured test V range. This intentionally removes spawn-position randomness from the physical comparison.
+
+### 22.2 Diameter -> radius -> mass baseline
+
+The direct test maps 0.5–6.0 mm diameter linearly onto the existing calibrated persistent radius range 0.032–0.115. This is a render-space calibration, not a claim that those UV radii are literal world-space millimetres.
+
+Mass is based on droplet volume, proportional to diameter cubed, then normalized into the current persistent test mass range 1.0–9.0:
+
+mass = lerp(1, 9, (d^3 - 0.5^3) / (6.0^3 - 0.5^3))
+
+This is a deliberately simple physical foundation for tuning. It preserves monotonic mass growth with diameter while remaining compatible with the existing adhesion model. It is not the final real-world mass calibration.
+
+### 22.3 Respawn determinism for this test
+
+Normal production respawn remains randomized.
+
+Mode 9 is different: after lifecycle death and the respawn wait, each of the nine reference droplets restores its own fixed diameter/radius/mass instead of receiving a random radius. Therefore repeated observations at the same gravity gain remain physically comparable across lifecycle cycles.
+
+This was necessary because normal respawn previously randomized radius, which could change mass, adhesion and resulting velocity between repeated observations.
+
+### 22.4 Debug 50 direct visual output
+
+Debug 50 renders the actual persistent droplets directly:
+- pink droplet marker, alpha 1.0;
+- no trail;
+- white background with alpha 0.5 if at least one test droplet has non-zero persistent velocity;
+- fully transparent background when all test droplets are effectively stationary.
+
+The marker uses Meta.R directly, with no diagnostic enlargement multiplier. This is intentionally different from earlier oversized Stage 2 markers.
+
+The purpose is to tune the physical parameters by observing actual droplet size, relative motion, acceleration and lifecycle behavior together.
+
+### 22.5 Measurement criteria
+
+For the nine reference droplets, observe:
+1. onset of motion relative to diameter/mass;
+2. acceleration after the adhesion threshold;
+3. relative travel distance over a fixed observation interval;
+4. whether velocity continues increasing or reaches a stable regime;
+5. whether the same reference droplet behaves consistently after respawn;
+6. whether the visual size ordering remains credible;
+7. whether profile differences remain plausible rather than being dominated by the test-position normal.
+
+Debug 49 remains the internal state instrument and should be used alongside Debug 50 when a visual result needs to be correlated with persistent velocity.
+
+### 22.6 Gravity-gain observations immediately preceding the direct test
+
+Observed with the previous three-drop gravity diagnostic:
+- GRAVITY_GAIN = 0.06443: Left white, velocity display very dark;
+- GRAVITY_GAIN = 0.09564: Right white, velocity display almost black;
+- GRAVITY_GAIN = 0.16217: Middle white, velocity display black.
+
+Because the previous test could randomize radius during normal respawn, these observations should not be interpreted as exact threshold boundaries. The direct nine-drop test removes that confounder.
