@@ -300,7 +300,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 256,
+        RAIN_GPU_STATE_COUNT = 1,
 
         -- Persistent state:
         -- 0 = disabled
@@ -311,7 +311,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = C2 controlled L/M/S isolation
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
-        RAIN_GPU_STATE_MODE = 7,
+        RAIN_GPU_STATE_MODE = 6,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -373,7 +373,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 41,
+        RAIN_DEBUG = 46,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = -0.5,
@@ -4493,7 +4493,8 @@ local function initializeRainGPUState()
     rainStateDebugOrigin:updateWithShader(rainStateDebugOriginUpdateParams)
 
     rainStateUpdateParams.values.gRainStateInit = 0.0
-
+    rainStateMetaUpdateParams.values.gRainStateInit = 0.0
+    
     rainStateReadIsA = true
     rainStateInitialized = true
     rainStateConfiguredMode = cfg.RUNTIME.RAIN_GPU_STATE_MODE
