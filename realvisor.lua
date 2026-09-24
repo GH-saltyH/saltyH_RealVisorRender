@@ -1497,7 +1497,28 @@ local rainStateMetaUpdateParams = {
                 }
 
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
-                    if (c2Isolation)
+                    if (c2Isolation && index < 3.0)
+                    {
+                        const float radiusValues[3] = {
+                            0.032, 0.0735, 0.115
+                        };
+                        float radius = radiusValues[(int)index];
+                        float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
+                        float mass = lerp(1.0, 9.0, radius01 * radius01);
+                        return float4(radius, mass, 0.0, 1.0);
+                    }
+
+                    const float radiusValues[9] = {
+                        0.115, 0.0735, 0.032,
+                        0.0735, 0.032, 0.115,
+                        0.032, 0.115, 0.0735
+                    };
+                    float radius = radiusValues[(int)index];
+                    float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
+                    float mass = lerp(1.0, 9.0, radius01 * radius01);
+                    return float4(radius, mass, 0.0, 1.0);
+                }
+
                 float r01 = rainStateHash(index + 101.0);
                 float radius = lerp(0.032, 0.115, r01);
                 float mass = lerp(1.0, 9.0, r01 * r01);
