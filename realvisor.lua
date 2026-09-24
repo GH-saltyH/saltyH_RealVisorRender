@@ -4423,7 +4423,11 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateCount = count
     rainStateUpdateParams.values.gRainStateInit = 1.0
     rainStateUpdateParams.values.gRainStateTestGrid =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+            or 
+            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
+        )
         and 1.0
         or 0.0
     rainStateUpdateParams.values.gRainStateC2Isolation =
@@ -4464,7 +4468,11 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateInit = 1.0
     rainStateMetaUpdateParams.values.gRainStateTestGrid =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+            or 
+            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
+        )
         and 1.0
         or 0.0
     rainStateMetaUpdateParams.values.gRainStateLifecycle =
@@ -4681,7 +4689,11 @@ local function updateRainGPUState(sim)
     )
 
     rainStateUpdateParams.values.gRainStateTestGrid =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+            or 
+            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
+        )
         and 1.0
         or 0.0
 
