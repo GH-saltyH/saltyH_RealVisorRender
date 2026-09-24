@@ -7404,6 +7404,16 @@ function windowMain(dt)
             ui.text('White = BoundaryMask(State.RG) valid, black = invalid. No normal/State color mixing is used.')
             ui.text('This isolates the mask because the normal texture is black outside the painted visor region.')
         end
+
+        if cfg.RUNTIME.RAIN_DEBUG == 47 then
+            ui.separator()
+            ui.text('Debug 47: C2 adhesion threshold / actual persistent movement')
+            ui.text('Mode 5 only. Left/center/right bands = small/medium/large mass (1/3/9).')
+            ui.text('White = actual persistent velocity, black = effectively stationary.')
+            ui.text('Expected adhesion thresholds at base 1.20: small=1.20, medium=0.693, large=0.400.')
+            ui.text('Set C2_FORCE_X to 0.50 -> large only; 0.80 -> medium+large; 1.30 -> all three.')
+        end
+
     end
 
     --------------------------------------------------------
