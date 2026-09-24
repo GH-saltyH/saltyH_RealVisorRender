@@ -1304,6 +1304,23 @@ local rainStateUpdateParams = {
             {
                 if (meta.a > 1.5)
                 {
+                    if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                    {
+                        float u = lerp(
+                            gRainStateMeshUMin,
+                            gRainStateMeshUMax,
+                            index / 8.0
+                        );
+
+                        return float4(
+                            u,
+                            gRainStateMeshVMin
+                            + (gRainStateMeshVMax - gRainStateMeshVMin) * 0.5,
+                            0.0,
+                            0.0
+                        );
+                    }
+
                     float2 respawn =
                         rainStateRespawnPosition(
                             index,
