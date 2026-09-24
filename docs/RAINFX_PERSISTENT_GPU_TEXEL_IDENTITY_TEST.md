@@ -81,3 +81,51 @@ Restore:
 `RAIN_GPU_STATE_COUNT = 256`
 
 before continuing multi-particle lifecycle/rendering work.
+
+
+## Debug 43 — direct Meta.A texel probe
+
+Debug 42 is intentionally not used as the primary writeback verdict for the single-texel experiment. It still computes a screen-space marker from State position and evaluates the boundary mask.
+
+Debug 43 removes those variables completely.
+
+It samples exactly:
+
+`txRainStateMeta[(0 + 0.5) / gRainStateCount, 0.5]`
+
+and fills the entire visor fragment with a color determined only by `Meta.A`.
+
+Expected colors:
+
+- **cyan** = `Meta.A = 1` (alive)
+- **black** = `Meta.A = 0` (dead/waiting)
+- **yellow** = `Meta.A = 2` (respawn pending)
+- **red** = unexpected Meta.A value
+
+Alpha is always 1.
+
+### Required run
+
+Set:
+
+- `RAIN_GPU_STATE_MODE = 6`
+- `RAIN_GPU_STATE_COUNT = 1`
+- `RAIN_GPU_STATE_LIFECYCLE = true`
+- `RAIN_GPU_STATE_C3_TEST_SPEED = true`
+- `RAIN_DEBUG = 43`
+
+The allocation must be recreated after changing the state count. Restart/reload the app if necessary so the persistent textures are allocated as 1×1.
+
+### Interpretation
+
+This is the primary binary test.
+
+If Debug 43 changes:
+
+`cyan -> black -> yellow -> cyan`
+
+then Meta.A is demonstrably being written and read back through the persistent ping-pong path.
+
+If Debug 41 detects the boundary transition but Debug 43 remains cyan, the failure is downstream/upstream of the boundary decision and cannot be attributed to screen-space marker overlap or boundary-color logic.
+
+Do not tune physics parameters during this test.
