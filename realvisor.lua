@@ -4450,7 +4450,10 @@ local function initializeRainGPUState()
         and 1.0
         or 0.0
     rainStateUpdateParams.values.gRainStateC2Isolation =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+        )
         and 1.0
         or 0.0
     rainStateUpdateParams.values.gRainStateC2Force:set(
@@ -4665,12 +4668,6 @@ local function updateRainGPUState(sim)
 
     local gravityMagnitude =
         math.abs(stateSimGravity)
-
-    local gravityReference =
-        math.max(
-            cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_REFERENCE,
-            0.000001
-        )
 
     local gravityGain =
         cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN
