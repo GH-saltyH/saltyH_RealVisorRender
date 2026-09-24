@@ -4833,6 +4833,47 @@ float4 rainPersistentC2AdhesionMovementDebugOutput(PS_IN pin)
     );
 }
 
+float4 rainPersistentC2VelocityMagnitudeDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 48 / Stage 5-6 gravity momentum measurement.
+
+        Reads the actual persistent velocity of the three C2 droplets.
+        Unlike Debug 47, this does not binarize velocity into black/white.
+        The grayscale value is proportional to speed, so the three bands
+        can be compared directly.
+
+        This diagnostic is intended for Mode 8 with lifecycle disabled or
+        with a sufficiently large valid test region. It measures the
+        current velocity state, not accumulated displacement.
+    */
+    float count = max(gRainStateCount, 1.0);
+
+    if (abs(count - 3.0) > 0.01)
+    {
+        return float4(0.10, 0.10, 0.10, 1.0);
+    }
+
+    float index = min(floor(pin.Tex.x * 3.0), 2.0);
+    float2 stateUV = float2((index + 0.5) / 3.0, 0.5);
+
+    float2 velocity = txRainState.SampleLevel(
+        samPointRain,
+        stateUV,
+        0.0
+    ).ba;
+
+    float speed = length(velocity);
+
+    /*
+        Compact UV velocity can be small. 10x is visualization only.
+        The underlying state remains untouched.
+    */
+    float value = saturate(speed * 10.0);
+
+    return float4(value, value, value, 1.0);
+}
+
 
 float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
 {
@@ -5419,6 +5460,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 47)
     {
         return rainPersistentC2AdhesionMovementDebugOutput(pin);
+    }
+
+    if (gRainDebug == 48)
+    {
+        return rainPersistentC2VelocityMagnitudeDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
