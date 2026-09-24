@@ -4880,6 +4880,78 @@ float4 rainPersistentLifecycleTexelProbeDebugOutput(PS_IN pin)
 }
 
 
+
+float4 rainPersistentLifecycleStateMaskDiagnosticDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 45 / direct persistent-state diagnostic.
+
+        This deliberately does NOT draw the particle at State.RG.
+        It exposes the selected physical texel's three authoritative values
+        even when the particle has moved outside the visible visor region.
+
+        Upper half (V < -0.5):
+          lifecycle field
+            cyan   = Meta.A 1 (alive)
+            black  = Meta.A 0 (dead/waiting)
+            yellow = Meta.A 2 (respawn pending)
+            red    = unexpected value
+
+        Lower half (V >= -0.5):
+          R = State.RG.x encoded as U (0..1)
+          G = State.RG.y encoded from signed V (-1..0) -> 0..1
+          B = BoundaryMask(State.RG)
+
+        Therefore this test directly answers whether the State position,
+        boundary-mask evaluation, and lifecycle metadata refer to the same
+        physical texel.
+    */
+    float count = max(gRainStateCount, 1.0);
+    float2 stateUV = float2(0.5 / count, 0.5);
+
+    float4 meta = txRainStateMeta.SampleLevel(
+        samPointRain,
+        stateUV,
+        0.0
+    );
+
+    float2 position = txRainState.SampleLevel(
+        samPointRain,
+        stateUV,
+        0.0
+    ).rg;
+
+    float currentMask = rainStateBoundaryMask(position);
+
+    float3 lifecycleColor;
+
+    if (meta.a < 0.5)
+        lifecycleColor = float3(0.0, 0.0, 0.0);
+    else if (meta.a > 1.5)
+        lifecycleColor = float3(1.0, 0.85, 0.10);
+    else if (abs(meta.a - 1.0) < 0.25)
+        lifecycleColor = float3(0.25, 0.95, 1.0);
+    else
+        lifecycleColor = float3(1.0, 0.0, 0.0);
+
+    if (pin.Tex.y < -0.5)
+    {
+        return float4(
+            lifecycleColor,
+            1.0
+        );
+    }
+
+    return float4(
+        saturate(position.x),
+        saturate(-position.y),
+        currentMask >= 0.5 ? 1.0 : 0.0,
+        1.0
+    );
+}
+
+
+
 float4 rainPersistentLifecycleTexelMapDebugOutput(PS_IN pin)
 {
     /*
@@ -5202,6 +5274,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 44)
     {
         return rainPersistentLifecycleTexelMapDebugOutput(pin);
+    }
+
+    if (gRainDebug == 45)
+    {
+        return rainPersistentLifecycleStateMaskDiagnosticDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
