@@ -4875,6 +4875,71 @@ float4 rainPersistentC2VelocityMagnitudeDebugOutput(PS_IN pin)
 }
 
 
+float4 rainPersistentC2SixPanelVelocityDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 49 / Stage 5-6 gravity momentum observation.
+
+        The screen is divided into six panels:
+            left  half  = movement state
+            right half  = velocity magnitude
+
+        Rows map to the persistent C2 droplets:
+            top    = index 0 / L
+            middle = index 1 / M
+            bottom = index 2 / S
+
+        Left:
+            white = persistent velocity is present
+            black = effectively stationary
+
+        Right:
+            grayscale = current persistent velocity magnitude.
+            Visualization only; physics/state are not modified.
+
+        This separates "is it moving?" from "how fast is it moving?",
+        making slow acceleration easier to observe than Debug 48.
+    */
+    float count = max(gRainStateCount, 1.0);
+
+    if (abs(count - 3.0) > 0.01)
+    {
+        return float4(0.10, 0.10, 0.10, 1.0);
+    }
+
+    float row = min(
+        floor(saturate(pin.Tex.y + 1.0) * 3.0),
+        2.0
+    );
+
+    float stateUVX = (row + 0.5) / 3.0;
+
+    float2 velocity = txRainState.SampleLevel(
+        samPointRain,
+        float2(stateUVX, 0.5),
+        0.0
+    ).ba;
+
+    float speed = length(velocity);
+    float moving = step(0.00001, speed);
+
+    float velocityValue = saturate(
+        speed * max(gRainStateDebugVelocityScale, 0.000001)
+    );
+
+    if (pin.Tex.x < 0.5)
+    {
+        return float4(moving, moving, moving, 1.0);
+    }
+
+    return float4(
+        velocityValue,
+        velocityValue,
+        velocityValue,
+        1.0
+    );
+}
+
 float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
 {
     /*
@@ -5465,6 +5530,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 48)
     {
         return rainPersistentC2VelocityMagnitudeDebugOutput(pin);
+    }
+
+    if (gRainDebug == 49)
+    {
+        return rainPersistentC2SixPanelVelocityDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
