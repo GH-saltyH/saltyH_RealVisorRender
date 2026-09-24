@@ -630,7 +630,7 @@ local RAIN_DEBUG_OPTIONS = {
     '[39] C3 boundary lifecycle',
     '[40] Boundary Mask',
     '[41] Boundary lifecycle decision',
-    '[42] Lifecycle Meta state probe'
+    '[42] Lifecycle Meta state probe',
     '[43] Lifecycle texel probe + position marker',
     '[44] Physical texel lifecycle map',
     '[45] Direct State RG + Boundary Mask diagnostic'
