@@ -173,6 +173,55 @@ No visual scale multiplier is used to compensate for incorrect physics.
 ## 17. Key conclusion
 The RainFX project is past the initial physics-prototyping stage. The important work now is architectural consolidation: preserve the validated experiments, remove temporary duplication only when equivalent behavior is retained, and connect the persistent physics state to a real visor droplet renderer.
 
+## 19. Lifecycle writeback validation — 2026-09-24
+
+### 19.1 Boundary decision is confirmed
+
+The Debug 41 / mode 7 experiment confirmed that the authoritative boundary decision itself is correct:
+
+- valid mask area remains white;
+- when the mask transitions from 1 -> 0, the predicted lifecycle crossing is detected;
+- the diagnostic reliably turns yellow/red at the crossing;
+- no UV sign conversion or coordinate remapping is required.
+
+Therefore the remaining C3 issue is not boundary sampling.
+
+### 19.2 Debug 39 result
+
+Debug 39 / mode 6 showed:
+
+- droplets are created;
+- flow direction is acceptable;
+- signed UV position integration works;
+- no wrapping or teleporting was observed;
+- however, droplets can remain visibly alive after leaving the mask.
+
+This isolates the remaining problem to lifecycle state writeback/consumption or render-state observation.
+
+### 19.3 Next diagnostic: Debug 42
+
+Debug 42 was added as a metadata-only lifecycle probe:
+
+- cyan = Meta.A = 1 (alive)
+- black/transparent = Meta.A = 0 (dead/waiting)
+- yellow = Meta.A = 2 (respawn pending)
+
+It deliberately does not infer lifecycle state from the boundary mask. Its purpose is to determine whether the Meta.A transition is actually committed to the persistent metadata texture.
+
+### 19.4 Test procedure
+
+Use the accelerated C3 lifecycle validation mode (mode 6) and Debug 42.
+
+Observe one or more drops until they cross the mask boundary.
+
+Expected sequence:
+
+cyan/alive -> black/dead -> remain hidden for respawn gap -> yellow/pending briefly -> cyan at a new valid position
+
+The critical first observation is whether cyan changes to black immediately after Debug 41 reports a boundary crossing.
+
+If Debug 41 crosses but Debug 42 never reaches black, inspect the Meta ping-pong/writeback path before changing physics or coordinates.
+
 ## 18. Coordinate/lifecycle consolidation record — 2026-09-24
 
 The signed `pin.Tex` coordinate discovery is now treated as a project-wide architectural decision, not a debug-only observation.
