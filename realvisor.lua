@@ -364,6 +364,17 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_C2_TEST_DRAG = 0.0,
         RAIN_GPU_STATE_C2_TEST_MAX_SPEED = 1.0,
 
+        -- Mode 9 / Debug 50: CSP physical reference droplets.
+        -- Profiles use Min / representative midpoint of Average-Median range / Max.
+        RAIN_GPU_STATE_PHYSICAL_TEST = true,
+        RAIN_GPU_STATE_PHYSICAL_DIAMETER_MIN_MM = 0.5,
+        RAIN_GPU_STATE_PHYSICAL_DIAMETER_MAX_MM = 6.0,
+        RAIN_GPU_STATE_PHYSICAL_RADIUS_MIN = 0.032,
+        RAIN_GPU_STATE_PHYSICAL_RADIUS_MAX = 0.115,
+        RAIN_GPU_STATE_PHYSICAL_LIGHT_AVG_MM = 0.95,
+        RAIN_GPU_STATE_PHYSICAL_MODERATE_AVG_MM = 1.50,
+        RAIN_GPU_STATE_PHYSICAL_HEAVY_AVG_MM = 2.50,
+
         RAIN_GPU_STATE_DRAG = 0.35,
         RAIN_GPU_STATE_MAX_SPEED = 0.12,
 
@@ -649,7 +660,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[46] Boundary Mask only (selected State texel)',
     '[47] C2 adhesion threshold / actual movement',
     '[48] C2 persistent velocity magnitude',
-    '[49] C2 six-panel movement + velocity'
+    '[49] C2 six-panel movement + velocity',
+    '[50] CSP physical 9-drop reference set'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -662,6 +674,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[6] Persistent physics + C3 boundary lifecycle',
     '[7] Single persistent droplet position probe',
     '[8] Persistent C2 gravity-derived L/M/S test',
+    '[9] CSP physical 9-drop reference test',
 }
 
 local rainStateUpdateParams = {
