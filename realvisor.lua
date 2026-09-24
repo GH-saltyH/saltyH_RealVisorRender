@@ -311,7 +311,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = C2 controlled L/M/S isolation
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
-        RAIN_GPU_STATE_MODE = 6,
+        RAIN_GPU_STATE_MODE = 5,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -349,7 +349,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- C2 controlled radius/mass/adhesion isolation.
         -- Force is expressed directly in persistent tangent-state coordinates.
-        RAIN_GPU_STATE_C2_FORCE_X = 1.500,
+        RAIN_GPU_STATE_C2_FORCE_X = 0.500,
         RAIN_GPU_STATE_C2_FORCE_Y = 0.000,
         RAIN_GPU_STATE_C2_ADHESION_BASE = 1.200,
 
@@ -373,7 +373,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = local surface normal (object-space RGB)
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
-        RAIN_DEBUG = 46,
+        RAIN_DEBUG = 47,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = -0.5,
