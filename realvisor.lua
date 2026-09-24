@@ -633,7 +633,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[42] Lifecycle Meta state probe',
     '[43] Lifecycle texel probe + position marker',
     '[44] Physical texel lifecycle map',
-    '[45] Direct State RG + Boundary Mask diagnostic'
+    '[45] Direct State RG + Boundary Mask diagnostic',
+    '[46] Boundary Mask only (selected State texel)'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -7394,6 +7395,13 @@ function windowMain(dt)
             ui.text('Debug 45: direct State RG + Boundary Mask diagnostic')
             ui.text('Upper half: lifecycle Meta.A. Lower half: R=State.U, G=-State.V, B=BoundaryMask(State.RG).')
             ui.text('This diagnostic is independent of the particle marker position.')
+        end
+
+        if cfg.RUNTIME.RAIN_DEBUG == 46 then
+            ui.separator()
+            ui.text('Debug 46: Boundary Mask only')
+            ui.text('White = BoundaryMask(State.RG) valid, black = invalid. No normal/State color mixing is used.')
+            ui.text('This isolates the mask because the normal texture is black outside the painted visor region.')
         end
     end
 
