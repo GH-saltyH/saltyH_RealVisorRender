@@ -4952,6 +4952,52 @@ float4 rainPersistentLifecycleStateMaskDiagnosticDebugOutput(PS_IN pin)
 
 
 
+float4 rainPersistentBoundaryMaskOnlyDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 46 / BoundaryMask-only diagnostic.
+
+        This is intentionally a one-channel experiment.
+        It does NOT sample the surface normal and does NOT encode State.U/V.
+
+        The selected physical State texel is fixed to index 0:
+            stateUV = (0.5 / gRainStateCount, 0.5)
+
+        The output is only:
+            RGB = BoundaryMask(State.RG)
+
+        White = mask valid
+        Black = mask invalid
+
+        This isolates the boundary-mask result from the State coordinate
+        color mixing used by Debug 45. It is especially important because
+        the visor normal texture is black (0,0,0) outside its painted visor
+        region. Any normal-based physics evaluated there can therefore
+        produce an artificial direction, so this diagnostic must not invoke
+        normal reconstruction at all.
+    */
+    float count = max(gRainStateCount, 1.0);
+    float2 stateUV = float2(0.5 / count, 0.5);
+
+    float2 position = txRainState.SampleLevel(
+        samPointRain,
+        stateUV,
+        0.0
+    ).rg;
+
+    float mask = saturate(
+        rainStateBoundaryMask(position)
+    );
+
+    return float4(
+        mask,
+        mask,
+        mask,
+        1.0
+    );
+}
+
+
 float4 rainPersistentLifecycleTexelMapDebugOutput(PS_IN pin)
 {
     /*
@@ -5279,6 +5325,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 45)
     {
         return rainPersistentLifecycleStateMaskDiagnosticDebugOutput(pin);
+    }
+
+    if (gRainDebug == 46)
+    {
+        return rainPersistentBoundaryMaskOnlyDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
