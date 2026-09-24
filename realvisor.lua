@@ -696,6 +696,8 @@ local rainStateUpdateParams = {
         gRainStateC2AdhesionBase = 1.2,
         gRainStateC2UseGravity = 0.0,
         gRainStateC2GravityMultiplier = 1.0,
+        gRainStateC2UseGravity = 0.0,
+        gRainStateC2GravityMultiplier = 1.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -1073,7 +1075,10 @@ local rainStateUpdateParams = {
 
             if (gRainStateC2Isolation > 0.5)
             {
-                float2 tangentForce = gRainStateC2Force;
+                float2 tangentForce =
+                    gRainStateC2UseGravity > 0.5
+                    ? float2(0.0, -gRainStateGravity * gRainStateC2GravityMultiplier)
+                    : gRainStateC2Force;
                 forceMagnitude = length(tangentForce);
 
                 float adhesion = rainStateControlledAdhesion(mass);
@@ -4436,8 +4441,8 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateTestGrid =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-            or 
-            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
+            or
+            ((cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5) and cfg.RUNTIME.RAIN_DEBUG == 5)
         )
         and 1.0
         or 0.0
@@ -7360,6 +7365,36 @@ function windowMain(dt)
         if c2adhChanged then
             cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE = c2adh
         end
+    end
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 then
+        ui.separator()
+        ui.text('C2 gravity test: |ac.StateSim.gravity| -> compact force -> adhesion -> velocity')
+        ui.text('Reference: 9.81 m/s². Default gain maps 9.81 -> 0.35 compact force.')
+
+        local gravityGain, gravityGainChanged = ui.slider(
+            'GRAVITY_GAIN',
+            cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN,
+            0.001,
+            0.100,
+            '%.5f'
+        )
+        if gravityGainChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN = gravityGain
+        end
+
+        local gravityMultiplier, gravityMultiplierChanged = ui.slider(
+            'C2_GRAVITY_MULTIPLIER',
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER,
+            0.0,
+            5.0,
+            '%.3f'
+        )
+        if gravityMultiplierChanged then
+            cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER = gravityMultiplier
+        end
+
+        ui.text(string.format('StateSim.gravity: %.3f m/s²', math.abs(ac.StateSim.gravity)))
     end
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
