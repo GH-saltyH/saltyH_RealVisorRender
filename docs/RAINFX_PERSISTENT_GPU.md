@@ -285,3 +285,19 @@ The preferred model is low-frequency stick-slip:
 This should create a gently wandering flow path rather than high-frequency vibration. It also preserves deterministic GPU behavior and avoids introducing a new random decision every frame.
 
 This effect is intentionally deferred until the gravity-to-velocity chain is measured in isolation.
+
+
+## 21. Gravity C2 test result — 2026-09-24
+
+Mode 8 gravity-derived C2 validation was observed. `ac.StateSim.gravity` is converted through `GRAVITY_GAIN` and fed into the isolated C2 force path.
+
+Observed behavior:
+- At the default gain, all three Debug 47 bands were black.
+- When a band became white, it eventually returned to black; after another interval it became white again. Increasing `GRAVITY_GAIN` shortened this repetition period. This is consistent with the particle moving through the persistent lifecycle and being respawned, rather than proving that velocity itself periodically decays to zero.
+- Experimental observations: `GRAVITY_GAIN = 0.05486` produced Left white; `0.09810` produced Right white; `0.16799` produced Center white; `0.4153` was observed all black at the observation point.
+- These gain values must not be treated as exact adhesion thresholds because Debug 47 is a binary instantaneous-velocity probe and the droplet can leave the valid surface and enter the lifecycle before observation.
+- Visual speed could not be judged from Debug 47 because it only shows velocity as black/white.
+
+Therefore the gravity-to-motion chain has evidence of producing persistent movement, but the current output cannot establish the magnitude or continuity of the generated momentum. A direct velocity-magnitude diagnostic is required before tuning gravity gain or acceleration scale.
+
+Debug 48 was added for this purpose. It displays the current persistent velocity magnitude as grayscale for the three C2 bands. The displayed value is visualization-only and does not modify state. The next test should use Debug 48, preferably with lifecycle disabled or otherwise preventing boundary respawn from obscuring the velocity measurement.
