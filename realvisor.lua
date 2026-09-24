@@ -311,6 +311,7 @@ local cfg = scriptSettings:mapConfig({
         -- 5 = C2 controlled L/M/S isolation
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
+        -- 8 = C2 gravity-derived L/M/S momentum validation
         RAIN_GPU_STATE_MODE = 8,
 
         -- Signed visor-UV position used by the single-drop probe.
@@ -360,6 +361,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_GRAVITY_REFERENCE = 9.81,
         RAIN_GPU_STATE_GRAVITY_GAIN = 0.03567788,
         RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER = 1.0,
+        RAIN_GPU_STATE_C2_TEST_DRAG = 0.0,
+        RAIN_GPU_STATE_C2_TEST_MAX_SPEED = 1.0,
 
         RAIN_GPU_STATE_DRAG = 0.35,
         RAIN_GPU_STATE_MAX_SPEED = 0.12,
@@ -1077,7 +1080,7 @@ local rainStateUpdateParams = {
             {
                 float2 tangentForce =
                     gRainStateC2UseGravity > 0.5
-                    ? float2(0.0, -gRainStateGravity * gRainStateC2GravityMultiplier)
+                    ? float2(0.0, gRainStateGravity * gRainStateC2GravityMultiplier)
                     : gRainStateC2Force;
                 forceMagnitude = length(tangentForce);
 
@@ -4626,17 +4629,25 @@ local function updateRainGPUState(sim)
     )
 
     rainStateUpdateParams.values.gRainStateDrag =
-        physicsMode
-        and cfg.RUNTIME.RAIN_FLOW_DRAG
-        or cfg.RUNTIME.RAIN_GPU_STATE_DRAG
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+        and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_DRAG
+        or (
+            physicsMode
+            and cfg.RUNTIME.RAIN_FLOW_DRAG
+            or cfg.RUNTIME.RAIN_GPU_STATE_DRAG
+        )
 
     rainStateUpdateParams.values.gRainStateMaxSpeed =
-        physicsMode
-        and (
-            cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
-            / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+        and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_MAX_SPEED
+        or (
+            physicsMode
+            and (
+                cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
+                / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
+            )
+            or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
         )
-        or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
 
     rainStateUpdateParams.values.gRainAcceleration =
         rainAccelerationCurrent
