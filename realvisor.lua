@@ -646,7 +646,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[44] Physical texel lifecycle map',
     '[45] Direct State RG + Boundary Mask diagnostic',
     '[46] Boundary Mask only (selected State texel)',
-    '[47] C2 adhesion threshold / actual movement'
+    '[47] C2 adhesion threshold / actual movement',
+    '[48] C2 persistent velocity magnitude'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
