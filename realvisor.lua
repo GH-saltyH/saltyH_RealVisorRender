@@ -1220,6 +1220,23 @@ local rainStateUpdateParams = {
                     return float4(gRainStateSingleDropPosition.x, gRainStateSingleDropPosition.y , 0.0, 0.0);
                 }
 
+                if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                {
+                    float u = lerp(
+                        gRainStateMeshUMin,
+                        gRainStateMeshUMax,
+                        index / 8.0
+                    );
+
+                    return float4(
+                        u,
+                        gRainStateMeshVMin
+                        + (gRainStateMeshVMax - gRainStateMeshVMin) * 0.5,
+                        0.0,
+                        0.0
+                    );
+                }
+
                 if (gRainStateC2Isolation > 0.5 && index < 3.0) {
                     return float4(0.5, -0.5, 0.0, 0.0);
                 }
