@@ -715,6 +715,7 @@ local rainStateUpdateParams = {
         gRainStateC2AdhesionBase = 1.2,
         gRainStateC2UseGravity = 0.0,
         gRainStateC2GravityMultiplier = 1.0,
+        gRainStatePhysicalTest = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -1369,6 +1370,7 @@ local rainStateMetaUpdateParams = {
         gRainStateCount = 256.0,
         gRainStateInit = 0.0,
         gRainStateTestGrid = 0.0,
+        gRainStatePhysicalTest = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -4396,6 +4398,8 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
@@ -4459,6 +4463,8 @@ local function initializeRainGPUState()
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
             or
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or
             ((cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5) and cfg.RUNTIME.RAIN_DEBUG == 5)
         )
         and 1.0
@@ -4467,6 +4473,7 @@ local function initializeRainGPUState()
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
         )
         and 1.0
         or 0.0
@@ -4477,7 +4484,7 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateC2AdhesionBase =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
     rainStateUpdateParams.values.gRainStateC2UseGravity =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9) and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
     rainStateUpdateParams.values.gRainStateSingleDropTest =
@@ -4646,7 +4653,7 @@ local function updateRainGPUState(sim)
     )
 
     rainStateUpdateParams.values.gRainStateDrag =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9)
         and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_DRAG
         or (
             physicsMode
@@ -4655,7 +4662,7 @@ local function updateRainGPUState(sim)
         )
 
     rainStateUpdateParams.values.gRainStateMaxSpeed =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9)
         and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_MAX_SPEED
         or (
             physicsMode
