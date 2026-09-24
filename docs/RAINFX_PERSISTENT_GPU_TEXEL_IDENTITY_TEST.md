@@ -129,3 +129,31 @@ then Meta.A is demonstrably being written and read back through the persistent p
 If Debug 41 detects the boundary transition but Debug 43 remains cyan, the failure is downstream/upstream of the boundary decision and cannot be attributed to screen-space marker overlap or boundary-color logic.
 
 Do not tune physics parameters during this test.
+
+
+## Debug 44 — full-area physical texel lifecycle map
+
+Debug 43 is intentionally a **single-texel** probe. It fills the entire visor with the state of one texel. Therefore, if it is used with `RAIN_GPU_STATE_COUNT = 128`, a cyan full-screen result only means that **Meta[0] is alive**; it does not mean all 128 particles are alive. This was an important ambiguity in the 128-particle observation.
+
+Debug 44 removes that ambiguity. The rendered visor is divided horizontally into `gRainStateCount` bands, and each band samples the corresponding physical State/Meta texel:
+
+`screen band i -> Meta[i] -> UV((i + 0.5) / count, 0.5)`
+
+For `count = 1`, the entire visor is one band, so the result is equivalent to the desired large-area single-particle probe. For `count = 128`, 128 independent vertical bands are visible.
+
+Colors:
+
+- cyan = `Meta.A = 1` alive
+- black = `Meta.A = 0` dead/waiting
+- yellow = `Meta.A = 2` respawn pending
+- red = unexpected Meta.A
+
+### Recommended test order
+
+1. `COUNT = 1`, `DEBUG = 43`: observe the large-area lifecycle sequence directly. Expected: `cyan -> black -> yellow -> cyan`.
+2. `COUNT = 1`, `DEBUG = 44`: confirms the same single physical texel through the band mapping.
+3. `COUNT = 128`, `DEBUG = 44`: inspect whether individual Meta texels actually diverge. A uniform cyan screen here means the 128 Meta texels are all currently `Alive`; it is no longer a screen-position visibility artifact.
+
+The Lua allocation path was verified: `ui.ExtraCanvas(vec2(count, 1), ...)` allocates the persistent State/Meta canvases at exactly `count x 1`. Therefore `COUNT = 1` really is a 1x1 physical canvas, while `COUNT = 128` is a 128x1 physical canvas.
+
+Debug 43/44 use the same point-sampled texel identity convention as the update shaders, so this test does not introduce a separate coordinate mapping.
