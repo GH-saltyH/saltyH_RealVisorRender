@@ -4690,7 +4690,7 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
         if (meta.a < 0.5)
             continue;
 
-        float2 position = float2(state.r, -state.g);
+        float2 position = float2(state.r, state.g);
         float2 predicted = position + state.ba * dt;
         float2 midpoint = lerp(position, predicted, 0.5);
 
