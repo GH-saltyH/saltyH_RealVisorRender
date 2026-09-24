@@ -4839,6 +4839,75 @@ float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
     );
 }
 
+float4 rainPersistentLifecycleTexelProbeDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 43 / single-texel identity probe.
+
+        This is intentionally NOT a particle marker.
+
+        It samples exactly one persistent texel and fills the entire
+        rendered visor fragment with the value of Meta.A. Position,
+        radius, marker overlap and boundary mask are deliberately ignored.
+
+        Required test configuration:
+            gRainStateCount = 1
+            therefore index 0 -> UV (0.5, 0.5)
+
+        Colors:
+            cyan   = Meta.A == 1 (alive)
+            black  = Meta.A == 0 (dead/waiting)
+            yellow = Meta.A == 2 (respawn pending)
+            red    = any unexpected Meta.A value
+
+        Alpha is always 1 so the result cannot disappear because of
+        marker coverage.
+    */
+
+    float count = max(gRainStateCount, 1.0);
+
+    /*
+        The identity under test is explicitly index 0.
+        With count=1 this is the only state texel.
+    */
+    float stateIndex = 0.0;
+
+    float2 stateUV = float2(
+        (stateIndex + 0.5) / count,
+        0.5
+    );
+
+    float4 meta = txRainStateMeta.SampleLevel(
+        samPointRain,
+        stateUV,
+        0.0
+    );
+
+    float a = meta.a;
+
+    float3 color;
+
+    if (abs(a - 0.0) < 0.25)
+    {
+        color = float3(0.0, 0.0, 0.0);
+    }
+    else if (abs(a - 1.0) < 0.25)
+    {
+        color = float3(0.25, 0.95, 1.0);
+    }
+    else if (abs(a - 2.0) < 0.25)
+    {
+        color = float3(1.0, 0.85, 0.10);
+    }
+    else
+    {
+        color = float3(1.0, 0.0, 0.0);
+    }
+
+    return float4(color, 1.0);
+}
+
+
 float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
 {
     /*
