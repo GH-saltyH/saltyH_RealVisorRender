@@ -301,3 +301,39 @@ Observed behavior:
 Therefore the gravity-to-motion chain has evidence of producing persistent movement, but the current output cannot establish the magnitude or continuity of the generated momentum. A direct velocity-magnitude diagnostic is required before tuning gravity gain or acceleration scale.
 
 Debug 48 was added for this purpose. It displays the current persistent velocity magnitude as grayscale for the three C2 bands. The displayed value is visualization-only and does not modify state. The next test should use Debug 48, preferably with lifecycle disabled or otherwise preventing boundary respawn from obscuring the velocity measurement.
+
+
+## Debug 49 — C2 six-panel movement + velocity observation — 2026-09-24
+
+Debug 48 exposed a measurement limitation: persistent velocity grows gradually, so a grayscale-only display can make slow acceleration difficult to detect by eye.
+
+Debug 49 separates the two observations spatially:
+
+- Left half: movement state, white when persistent velocity is non-zero and black when effectively stationary.
+- Right half: current persistent velocity magnitude as grayscale.
+- Three horizontal rows correspond to C2 indices 0/1/2 (L/M/S).
+
+This allows the test to answer two independent questions at once:
+1. Has the droplet crossed the adhesion gate and actually started moving?
+2. After movement begins, is its persistent velocity increasing?
+
+The velocity visualization uses `gRainStateDebugVelocityScale` only for display. It does not modify the physical velocity or integration.
+
+### Gravity gain correction
+
+The previously reported `GRAVITY_GAIN = 0.4153` was a typo. The correct observed value was:
+
+`GRAVITY_GAIN = 0.04153`
+
+Therefore the 0.04153 observation remains part of the consistent gravity-gain test series and must not be treated as an anomalous 0.4153 case.
+
+The gravity C2 test remains based on `|ac.StateSim.gravity|` as the physical gravity magnitude, with the configurable gain converting it into the compact persistent-force domain.
+
+### Next observation
+
+Run Mode 8 with Debug 49 and compare:
+- whether each L/M/S left panel changes from black to white;
+- the corresponding right-panel brightness over time;
+- whether higher `GRAVITY_GAIN` increases the rate of velocity growth without changing the qualitative mass ordering.
+
+Do not introduce the proposed resting zig-zag/stick-slip behavior until this gravity-to-velocity chain is characterized.
