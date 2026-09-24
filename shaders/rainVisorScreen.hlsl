@@ -4750,6 +4750,90 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
 }
 
 
+float4 rainPersistentC2AdhesionMovementDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 47 / Stage 6 adhesion-threshold validation.
+
+        Mode 5 creates exactly three persistent droplets at the same
+        physical spawn position with the same controlled force and
+        adhesion base. Only mass/radius differs:
+
+            index 0 = small  = mass 1
+            index 1 = medium = mass 3
+            index 2 = large  = mass 9
+
+        This diagnostic deliberately reports only whether the actual
+        persistent velocity is non-zero. It does not sample normals,
+        boundary masks, or procedural rain.
+
+        Screen bands:
+            left   = index 0 / small
+            center = index 1 / medium
+            right  = index 2 / large
+
+        White = persistent velocity is present.
+        Black = persistent velocity is effectively zero.
+
+        The test is therefore a direct observation of the adhesion gate,
+        not a visualization of the expected threshold formula.
+    */
+    float count = max(gRainStateCount, 1.0);
+
+    if (abs(count - 3.0) > 0.01)
+    {
+        return float4(0.10, 0.10, 0.10, 1.0);
+    }
+
+    float result = 0.0;
+
+    [loop]
+    for (int i = 0; i < 3; ++i)
+    {
+        float stateIndex = (float)i;
+
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / 3.0,
+            0.5
+        );
+
+        float2 velocity = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        ).ba;
+
+        float speed = length(velocity);
+
+        float moving = step(
+            0.00001,
+            speed
+        );
+
+        float left = stateIndex / 3.0;
+        float right = (stateIndex + 1.0) / 3.0;
+
+        if (
+            pin.Tex.x >= left
+            && (
+                pin.Tex.x < right
+                || stateIndex >= 2.0
+            )
+        )
+        {
+            result = moving;
+        }
+    }
+
+    return float4(
+        result,
+        result,
+        result,
+        1.0
+    );
+}
+
+
 float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
 {
     /*
@@ -5330,6 +5414,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 46)
     {
         return rainPersistentBoundaryMaskOnlyDebugOutput(pin);
+    }
+
+    if (gRainDebug == 47)
+    {
+        return rainPersistentC2AdhesionMovementDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
