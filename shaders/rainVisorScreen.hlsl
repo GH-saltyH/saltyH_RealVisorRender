@@ -4749,6 +4749,86 @@ float4 rainPersistentBoundaryLifecycleDebugOutput(PS_IN pin)
     return float4(1.0, 1.0, 1.0, marker);
 }
 
+
+float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 42 / C3 meta-state probe.
+
+        This isolates the lifecycle metadata writeback from the normal
+        droplet rendering path:
+          cyan  = alive (Meta.A = 1)
+          yellow = respawn pending (Meta.A = 2)
+          black/transparent = dead/waiting (Meta.A = 0)
+
+        The position itself is not used to decide the lifecycle color.
+        This test exists specifically to determine whether Debug 41's
+        boundary decision is actually committed into the persistent Meta
+        texture.
+    */
+    float count = max(gRainStateCount, 1.0);
+    float result = 0.0;
+    float3 resultColor = float3(0.25, 0.95, 1.0);
+
+    [loop]
+    for (int i = 0; i < 256; ++i)
+    {
+        if ((float)i >= count)
+            break;
+
+        float stateIndex = (float)i;
+        float2 stateUV = float2(
+            (stateIndex + 0.5) / count,
+            0.5
+        );
+
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float2 statePosition = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        ).rg;
+
+        float radius01 = saturate(
+            (meta.r - 0.032) / (0.115 - 0.032)
+        );
+
+        float radius = lerp(
+            0.008,
+            0.016,
+            radius01
+        );
+
+        float marker = 1.0 - smoothstep(
+            radius * 0.35,
+            radius,
+            length(pin.Tex - statePosition)
+        );
+
+        if (marker > result)
+        {
+            result = marker;
+
+            if (meta.a < 0.5)
+                resultColor = float3(0.0, 0.0, 0.0);
+            else if (meta.a > 1.5)
+                resultColor = float3(1.0, 0.85, 0.10);
+            else
+                resultColor = float3(0.25, 0.95, 1.0);
+        }
+    }
+
+    return float4(
+        resultColor,
+        saturate(result)
+    );
+}
+
 float4 rainPersistentLifecycleDebugOutput(PS_IN pin)
 {
     /*
@@ -5012,6 +5092,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 41)
     {
         return rainPersistentBoundaryLifecycleDebugOutput(pin);
+    }
+
+    if (gRainDebug == 42)
+    {
+        return rainPersistentLifecycleStateDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
