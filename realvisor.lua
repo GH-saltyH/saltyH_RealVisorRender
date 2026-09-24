@@ -7445,6 +7445,13 @@ function windowMain(dt)
         end
     end
 
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 then
+        ui.separator()
+        ui.text('CSP physical reference test: 9 fixed droplets / Light, Moderate, Heavy / Min-Average-Max')
+        ui.text('Debug 50: pink = droplet, white alpha 0.5 = at least one droplet is moving; transparent = all stationary.')
+        ui.text('Diameters: L 0.5/0.95/2.0 mm | M 0.5/1.5/4.0 mm | H 0.5/2.5/6.0 mm')
+    end
+
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 then
         ui.separator()
         ui.text('C2 gravity test: |ac.getSim().gravity| -> compact force -> adhesion -> velocity')
