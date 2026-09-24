@@ -4943,6 +4943,99 @@ float4 rainPersistentC2SixPanelVelocityDebugOutput(PS_IN pin)
     );
 }
 
+float4 rainPersistentCSPPhysicalNineDropDebugOutput(PS_IN pin)
+{
+    /*
+        Debug 50 / Mode 9.
+
+        Nine persistent droplets are fixed in the visor test region:
+            Light:     0.5 / 0.95 / 2.0 mm
+            Moderate:  0.5 / 1.5  / 4.0 mm
+            Heavy:     0.5 / 2.5  / 6.0 mm
+
+        The marker radius comes directly from Meta.R, which is the calibrated
+        persistent radius derived from the diameter. No visual enlargement
+        multiplier is applied here.
+
+        Point = pink, alpha 1.0.
+        Background = white, alpha 0.5 only while at least one test drop has
+        non-zero persistent velocity. Otherwise background alpha is 0.
+
+        No trail is rendered. This diagnostic is intentionally a direct
+        observation of position, size and movement state.
+    */
+    float count = max(gRainStateCount, 1.0);
+
+    if (abs(count - 9.0) > 0.01)
+    {
+        return float4(0.0, 0.0, 0.0, 0.0);
+    }
+
+    float anyMoving = 0.0;
+    float point = 0.0;
+    float3 pointColor = float3(1.0, 0.15, 0.65);
+
+    [loop]
+    for (int i = 0; i < 9; ++i)
+    {
+        float index = (float)i;
+        float2 stateUV = float2(
+            (index + 0.5) / 9.0,
+            0.5
+        );
+
+        float4 state = txRainState.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        float4 meta = txRainStateMeta.SampleLevel(
+            samPointRain,
+            stateUV,
+            0.0
+        );
+
+        if (meta.a < 0.5)
+            continue;
+
+        float speed = length(state.ba);
+        anyMoving = max(
+            anyMoving,
+            step(0.00001, speed)
+        );
+
+        float radius = max(meta.r, 0.000001);
+        float distanceToDrop = length(
+            pin.Tex - state.rg
+        );
+
+        float marker = 1.0 - smoothstep(
+            radius * 0.30,
+            radius,
+            distanceToDrop
+        );
+
+        if (marker > point)
+            point = marker;
+    }
+
+    if (point > 0.0)
+    {
+        return float4(
+            pointColor,
+            saturate(point)
+        );
+    }
+
+    return float4(
+        1.0,
+        1.0,
+        1.0,
+        anyMoving * 0.5
+    );
+}
+
 float4 rainPersistentLifecycleStateDebugOutput(PS_IN pin)
 {
     /*
@@ -5538,6 +5631,11 @@ float4 main(PS_IN pin)
     if (gRainDebug == 49)
     {
         return rainPersistentC2SixPanelVelocityDebugOutput(pin);
+    }
+
+    if (gRainDebug == 50)
+    {
+        return rainPersistentCSPPhysicalNineDropDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
