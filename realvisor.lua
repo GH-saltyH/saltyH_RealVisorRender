@@ -355,7 +355,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_C2_ADHESION_BASE = 1.200,
 
         -- Gravity reference model for persistent C2 validation.
-        -- AC StateSim.gravity is normally about -9.81 m/s².
+        -- AC getSim().gravity is normally about -9.81 m/s².
         -- The gain converts physical gravity magnitude into the compact
         -- persistent-force space. Default preserves the existing 0.35 gravity input.
         RAIN_GPU_STATE_GRAVITY_REFERENCE = 9.81,
@@ -697,8 +697,6 @@ local rainStateUpdateParams = {
         gRainStateC2Isolation = 0.0,
         gRainStateC2Force = vec2(1.5, 0.0),
         gRainStateC2AdhesionBase = 1.2,
-        gRainStateC2UseGravity = 0.0,
-        gRainStateC2GravityMultiplier = 1.0,
         gRainStateC2UseGravity = 0.0,
         gRainStateC2GravityMultiplier = 1.0,
         gRainStateLifecycle = 0.0,
@@ -4662,8 +4660,8 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE
 
     local stateSimGravity =
-        ac.StateSim
-        and ac.StateSim.gravity
+        ac.getSim()
+        and ac.getSim().gravity
         or -cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_REFERENCE
 
     local gravityMagnitude =
@@ -7377,7 +7375,7 @@ function windowMain(dt)
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 then
         ui.separator()
-        ui.text('C2 gravity test: |ac.StateSim.gravity| -> compact force -> adhesion -> velocity')
+        ui.text('C2 gravity test: |ac.getSim().gravity| -> compact force -> adhesion -> velocity')
         ui.text('Reference: 9.81 m/s². Default gain maps 9.81 -> 0.35 compact force.')
 
         local gravityGain, gravityGainChanged = ui.slider(
@@ -7402,7 +7400,7 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER = gravityMultiplier
         end
 
-        ui.text(string.format('StateSim.gravity: %.3f m/s²', math.abs(ac.StateSim.gravity)))
+        ui.text(string.format('getSim().gravity: %.3f m/s²', math.abs(ac.getSim().gravity)))
     end
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
@@ -7501,9 +7499,9 @@ function windowMain(dt)
         if cfg.RUNTIME.RAIN_DEBUG == 47 then
             ui.separator()
             ui.text('Debug 47: C2 adhesion threshold / actual persistent movement')
-            ui.text('Mode 5: manual C2 force. Mode 8: AC StateSim.gravity-derived C2 force.')
+            ui.text('Mode 5: manual C2 force. Mode 8: AC getSim().gravity-derived C2 force.')
             ui.text('White = actual persistent velocity, black = effectively stationary.')
-            ui.text('Mode 8 uses |ac.StateSim.gravity| as the physical reference and converts it with GRAVITY_GAIN.')
+            ui.text('Mode 8 uses |ac.getSim().gravity| as the physical reference and converts it with GRAVITY_GAIN.')
             ui.text('Default gain maps 9.81 m/s² to the existing compact gravity magnitude 0.35.')
         end
 
