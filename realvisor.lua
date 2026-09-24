@@ -629,7 +629,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[38] C2 controlled L/M/S movement',
     '[39] C3 boundary lifecycle',
     '[40] Boundary Mask',
-    '[41] Boundary lifecycle decision'
+    '[41] Boundary lifecycle decision',
+    '[42] Lifecycle Meta state probe'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
