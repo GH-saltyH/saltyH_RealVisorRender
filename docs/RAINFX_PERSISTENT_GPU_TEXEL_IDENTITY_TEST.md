@@ -293,3 +293,157 @@ Once this is known, the next diagnostic can isolate State.U and State.V individu
 ### Important limitation
 
 A black normal texture outside the painted visor area is expected from the asset and must not be interpreted as a physical zero normal. Debug 46 deliberately bypasses normal reconstruction so that this asset characteristic cannot contaminate the boundary-mask observation.
+
+
+## Lifecycle initialization fix — Meta init flag writeback
+
+The C3 lifecycle test exposed an initialization-state bug in the Lua ping-pong setup.
+
+`initializeRainGPUState()` initializes both State and Meta A/B canvases with `gRainStateInit = 1.0`. The State parameter block was correctly reset to `0.0` after the four initialization dispatches, but the Meta parameter block was not.
+
+As a result, the Meta shader returned from its initialization branch on every subsequent frame:
+
+- `Meta.A` was continuously rewritten to `1.0`;
+- `Meta.B` was continuously rewritten to `0.0`;
+- the lifecycle branch below the initialization return was unreachable;
+- BoundaryMask crossing therefore could not transition the droplet into `DEAD` or `RESPAWN_PENDING`.
+
+The required post-initialization state is now:
+
+```lua
+rainStateUpdateParams.values.gRainStateInit = 0.0
+rainStateMetaUpdateParams.values.gRainStateInit = 0.0
+```
+
+After this change, the single-texel C3 run with `COUNT = 1` reproduced the complete expected sequence:
+
+```
+ALIVE
+  -> boundary crossing
+  -> DEAD / waiting
+  -> RESPAWN_PENDING
+  -> ALIVE at a new valid position
+```
+
+Debug 46 independently reproduced the valid/invalid BoundaryMask transition, while Debug 43 showed the corresponding Meta.A lifecycle transition. This establishes that the boundary and lifecycle state machine are functioning through the State/Meta A/B ping-pong path.
+
+This fix is a lifecycle-state initialization correction. It does not alter the physical force, adhesion, drag, or speed model.
+
+## Debug 47 — Stage 6 adhesion threshold / actual movement
+
+Stage 6 now validates the central adhesion rule:
+
+> A droplet should remain attached while effective tangential force is below its adhesion threshold, and should begin accelerating only after the threshold is exceeded.
+
+Mode 5 already provides the required controlled experiment. It creates exactly three persistent droplets at the same physical spawn position and applies the same controlled tangent force and adhesion base to all three. Only radius/mass differs:
+
+| Texel | Radius | Mass | Adhesion at base 1.20 |
+|---|---:|---:|---:|
+| 0 / small | 0.032 | 1 | 1.200 |
+| 1 / medium | 0.0735 | 3 | 0.693 |
+| 2 / large | 0.115 | 9 | 0.400 |
+
+The current controlled adhesion implementation is:
+
+```
+adhesion = C2_ADHESION_BASE / sqrt(mass)
+```
+
+Therefore the test can use one force sweep without changing any other physical parameter.
+
+### Debug 47 output
+
+Debug 47 divides the visor into three screen bands:
+
+- left = small / mass 1
+- center = medium / mass 3
+- right = large / mass 9
+
+The shader reads only the actual persistent State velocity (`State.BA`).
+
+- **White** = actual persistent velocity is non-zero.
+- **Black** = actual persistent velocity is effectively zero.
+
+The diagnostic intentionally does **not** sample:
+
+- surface normal;
+- BoundaryMask;
+- procedural rain;
+- screen-space droplet generation.
+
+This keeps the observation focused on whether the persistent physics gate actually permits motion.
+
+### Required run
+
+Use:
+
+- `RAIN_GPU_STATE_MODE = 5`
+- `RAIN_GPU_STATE_COUNT` is forced to `3` by Mode 5
+- `RAIN_DEBUG = 47`
+- `RAIN_GPU_STATE_C2_ADHESION_BASE = 1.20`
+- start from a fresh persistent-state allocation so all three velocities begin at zero
+
+Use the existing `C2_FORCE_X` control and keep `C2_FORCE_Y = 0`.
+
+Recommended force sweep:
+
+1. **C2_FORCE_X = 0.50**
+   - small: stationary
+   - medium: stationary
+   - large: moving
+
+2. **C2_FORCE_X = 0.80**
+   - small: stationary
+   - medium: moving
+   - large: moving
+
+3. **C2_FORCE_X = 1.30**
+   - small: moving
+   - medium: moving
+   - large: moving
+
+These three points bracket the calculated thresholds:
+
+```
+0.50 < 0.693 < 0.80 < 1.20 < 1.30
+```
+
+### Pass criteria
+
+The important result is not the absolute speed. It is the **membership of each droplet in the stationary/moving set**.
+
+Expected transition:
+
+```
+Force 0.50 :  S -  M -  L +
+Force 0.80 :  S -  M +  L +
+Force 1.30 :  S +  M +  L +
+```
+
+where `-` means effectively stationary and `+` means persistent velocity is present.
+
+If this sequence is reproduced, the Stage 6 adhesion gate has been demonstrated for three different masses under the same applied force.
+
+### Important interpretation rules
+
+This is a threshold test, not a speed-quality test.
+
+Do not tune:
+
+- `RAIN_FLOW_ACCELERATION`
+- `RAIN_FLOW_DRAG`
+- `RAIN_FLOW_MAX_SPEED`
+- gravity
+- normal projection
+- boundary mask
+
+while judging this test.
+
+A large droplet moving farther than a small droplet is not by itself the pass condition. The first question is whether each mass crosses the adhesion threshold at the expected force.
+
+Once the threshold gate is confirmed, Stage 7 can separately validate acceleration response, drag, and terminal-speed limiting.
+
+### Asset-specific normal-map caveat
+
+The custom visor normal texture is black outside its painted visor region. Debug 47 does not sample it, so the Stage 6 verdict must not be contaminated by the invalid `(0,0,0)` normal representation outside the painted region.
+
