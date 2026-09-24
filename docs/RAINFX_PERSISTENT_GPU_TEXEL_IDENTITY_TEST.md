@@ -169,3 +169,57 @@ The lifecycle diagnostics now separate the lifecycle field from the particle mar
 Debug 43 still fills the entire visor with the selected texel's lifecycle color, but additionally samples that texel's State position and draws its particle marker at that position. This means the particle remains observable even when it moves outside the valid boundary, while the semi-transparent lifecycle field remains visible behind it.
 
 Debug 44 applies the same principle per texel band: each band shows its Meta.A lifecycle color at alpha 0.5, while the corresponding State position is drawn with alpha 1.0. The lifecycle state and physical position can therefore be distinguished in the same output.
+
+
+## Debug 45 — direct State RG + Boundary Mask diagnostic
+
+The Mode 6 test was run with:
+
+- `RAIN_GPU_STATE_MODE = 6`
+- `RAIN_GPU_STATE_COUNT = 1`
+- `RAIN_GPU_STATE_C3_TEST_SPEED = true`
+
+The observed Debug 43 result was a persistent cyan field with no visible particle marker. Increasing the count to 128/256 did not make the marker generally visible; only sufficiently strong motion occasionally produced visible points.
+
+Debug 43 alone cannot distinguish between:
+
+1. `Meta.A) remaining alive;
+2. `State.RG) being outside the rendered visor coordinate region;
+3. the boundary mask evaluating the State position as invalid;
+4. the marker simply being outside the visible fragment domain.
+
+Debug 45 was added to remove the screen-space marker from the experiment.
+
+For the selected physical texel (index 0 for the single-texel test), it reads:
+
+- `Meta.A) from `txRainStateMeta`
+- `State.RG) from `txRainState`
+- `BoundaryMask(State.RG)) from `rainStateBoundaryMask()`
+
+The output is split into two vertical UV regions:
+
+- **Upper half (`V < -0.5`)**: lifecycle color
+  - cyan = `Meta.A = 1`
+  - black = `Meta.A = 0`
+  - yellow = `Meta.A = 2`
+  - red = unexpected value
+- **Lower half (`V >= -0.5`)**:
+  - R = State U encoded in 0..1
+  - G = -State V encoded in 0..1
+  - B = boundary validity (`1 = valid`, `0 = invalid`)
+
+This is the next authoritative diagnostic. It should be run in Mode 6 with lifecycle enabled before changing boundary coordinates or physics parameters.
+
+### Interpretation matrix
+
+| Upper half | Lower-half B | Meaning |
+|---|---:|---|
+| cyan | 1 | State is alive and currently inside the boundary |
+| cyan | 0 | State is alive but currently outside/invalid; lifecycle writeback is not yet committed at the observed frame, or the lifecycle update path is not seeing the same State |
+| black | 0 | Dead/waiting state has been recorded in Meta.A |
+| yellow | 1 or 0 | Respawn is pending; inspect the newly generated position on the next frame |
+| red | any | Meta.A is not one of the expected lifecycle states |
+
+The key observation is whether the lower-half B channel becomes 0 while the upper half remains cyan, and whether it subsequently becomes black/yellow. This isolates the exact point at which State position, mask evaluation, and Meta lifecycle diverge.
+
+The Debug 45 entry is also added to the Lua `RAIN_DEBUG` UI list; new debug tests must update both HLSL dispatch and the visible Lua test selector.
