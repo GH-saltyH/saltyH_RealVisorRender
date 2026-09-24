@@ -223,3 +223,73 @@ This is the next authoritative diagnostic. It should be run in Mode 6 with lifec
 The key observation is whether the lower-half B channel becomes 0 while the upper half remains cyan, and whether it subsequently becomes black/yellow. This isolates the exact point at which State position, mask evaluation, and Meta lifecycle diverge.
 
 The Debug 45 entry is also added to the Lua `RAIN_DEBUG` UI list; new debug tests must update both HLSL dispatch and the visible Lua test selector.
+
+
+## Debug 46 — Boundary Mask only
+
+Debug 45 intentionally displays State.U, -State.V, and BoundaryMask(State.RG) together. The next test separates these values completely.
+
+### Why this separation is required
+
+The visor normal texture is only painted in the actual visor region. Outside that region its RGB value is (0,0,0). The normal reconstruction therefore produces an invalid/degenerate normal outside the painted region, and any physics that derives direction from that normal can generate an artificial direction.
+
+That means an observed direction change must not be used by itself to decide whether the persistent State has crossed the valid surface region. First establish the boundary-mask result independently.
+
+Debug 46 does not sample or reconstruct the normal at all.
+
+### Output
+
+Debug 46 selects the same physical State texel used by Debug 45:
+
+stateUV = (0.5 / gRainStateCount, 0.5)
+
+It reads only:
+
+State.RG -> rainStateBoundaryMask(State.RG)
+
+The entire rendered area is one scalar visualization:
+
+- white = BoundaryMask(State.RG) is valid
+- black = BoundaryMask(State.RG) is invalid
+- intermediate gray = the mask texture's filtered value at the sampled State position
+
+No State.U/V color is mixed into the result.
+
+### Required run
+
+Use:
+
+- RAIN_GPU_STATE_MODE = 6
+- RAIN_GPU_STATE_COUNT = 1
+- RAIN_GPU_STATE_LIFECYCLE = true
+- RAIN_GPU_STATE_C3_TEST_SPEED = true
+- RAIN_DEBUG = 46
+
+Do not change normal-map, force, adhesion, gravity, drag, or boundary-coordinate parameters during this run.
+
+### Test procedure
+
+1. Start/reload the persistent GPU state with the above configuration.
+2. Observe Debug 46 immediately.
+3. Drive straight and perform the same turns/acceleration/deceleration pattern used for Debug 45.
+4. Watch specifically for a white -> black transition.
+5. If the output changes, record approximately when it changes and whether Debug 45 at the same moment showed a corresponding change in its B channel.
+6. If it remains white for the entire run, that is also a useful result: the selected State position is continuously considered valid by the boundary mask, regardless of what the normal-derived physics is doing.
+
+### Interpretation
+
+| Debug 46 | Meaning |
+|---|---|
+| White | rainStateBoundaryMask(State.RG) currently evaluates as valid |
+| Black | rainStateBoundaryMask(State.RG) currently evaluates as invalid |
+| Gray | The mask texture returns a filtered/intermediate value at State.RG |
+
+This test does not determine whether State.U or State.V is correct. It answers only one question:
+
+> Does the boundary mask consider the current persistent State position valid?
+
+Once this is known, the next diagnostic can isolate State.U and State.V individually if necessary.
+
+### Important limitation
+
+A black normal texture outside the painted visor area is expected from the asset and must not be interpreted as a physical zero normal. Debug 46 deliberately bypasses normal reconstruction so that this asset characteristic cannot contaminate the boundary-mask observation.
