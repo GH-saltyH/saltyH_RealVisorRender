@@ -780,3 +780,277 @@ Re-run the exact previous comparison with no parameter changes:
 - `RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0`.
 
 Acceptance target: Mode 9 remains downward and Mode 10 changes from upward to downward. Only after this direction gate passes should curvature-dependent differences and the Stage 7B vehicle-acceleration gate be evaluated.
+
+## 27. Phase A — unified external-force pipeline — 2026-09-25
+
+### 27.1 Design decision
+
+The persistent RainFX physics path now treats all external influences as one world-space force pipeline:
+
+~~~text
+source selection (UI bitmask)
+        ↓
+gravity / vehicle inertia / airflow
+        ↓
+WORLD-space SI acceleration
+        ↓
+shared acceleration → compact surface-force conversion
+        ↓
+single surface-normal / tangent projection
+        ↓
+adhesion threshold
+        ↓
+flow acceleration
+        ↓
+surface drag
+        ↓
+size-dependent max speed
+        ↓
+position integration
+~~~
+
+The important rule is that no external source chooses its own tangent frame or directly edits UV velocity. Source-specific logic ends before the common surface projection.
+
+### 27.2 Force-source bitmask
+
+The Lua UI exposes three independent checkboxes:
+
+- Gravity = bit 1
+- Vehicle Inertia = bit 2
+- Airflow = bit 4
+
+The selected sources are packed into gRainForceMask.
+
+| Enabled sources | Mask |
+|---|---:|
+| none | 0 |
+| gravity | 1 |
+| inertia | 2 |
+| gravity + inertia | 3 |
+| airflow | 4 |
+| gravity + airflow | 5 |
+| inertia + airflow | 6 |
+| all | 7 |
+
+This is a source-selection mechanism, not three independent physics pipelines.
+
+### 27.3 Vehicle inertia input
+
+ac.getCar(0).acceleration is now the authoritative vehicle-acceleration input.
+
+The API is treated as car-local G acceleration:
+
+- X = side
+- Y = up
+- Z = look / forward
+
+Lua converts it to world space:
+
+~~~lua
+accelerationWorld =
+    car.side * accelerationG.x
+    + car.up * accelerationG.y
+    + car.look * accelerationG.z
+~~~
+
+The visor droplet receives inertial force in the opposite direction:
+
+~~~text
+a_inertia_world = -accelerationWorld × 9.81
+~~~
+
+Therefore the shader receives this source in SI m/s².
+
+The previous finite-difference velocity path has been removed from RainFX physics. RAIN_ACCEL_GAIN remains only as a compatibility setting.
+
+### 27.4 Common acceleration unit
+
+All three external sources use the same physical acceleration domain before projection:
+
+- gravity: m/s²
+- vehicle inertia: m/s²
+- airflow: m/s²
+
+A single RAIN_PHYSICS_ACCEL_SCALE = 0.03567788 converts SI acceleration to the compact persistent surface-force domain.
+
+The current value preserves the previously validated gravity calibration:
+
+~~~text
+9.81 m/s² × 0.03567788 ≈ 0.35 compact force
+~~~
+
+This is a project calibration constant, not an SI interpretation of compact UV-space force.
+
+### 27.5 Gravity
+
+Gravity remains the existing validated world-down source.
+
+ac.getSim().gravity supplies the magnitude. The persistent source is explicitly:
+
+~~~text
+F_gravity = (0, -|g|, 0)
+~~~
+
+It is then converted with the same common acceleration scale and projected onto the local visor surface.
+
+The signed-V contract remains:
+
+- V = -1 at the visor top
+- V = 0 at the visor bottom
+- increasing V = physically downward
+
+The tangent-V canonical orientation correction from Section 26 remains unchanged.
+
+### 27.6 Airflow model
+
+Phase A airflow uses the current relative-air approximation:
+
+~~~text
+V_air_relative = -car.velocity
+~~~
+
+Simulation wind is intentionally not included yet.
+
+For each persistent drop, aerodynamic acceleration is calculated in SI units:
+
+~~~text
+F_drag =
+    0.5 × rho_air × |V_rel|² × Cd × A × incidence
+~~~
+
+with:
+
+- rho_air = 1.20 kg/m³
+- Cd = 0.47
+- A = pi r²
+- water density = 1000 kg/m³
+- m = volume × 1000
+- volume = 4/3 × pi r³
+
+The current visor calibration converts persistent UV radius to diameter in millimeters:
+
+~~~text
+diameterMM =
+    (radiusUV × 2) / 0.0029296875
+~~~
+
+### 27.7 One-sided surface incidence
+
+Airflow does not apply simply because air speed is non-zero.
+
+The current incidence term is:
+
+~~~text
+incidence = saturate(-dot(airDirection, surfaceNormal))
+~~~
+
+Therefore:
+
+- air travelling into the surface normal side produces aerodynamic pressure;
+- air travelling away from the surface produces zero aerodynamic source force;
+- the rigid visor removes the normal component during the final tangent projection;
+- only the resulting tangent component can drive surface motion.
+
+This is intentionally different from abs(dot(...)); the shielded side should not generate pressure.
+
+The sign convention must be revalidated in-game against the active visor normal orientation before airflow becomes default-on.
+
+### 27.8 Phase A test protocol
+
+Use:
+
+~~~text
+STATE_MODE = 3
+RAIN_DEBUG = 27 → 30/1/6 → 0
+~~~
+
+and change only the source checkboxes.
+
+#### A1 — Gravity only
+
+- Gravity: ON
+- Vehicle Inertia: OFF
+- Airflow: OFF
+- Stationary car
+- RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0
+
+Expected:
+- same curvature-driven direction accepted in Mode 10 / Debug 50;
+- no dependency on car acceleration;
+- no sudden direction reversal.
+
+#### A2 — Vehicle inertia only
+
+- Gravity: OFF
+- Vehicle Inertia: ON
+- Airflow: OFF
+
+Perform:
+1. straight acceleration,
+2. straight braking,
+3. left/right cornering,
+4. combined braking + cornering.
+
+Expected:
+- droplets move opposite vehicle acceleration;
+- longitudinal input follows car look after world conversion;
+- lateral input follows car side after world conversion;
+- no camera-space dependence.
+
+This is the primary regression test for the previous Test 23 / Mode 3 vertical sign discrepancy.
+
+#### A3 — Gravity + vehicle inertia
+
+- Gravity: ON
+- Vehicle Inertia: ON
+- Airflow: OFF
+
+Keep all other parameters identical to A1/A2.
+
+Expected:
+- total direction is the vector sum of both sources;
+- gravity remains present when the car is stationary;
+- inertia changes total direction smoothly rather than replacing gravity.
+
+#### A4 — Airflow only
+
+- Gravity: OFF
+- Vehicle Inertia: OFF
+- Airflow: ON
+
+Test several vehicle speeds and visor orientations.
+
+Expected:
+- no airflow effect at zero relative speed;
+- stronger response with increasing speed;
+- no force when airflow is on the shielded side according to the signed incidence test;
+- tangent motion follows projected airflow direction;
+- larger drops respond differently because area/mass changes.
+
+### 27.9 Phase A acceptance rule
+
+Do not retune adhesion, flow acceleration, drag, or max-speed while validating source direction.
+
+First establish:
+
+1. each source has the correct sign;
+2. each source reaches the shader in WORLD space;
+3. all enabled sources are summed once;
+4. one tangent projection handles the combined result;
+5. the UI mask changes only source inclusion.
+
+Only after these pass should physical magnitude calibration proceed.
+
+### 27.10 API reference
+
+The CSP Lua SDK is the external API reference for ac.getCar(0) state access. The project additionally relies on the installed CSP build's EmmyLua definitions and the in-game verified up, look, side, and acceleration fields.
+
+Reference:
+https://github.com/ac-custom-shaders-patch/acc-lua-sdk
+
+### 27.11 Compatibility notes
+
+- RAIN_TEST_ACCEL_ENABLED is no longer part of the active force-selection path. The Phase A Vehicle Inertia checkbox replaces it as the authoritative isolation control.
+- RAIN_GPU_STATE_USE_AIR_DRAG is retained for compatibility but the active source gate is now RAIN_FORCE_AIRFLOW_ENABLED.
+- RAIN_ACCEL_GAIN and RAIN_ACCEL_GAIN_X/Y/Z remain as legacy settings for compatibility and historical comparison; they are not used by the new SI inertia path.
+- C2 Mode 5/8/9 controlled paths remain calibration instruments. They do not replace the unified Mode 3 production force path.
