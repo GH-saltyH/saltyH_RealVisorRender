@@ -996,7 +996,24 @@ local rainStateUpdateParams = {
             }
 
             u = normalize(u);
+
+            /*
+                Signed visor-V contract:
+                    object-space -Y is the canonical increasing mesh-V direction.
+
+                The persistent state pass cannot use ddx/ddy to recover the
+                actual dP/dV tangent, so the normal-derived basis needs an
+                explicit orientation check.  cross(normal, U) produces a
+                right-handed tangent frame, but its V axis can be opposite to
+                the mesh UV V direction.  Align V with object-space -Y while
+                keeping the already-validated U orientation unchanged.
+            */
             float3 v = normalize(cross(normalObject, u));
+            float3 canonicalV = float3(0.0, -1.0, 0.0);
+            if (dot(v, canonicalV) < 0.0)
+            {
+                v = -v;
+            }
 
             float3 uWorld = normalize(mul(u, (float3x3)gRainObjectToWorld));
             float3 vWorld = normalize(mul(v, (float3x3)gRainObjectToWorld));
