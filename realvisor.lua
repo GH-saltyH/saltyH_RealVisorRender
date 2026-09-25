@@ -275,6 +275,7 @@ local cfg = scriptSettings:mapConfig({
         -- 1 mm diameter occupies exactly 0.0029296875 visor UV in the
         -- calibrated Debug 50 mesh measurement.
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
+        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.016,
         -- Atlas/Ulbrich-style size exponent used as the first-order
         -- size-dependent max-speed curve.
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
@@ -283,7 +284,7 @@ local cfg = scriptSettings:mapConfig({
         -- 40 = boundary mask
         -- 41 = lifecycle state
         -- 51 = physical persistent-state viewer
-        RAIN_DEBUG = 51,
+        RAIN_DEBUG = 0,
 
     },
 })
@@ -491,11 +492,15 @@ local rainStateSingleDropDirty = false
 -- not need to change when the UI wording changes.
 ------------------------------------------------------------
 local RAIN_DEBUG_OPTIONS = {
-    '[0] Canonical persistent physical droplets',
-    '[40] Boundary mask',
-    '[41] Lifecycle state',
-    '[51] Physical state viewer'
+    '[0] RainFX — canonical full effect',
+    '[1] Local surface normal (object-space RGB)',
+    '[2] World surface normal (world-space RGB)',
+    '[3] Boundary mask',
+    '[4] Predicted positions',
+    '[5] Force direction',
+    '[6] Physical state viewer'
 }
+
 
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -575,28 +580,18 @@ local rainStateUpdateParams = {
         }
 
         /*
-            Debug 50 physical size/profile model. This is the single
-            shader-side profile reused by legacy test modes.
+            Final physical droplet model.
+            Every persistent texel uses a deterministic hash-selected
+            diameter in the measured 0.5–6.0 mm domain.
+            Future rain profiles may replace only this distribution.
         */
         float rainStatePhysicalDiameterMM(float index)
         {
-            // First nine entries are the fixed physical validation population.
-            if (index < 9.0)
-            {
-                float profile = floor(index / 3.0);
-                float slot = index - profile * 3.0;
-
-                if (profile < 0.5)
-                    return slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
-
-                if (profile < 1.5)
-                    return slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
-
-                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
-            }
-
-            // Production droplets use a deterministic physical diameter range.
-            return lerp(0.5, 6.0, rainStateHash(index + 701.0));
+            return lerp(
+                0.5,
+                6.0,
+                rainStateHash(index + 101.0)
+            );
         }
 
         float rainStatePhysicalMassProfile(float diameterMM)
@@ -1400,27 +1395,9 @@ local rainStateMetaUpdateParams = {
                 }
 
 
-                if (index < 9.0)
-                {
-                    float diameterMM =
-                        rainStatePhysicalDiameterMM(index);
-
-                    /*
-                        Physical reference calibration:
-                        1.0 mm diameter = 0.0029296875 UV diameter,
-                        based on the measured 2/4/6 mm reference values.
-                        Radius is therefore half of that diameter scale.
-                    */
-                    float radius = diameterMM * 0.00146484375;
-                    float mass =
-                        rainStatePhysicalMassProfile(diameterMM);
-
-                    return float4(radius, mass, 0.0, 1.0);
-                }
-
-                float r01 = rainStateHash(index + 101.0);
-                float radius = lerp(0.032, 0.115, r01);
-                float mass = lerp(1.0, 9.0, r01 * r01);
+                float diameterMM = rainStatePhysicalDiameterMM(index);
+                float radius = diameterMM * 0.00146484375;
+                float mass = rainStatePhysicalMassProfile(diameterMM);
 
                 return float4(radius, mass, 0.0, 1.0);
             }
@@ -1445,54 +1422,13 @@ local rainStateMetaUpdateParams = {
                     meta.a = 1.0;
                     meta.b = 0.0;
 
-                    if (index < 9.0)
-                    {
-                        float profile = floor(index / 3.0);
-                        float slot = index - profile * 3.0;
-                        float diameterMM;
-
-                        if (profile < 0.5)
-                            diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
-                        else if (profile < 1.5)
-                            diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
-                        else
-                            diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
-
-                        /*
-                            Keep the exact measured UV diameter calibration
-                            on respawn as well, so size remains deterministic.
-                        */
-                        meta.r = diameterMM * 0.00146484375;
-
-                        meta.g =
-                            rainStatePhysicalMassProfile(diameterMM);
-                    }
-                    else
-                    {
-                        float r01 = rainStateHash(
-                            index
-                            + respawnSeed * 17.123
-                            + 101.0
+                    float diameterMM =
+                        rainStatePhysicalDiameterMM(
+                            index + respawnSeed * 17.123
                         );
 
-                        float radius = lerp(
-                            0.032,
-                            0.115,
-                            r01
-                        );
-
-                        float radius01 = saturate(
-                            (radius - 0.032)
-                            / (0.115 - 0.032)
-                        );
-
-                        meta.r = radius;
-                        meta.g = lerp(
-                            1.0,
-                            9.0,
-                            radius01 * radius01
-                        );
-                    }
+                    meta.r = diameterMM * 0.00146484375;
+                    meta.g = rainStatePhysicalMassProfile(diameterMM);
 
                     return meta;
                 }
@@ -4788,7 +4724,7 @@ render.on('main.track.transparent', function()
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
-        }        },
+        },
 
         shader = 
             rainShader.HLSL
@@ -6805,7 +6741,7 @@ function windowMain(dt)
     ui.separator()
     ui.text('RainFX Debug Code')
 
-    local RAIN_DEBUG_VALUES = { 0, 40, 41, 51 }
+    local RAIN_DEBUG_VALUES = { 0, 1, 2, 3, 4, 5, 6 }
     local rainDebugIndex = 1
     for i, value in ipairs(RAIN_DEBUG_VALUES) do
         if value == cfg.RUNTIME.RAIN_DEBUG then
