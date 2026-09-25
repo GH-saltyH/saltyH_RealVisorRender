@@ -235,40 +235,12 @@ local cfg = scriptSettings:mapConfig({
         -- Master amount
         RAIN_AMOUNT = 250.0,
 
-        -- Base Rain Speed
-        RAIN_SPEED_BASE = 0.0018,
-
-        -- Vehicle speed influence
-        RAIN_SPEED_MIN = 0.0,
-        RAIN_SPEED_MAX = 10.0,
-
-        -- Visual density
-        RAIN_DENSITY = 1.0,
-
         -- Drop dynamics
         -- Acceleration after surface adhesion is exceeded.
         RAIN_FLOW_ACCELERATION = 0.020,
 
         -- Linear air/viscous drag coefficient.
         RAIN_FLOW_DRAG = 7.0,
-
-        -- Maximum procedural surface speed in UV-space units per second.
-        RAIN_FLOW_MAX_SPEED = 0.035,
-
-        -- Rain surface / adhesion model
-        -- UV center is intentionally explicit so the surface model
-        -- can later be remapped without rewriting the physics.
-        RAIN_SURFACE_CENTER_X = 0.5,
-        RAIN_SURFACE_CENTER_Y = -0.5,
-
-        -- Approximate visor curvature in UV space.
-        -- X controls lateral curvature; Y controls upper/lower curvature.
-        RAIN_SURFACE_CURVATURE_X = 0.35,
-        RAIN_SURFACE_CURVATURE_Y = 0.12,
-
-        -- Global visor downward slope. This gives gravity a tangential
-        -- component even at the UV center.
-        RAIN_SURFACE_SLOPE_Y = 0.12,
 
         -- Adhesion threshold range. A drop remains attached while the
         -- effective tangential force is below its own threshold.
@@ -4750,21 +4722,6 @@ render.on('main.track.transparent', function()
             gRainCameraForward =
                 ac.getCameraForward(),
 
-            gRainSurfaceCenter =
-                vec2(
-                    cfg.RUNTIME.RAIN_SURFACE_CENTER_X,
-                    cfg.RUNTIME.RAIN_SURFACE_CENTER_Y
-                ),
-
-            gRainSurfaceCurvature =
-                vec2(
-                    cfg.RUNTIME.RAIN_SURFACE_CURVATURE_X,
-                    cfg.RUNTIME.RAIN_SURFACE_CURVATURE_Y
-                ),
-
-            gRainSurfaceSlopeY =
-                cfg.RUNTIME.RAIN_SURFACE_SLOPE_Y,
-
             gRainAdhesionMin =
                 cfg.RUNTIME.RAIN_ADHESION_MIN,
 
@@ -4774,12 +4731,6 @@ render.on('main.track.transparent', function()
 
             gRainFlowAcceleration =
                 cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
-
-            gRainAmount =
-                cfg.RUNTIME.RAIN_AMOUNT,
-
-            gRainDensity =
-                cfg.RUNTIME.RAIN_DENSITY,
 
             gRainTime =
                 sim.time,
@@ -4801,15 +4752,6 @@ render.on('main.track.transparent', function()
             
             gRainUVCenterY =
                     cfg.RUNTIME.RAIN_DEBUG_CENTER_Y,
-
-            gRainStateDebugDisplacementScale =
-                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE,
-
-            gRainStateDebugSampleInterval =
-                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL,
-
-            gRainStateDebugVelocityScale =
-                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE,
 
             gRainStateDeltaTime =
                 sim.dt
