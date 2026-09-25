@@ -4828,7 +4828,7 @@ local function initializeRainGPUState()
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
                     or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+                    )
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -4921,7 +4921,7 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStatePhysicalTest =
         (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+            )
             and 1.0
             or 0.0
     rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
@@ -4960,7 +4960,7 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.values.gRainStatePhysicalTest =
         (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+            )
             and 1.0
             or 0.0
     rainStateMetaUpdateParams.values.gRainStateUsePhysicalSizeProfile =
@@ -5096,7 +5096,7 @@ local function updateRainGPUState(sim)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
                     or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+                    )
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5284,7 +5284,7 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStatePhysicalTest =
         (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+            )
             and 1.0
             or 0.0
     rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
@@ -5302,7 +5302,7 @@ local function updateRainGPUState(sim)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
                     or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+                    )
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5714,7 +5714,7 @@ render.on('main.track.transparent', function()
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
                     or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+                    )
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -7874,7 +7874,7 @@ function windowMain(dt)
         rainStateConfiguredMode = nil
     end
 
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51 then
+    if cfg.RUNTIME.RAIN_DEBUG == 51 then
         ui.text('Debug 51 is the physical unified-force state viewer. Use State Mode 10 + physical size profile.')
     else
         ui.text(
