@@ -4690,6 +4690,7 @@ local function initializeRainGPUState()
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
             or
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
             or
             ((cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5) and cfg.RUNTIME.RAIN_DEBUG == 5)
         )
