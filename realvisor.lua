@@ -4644,20 +4644,6 @@ end
 --------------------------------------------------------
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
-local UV_DEBUG_SHADER = [[
-
-float4 main(PS_IN pin)
-{
-    return float4(
-        pin.Tex.x,
-        pin.Tex.y,
-        0.0,
-        1.0
-    );
-}
-
-]]
-
 render.on('main.track.transparent', function()
     -- ac.log('[RealVisor] ENTER main.track.transparent')
     
@@ -4805,10 +4791,7 @@ render.on('main.track.transparent', function()
         }        },
 
         shader = 
-            -- UV_DEBUG_SHADER
-            -- RAIN_SHADER
             rainShader.HLSL
-
 
             -- shader = [[
             --     float4 main(PS_IN pin) {
