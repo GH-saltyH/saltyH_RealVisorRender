@@ -1105,15 +1105,15 @@ This is deliberately separate from the force-source mask. It allows testing the 
 
 Changing the size model invalidates the persistent state textures so all droplets are regenerated under the selected profile.
 
-### 28.4 Phase A Mode 51
+### 28.4 Phase A Debug 51
 
 A new state mode is provided:
 
 ```text
-[51] Phase A physical 9-drop unified-force test
+[51] Physical 9-drop unified-force state
 ```
 
-Mode 51 always uses the Debug 50 physical profile and allocates exactly nine persistent droplets.
+Debug 51 always uses the Debug 50 physical profile and allocates exactly nine persistent droplets.
 
 The nine droplets are:
 
@@ -1123,19 +1123,19 @@ M: 0.5 / 1.5  / 4.0 mm
 H: 0.5 / 2.5  / 6.0 mm
 ```
 
-Mode 51 uses the unified external-force pipeline documented in Section 27.
+Debug 51 uses the unified external-force pipeline documented in Section 27.
 
-### 28.5 Why Mode 51 is preferred
+### 28.5 Why Debug 51 is preferred
 
 The old modes retain their historical meaning and remain useful for debugging earlier stages.
 
-Mode 51 is a clean physical test environment with a fixed nine-drop population, the Debug 50 radius mapping, the Debug 50 normalized mass profile, the current size-dependent max-speed law, the unified force bitmask, world-space inertia conversion, and the current surface-normal/tangent projection.
+Debug 51 is a clean physical test environment with a fixed nine-drop population, the Debug 50 radius mapping, the Debug 50 normalized mass profile, the current size-dependent max-speed law, the unified force bitmask, world-space inertia conversion, and the current surface-normal/tangent projection.
 
 This prevents a physical-force result from being ambiguous because an older diagnostic mode quietly changed the droplet model.
 
 ### 28.6 Phase A test matrix
 
-With Mode 51 selected, use only the force checkboxes to isolate sources:
+With Debug 51 selected, use only the force checkboxes to isolate sources:
 
 | Test | Gravity | Inertia | Airflow |
 |---|---:|---:|---:|
@@ -1156,7 +1156,7 @@ The default size-model selector remains [0] Legacy so historical debug modes do 
 
 Selecting [1] Debug 50 physical profile explicitly upgrades the Meta size/mass population of applicable legacy modes.
 
-Mode 51 does not depend on that UI selection: it always forces the physical profile.
+Debug 51 does not depend on that UI selection: it always forces the physical profile.
 
 This provides both historical reproducibility and a clean physical validation mode.
 ## 29. Correction: physical validation belongs to Debug 51, not State Mode 51 — 2026-09-26
