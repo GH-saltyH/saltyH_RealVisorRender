@@ -627,17 +627,15 @@ local rainStateUpdateParams = {
         gRainAirVelocityWorld = vec3(0.0, 0.0, 0.0),
         gRainAirDensity = cfg.RUNTIME.RAIN_AIR_DENSITY,
         gRainAirDragCoeff = cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
-        gRainAirDragScale = 0.000050,
         gRainStatePhysicalDiameterUVPerMM =
             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
         gRainStatePhysicalMaxSpeed1MM =
             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM,
         gRainStatePhysicalMaxSpeedExponent =
             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT,
-        gRainStateFlowAcceleration = 0.020,
-        gRainStateUVScale = 18.0,
-        gRainStateGravity = 0.35,
-        gRainStateForceScale = 100000.0,
+        gRainStateFlowAcceleration = cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
+        gRainStateFlowDrag = cfg.RUNTIME.RAIN_FLOW_DRAG,
+        gRainStateGravity = 9.81,
         gRainStateAdhesionMin = 0.65,
         gRainStateAdhesionMax = 2.20,
         gRainObjectToWorld = mat4x4.identity(),
@@ -1093,7 +1091,7 @@ local rainStateUpdateParams = {
             */
             float acceleration =
                 excess
-                * rainStateFlowAccelerationValue();
+                * gRainStateFlowAcceleration;
 
             return
                 direction
@@ -1117,7 +1115,7 @@ local rainStateUpdateParams = {
             {
                 velocity *=
                     exp(
-                        -rainStateDragValue()
+                        -gRainStateFlowDrag
                         * 2.0
                         * dt
                     );
@@ -1171,8 +1169,8 @@ local rainStateUpdateParams = {
         {
             /*
                 Persistent state coordinates are raw visor UV coordinates.
-                C3 owns boundary handling explicitly, so this integration
-                function itself never wraps or clamps the physical result.
+                Boundary lifecycle owns exit/death/respawn explicitly, so
+                this integration function never wraps or clamps the result.
             */
             return position + velocity * dt;
         }
@@ -1258,7 +1256,7 @@ local rainStateUpdateParams = {
                     return float4(gRainStateSingleDropPosition.x, gRainStateSingleDropPosition.y , 0.0, 0.0);
                 }
 
-                if (index < 9.0)
+                if (gRainStatePhysicalTest > 0.5 && index < 9.0)
                 {
                     float u = lerp(0.250, 0.750, index / 8.0);
 
@@ -1319,7 +1317,7 @@ local rainStateUpdateParams = {
             float dt = max(gRainStateDeltaTime, 0.0);
 
             /*
-                C3 lifecycle flags in Meta.A:
+                Lifecycle flags in Meta.A:
                     0 = dead / waiting for respawn gap
                     1 = alive
                     2 = respawn pending; consume on this state pass
@@ -1331,11 +1329,11 @@ local rainStateUpdateParams = {
             {
                 if (meta.a > 1.5)
                 {
-                    if (index < 9.0)
+                    if (gRainStatePhysicalTest > 0.5 && index < 9.0)
                     {
                         float u = lerp(
-                            gRainStateMeshUMin,
-                            gRainStateMeshUMax,
+                            0.250,
+                            0.750,
                             index / 8.0
                         );
 
@@ -4976,12 +4974,6 @@ render.on('main.track.transparent', function()
 
             gRainFlowAcceleration =
                 cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
-
-            gRainFlowDrag =
-                cfg.RUNTIME.RAIN_FLOW_DRAG,
-
-            gRainFlowMaxSpeed =
-                cfg.RUNTIME.RAIN_FLOW_MAX_SPEED,
 
             gRainAmount =
                 cfg.RUNTIME.RAIN_AMOUNT,
