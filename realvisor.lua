@@ -4826,7 +4826,9 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5094,7 +5096,9 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5299,7 +5303,9 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5709,7 +5715,9 @@ render.on('main.track.transparent', function()
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
