@@ -636,7 +636,6 @@ local motionCurrent = vec3(
 --------------------------------------------------------
 
 local rainAccelerationCurrent = vec3(0, 0, 0)
-local rainPreviousVelocity = nil
 local rainLastDebugMode = nil
 local rainRenderDiagnosticLogged = false
 
