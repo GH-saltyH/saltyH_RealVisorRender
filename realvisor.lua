@@ -239,6 +239,11 @@ local cfg = scriptSettings:mapConfig({
         ------------------------------------------------------------
         RAIN_TEST_ACCEL_ENABLED = true,
 
+        -- Stage 7A validation: surface-normal + physical gravity only.
+        -- Vehicle acceleration remains disabled by RAIN_TEST_ACCEL_ENABLED.
+        -- Drag is separately disabled for the first gravity-flow acceptance pass.
+        RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0.0,
+
         -- Master amount
         RAIN_AMOUNT = 250.0,
 
@@ -339,7 +344,9 @@ local cfg = scriptSettings:mapConfig({
         -- 6 = C3 persistent boundary lifecycle validation
         -- 7 = single persistent droplet position probe
         -- 8 = C2 gravity-derived L/M/S momentum validation
-        RAIN_GPU_STATE_MODE = 9,
+        -- 9 = C2 physical 9-drop reference test (direct tangent gravity)
+        -- 10 = physical 9-drop surface-normal + gravity validation
+        RAIN_GPU_STATE_MODE = 10,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -700,7 +707,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[47] C2 adhesion threshold / actual movement',
     '[48] C2 persistent velocity magnitude',
     '[49] C2 six-panel movement + velocity',
-    '[50] CSP physical 9-drop reference set'
+    '[50] CSP physical 9-drop reference set',
+    '[51] Gravity + surface normal physical 9-drop flow'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -714,6 +722,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[7] Single persistent droplet position probe',
     '[8] Persistent C2 gravity-derived L/M/S test',
     '[9] CSP physical 9-drop reference test',
+    '[10] Physical 9-drop surface-normal + gravity test',
 }
 
 local rainStateUpdateParams = {
@@ -4616,7 +4625,7 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -4706,7 +4715,7 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
     rainStateUpdateParams.values.gRainStatePhysicalTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10) and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
@@ -4735,7 +4744,7 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateInit = 1.0
     rainStateMetaUpdateParams.values.gRainStatePhysicalTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10) and 1.0 or 0.0
     rainStateMetaUpdateParams.values.gRainStateTestGrid =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
@@ -4861,7 +4870,7 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -4879,6 +4888,8 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateDrag =
         (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9)
         and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_DRAG
+        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+        and cfg.RUNTIME.RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG
         or (
             physicsMode
             and cfg.RUNTIME.RAIN_FLOW_DRAG
@@ -4983,6 +4994,7 @@ local function updateRainGPUState(sim)
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
             or
             (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
         )
@@ -5023,7 +5035,7 @@ local function updateRainGPUState(sim)
     -- This mirrors the persistent C2 flags above and avoids an
     -- initialization-only state mismatch.
     rainStateUpdateParams.values.gRainStatePhysicalTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10) and 1.0 or 0.0
 
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(
@@ -5031,7 +5043,7 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5427,7 +5439,7 @@ render.on('main.track.transparent', function()
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10)
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -7701,9 +7713,14 @@ function windowMain(dt)
         end
     end
 
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 then
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 then
         ui.separator()
-        ui.text('CSP physical reference test: 9 fixed droplets / Light, Moderate, Heavy / Min-Average-Max')
+        ui.text(
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+            and 'Surface-normal + gravity test: 9 fixed physical droplets / vehicle acceleration OFF / drag OFF'
+            or 'CSP physical reference test: 9 fixed droplets / Light, Moderate, Heavy / Min-Average-Max'
+        )
         ui.text('Debug 50: pink = droplet, white alpha 0.5 = at least one droplet is moving; transparent = all stationary.')
         ui.text('Diameters: L 0.5/0.95/2.0 mm | M 0.5/1.5/4.0 mm | H 0.5/2.5/6.0 mm')
     end
