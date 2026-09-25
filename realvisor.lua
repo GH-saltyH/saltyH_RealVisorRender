@@ -1393,11 +1393,11 @@ local rainStateUpdateParams = {
 
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
                     const float measuredX[3] = {
-                        0.682, 0.491, 0.300
+                        0.250, 0.500, 0.750
                     };
 
                     const float measuredY[3] = {
-                        -0.410, -0.501, -0.591
+                        -0.600, -0.500, -0.450
                     };
 
                     int i = (int)index;
@@ -7743,7 +7743,8 @@ function windowMain(dt)
     end
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 
-        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 then
+        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 then
         ui.separator()
         ui.text('C2 gravity test: |ac.getSim().gravity| -> compact force -> adhesion -> velocity')
         ui.text('Reference: 9.81 m/s². Default gain maps 9.81 -> 0.35 compact force.')
@@ -7874,8 +7875,41 @@ function windowMain(dt)
             ui.text('Mode 8 uses |ac.getSim().gravity| as the physical reference and converts it with GRAVITY_GAIN.')
             ui.text('Default gain maps 9.81 m/s² to the existing compact gravity magnitude 0.35.')
         end
-
+        
     end
+    
+    
+        local pCar = ac.getCar(0)
+        local simsim = ac.getSim()
+
+        if pCar then
+            ui.text(
+                'car.acceleration = '
+                .. '\n\t{Side(x)= ' .. string.format(pCar.acceleration.x > 0 and '+%.5f' or '%.5f', pCar.acceleration.x) .. '}, '
+                .. '\n\t{Up   (y)= ' .. string.format(pCar.acceleration.y > 0 and '+%.5f' or '%.5f', pCar.acceleration.y) .. '}, '
+                .. '\n\t{Fwd (z)= ' .. string.format(pCar.acceleration.z > 0 and '+%.5f' or '%.5f', pCar.acceleration.z) .. '}'
+            )
+            ui.text(
+                'car.velocity = '
+                -- .. string.format('%.5f', pCar.velocity)
+                .. tostring(pCar.velocity)
+            )
+            ui.text(
+                'car.world facings = '
+                .. '\n\t{Side(x)= ' .. tostring(pCar.side) ..'}'
+                .. '\n\t{Up   (y)= ' .. tostring(pCar.up) ..'}'
+                .. '\n\t{Fwd (z)= ' .. tostring(pCar.look) ..'}'
+            )
+            ui.text(
+                'sim.windVelocityKmh = '
+                .. '{x=' .. string.format('%.5f', simsim.windVelocityKmh.x) .. '}, '
+                .. '{y=' .. string.format('%.5f', simsim.windVelocityKmh.y) .. '}'
+            )
+            ui.text(
+                'sim.windDirectionDeg = '
+                .. string.format('%.5f', simsim.windDirectionDeg)
+            )
+        end
 
         end)
 
