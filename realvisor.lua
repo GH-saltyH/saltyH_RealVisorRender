@@ -4360,59 +4360,54 @@ end
 -- RainFX persistent GPU state
 --------------------------------------------------------
 
+local function rainStateCountForMode()
+    return math.max(
+        1,
+        math.floor(
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+            and 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+            and 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
+            and 1
+            or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+        )
+    )
+end
+
 local function initializeRainGPUState()
-    if rainStateA and rainStateB then
+    if rainStateA and rainStateB and rainStateMetaA and rainStateMetaB then
         return true
     end
 
-    local count =
-        math.max(
-            1,
-            math.floor(
-                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-                and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-                and 1
-                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
-            )
-        )
+    local count = rainStateCountForMode()
 
-    rainStateA =
-        ui.ExtraCanvas(
-            vec2(count, 1),
-            1,
-            render.TextureFormat.R32G32B32A32.Float
-        ):setName('RainFX State A')
+    rainStateA = ui.ExtraCanvas(
+        vec2(count, 1),
+        1,
+        render.TextureFormat.R32G32B32A32.Float
+    ):setName('RainFX State A')
 
-    rainStateB =
-        ui.ExtraCanvas(
-            vec2(count, 1),
-            1,
-            render.TextureFormat.R32G32B32A32.Float
-        ):setName('RainFX State B')
+    rainStateB = ui.ExtraCanvas(
+        vec2(count, 1),
+        1,
+        render.TextureFormat.R32G32B32A32.Float
+    ):setName('RainFX State B')
 
-    rainStateMetaA =
-        ui.ExtraCanvas(
-            vec2(count, 1),
-            1,
-            render.TextureFormat.R32G32B32A32.Float
-        ):setName('RainFX State Meta A')
+    rainStateMetaA = ui.ExtraCanvas(
+        vec2(count, 1),
+        1,
+        render.TextureFormat.R32G32B32A32.Float
+    ):setName('RainFX State Meta A')
 
-    rainStateMetaB =
-        ui.ExtraCanvas(
-            vec2(count, 1),
-            1,
-            render.TextureFormat.R32G32B32A32.Float
-        ):setName('RainFX State Meta B')
+    rainStateMetaB = ui.ExtraCanvas(
+        vec2(count, 1),
+        1,
+        render.TextureFormat.R32G32B32A32.Float
+    ):setName('RainFX State Meta B')
 
     if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB then
-        ac.warn(
-            appNameDebug
-            .. ' Rain GPU state: ExtraCanvas allocation failed'
-        )
-
+        ac.warn(appNameDebug .. ' Rain GPU state: ExtraCanvas allocation failed')
         rainStateA = nil
         rainStateB = nil
         rainStateMetaA = nil
@@ -4420,31 +4415,200 @@ local function initializeRainGPUState()
         return false
     end
 
+    local physicalTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 and 1.0 or 0.0
+
+    local physicalGridTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4 and 1.0 or 0.0
+
+    local lifecycle =
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
+        )
+        and 1.0
+        or 0.0
+
+    local singleDrop =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
+
     rainStateUpdateParams.values.gRainStateCount = count
     rainStateUpdateParams.values.gRainStateInit = 1.0
-    rainStateUpdateParams.values.gRainStatePhysicalTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-        and 1.0
-        or 0.0
-    rainStateUpdateParams.values.gRainStatePhysicalGridTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-        and 1.0
-        or 0.0
+    rainStateUpdateParams.values.gRainStatePhysicalTest = physicalTest
+    rainStateUpdateParams.values.gRainStatePhysicalGridTest = physicalGridTest
+    rainStateUpdateParams.values.gRainStateLifecycle = lifecycle
+    rainStateUpdateParams.values.gRainStateSingleDropTest = singleDrop
+    rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+    )
 
-    rainStateMetaUpdateParams.values.gRainStateCount =
-        math.max(
-            1,
-            math.floor(
-                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-                and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                and 9
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-                and 1
-                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
-            )
+    rainStateMetaUpdateParams.values.gRainStateCount = count
+    rainStateMetaUpdateParams.values.gRainStateInit = 1.0
+    rainStateMetaUpdateParams.values.gRainStateLifecycle = lifecycle
+    rainStateMetaUpdateParams.values.gRainStateSingleDropTest = singleDrop
+    rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
+        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
+    rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
+    rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+
+    rainStateUpdateParams.textures.txRainState = false
+    rainStateUpdateParams.textures.txRainStateMeta = false
+    rainStateUpdateParams.textures.txRainSurfaceNormal = false
+    rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+
+    rainStateMetaUpdateParams.textures.txRainStateMeta = false
+    rainStateMetaUpdateParams.textures.txRainState = false
+    rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+
+    rainStateA:updateWithShader(rainStateUpdateParams)
+    rainStateB:updateWithShader(rainStateUpdateParams)
+    rainStateMetaA:updateWithShader(rainStateMetaUpdateParams)
+    rainStateMetaB:updateWithShader(rainStateMetaUpdateParams)
+
+    rainStateUpdateParams.values.gRainStateInit = 0.0
+    rainStateMetaUpdateParams.values.gRainStateInit = 0.0
+
+    rainStateReadIsA = true
+    rainStateInitialized = true
+    rainStateConfiguredMode = cfg.RUNTIME.RAIN_GPU_STATE_MODE
+    rainStateLastFrame = -1
+
+    ac.log(
+        appNameDebug
+        .. ' Rain GPU state initialized: '
+        .. tostring(count)
+        .. ' physical droplets'
+    )
+
+    return true
+end
+
+local function updateRainGPUState(sim)
+    if rainStateSingleDropDirty
+        or (
+            rainStateConfiguredMode ~= nil
+            and rainStateConfiguredMode ~= cfg.RUNTIME.RAIN_GPU_STATE_MODE
         )
+    then
+        rainStateA = nil
+        rainStateB = nil
+        rainStateMetaA = nil
+        rainStateMetaB = nil
+        rainStateInitialized = false
+        rainStateReadIsA = true
+        rainStateLastFrame = -1
+        rainStateConfiguredMode = nil
+        rainStateSingleDropDirty = false
+    end
 
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE <= 0 then
+        return
+    end
+
+    if not initializeRainGPUState() or not rainStateInitialized then
+        return
+    end
+
+    local frame = sim and sim.frame
+    if frame == nil or rainStateLastFrame == frame then
+        return
+    end
+
+    rainStateLastFrame = frame
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 1 then
+        return
+    end
+
+    local dt = sim.dt
+    if not dt or dt <= 0.000001 then
+        return
+    end
+
+    local transform =
+        rainTargetMesh
+        and rainTargetMesh:getWorldTransformationRaw():clone()
+        or mat4x4.identity()
+
+    local count = rainStateCountForMode()
+
+    rainStateUpdateParams.values.gRainStateDeltaTime =
+        math.min(dt, 0.05)
+    rainStateUpdateParams.values.gRainStateCount = count
+    rainStateUpdateParams.values.gRainStatePhysics =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStatePhysicalTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStatePhysicalGridTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateLifecycle =
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
+        )
+        and 1.0
+        or 0.0
+    rainStateUpdateParams.values.gRainStateSingleDropTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
+        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
+    )
+
+    rainStateUpdateParams.values.gRainAcceleration =
+        rainAccelerationCurrent
+
+    local forceMask = 0
+    if cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED then
+        forceMask = forceMask + RAIN_FORCE_GRAVITY
+    end
+    if cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED then
+        forceMask = forceMask + RAIN_FORCE_INERTIA
+    end
+    if cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED then
+        forceMask = forceMask + RAIN_FORCE_AIRFLOW
+    end
+
+    rainStateUpdateParams.values.gRainForceMask = forceMask
+    rainStateUpdateParams.values.gRainPhysicsAccelScale =
+        cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
+    rainStateUpdateParams.values.gRainAirVelocityWorld:set(
+        -ac.getCar(0).velocity.x,
+        -ac.getCar(0).velocity.y,
+        -ac.getCar(0).velocity.z
+    )
+    rainStateUpdateParams.values.gRainAirDensity =
+        cfg.RUNTIME.RAIN_AIR_DENSITY
+    rainStateUpdateParams.values.gRainAirDragCoeff =
+        cfg.RUNTIME.RAIN_AIR_DRAG_COEFF
+    rainStateUpdateParams.values.gRainStateFlowAcceleration =
+        cfg.RUNTIME.RAIN_FLOW_ACCELERATION
+    rainStateUpdateParams.values.gRainStateFlowDrag =
+        cfg.RUNTIME.RAIN_FLOW_DRAG
+    rainStateUpdateParams.values.gRainStateGravity =
+        math.abs(
+            ac.getSim()
+            and ac.getSim().gravity
+            or -9.81
+        )
+    rainStateUpdateParams.values.gRainStateAdhesionMin =
+        cfg.RUNTIME.RAIN_ADHESION_MIN
+    rainStateUpdateParams.values.gRainStateAdhesionMax =
+        cfg.RUNTIME.RAIN_ADHESION_MAX
+    rainStateUpdateParams.values.gRainObjectToWorld =
+        transform
+
+    rainStateUpdateParams.values.gRainStateBoundaryMargin =
+        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
+    rainStateUpdateParams.values.gRainStateRespawnGapMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
+    rainStateUpdateParams.values.gRainStateRespawnGapMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+
+    rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateDeltaTime =
         math.min(dt, 0.05)
     rainStateMetaUpdateParams.values.gRainStateLifecycle =
@@ -4465,13 +4629,10 @@ local function initializeRainGPUState()
 
     local readState =
         rainStateReadIsA and rainStateA or rainStateB
-
     local writeState =
         rainStateReadIsA and rainStateB or rainStateA
-
     local readMeta =
         rainStateReadIsA and rainStateMetaA or rainStateMetaB
-
     local writeMeta =
         rainStateReadIsA and rainStateMetaB or rainStateMetaA
 
@@ -4479,6 +4640,7 @@ local function initializeRainGPUState()
     rainStateUpdateParams.textures.txRainStateMeta = readMeta
     rainStateUpdateParams.textures.txRainSurfaceNormal = textureRainSurfaceNormal
     rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+
     rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
     rainStateMetaUpdateParams.textures.txRainState = readState
     rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
@@ -4487,8 +4649,6 @@ local function initializeRainGPUState()
     writeMeta:updateWithShader(rainStateMetaUpdateParams)
 
     rainStateReadIsA = not rainStateReadIsA
-
-    end
 end
 
 --------------------------------------------------------
