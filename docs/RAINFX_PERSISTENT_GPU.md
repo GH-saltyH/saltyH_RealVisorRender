@@ -524,3 +524,127 @@ Re-run Mode 9 / Debug 50 after the correction. The purpose is now narrow:
 4. verify movement speed/acceleration can then be tuned without randomized adhesion or normal-position differences contaminating the result.
 
 Debug 49 remains the persistent-state instrument and should be used only to correlate the direct visual test with State.B/A velocity; it is not the primary physical-size observation.
+
+
+---
+
+## 24. Stage 7C — size-dependent persistent max speed — 2026-09-25
+
+### 24.1 Decision
+
+Stage 7C is implemented as a separate velocity cap after adhesion-driven acceleration and before position integration.
+
+~~~
+external force
+    ↓
+surface tangent projection
+    ↓
+adhesion threshold
+    ↓
+flow acceleration
+    ↓
+drag
+    ↓
+size-dependent max speed
+    ↓
+position integration
+~~~
+
+The max-speed stage only changes velocity magnitude. It does not choose or rotate the velocity direction.
+
+### 24.2 Research basis
+
+Atlas/Ulbrich's power-law fit for free-falling raindrop terminal speed is:
+
+~~~
+V(D) = 3.778 × D^0.67
+~~~
+
+where D is diameter in millimeters and V is free-fall speed in m/s. The fit is reported as a close approximation to Gunn–Kinzer measurements over approximately 0.5–5.0 mm.
+
+This project does not use that m/s value directly because visor droplets are surface-bound rather than freely falling. Only the observed size dependence (D^0.67) is retained; absolute surface speed is calibrated independently in visor UV/s.
+
+References:
+- https://journals.ametsoc.org/view/journals/atsc/60/10/1520-0469_2003_60_1220_tmsoep_2.0.co_2.xml
+- https://journals.ametsoc.org/view/journals/atsc/78/4/JAS-D-20-0161.1.xml
+
+### 24.3 Exact visor size conversion
+
+Debug 50 established:
+
+~~~
+1.0 mm diameter = 0.0029296875 UV
+radius = diameter × 0.00146484375 UV
+~~~
+
+Therefore:
+
+~~~
+diameterMM =
+    (radiusUV × 2)
+    / 0.0029296875
+~~~
+
+The conversion is passed explicitly to the persistent shader as gRainStatePhysicalDiameterUVPerMM.
+
+### 24.4 Implemented equation
+
+For Mode 9 / Debug 50:
+
+~~~
+sizeFactor = diameterMM^0.67
+
+maxSpeedUVPerSecond =
+    gRainStatePhysicalMaxSpeed1MM
+    × sizeFactor
+~~~
+
+Current starting calibration:
+
+~~~
+RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.004 UV/s
+RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67
+~~~
+
+The 0.004 UV/s value is a visor calibration starting point, not a measured real-world surface-flow velocity.
+
+Relative max-speed factors are approximately:
+
+~~~
+0.5 mm → 0.63
+0.95 mm → 0.97
+1.0 mm → 1.00
+1.5 mm → 1.31
+2.0 mm → 1.59
+2.5 mm → 1.84
+4.0 mm → 2.52
+6.0 mm → 3.21
+~~~
+
+### 24.5 Separation of responsibilities
+
+- Adhesion threshold determines whether external tangential force can initiate/continue flow.
+- Flow acceleration determines how quickly velocity grows after threshold.
+- Drag will later determine how quickly velocity responds to changing forces and how quickly old momentum decays.
+- Max speed only caps velocity magnitude.
+- Position integration consumes the final velocity.
+
+This leaves the model ready for later vehicle acceleration, airflow drag, and other external forces without coupling max speed to their direction.
+
+### 24.6 Validation target
+
+Mode 9 uses gravity-derived C2 force with drag disabled, while the new size-dependent max-speed cap is active.
+
+Observe whether each fixed reference droplet reaches a stable velocity plateau. Exact slider-threshold measurements are not required. The important checks are:
+
+1. velocity grows before the cap,
+2. velocity stops growing at the cap,
+3. larger droplets have higher caps,
+4. direction is unchanged by the cap,
+5. changing the 1 mm calibration shifts all nine caps together without changing their relative size curve.
+
+### 24.7 Scope
+
+The physical-reference max-speed branch is intentionally isolated to Mode 9. General persistent RainFX droplets retain the existing global max-speed parameter until their visual size representation is put on the same physical UV/mm calibration.
+
+The external shaders/rainVisorScreen.hlsl validation pass is not modified. The active persistent physics implementation is the shader string embedded in realvisor.lua; changing only the unused validation copy would create divergence.
