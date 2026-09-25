@@ -758,11 +758,6 @@ local rainStateUpdateParams = {
         gRainStateUVScale = 18.0,
         gRainStateGravity = 0.35,
         gRainStateForceScale = 100000.0,
-        gRainForceMask = 0.0,
-        gRainPhysicsAccelScale = cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE,
-        gRainAirVelocityWorld = vec3(0.0, 0.0, 0.0),
-        gRainAirDensity = cfg.RUNTIME.RAIN_AIR_DENSITY,
-        gRainAirDragCoeff = cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
         gRainStateAdhesionMin = 0.65,
         gRainStateAdhesionMax = 2.20,
         gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
@@ -5620,6 +5615,9 @@ render.on('main.track.transparent', function()
                     / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
                 )
                 or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED,
+
+            gRainStatePhysicalDiameterUVPerMM =
+                cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
 
             gRainUVCenterX =
                     cfg.RUNTIME.RAIN_DEBUG_CENTER_X,                    

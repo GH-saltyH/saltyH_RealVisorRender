@@ -2107,6 +2107,41 @@ float4 rainPersistentPredictedMotionDebugOutput(PS_IN pin)
 
         float2 predictedPosition = predictedStatePosition;
 
+
+        // actual size
+
+        // float4 meta = txRainStateMeta.SampleLevel(
+        //     samPointRain,
+        //     stateUV,
+        //     0.0
+        // );
+        
+        // float radius = max(meta.r, 0.000001);
+
+        // float currentMarker = 1.0 - smoothstep(
+        //     radius * 0.30,
+        //     radius,
+        //     length(pin.Tex - currentPosition)
+        // );
+
+        // if (currentMarker > result)
+        // {
+        //     result = currentMarker;
+        //     resultColor = float3(1.0, 1.0, 1.0);
+        // }
+
+        // float predictedMarker = 1.0 - smoothstep(
+        //     radius * 0.30,
+        //     radius,
+        //     length(pin.Tex - predictedPosition)
+        // );
+
+        // if (predictedMarker > result)
+        // {
+        //     result = predictedMarker;
+        //     resultColor = float3(1.0, 1.0, 1.0);
+        // }
+
         float currentMask = 1.0 - smoothstep(
             0.003,
             0.006,
@@ -2790,6 +2825,14 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
             normalize(
                 mul(
                     tangentUObject,
+                    (float3x3)gRainObjectToWorld
+                )
+            );
+
+        float3 tangentVWorld =
+            normalize(
+                mul(
+                    tangentVObject,
                     (float3x3)gRainObjectToWorld
                 )
             );
