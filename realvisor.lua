@@ -1148,7 +1148,9 @@ local rainStateUpdateParams = {
             float3 forceWorld = float3(0.0, 0.0, 0.0);
 
             if (fmod(floor(gRainForceMask), 2.0) >= 0.5)
-                forceWorld += float3(0.0, -gRainStateGravity, 0.0);
+                forceWorld +=
+                    float3(0.0, -gRainStateGravity, 0.0)
+                    * gRainPhysicsAccelScale;
 
             if (fmod(floor(gRainForceMask / 2.0), 2.0) >= 0.5)
                 forceWorld +=
@@ -1364,7 +1366,12 @@ local rainStateUpdateParams = {
             {
                 float2 tangentForce =
                     gRainStateC2UseGravity > 0.5
-                    ? float2(0.0, gRainStateGravity * gRainStateC2GravityMultiplier)
+                    ? float2(
+                        0.0,
+                        gRainStateGravity
+                        * gRainPhysicsAccelScale
+                        * gRainStateC2GravityMultiplier
+                    )
                     : gRainStateC2Force;
                 forceMagnitude = length(tangentForce);
 
