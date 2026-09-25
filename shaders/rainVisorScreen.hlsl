@@ -2603,6 +2603,46 @@ float4 rainPersistentPhysicalDropDebugOutput(PS_IN pin)
 
 
 
+float3 rainAirflowAccelerationWorld(
+    float3 normalWorld,
+    float radius
+)
+{
+    float speed = length(gRainAirVelocityWorld);
+    if (speed < 0.0001)
+        return float3(0.0, 0.0, 0.0);
+
+    float diameterMM =
+        max(
+            (radius * 2.0)
+            / max(gRainStatePhysicalDiameterUVPerMM, 0.000001),
+            0.0
+        );
+
+    float diameterM = diameterMM * 0.001;
+    float radiusM = diameterM * 0.5;
+    float area = 3.14159265 * radiusM * radiusM;
+    float volume = (4.0 / 3.0) * 3.14159265 * radiusM * radiusM * radiusM;
+    float massKg = max(volume * 1000.0, 0.000000000001);
+
+    float3 airDir = gRainAirVelocityWorld / speed;
+    float incidence = saturate(-dot(airDir, normalWorld));
+
+    if (incidence <= 0.000001)
+        return float3(0.0, 0.0, 0.0);
+
+    float dragForce =
+        0.5
+        * max(gRainAirDensity, 0.0)
+        * speed * speed
+        * max(gRainAirDragCoeff, 0.0)
+        * area
+        * incidence;
+
+    return airDir * (dragForce / massKg);
+}
+
+
 float4 rainPersistentAirDragDebugOutput(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
@@ -2623,24 +2663,13 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
 
         This stage does NOT modify persistent physics.
     */
-    float3 baseForce =
-        float3(
-            0.0,
-            -gRainGravity,
-            0.0
-        )
-        + gRainAcceleration * gRainForceScale;
+    float3 baseForce = float3(0.0, 0.0, 0.0);
 
-    float airSpeed = length(gRainAirVelocityWorld);
+    if (gRainForceMask >= 1.0)
+        baseForce += float3(0.0, -gRainGravity, 0.0);
 
-    float3 airDragForce =
-        gRainAirVelocityWorld
-        * airSpeed
-        * max(gRainAirDragScale, 0.0);
-
-    float3 totalForce =
-        baseForce
-        + airDragForce;
+    if (fmod(floor(gRainForceMask / 2.0), 2.0) >= 0.5)
+        baseForce += gRainAcceleration * gRainPhysicsAccelScale;
 
     [loop]
     for (int i = 0; i < 256; ++i)
@@ -2765,13 +2794,14 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
                 )
             );
 
-        float3 tangentVWorld =
-            normalize(
-                mul(
-                    tangentVObject,
-                    (float3x3)gRainObjectToWorld
-                )
-            );
+        float3 airDragForce =
+            (fmod(floor(gRainForceMask / 4.0), 2.0) >= 0.5)
+            ? rainAirflowAccelerationWorld(normalWorld, meta.r)
+            : float3(0.0, 0.0, 0.0);
+
+        float3 totalForce =
+            baseForce
+            + airDragForce * gRainPhysicsAccelScale;
 
         float2 baseUVForce =
             float2(
