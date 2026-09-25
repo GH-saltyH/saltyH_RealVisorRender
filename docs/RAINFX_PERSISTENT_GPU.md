@@ -648,3 +648,108 @@ Observe whether each fixed reference droplet reaches a stable velocity plateau. 
 The physical-reference max-speed branch is intentionally isolated to Mode 9. General persistent RainFX droplets retain the existing global max-speed parameter until their visual size representation is put on the same physical UV/mm calibration.
 
 The external shaders/rainVisorScreen.hlsl validation pass is not modified. The active persistent physics implementation is the shader string embedded in realvisor.lua; changing only the unused validation copy would create divergence.
+
+---
+
+## 25. Combined-force validation Stage Gate — 2026-09-25
+
+### 25.1 Motivation
+
+Size/mass/adhesion (Sections 22-24, Mode 9 / Debug 50) and the underlying surface-normal + gravity + vehicle-acceleration force model (Sections 5-6, validated individually via Debug 15/27/30/32/33) had never been combined and observed together in the actual production physics path (`RAIN_GPU_STATE_MODE = 3`, non-C2-isolated).
+
+Mode 9 / Debug 50 is a **controlled/isolated** calibration test: it bypasses surface-normal projection entirely (`gRainStateC2Isolation = 1`, constant compact-space force) so that size-dependent adhesion/max-speed could be measured without normal-projection noise. It is therefore not a validation of the real, curvature-driven force path, and must not be treated as a substitute for it.
+
+Per Section 19 (Stage gate rule): do not change multiple physical concepts at once. This section defines the two-stage combined-force test that isolates surface-normal+gravity first, then reintroduces vehicle acceleration, using the same production path (Mode 3) that Mode 9 deliberately bypasses.
+
+### 25.2 Isolation switch added: `RAIN_TEST_ACCEL_ENABLED`
+
+A new `cfg.RUNTIME` flag was added specifically for this test:
+
+```lua
+RAIN_TEST_ACCEL_ENABLED = true,  -- default: production behavior unchanged
+```
+
+Implementation (`updateRainFlow(dt)`):
+
+```lua
+local targetAcceleration =
+    vec3(
+        rawAcceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN,
+        rawAcceleration.y * cfg.RUNTIME.RAIN_ACCEL_GAIN,
+        rawAcceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN
+    )
+
+if not cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED then
+    targetAcceleration:set(0, 0, 0)
+end
+```
+
+Design constraints honored:
+- This zeroes only the **input** to the existing exponential smoothing (`rainAccelerationCurrent`). It does not touch `gRainAcceleration`, gravity, normal decoding, tangent projection, adhesion, drag, or max-speed. No physics term other than the vehicle-acceleration contribution is affected.
+- Because the smoothing target simply becomes `(0,0,0)`, toggling the flag mid-session decays/rises smoothly (`RAIN_FLOW_RESPONSE`-controlled), matching the existing "smooth acceleration itself, not drop position" rule — no position or velocity discontinuity is introduced by the flag itself.
+- Airflow remains independently gated by `RAIN_GPU_STATE_USE_AIR_DRAG` (default `false`) and is unaffected by this flag; airflow/air-drag integration is explicitly out of scope for this stage (see Engineering Rule #5, Section 14 of the companion document `RainFXPersistentGPU.md`).
+- A matching UI checkbox was added to the RainFX tab, directly below `STATE_MODE`, with inline stage-state text so the active stage is visible without checking the ini file.
+
+### 25.3 Stage 1 — Surface normal + gravity only
+
+Purpose: verify that projected gravity alone produces curvature-consistent flow across the visor surface, using the real per-drop/per-fragment surface normal (not a synthetic/controlled tangent as in Mode 5/8/9).
+
+Required configuration:
+
+| Setting | Value |
+|---|---|
+| `RAIN_GPU_STATE_MODE` | 3 (persistent RainFX physics, full path, not C2-isolated) |
+| `RAIN_TEST_ACCEL_ENABLED` | **false** |
+| `RAIN_GPU_STATE_USE_AIR_DRAG` | false (default, unchanged) |
+| `RAIN_GPU_STATE_COUNT` | 256 (default) or lower for visual clarity |
+
+Recommended Debug sequence:
+1. `RAIN_DEBUG = 27` (`rainPersistentSurfaceForceDebugOutput`) — shows the projected tangent-force direction field evaluated at the actual rendered surface. This isolates the force *field* itself (normal + gravity only, since `RAIN_TEST_ACCEL_ENABLED = false` zeroes the other term of `rainStateExternalForceWorld()`) from drop/adhesion behavior.
+2. `RAIN_DEBUG = 19` or `29` — persistent drop positions/markers, to confirm drops actually follow the field direction shown by Debug 27.
+3. `RAIN_DEBUG = 0` (actual render) — final visual sanity check.
+
+Pass criteria:
+- The Debug 27 force-direction field varies continuously with visor curvature (not uniform/flat across the surface), consistent with the already-validated Debug 33 projection behavior.
+- Direction is plausible relative to the surface curvature parameters (`RAIN_SURFACE_CURVATURE_X/Y`, `RAIN_SURFACE_SLOPE_Y`): lateral curvature should visibly bend flow sideways near the visor edges; the downward slope bias should dominate near the vertical center.
+- No sudden direction flips or NaN/black regions while the car is stationary (this would indicate a Section 5 tangent-basis or normal-decoding regression, not a new bug — those paths are already validated, so a failure here should first be treated as a *test-configuration* error, e.g. a leftover C2/physical-test flag, before touching normal/tangent code).
+- Drops in Debug 19/29 visibly move toward lower visor regions / laterally near curved edges, without needing vehicle motion.
+
+### 25.4 Stage 2 — + vehicle acceleration
+
+Purpose: confirm vehicle acceleration combines with the already-validated Stage 1 curvature response without contaminating direction or producing implausible magnitude, using the same Mode 3 path.
+
+Required configuration change from Stage 1: only `RAIN_TEST_ACCEL_ENABLED = true` (everything else unchanged).
+
+Recommended Debug sequence:
+1. `RAIN_DEBUG = 1` (force magnitude/components) or `6` (movement direction/strength) — both read `effectiveForce = gravityForce + gRainAcceleration * gRainForceScale` with **no airflow term**, making them the correct diagnostics for this stage (Debug 34's combined-force diagnostic intentionally always includes airflow for its own purposes and should not be used here).
+2. `RAIN_DEBUG = 30` (`rainPersistentForceVelocityDebugOutput`) — compares the current tangent-force direction against the persistent drop's actual stored velocity direction, useful for judging whether the drag/acceleration response lags or overshoots implausibly under braking/cornering.
+3. `RAIN_DEBUG = 0` — final visual check under acceleration, braking and cornering.
+
+Pass criteria:
+- Force direction/magnitude in Debug 1/6 responds sensibly to acceleration, braking, and cornering (already spot-checked in isolation via Debug 32 for the analogous airflow-input path; this stage performs the equivalent check for the vehicle-acceleration term actually used by production physics).
+- Debug 30's force-vs-velocity comparison shows the velocity direction trending toward the force direction with plausible lag (governed by `RAIN_FLOW_DRAG`), not instant snapping or unbounded divergence.
+- Re-toggling `RAIN_TEST_ACCEL_ENABLED` on/off during a drive shows a smooth transition (per Section 25.2), not a jump.
+
+### 25.5 Relationship to Mode 9 / Debug 50
+
+Stage 1/2 (this section) and Mode 9/Debug 50 (Sections 22-24) validate different, complementary aspects and are not a sequential replacement of one another:
+
+| | Stage 1/2 (Mode 3) | Mode 9 (Debug 50) |
+|---|---|---|
+| Force path | Real surface-normal projection | Controlled compact-space force, normal projection bypassed |
+| Purpose | Qualitative directional plausibility (does flow follow curvature + vehicle motion) | Quantitative size/mass/adhesion/max-speed calibration under a controlled, uniform force |
+| Adhesion | Per-index hashed (production) unless manually narrowed for a cleaner signal | Deterministic, mass-derived, no hashing |
+| Status | New (this section) | Sections 22-24, C2-isolation bug already fixed |
+
+Recommended order going forward: Stage 1 -> Stage 2 -> re-confirm Mode 9/Debug 50 still holds under the corrected combined model, before any airflow/drag integration work begins (Engineering Rule #5).
+
+### 25.6 Optional: reducing adhesion threshold noise for Stage 1
+
+Stage 1's per-index hashed adhesion (`rainStateAdhesion()`, `RAIN_ADHESION_MIN/MAX = 0.65..2.20`) is production-realistic but adds threshold-crossing noise on top of the pure curvature signal being tested. `RAIN_ADHESION_MIN/MAX` are not currently exposed as UI sliders; if the Stage 1 force field (Debug 27) looks curvature-consistent but drop motion (Debug 19) looks inconsistent or sparse, temporarily lowering both values (e.g. to `~0.05-0.15`) via `settings.ini` removes the threshold gate as a confound. Revert to `0.65/2.20` before Stage 2 or any adhesion-related conclusion.
+
+### 25.7 Result log (fill in after each test run)
+
+| Date | Stage | STATE_MODE | RAIN_DEBUG | Observation | Verdict |
+|---|---|---|---|---|---|
+| _pending_ | 1 | 3 | 27 -> 19 -> 0 | | |
+| _pending_ | 2 | 3 | 1/6 -> 30 -> 0 | | |

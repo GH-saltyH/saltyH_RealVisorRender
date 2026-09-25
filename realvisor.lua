@@ -212,6 +212,33 @@ local cfg = scriptSettings:mapConfig({
 
         RAIN_ENABLED = true,
 
+        ------------------------------------------------------------
+        -- v0.6.1 Combined-force validation (Stage Gate)
+        --
+        -- Isolation switch for the surface-normal + gravity + vehicle
+        -- acceleration combination test. This does NOT touch persistent
+        -- physics (adhesion/drag/max-speed) or the Mode 5/8/9 C2
+        -- isolation paths. It only zeroes the vehicle-acceleration
+        -- INPUT before it reaches gRainAcceleration, so Stage 1
+        -- (surface normal + gravity only) can be observed with the
+        -- exact same full physics path used in production (Mode 3),
+        -- rather than a separately controlled test path.
+        --
+        -- Stage 1: RAIN_TEST_ACCEL_ENABLED = false
+        --   -> gRainAcceleration stays (0,0,0); only gravity is
+        --      projected through the real per-fragment/per-drop
+        --      surface normal. Tests curvature-driven flow alone.
+        --
+        -- Stage 2: RAIN_TEST_ACCEL_ENABLED = true (default)
+        --   -> normal production behavior; vehicle acceleration is
+        --      added back on top of the already-validated Stage 1
+        --      curvature response.
+        --
+        -- Airflow is unaffected by this flag; it remains governed by
+        -- RAIN_GPU_STATE_USE_AIR_DRAG (default false, see below).
+        ------------------------------------------------------------
+        RAIN_TEST_ACCEL_ENABLED = true,
+
         -- Master amount
         RAIN_AMOUNT = 250.0,
 
@@ -300,7 +327,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 9,
+        RAIN_GPU_STATE_COUNT = 256,
 
         -- Persistent state:
         -- 0 = disabled
@@ -381,7 +408,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
         -- Initial calibration target. This is a visor-surface speed in UV/s,
         -- not the free-fall terminal velocity reported by raindrop studies.
-        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.004,
+        --RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.004,
+        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.016,
         -- Atlas/Ulbrich-style size exponent used as the first-order
         -- size-dependent max-speed curve.
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
@@ -6339,6 +6367,19 @@ local function updateRainFlow(dt)
         )
 
     ------------------------------------------------------------
+    -- Stage Gate isolation (v0.6.1):
+    --
+    -- Zero the INPUT only. rainAccelerationCurrent still smooths
+    -- toward this zeroed target using the same exponential response,
+    -- so re-enabling the flag mid-session does not create a
+    -- discontinuous jump. gRainAcceleration itself, gravity, normal
+    -- projection and every other physics term remain untouched.
+    ------------------------------------------------------------
+    if not cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED then
+        targetAcceleration:set(0, 0, 0)
+    end
+
+    ------------------------------------------------------------
     -- Smooth acceleration itself, not drop position.
     ------------------------------------------------------------
     local response =
@@ -7518,6 +7559,34 @@ function windowMain(dt)
 
     if stateModeChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_MODE = newStateModeIndex - 1
+    end
+
+    --------------------------------------------------------
+    -- v0.6.1 Combined-force Stage Gate
+    --
+    -- Stage 1 (unchecked): surface normal + gravity only.
+    -- Stage 2 (checked, default): + vehicle acceleration.
+    -- Use STATE_MODE = 3 (persistent RainFX physics) for both stages
+    -- so the same production normal-projection path is being tested.
+    -- Recommended Debug views:
+    --   Stage 1: 27 (surface force field) then 0 (actual render)
+    --   Stage 2: 6 (direction/strength) or 1 (force components)
+    --------------------------------------------------------
+    ui.separator()
+    ui.text('Combined-force Stage Gate (Mode 3 recommended)')
+
+    local accelEnabledChanged, _  = ui.checkbox(
+        'RAIN_TEST_ACCEL_ENABLED (Stage 2: + vehicle acceleration)',
+        cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED
+    )
+    if accelEnabledChanged then
+        cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED = not cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED 
+    end
+
+    if cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED then
+        ui.text('Stage 2 active: gravity + surface normal + vehicle acceleration.')
+    else
+        ui.text('Stage 1 active: gravity + surface normal only (vehicle acceleration input forced to zero).')
     end
 
     local newCenterX, changed = ui.slider(
