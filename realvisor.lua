@@ -6879,7 +6879,7 @@ function windowMain(dt)
     -- Phase A validation
     --------------------------------------------------------
     ui.separator()
-    ui.text('Phase A: force-source isolation')
+    ui.text('Canonical force-source isolation')
     ui.text('Use STATE_MODE = 3. Test one source at a time, then enable combinations:')
     ui.text('1) Gravity only -> 2) Inertia only -> 3) Gravity + Inertia -> 4) Airflow')
     ui.text('Airflow is intentionally OFF by default until its incidence/mass response is verified.')
