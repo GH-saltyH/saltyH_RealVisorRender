@@ -753,3 +753,30 @@ Stage 1's per-index hashed adhesion (`rainStateAdhesion()`, `RAIN_ADHESION_MIN/M
 |---|---|---|---|---|---|
 | _pending_ | 1 | 3 | 27 -> 19 -> 0 | | |
 | _pending_ | 2 | 3 | 1/6 -> 30 -> 0 | | |
+
+
+## 26. Persistent tangent-V orientation correction — 2026-09-25
+
+Mode 9 / Debug 50 was the signed-V direction reference and moved downward. The corresponding Mode 10 / Debug 50 test moved upward. Because Mode 10 uses the world-gravity -> normal-derived tangent path while Mode 9 directly injects +V gravity, this isolates the discrepancy to the tangent-frame orientation rather than gravity sign, adhesion, max-speed, or position integration.
+
+The persistent shader constructs U by projecting object-space +X onto the surface tangent plane and derives V with a cross product. That construction is mathematically right-handed but does not, by itself, guarantee that V has the same orientation as the actual mesh UV V. The project contract requires increasing V to mean moving downward, and the observed Mode 10 result demonstrated that the derived V was reversed for the active visor configuration.
+
+The correction keeps U unchanged and orients the derived V against canonical object-space -Y:
+
+```
+V = normalize(cross(normal, U))
+if (dot(V, float3(0,-1,0)) < 0) V = -V
+```
+
+This is intentionally limited to the persistent surface-force projection path. It does not modify gravity magnitude, droplet mass/radius, adhesion thresholds, flow acceleration, drag, max-speed, State/Meta texel layout, or signed UV coordinates.
+
+### Next validation
+
+Re-run the exact previous comparison with no parameter changes:
+- Mode 9 / Debug 50: reference;
+- Mode 10 / Debug 50;
+- stationary vehicle;
+- `RAIN_TEST_ACCEL_ENABLED = false`;
+- `RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0`.
+
+Acceptance target: Mode 9 remains downward and Mode 10 changes from upward to downward. Only after this direction gate passes should curvature-dependent differences and the Stage 7B vehicle-acceleration gate be evaluated.
