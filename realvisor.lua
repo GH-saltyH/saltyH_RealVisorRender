@@ -292,9 +292,6 @@ local cfg = scriptSettings:mapConfig({
         -- 49 = C2 six-panel movement + velocity diagnostic
         RAIN_DEBUG = 51,
 
-        RAIN_DEBUG_CENTER_X = 0.5,
-        RAIN_DEBUG_CENTER_Y = -0.5,
-
     },
 })
 
@@ -4790,12 +4787,6 @@ render.on('main.track.transparent', function()
 
         textures = {
             
-            txRainDrops =
-                textureRaindrops,
-
-            txRainSurfaceNormal =
-                textureRainSurfaceNormal,
-
             txRainBoundaryMask =
                 textureRainBoundaryMask,
 
@@ -4813,61 +4804,7 @@ render.on('main.track.transparent', function()
 
         
         values = {
-
-            gRainAcceleration =
-                rainAccelerationCurrent,
-
-            gRainForceMask =
-                (cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and RAIN_FORCE_GRAVITY or 0)
-                + (cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED and RAIN_FORCE_INERTIA or 0)
-                + (cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and RAIN_FORCE_AIRFLOW or 0),
-
-            gRainPhysicsAccelScale =
-                cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE,
-
-            gRainAirDensity =
-                cfg.RUNTIME.RAIN_AIR_DENSITY,
-
-            gRainAirDragCoeff =
-                cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
-
-            -- Airflow is opposite vehicle world velocity.
-            -- Debug 31 consumes this value only; persistent physics is
-            -- intentionally unchanged until the direction test is verified.
-            gRainAirVelocityWorld =
-                vec3(
-                    -car.velocity.x,
-                    -car.velocity.y,
-                    -car.velocity.z
-                ),
-
-            gRainDebug =
-                cfg.RUNTIME.RAIN_DEBUG,
-
-            gRainObjectToWorld =
-                startingTransform,
-
-            gRainCameraSide =
-                ac.getCameraSide(),
-
-            gRainCameraUp =
-                ac.getCameraUp(),
-
-            gRainCameraForward =
-                ac.getCameraForward(),
-
-            gRainAdhesionMin =
-                cfg.RUNTIME.RAIN_ADHESION_MIN,
-
-            gRainAdhesionMax =
-                cfg.RUNTIME.RAIN_ADHESION_MAX,
-
-
-            gRainFlowAcceleration =
-                cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
-
-            gRainTime =
-                sim.time,
+            gRainDebug = cfg.RUNTIME.RAIN_DEBUG,
 
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
@@ -4876,20 +4813,8 @@ render.on('main.track.transparent', function()
                 and 9
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
-                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
-
-            gRainStatePhysicalDiameterUVPerMM =
-                cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
-
-            gRainUVCenterX =
-                    cfg.RUNTIME.RAIN_DEBUG_CENTER_X,                    
-            
-            gRainUVCenterY =
-                    cfg.RUNTIME.RAIN_DEBUG_CENTER_Y,
-
-            gRainStateDeltaTime =
-                sim.dt
-        },
+                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+        }        },
 
         shader = 
             -- UV_DEBUG_SHADER
