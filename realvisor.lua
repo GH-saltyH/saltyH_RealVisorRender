@@ -375,6 +375,17 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_PHYSICAL_MODERATE_AVG_MM = 1.50,
         RAIN_GPU_STATE_PHYSICAL_HEAVY_AVG_MM = 2.50,
 
+        -- Stage 7C: physical-reference size-dependent surface max speed.
+        -- 1 mm diameter occupies exactly 0.0029296875 visor UV in the
+        -- calibrated Debug 50 mesh measurement.
+        RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
+        -- Initial calibration target. This is a visor-surface speed in UV/s,
+        -- not the free-fall terminal velocity reported by raindrop studies.
+        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.004,
+        -- Atlas/Ulbrich-style size exponent used as the first-order
+        -- size-dependent max-speed curve.
+        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
+
         RAIN_GPU_STATE_DRAG = 0.35,
         RAIN_GPU_STATE_MAX_SPEED = 0.12,
 
@@ -696,6 +707,12 @@ local rainStateUpdateParams = {
         gRainAirDragScale = 0.000050,
         gRainStateDrag = 0.35,
         gRainStateMaxSpeed = 0.12,
+        gRainStatePhysicalDiameterUVPerMM =
+            cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
+        gRainStatePhysicalMaxSpeed1MM =
+            cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM,
+        gRainStatePhysicalMaxSpeedExponent =
+            cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT,
         gRainStateFlowAcceleration = 0.020,
         gRainStateUVScale = 18.0,
         gRainStateGravity = 0.35,
@@ -839,11 +856,85 @@ local rainStateUpdateParams = {
                 : gRainStateDrag;
         }
 
-        float rainStateMaxSpeedValue()
+        /*
+            Stage 7C physical max-speed model.
+
+            Research reference:
+                V_terminal(D) ~= 3.778 * D^0.67
+
+            D is diameter in millimeters and V is free-fall speed in m/s.
+            That relationship is NOT copied as an absolute visor speed.
+            Only the observed size dependence is retained. The 1 mm surface
+            speed is calibrated independently in Lua as UV/s.
+
+            Current physical-reference radius is already expressed in raw
+            visor UV, so diameter can be recovered exactly from the measured
+            1 mm diameter = 0.0029296875 UV relationship.
+        */
+        float rainStatePhysicalMaxSpeed(
+            float radius
+        )
         {
-            return rainStateC3SpeedTestActive()
-                ? gRainStateC3MaxSpeed
-                : gRainStateMaxSpeed;
+            if (
+                gRainStatePhysicalTest <= 0.5
+                || radius <= 0.000001
+            )
+            {
+                return max(
+                    gRainStateMaxSpeed,
+                    0.0
+                );
+            }
+
+            float diameterUV =
+                radius * 2.0;
+
+            float diameterMM =
+                diameterUV
+                / max(
+                    gRainStatePhysicalDiameterUVPerMM,
+                    0.000001
+                );
+
+            diameterMM =
+                clamp(
+                    diameterMM,
+                    0.5,
+                    6.0
+                );
+
+            float sizeFactor =
+                pow(
+                    diameterMM,
+                    gRainStatePhysicalMaxSpeedExponent
+                );
+
+            return
+                max(
+                    gRainStatePhysicalMaxSpeed1MM,
+                    0.0
+                )
+                * sizeFactor;
+        }
+
+        float rainStateMaxSpeedValue(
+            float radius
+        )
+        {
+            if (rainStateC3SpeedTestActive())
+            {
+                return gRainStateC3MaxSpeed;
+            }
+
+            if (gRainStatePhysicalTest > 0.5)
+            {
+                return rainStatePhysicalMaxSpeed(radius);
+            }
+
+            return max(
+                gRainStateMaxSpeed,
+                0.0
+            );
         }
 
         float3 rainStateNormalWorld(float2 p) {
@@ -1029,14 +1120,15 @@ local rainStateUpdateParams = {
         }
 
         float2 rainStateClampSpeed(
-            float2 velocity
+            float2 velocity,
+            float radius
         )
         {
             float speed =
                 length(velocity);
 
             float maxSpeed =
-                rainStateMaxSpeedValue();
+                rainStateMaxSpeedValue(radius);
 
             if (
                 speed
@@ -1115,7 +1207,10 @@ local rainStateUpdateParams = {
                     dt
                 );
 
-                velocity = rainStateClampSpeed(velocity);
+                velocity = rainStateClampSpeed(
+                    velocity,
+                    radius
+                );
 
                 position = rainStateIntegratePosition(
                     position,
@@ -1156,7 +1251,8 @@ local rainStateUpdateParams = {
 
             velocity =
                 rainStateClampSpeed(
-                    velocity
+                    velocity,
+                    radius
                 );
 
             position =
@@ -1193,7 +1289,8 @@ local rainStateUpdateParams = {
 
             velocity =
                 rainStateClampSpeed(
-                    velocity
+                    velocity,
+                    0.0
                 );
 
             position =
@@ -4736,6 +4833,8 @@ local function updateRainGPUState(sim)
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+                and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
@@ -4892,11 +4991,19 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
 
+    -- Keep the physical max-speed branch active every frame in Mode 9.
+    -- This mirrors the persistent C2 flags above and avoids an
+    -- initialization-only state mismatch.
+    rainStateUpdateParams.values.gRainStatePhysicalTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 and 1.0 or 0.0
+
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(
             1,
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
@@ -5291,6 +5398,8 @@ render.on('main.track.transparent', function()
 
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
+                and 9
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
                 and 9
                 or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
                 and 3
