@@ -2665,7 +2665,7 @@ float4 rainPersistentAirDragDebugOutput(PS_IN pin)
     */
     float3 baseForce = float3(0.0, 0.0, 0.0);
 
-    if (gRainForceMask >= 1.0)
+    if (fmod(floor(gRainForceMask), 2.0) >= 0.5)
         baseForce += float3(0.0, -gRainGravity, 0.0);
 
     if (fmod(floor(gRainForceMask / 2.0), 2.0) >= 0.5)
