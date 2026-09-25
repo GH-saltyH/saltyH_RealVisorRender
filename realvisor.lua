@@ -348,7 +348,10 @@ local cfg = scriptSettings:mapConfig({
         -- 8 = C2 gravity-derived L/M/S momentum validation
         -- 9 = C2 physical 9-drop reference test (direct tangent gravity)
         -- 10 = physical 9-drop surface-normal + gravity validation
-        RAIN_GPU_STATE_MODE = 10,
+        RAIN_GPU_STATE_MODE = 51,
+
+        -- 0 = legacy arbitrary size model, 1 = Debug 50 physical profile.
+        RAIN_GPU_STATE_SIZE_MODEL = 0,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -723,6 +726,7 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[8] Persistent C2 gravity-derived L/M/S test',
     '[9] CSP physical 9-drop reference test',
     '[10] Physical 9-drop surface-normal + gravity test',
+    '[51] Phase A physical 9-drop unified-force test',
 }
 
 local rainStateUpdateParams = {
@@ -774,6 +778,7 @@ local rainStateUpdateParams = {
         gRainStateC2UseGravity = 0.0,
         gRainStateC2GravityMultiplier = 1.0,
         gRainStatePhysicalTest = 0.0,
+        gRainStateUsePhysicalSizeProfile = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -808,6 +813,40 @@ local rainStateUpdateParams = {
 
         float rainStateHash(float n) {
             return frac(sin(n * 127.1 + 311.7) * 43758.5453);
+        }
+
+        /*
+            Debug 50 physical size/profile model. This is the single
+            shader-side profile reused by legacy test modes.
+        */
+        float rainStatePhysicalDiameterMM(float index)
+        {
+            float profile = floor(index / 3.0);
+            float slot = index - profile * 3.0;
+
+            if (profile < 0.5)
+                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
+
+            if (profile < 1.5)
+                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
+
+            return slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
+        }
+
+        float rainStatePhysicalMassProfile(float diameterMM)
+        {
+            float volumeMin = 0.5 * 0.5 * 0.5;
+            float volumeMax = 6.0 * 6.0 * 6.0;
+            float volume = diameterMM * diameterMM * diameterMM;
+
+            return lerp(
+                1.0,
+                9.0,
+                saturate(
+                    (volume - volumeMin)
+                    / (volumeMax - volumeMin)
+                )
+            );
         }
 
         /*
@@ -1479,7 +1518,10 @@ local rainStateUpdateParams = {
                     return float4(gRainStateSingleDropPosition.x, gRainStateSingleDropPosition.y , 0.0, 0.0);
                 }
 
-                if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                if ((
+                    gRainStatePhysicalTest > 0.5
+                    || gRainStateUsePhysicalSizeProfile > 0.5
+                ) && index < 9.0)
                 {
                     float u = lerp(
                         gRainStateMeshUMin,
@@ -1563,7 +1605,10 @@ local rainStateUpdateParams = {
             {
                 if (meta.a > 1.5)
                 {
-                    if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                    if ((
+                    gRainStatePhysicalTest > 0.5
+                    || gRainStateUsePhysicalSizeProfile > 0.5
+                ) && index < 9.0)
                     {
                         float u = lerp(
                             gRainStateMeshUMin,
@@ -1664,6 +1709,7 @@ local rainStateMetaUpdateParams = {
         gRainStateInit = 0.0,
         gRainStateTestGrid = 0.0,
         gRainStatePhysicalTest = 0.0,
+        gRainStateUsePhysicalSizeProfile = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -1692,6 +1738,40 @@ local rainStateMetaUpdateParams = {
 
         float rainStateHash(float n) {
             return frac(sin(n * 127.1 + 311.7) * 43758.5453);
+        }
+
+        /*
+            Debug 50 physical size/profile model. This is the single
+            shader-side profile reused by legacy test modes.
+        */
+        float rainStatePhysicalDiameterMM(float index)
+        {
+            float profile = floor(index / 3.0);
+            float slot = index - profile * 3.0;
+
+            if (profile < 0.5)
+                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
+
+            if (profile < 1.5)
+                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
+
+            return slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
+        }
+
+        float rainStatePhysicalMassProfile(float diameterMM)
+        {
+            float volumeMin = 0.5 * 0.5 * 0.5;
+            float volumeMax = 6.0 * 6.0 * 6.0;
+            float volume = diameterMM * diameterMM * diameterMM;
+
+            return lerp(
+                1.0,
+                9.0,
+                saturate(
+                    (volume - volumeMin)
+                    / (volumeMax - volumeMin)
+                )
+            );
         }
 
         /*
@@ -1750,18 +1830,13 @@ local rainStateMetaUpdateParams = {
                     gRainStateTestGrid < 0.5
                     && count == 3.0;
 
-                if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                if ((
+                    gRainStatePhysicalTest > 0.5
+                    || gRainStateUsePhysicalSizeProfile > 0.5
+                ) && index < 9.0)
                 {
-                    float profile = floor(index / 3.0);
-                    float slot = index - profile * 3.0;
-                    float diameterMM;
-
-                    if (profile < 0.5)
-                        diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
-                    else if (profile < 1.5)
-                        diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
-                    else
-                        diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
+                    float diameterMM =
+                        rainStatePhysicalDiameterMM(index);
 
                     /*
                         Physical reference calibration:
@@ -1770,10 +1845,8 @@ local rainStateMetaUpdateParams = {
                         Radius is therefore half of that diameter scale.
                     */
                     float radius = diameterMM * 0.00146484375;
-                    float volumeMin = 0.5 * 0.5 * 0.5;
-                    float volumeMax = 6.0 * 6.0 * 6.0;
-                    float volume = diameterMM * diameterMM * diameterMM;
-                    float mass = lerp(1.0, 9.0, saturate((volume - volumeMin) / (volumeMax - volumeMin)));
+                    float mass =
+                        rainStatePhysicalMassProfile(diameterMM);
 
                     return float4(radius, mass, 0.0, 1.0);
                 }
@@ -1828,7 +1901,10 @@ local rainStateMetaUpdateParams = {
                     meta.a = 1.0;
                     meta.b = 0.0;
 
-                    if (gRainStatePhysicalTest > 0.5 && index < 9.0)
+                    if ((
+                    gRainStatePhysicalTest > 0.5
+                    || gRainStateUsePhysicalSizeProfile > 0.5
+                ) && index < 9.0)
                     {
                         float profile = floor(index / 3.0);
                         float slot = index - profile * 3.0;
@@ -1847,14 +1923,8 @@ local rainStateMetaUpdateParams = {
                         */
                         meta.r = diameterMM * 0.00146484375;
 
-                        float volumeMin = 0.5 * 0.5 * 0.5;
-                        float volumeMax = 6.0 * 6.0 * 6.0;
-                        float volume = diameterMM * diameterMM * diameterMM;
-                        meta.g = lerp(
-                            1.0,
-                            9.0,
-                            saturate((volume - volumeMin) / (volumeMax - volumeMin))
-                        );
+                        meta.g =
+                            rainStatePhysicalMassProfile(diameterMM);
                     }
                     else
                     {
