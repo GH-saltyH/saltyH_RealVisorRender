@@ -408,3 +408,119 @@ Observed with the previous three-drop gravity diagnostic:
 - GRAVITY_GAIN = 0.16217: Middle white, velocity display black.
 
 Because the previous test could randomize radius during normal respawn, these observations should not be interpreted as exact threshold boundaries. The direct nine-drop test removes that confounder.
+
+
+## 23. Mode 9 / Debug 50 observation and C2 isolation correction — 2026-09-25
+
+### 23.1 Test 50 observation
+
+Mode 9 / Debug 50 was observed with the fixed nine-drop physical reference population.
+
+Observed:
+- all nine droplets move in the same vertical direction;
+- at the individual onset gain, movement is very slow; at the threshold level a droplet takes roughly 17 seconds to cross about half of the visor's vertical test area;
+- increasing `GRAVITY_GAIN` increases the observed movement speed continuously;
+- at the default `GRAVITY_GAIN = 0.03567788`, all droplets remain stationary;
+- observed onset order, using 1-based particle indices:
+  `9 (0.042) > 4 (0.11525) > 8 (0.11798) > 6 (0.12346) > 5 (0.12620) > 7 (0.14264) > 1 (0.14538) > 3 (0.15360) > 2 (0.18923)`.
+
+The common vertical direction confirms that the gravity path is active visually, but the threshold ordering does not match the intended fixed-mass C2 model.
+
+### 23.2 Root cause: Mode 9 lost C2 isolation after initialization
+
+The nine-drop Meta values are deterministic and were confirmed from the physical-test branch to be:
+
+| Index | Diameter | Mass |
+|---:|---:|---:|
+| 1 | 0.5 mm | 1.000 |
+| 2 | 0.95 mm | 1.027 |
+| 3 | 2.0 mm | 1.292 |
+| 4 | 0.5 mm | 1.000 |
+| 5 | 1.5 mm | 1.121 |
+| 6 | 4.0 mm | 3.367 |
+| 7 | 0.5 mm | 1.000 |
+| 8 | 2.5 mm | 1.574 |
+| 9 | 6.0 mm | 9.000 |
+
+However, `initializeRainGPUState()` and `updateRainGPUState()` did not use the same Mode 9 C2 flags.
+
+Initialization set Mode 9 as C2/gravity-isolated, but the per-frame update later assigned:
+- `gRainStateC2Isolation = 1` only for Mode 5;
+- `gRainStateC2UseGravity = 1` only for Mode 8.
+
+Therefore Mode 9 entered the correct controlled path during initialization, then silently fell back to the normal persistent surface-physics path on subsequent frames.
+
+The normal path calls `rainStateAdhesion(stateIndex, mass)`, whose base adhesion is randomized independently for every state index:
+
+`adhesionBase = lerp(gRainStateAdhesionMin, gRainStateAdhesionMax, rainStateHash(stateIndex + 211))`
+
+That random per-index adhesion explains why equal-size droplets 1/4/7 can have different observed onset gains. It also explains why the observed ordering cannot be attributed to the deterministic Mode 9 mass table alone.
+
+This is a state/update-parameter mismatch, not evidence that the State and StateMeta texels are ping-ponging independently or losing their index identity.
+
+### 23.3 Correction
+
+Mode 9 now keeps the following flags active during every persistent-state update:
+- `gRainStateTestGrid = 1`
+- `gRainStateC2Isolation = 1`
+- `gRainStateC2UseGravity = 1`
+- `gRainStatePhysicalTest = 1`
+- `gRainStateC2GravityMultiplier = 1`
+- C2 test drag and max-speed settings remain the Mode 9 values.
+
+The controlled physics path therefore uses exactly:
+
+`force = (0, gRainStateGravity)`
+
+`adhesion = 1.2 / sqrt(mass)`
+
+with no random per-index adhesion and no normal-map-dependent force magnitude.
+
+### 23.4 Predicted corrected threshold order
+
+For `gRainStateGravity = 9.81 * GRAVITY_GAIN`, the controlled threshold is:
+
+`GRAVITY_GAIN_threshold = (1.2 / sqrt(mass)) / 9.81`
+
+Using the fixed Mode 9 mass table, the predicted onset gains are approximately:
+
+| Index | Mass | Predicted onset gain |
+|---:|---:|---:|
+| 9 | 9.000 | 0.04077 |
+| 6 | 3.367 | 0.06666 |
+| 8 | 1.574 | 0.09750 |
+| 3 | 1.292 | 0.10762 |
+| 5 | 1.121 | 0.11553 |
+| 2 | 1.027 | 0.12071 |
+| 1 | 1.000 | 0.12232 |
+| 4 | 1.000 | 0.12232 |
+| 7 | 1.000 | 0.12232 |
+
+Thus 1/4/7 must have the same threshold in the corrected C2 test, apart from numerical/texture sampling effects that are not expected to produce a large systematic separation.
+
+The previous observation of index 9 at approximately 0.042 is notably close to the corrected controlled prediction of 0.04077, but that agreement was coincidental because the actual running path was the randomized adhesion path. It must not be used as validation of the old implementation.
+
+### 23.5 Physical droplet UV-size calibration
+
+The Mode 9 visual radius mapping was also corrected using the measured visor-UV reference supplied for this test:
+
+- 2.0 mm diameter = 0.005859375 UV
+- 4.0 mm diameter = 0.01171875 UV
+- 6.0 mm diameter = 0.017578125 UV
+- therefore 1.0 mm diameter = 0.0029296875 UV
+- therefore 0.1 mm diameter = 0.00029296875 UV
+- radius = diameter * 0.00146484375 UV
+
+The previous Mode 9 mapping of radius `0.032..0.115` was a legacy diagnostic radius range and made the 6 mm reference droplet far too large relative to the actual measured visor UV. Mode 9 now uses the measured physical UV diameter relationship directly, including on deterministic respawn.
+
+This calibration is a render/UV measurement contract for the visor mesh. It does not yet claim that UV distance itself is a world-space physical length.
+
+### 23.6 Next validation
+
+Re-run Mode 9 / Debug 50 after the correction. The purpose is now narrow:
+1. verify that 1/4/7 have effectively identical onset gain;
+2. verify the onset order follows mass monotonically, approximately 9 -> 6 -> 8 -> 3 -> 5 -> 2 -> 1/4/7;
+3. verify the visual diameters match the measured UV ratios;
+4. verify movement speed/acceleration can then be tuned without randomized adhesion or normal-position differences contaminating the result.
+
+Debug 49 remains the persistent-state instrument and should be used only to correlate the direct visual test with State.B/A velocity; it is not the primary physical-size observation.
