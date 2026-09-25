@@ -597,15 +597,10 @@ local RAIN_DEBUG_OPTIONS = {
 local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[0] Disabled',
     '[1] Initialize only',
-    '[2] Synthetic force validation',
-    '[3] Persistent RainFX physics',
-    '[4] Persistent physics + 3x3 L/M/S grid',
-    '[5] Persistent physics + C2 controlled L/M/S isolation',
-    '[6] Persistent physics + C3 boundary lifecycle',
-    '[7] Single persistent droplet position probe',
-    '[8] Persistent C2 gravity-derived L/M/S test',
-    '[9] CSP physical 9-drop reference test',
-    '[10] Physical 9-drop surface-normal + gravity test',
+    '[0] Canonical persistent physical droplets',
+    '[40] Boundary mask',
+    '[41] Lifecycle state',
+    '[51] Physical state viewer',
 }
 
 local rainStateUpdateParams = {
@@ -1124,7 +1119,7 @@ local rainStateUpdateParams = {
             velocity *=
                 exp(
                     -max(
-                        rainStateDragValue(),
+                        gRainStateFlowDrag,
                         0.0
                     )
                     * dt
@@ -1528,18 +1523,6 @@ local rainStateMetaUpdateParams = {
                 }
 
 
-                /*
-                    Meta initialization intentionally does not consume
-                    gRainStateC2Isolation from the physics parameter block.
-                    C2 is uniquely represented here by the 3-state allocation
-                    (mode 5) while the 9-state test grid remains mode 4.
-                    Keep this decision local to the meta shader so the two
-                    update parameter sets remain independent.
-                */
-                bool c2Isolation =
-                    gRainStateTestGrid < 0.5
-                    && count == 3.0;
-
                 if (index < 9.0)
                 {
                     float diameterMM =
@@ -1555,29 +1538,6 @@ local rainStateMetaUpdateParams = {
                     float mass =
                         rainStatePhysicalMassProfile(diameterMM);
 
-                    return float4(radius, mass, 0.0, 1.0);
-                }
-
-                if (gRainStateTestGrid > 0.5 && index < 9.0) {
-                    if (c2Isolation && index < 3.0)
-                    {
-                        const float radiusValues[3] = {
-                            0.032, 0.0735, 0.115
-                        };
-                        float radius = radiusValues[(int)index];
-                        float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
-                        float mass = lerp(1.0, 9.0, radius01 * radius01);
-                        return float4(radius, mass, 0.0, 1.0);
-                    }
-
-                    const float radiusValues[9] = {
-                        0.115, 0.0735, 0.032,
-                        0.0735, 0.032, 0.115,
-                        0.032, 0.115, 0.0735
-                    };
-                    float radius = radiusValues[(int)index];
-                    float radius01 = saturate((radius - 0.032) / (0.115 - 0.032));
-                    float mass = lerp(1.0, 9.0, radius01 * radius01);
                     return float4(radius, mass, 0.0, 1.0);
                 }
 
@@ -4587,10 +4547,6 @@ local function initializeRainGPUState()
 
     rainStateUpdateParams.values.gRainStateCount = count
     rainStateUpdateParams.values.gRainStateInit = 1.0
-    rainStateUpdateParams.values.gRainStateTestGrid =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-        and 1.0
-        or 0.0
     rainStateUpdateParams.values.gRainStatePhysicalTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
         and 1.0
@@ -7037,9 +6993,15 @@ function windowMain(dt)
     ui.separator()
     ui.text('RainFX Debug Code')
 
-    -- Select the original numeric RAIN_DEBUG value by readable test name.
-    -- ui.combo() is 1-based, while the shader/debug code remains 0-based.
-    local rainDebugIndex = math.max(0, math.min(#RAIN_DEBUG_OPTIONS - 1, math.floor(cfg.RUNTIME.RAIN_DEBUG))) + 1
+    local RAIN_DEBUG_VALUES = { 0, 40, 41, 51 }
+    local rainDebugIndex = 1
+    for i, value in ipairs(RAIN_DEBUG_VALUES) do
+        if value == cfg.RUNTIME.RAIN_DEBUG then
+            rainDebugIndex = i
+            break
+        end
+    end
+
     local newRainDebugIndex, rainDebugChanged = ui.combo(
         'RAIN_DEBUG',
         rainDebugIndex,
@@ -7047,7 +7009,7 @@ function windowMain(dt)
     )
 
     if rainDebugChanged then
-        cfg.RUNTIME.RAIN_DEBUG = newRainDebugIndex - 1
+        cfg.RUNTIME.RAIN_DEBUG = RAIN_DEBUG_VALUES[newRainDebugIndex]
     end
 
     local RAIN_GPU_STATE_MODE_VALUES = {
@@ -7228,15 +7190,7 @@ function windowMain(dt)
 
         if cfg.RUNTIME.RAIN_DEBUG == 47 then
             ui.separator()
-            ui.text('Debug 47: C2 adhesion threshold / actual persistent movement')
-            ui.text('Mode 5: manual C2 force. Mode 8: AC getSim().gravity-derived C2 force.')
-            ui.text('White = actual persistent velocity, black = effectively stationary.')
-            ui.text('Mode 8 uses |ac.getSim().gravity| as the physical reference and converts it with GRAVITY_GAIN.')
-            ui.text('Default gain maps 9.81 m/s² to the existing compact gravity magnitude 0.35.')
-        end
-        
-    end
-    
+            
     
         local pCar = ac.getCar(0)
         local simsim = ac.getSim()
