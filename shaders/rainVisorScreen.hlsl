@@ -5015,10 +5015,10 @@ float4 rainPersistentC2SixPanelVelocityDebugOutput(PS_IN pin)
     );
 }
 
-float4 rainPersistentCSPPhysicalNineDropDebugOutput(PS_IN pin)
+float4 rainPersistentPhysicalNineDropStateDebugOutput(PS_IN pin)
 {
     /*
-        Debug 50 / Mode 9.
+        Debug 51 / State Mode 10.
 
         Nine persistent droplets are fixed in the visor test region:
             Light:     0.5 / 0.95 / 2.0 mm
@@ -5705,9 +5705,9 @@ float4 main(PS_IN pin)
         return rainPersistentC2SixPanelVelocityDebugOutput(pin);
     }
 
-    if (gRainDebug == 50)
+    if (gRainDebug == 51)
     {
-        return rainPersistentCSPPhysicalNineDropDebugOutput(pin);
+        return rainPersistentPhysicalNineDropStateDebugOutput(pin);
     }
 
     if (gRainDebug == 34)
