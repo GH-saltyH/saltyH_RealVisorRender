@@ -7790,32 +7790,13 @@ function windowMain(dt)
     ui.text('All enabled sources are summed in WORLD m/s^2, then projected once onto the visor surface.')
 
     --------------------------------------------------------
-    -- v0.6.1 Combined-force Stage Gate
-    --
-    -- Stage 1 (unchecked): surface normal + gravity only.
-    -- Stage 2 (checked, default): + vehicle acceleration.
-    -- Use STATE_MODE = 3 (persistent RainFX physics) for both stages
-    -- so the same production normal-projection path is being tested.
-    -- Recommended Debug views:
-    --   Stage 1: 27 (surface force field) then 0 (actual render)
-    --   Stage 2: 6 (direction/strength) or 1 (force components)
+    -- Phase A validation
     --------------------------------------------------------
     ui.separator()
-    ui.text('Combined-force Stage Gate (Mode 3 recommended)')
-
-    local accelEnabledChanged, _  = ui.checkbox(
-        'RAIN_TEST_ACCEL_ENABLED (Stage 2: + vehicle acceleration)',
-        cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED
-    )
-    if accelEnabledChanged then
-        cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED = not cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED 
-    end
-
-    if cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED then
-        ui.text('Stage 2 active: gravity + surface normal + vehicle acceleration.')
-    else
-        ui.text('Stage 1 active: gravity + surface normal only (vehicle acceleration input forced to zero).')
-    end
+    ui.text('Phase A: force-source isolation')
+    ui.text('Use STATE_MODE = 3. Test one source at a time, then enable combinations:')
+    ui.text('1) Gravity only -> 2) Inertia only -> 3) Gravity + Inertia -> 4) Airflow')
+    ui.text('Airflow is intentionally OFF by default until its incidence/mass response is verified.')
 
     local newCenterX, changed = ui.slider(
         'CENTER_X',
