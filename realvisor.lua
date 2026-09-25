@@ -35,7 +35,6 @@ local appFolder =
     -- Path: Textures
     --------------------------------------------------------
     
-    local textureRaindrops = appFolder .. '/texture/drops.dds'
     local textureRainSurfaceNormal = appFolder .. '/texture/GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds'
     local textureRainBoundaryMask = appFolder .. '/texture/GLASS_EXT_RAINFX_boundaryMask_2K.dds'
     local testtextureRainSurfaceNormal = appFolder .. '/texture/test_objectSpace.dds'
@@ -4711,11 +4710,6 @@ render.on('main.track.transparent', function()
     end
 
 
-    if not textureRaindrops then
-        return
-    end
-    
-    
     if not rainTargetMesh
         or #rainTargetMesh == 0 then
         return
