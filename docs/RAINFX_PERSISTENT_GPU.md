@@ -1054,3 +1054,108 @@ https://github.com/ac-custom-shaders-patch/acc-lua-sdk
 - RAIN_GPU_STATE_USE_AIR_DRAG is retained for compatibility but the active source gate is now RAIN_FORCE_AIRFLOW_ENABLED.
 - RAIN_ACCEL_GAIN and RAIN_ACCEL_GAIN_X/Y/Z remain as legacy settings for compatibility and historical comparison; they are not used by the new SI inertia path.
 - C2 Mode 5/8/9 controlled paths remain calibration instruments. They do not replace the unified Mode 3 production force path.
+
+## 28. Physical droplet profile reuse and Phase A test environment — 2026-09-26
+
+### 28.1 Problem identified
+
+Debug 50 established the first project-approved droplet size/profile reference, but earlier state modes still initialized their Meta texels with arbitrary legacy radii and normalized masses.
+
+Those older tests therefore cannot be used as physical-force tests merely by enabling the new unified force pipeline. A force test is only meaningful when radius, mass, size-dependent max speed, and profile assignment are the same physical model.
+
+### 28.2 Shared Debug 50 profile
+
+The Debug 50 profile is now implemented once in the persistent Meta shader:
+
+```text
+Light:     0.5 / 0.95 / 2.0 mm
+Moderate:  0.5 / 1.5  / 4.0 mm
+Heavy:     0.5 / 2.5  / 6.0 mm
+```
+
+The existing measured conversion remains authoritative:
+
+```text
+1 mm diameter = 0.0029296875 UV diameter
+1 mm radius   = 0.00146484375 UV radius
+```
+
+The mass profile is centralized without changing the established Debug 50 model:
+
+```text
+volume is proportional to diameter^3
+massProfile = lerp(1, 9, saturate((diameter^3 - 0.5^3) / (6.0^3 - 0.5^3)))
+```
+
+The values 1..9 are the project's established normalized Meta mass domain. They are not being silently reinterpreted as kilograms.
+
+### 28.3 Reusable profile switch
+
+The UI now exposes:
+
+```text
+Droplet Size Model
+    [0] Legacy debug radius/mass
+    [1] Debug 50 physical profile
+```
+
+When [1] is selected, legacy state modes reuse the same Debug 50 radius/mass profile for their Meta texels.
+
+This is deliberately separate from the force-source mask. It allows testing the same physics with different force sources while keeping the same physical droplet population.
+
+Changing the size model invalidates the persistent state textures so all droplets are regenerated under the selected profile.
+
+### 28.4 Phase A Mode 51
+
+A new state mode is provided:
+
+```text
+[51] Phase A physical 9-drop unified-force test
+```
+
+Mode 51 always uses the Debug 50 physical profile and allocates exactly nine persistent droplets.
+
+The nine droplets are:
+
+```text
+L: 0.5 / 0.95 / 2.0 mm
+M: 0.5 / 1.5  / 4.0 mm
+H: 0.5 / 2.5  / 6.0 mm
+```
+
+Mode 51 uses the unified external-force pipeline documented in Section 27.
+
+### 28.5 Why Mode 51 is preferred
+
+The old modes retain their historical meaning and remain useful for debugging earlier stages.
+
+Mode 51 is a clean physical test environment with a fixed nine-drop population, the Debug 50 radius mapping, the Debug 50 normalized mass profile, the current size-dependent max-speed law, the unified force bitmask, world-space inertia conversion, and the current surface-normal/tangent projection.
+
+This prevents a physical-force result from being ambiguous because an older diagnostic mode quietly changed the droplet model.
+
+### 28.6 Phase A test matrix
+
+With Mode 51 selected, use only the force checkboxes to isolate sources:
+
+| Test | Gravity | Inertia | Airflow |
+|---|---:|---:|---:|
+| A1 | ON | OFF | OFF |
+| A2 | OFF | ON | OFF |
+| A3 | ON | ON | OFF |
+| A4 | OFF | OFF | ON |
+
+For A1/A2/A3, keep `RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0` and do not change adhesion, flow acceleration, surface drag, or max-speed parameters while judging force direction.
+
+### 28.7 Acceptance priority
+
+First establish: correct force sign; correct local-car to world conversion; correct inertial inversion; correct one-sided airflow incidence; correct source summation; one common tangent projection. Only then tune magnitude and response.
+
+### 28.8 Legacy-mode compatibility
+
+The default size-model selector remains [0] Legacy so historical debug modes do not silently change behavior.
+
+Selecting [1] Debug 50 physical profile explicitly upgrades the Meta size/mass population of applicable legacy modes.
+
+Mode 51 does not depend on that UI selection: it always forces the physical profile.
+
+This provides both historical reproducibility and a clean physical validation mode.
