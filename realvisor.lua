@@ -7820,6 +7820,54 @@ function windowMain(dt)
     end
 
     --------------------------------------------------------
+    -- Persistent droplet size model
+    --------------------------------------------------------
+    local sizeModelIndex =
+        math.max(
+            0,
+            math.min(
+                1,
+                math.floor(cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL)
+            )
+        ) + 1
+
+    local newSizeModelIndex, sizeModelChanged =
+        ui.combo(
+            'Droplet Size Model',
+            sizeModelIndex,
+            {
+                '[0] Legacy debug radius/mass',
+                '[1] Debug 50 physical profile'
+            }
+        )
+
+    if sizeModelChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL =
+            newSizeModelIndex - 1
+
+        rainStateA = nil
+        rainStateB = nil
+        rainStateMetaA = nil
+        rainStateMetaB = nil
+        rainStateDebugOrigin = nil
+        rainStateInitialized = false
+        rainStateReadIsA = true
+        rainStateLastFrame = -1
+        rainStateConfiguredMode = nil
+    end
+
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51 then
+        ui.text('Mode 51 forces the Debug 50 physical profile: 0.5/0.95/2.0, 0.5/1.5/4.0, 0.5/2.5/6.0 mm')
+        ui.text('Profile mass uses the same normalized volume-derived model established by Debug 50.')
+    else
+        ui.text(
+            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+            and 'Legacy state mode + Debug 50 physical size/mass profile'
+            or 'Legacy state mode + legacy arbitrary size/mass profile'
+        )
+    end
+
+    --------------------------------------------------------
     -- Unified external-force source controls (Phase A)
     -- The three checkboxes feed one GPU bitmask. The shader then
     -- evaluates all enabled sources through one common pipeline.
