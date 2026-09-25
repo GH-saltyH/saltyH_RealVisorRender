@@ -1403,3 +1403,56 @@ Future physical tuning must modify the canonical model only.
 Do not introduce a new independent force multiplier, artificial gravity, synthetic tangent force, camera-space acceleration gain, temporary speed override, or legacy radius/mass model merely to make a diagnostic easier to observe.
 
 If a diagnostic needs amplification, it should be a visualization-only operation and must not alter txRainState integration.
+
+
+## 31. Final physical size model and debug taxonomy correction — 2026-09-26
+
+### 31.1 Physical max speed calibration restored
+
+`RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.016` is authoritative and must remain in the runtime configuration.
+
+The persistent physics pipeline still calls the size-dependent max-speed function at the final motion stage. Removing the configuration without replacing that call was an error. The current model remains:
+
+```
+Vmax(D) = 0.016 × D^0.67 UV/s
+```
+
+where D is droplet diameter in millimeters, clamped to the supported 0.5–6.0 mm domain.
+
+### 31.2 One physical size model for every state mode
+
+The earlier split between the first nine physical droplets and later legacy droplets is removed.
+
+Every persistent state texel now follows the same deterministic model:
+
+```
+diameterMM = lerp(0.5, 6.0, hash(index + 101))
+radiusUV = diameterMM × 0.00146484375
+massProfile = lerp(1, 9, normalized diameter³)
+```
+
+The same model is used at initialization and lifecycle respawn. There is no remaining arbitrary radius such as `lerp(0.032, 0.115, ...)`.
+
+This is deliberately profile-neutral for the current development build. A future Light/Moderate/Heavy rain profile should replace only the diameter distribution parameters; the physical metadata, mass calculation, UV conversion, aerodynamic model and max-speed law remain shared.
+
+### 31.3 Debug numbering
+
+The active render debug taxonomy is now:
+
+- **0 — RainFX:** canonical persistent RainFX renderer and all active effects.
+- **1 — Local surface normal:** object-space normal texture rendered directly as RGB.
+- **2 — World surface normal:** the same surface normal transformed into world space and encoded as RGB.
+- **3 — Boundary mask:** authoritative persistent-state surface boundary.
+- **4 — Predicted positions:** current droplet plus visualization-only predicted position from current persistent velocity.
+- **5 — Force direction:** current enabled external-force sources projected onto the local surface and visualized as a direction arrow. The arrow amplification is visualization-only.
+- **6 — Physical state viewer:** direct persistent-state inspection. It exists to separate a physics-state/storage problem from a final-render problem; it does not alter the state or apply a second physics model.
+
+The former debug IDs 40, 41 and 51 are retired from the UI.
+
+### 31.4 Debug 0 + State Mode 3
+
+This combination is **not intentionally empty**. State Mode 3 is the canonical persistent physics mode and Debug 0 is its normal renderer.
+
+If this combination produces no visible droplets, that is a runtime/render-path defect rather than an intended mode limitation. The physical droplets are deliberately small, so their visual coverage is much smaller than the old prototype droplets, but the state must still be observable—especially with the larger end of the 0.5–6.0 mm distribution.
+
+Debug 6 exists specifically to determine whether the state exists while Debug 0 has a display-side problem.
