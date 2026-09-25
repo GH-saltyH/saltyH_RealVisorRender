@@ -4922,6 +4922,13 @@ local function initializeRainGPUState()
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
             and 1.0
             or 0.0
+    rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51
+            or cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+        )
+        and 1.0
+        or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
@@ -4955,6 +4962,13 @@ local function initializeRainGPUState()
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
             and 1.0
             or 0.0
+    rainStateMetaUpdateParams.values.gRainStateUsePhysicalSizeProfile =
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51
+            or cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+        )
+        and 1.0
+        or 0.0
     rainStateMetaUpdateParams.values.gRainStateTestGrid =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
@@ -5271,6 +5285,13 @@ local function updateRainGPUState(sim)
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
             and 1.0
             or 0.0
+    rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51
+            or cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+        )
+        and 1.0
+        or 0.0
 
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(
