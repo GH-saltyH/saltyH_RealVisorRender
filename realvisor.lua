@@ -279,15 +279,10 @@ local cfg = scriptSettings:mapConfig({
         -- size-dependent max-speed curve.
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
 
-        -- Debug
-        -- 0 = normal rain
-        -- 1 = projected force magnitude / components
-        -- 2 = input acceleration
-        -- 3 = solid render-path test
-        -- 4 = mesh UV coverage
-        -- 5 = local surface normal (object-space RGB)
-        -- 6 = local projected movement direction / strength (world-space physics)
-        -- 18 = persistent GPU state position / velocity diagnostic
+        -- 0 = canonical persistent physical droplets
+        -- 40 = boundary mask
+        -- 41 = lifecycle state
+        -- 51 = physical persistent-state viewer
         RAIN_DEBUG = 51,
 
     },
