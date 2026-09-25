@@ -707,8 +707,7 @@ local RAIN_DEBUG_OPTIONS = {
     '[47] C2 adhesion threshold / actual movement',
     '[48] C2 persistent velocity magnitude',
     '[49] C2 six-panel movement + velocity',
-    '[50] CSP physical 9-drop reference set',
-    '[51] Gravity + surface normal physical 9-drop flow'
+    '[50] CSP physical 9-drop reference set'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
