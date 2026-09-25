@@ -5094,9 +5094,9 @@ local function updateRainGPUState(sim)
     local gravityGain =
         cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN
 
+    -- Keep gravity in SI m/s^2 until the unified GPU force stage.
     rainStateUpdateParams.values.gRainStateGravity =
         gravityMagnitude
-        * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
 
     rainStateUpdateParams.values.gRainStateForceScale =
         cfg.RUNTIME.RAIN_FORCE_SCALE
