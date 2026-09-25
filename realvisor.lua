@@ -233,29 +233,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_AIR_DRAG_COEFF = 0.47,
 
         ------------------------------------------------------------
-        -- v0.6.1 Combined-force validation (Stage Gate)
+        -- Legacy compatibility flag
         --
-        -- Isolation switch for the surface-normal + gravity + vehicle
-        -- acceleration combination test. This does NOT touch persistent
-        -- physics (adhesion/drag/max-speed) or the Mode 5/8/9 C2
-        -- isolation paths. It only zeroes the vehicle-acceleration
-        -- INPUT before it reaches gRainAcceleration, so Stage 1
-        -- (surface normal + gravity only) can be observed with the
-        -- exact same full physics path used in production (Mode 3),
-        -- rather than a separately controlled test path.
-        --
-        -- Stage 1: RAIN_TEST_ACCEL_ENABLED = false
-        --   -> gRainAcceleration stays (0,0,0); only gravity is
-        --      projected through the real per-fragment/per-drop
-        --      surface normal. Tests curvature-driven flow alone.
-        --
-        -- Stage 2: RAIN_TEST_ACCEL_ENABLED = true (default)
-        --   -> normal production behavior; vehicle acceleration is
-        --      added back on top of the already-validated Stage 1
-        --      curvature response.
-        --
-        -- Airflow is unaffected by this flag; it remains governed by
-        -- RAIN_GPU_STATE_USE_AIR_DRAG (default false, see below).
+        -- The active force-source isolation control is now the
+        -- RAIN_FORCE_INERTIA_ENABLED checkbox/bitmask source.
+        -- This value remains only so old settings files still load.
         ------------------------------------------------------------
         RAIN_TEST_ACCEL_ENABLED = true,
 
