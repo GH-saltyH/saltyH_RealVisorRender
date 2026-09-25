@@ -7727,6 +7727,55 @@ function windowMain(dt)
     end
 
     --------------------------------------------------------
+    -- Unified external-force source controls (Phase A)
+    -- The three checkboxes feed one GPU bitmask. The shader then
+    -- evaluates all enabled sources through one common pipeline.
+    --------------------------------------------------------
+    ui.separator()
+    ui.text('External Force Sources (Phase A)')
+
+    local gravityChanged, _ = ui.checkbox(
+        'Gravity',
+        cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED
+    )
+    if gravityChanged then
+        cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED =
+            not cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED
+    end
+
+    local inertiaChanged, _ = ui.checkbox(
+        'Vehicle Inertia',
+        cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED
+    )
+    if inertiaChanged then
+        cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED =
+            not cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED
+    end
+
+    local airflowChanged, _ = ui.checkbox(
+        'Airflow',
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED
+    )
+    if airflowChanged then
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED =
+            not cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED
+    end
+
+    local activeForceMask =
+        (cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and RAIN_FORCE_GRAVITY or 0)
+        + (cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED and RAIN_FORCE_INERTIA or 0)
+        + (cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and RAIN_FORCE_AIRFLOW or 0)
+
+    ui.text(string.format(
+        'Force mask: %d  [G:%s I:%s A:%s]',
+        activeForceMask,
+        cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and 'ON' or 'OFF',
+        cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED and 'ON' or 'OFF',
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and 'ON' or 'OFF'
+    ))
+    ui.text('All enabled sources are summed in WORLD m/s^2, then projected once onto the visor surface.')
+
+    --------------------------------------------------------
     -- v0.6.1 Combined-force Stage Gate
     --
     -- Stage 1 (unchecked): surface normal + gravity only.
