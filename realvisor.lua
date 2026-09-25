@@ -289,12 +289,6 @@ local cfg = scriptSettings:mapConfig({
         -- 2 = synthetic force validation
         -- 3 = persistent RainFX physics
         -- 4 = persistent physics with the measured 3x3 L/M/S test grid
-        -- 5 = C2 controlled L/M/S isolation
-        -- 6 = C3 persistent boundary lifecycle validation
-        -- 7 = single persistent droplet position probe
-        -- 8 = C2 gravity-derived L/M/S momentum validation
-        -- 9 = C2 physical 9-drop reference test (direct tangent gravity)
-        -- 10 = physical 9-drop surface-normal + gravity validation
         RAIN_GPU_STATE_MODE = 3,
 
         -- 0 = legacy arbitrary size model, 1 = Debug 50 physical profile.
@@ -1432,17 +1426,11 @@ local rainStateMetaUpdateParams = {
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
         gRainStateInit = 0.0,
-        gRainStateTestGrid = 0.0,
         gRainStatePhysicalTest = 0.0,
-        gRainStateUsePhysicalSizeProfile = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
-        gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
-        gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
-        gRainStateMeshUMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
-        gRainStateMeshUMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
         gRainStateSingleDropTest = 0.0,
     },
 
@@ -5919,26 +5907,9 @@ local function updateRainFlow(dt)
         )
 
     ------------------------------------------------------------
-    -- Smooth acceleration itself, not drop position.
+    -- Direct physical acceleration input.
     ------------------------------------------------------------
-    local response =
-        math.max(
-            cfg.RUNTIME.RAIN_FLOW_RESPONSE,
-            0.01
-        )
-
-    local smoothing =
-        1.0
-        - math.exp(
-            -response * dt
-        )
-
-    rainAccelerationCurrent =
-        rainAccelerationCurrent
-        + (
-            targetAcceleration
-            - rainAccelerationCurrent
-        ) * smoothing
+    rainAccelerationCurrent = targetAcceleration
 end
 
 
@@ -7091,7 +7062,7 @@ function windowMain(dt)
     -- STATE_MODE has a non-contiguous physical validation mode (51),
     -- so UI index and actual mode value are intentionally separate.
     local RAIN_GPU_STATE_MODE_VALUES = {
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+        0, 1, 3, 4, 6, 7, 10
     }
 
     local stateModeIndex = 1
@@ -7111,43 +7082,6 @@ function windowMain(dt)
     if stateModeChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_MODE =
             RAIN_GPU_STATE_MODE_VALUES[newStateModeIndex]
-    end
-
-    --------------------------------------------------------
-    -- Persistent droplet size model
-    --------------------------------------------------------
-    local sizeModelIndex =
-        math.max(
-            0,
-            math.min(
-                1,
-                math.floor(cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL)
-            )
-        ) + 1
-
-    local newSizeModelIndex, sizeModelChanged =
-        ui.combo(
-            'Droplet Size Model',
-            sizeModelIndex,
-            {
-                '[0] Legacy debug radius/mass',
-                '[1] Debug 50 physical profile'
-            }
-        )
-
-    if sizeModelChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL =
-            newSizeModelIndex - 1
-
-        rainStateA = nil
-        rainStateB = nil
-        rainStateMetaA = nil
-        rainStateMetaB = nil
-        rainStateDebugOrigin = nil
-        rainStateInitialized = false
-        rainStateReadIsA = true
-        rainStateLastFrame = -1
-        rainStateConfiguredMode = nil
     end
 
     ui.text('Canonical physical RainFX state: physical droplet profile + unified external forces.')
