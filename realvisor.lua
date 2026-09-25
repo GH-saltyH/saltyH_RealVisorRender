@@ -6546,19 +6546,6 @@ local function updateRainFlow(dt)
         )
 
     ------------------------------------------------------------
-    -- Stage Gate isolation (v0.6.1):
-    --
-    -- Zero the INPUT only. rainAccelerationCurrent still smooths
-    -- toward this zeroed target using the same exponential response,
-    -- so re-enabling the flag mid-session does not create a
-    -- discontinuous jump. gRainAcceleration itself, gravity, normal
-    -- projection and every other physics term remain untouched.
-    ------------------------------------------------------------
-    if not cfg.RUNTIME.RAIN_TEST_ACCEL_ENABLED then
-        targetAcceleration:set(0, 0, 0)
-    end
-
-    ------------------------------------------------------------
     -- Smooth acceleration itself, not drop position.
     ------------------------------------------------------------
     local response =
