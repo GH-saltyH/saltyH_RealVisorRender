@@ -1068,23 +1068,119 @@ local rainStateUpdateParams = {
             This is the part that will be replaced when a true mesh-UV tangent
             source is introduced; it must not be silently changed here.
         */
-        float3 rainStateExternalForceWorld()
+        /*
+            Unified external-force pipeline.
+
+            Source domains:
+              Gravity  : world m/s^2, directed by the simulation gravity.
+              Inertia  : world m/s^2, already sign-inverted in Lua from the
+                         vehicle's car-local G acceleration.
+              Airflow  : world-relative air velocity, converted here to an
+                         aerodynamic acceleration using SI water-drop mass.
+
+            Bitmask:
+              1 = gravity
+              2 = vehicle inertia
+              4 = airflow
+
+            All enabled sources are summed in WORLD space first. Only then is
+            the single surface-normal/tangent projection performed.
+        */
+        float3 rainStateAirflowAccelerationWorld(
+            float3 normalWorld,
+            float radius
+        )
         {
+            float speed = length(gRainAirVelocityWorld);
+            if (speed < 0.0001)
+                return float3(0.0, 0.0, 0.0);
+
+            float diameterMM =
+                max(
+                    (radius * 2.0)
+                    / max(gRainStatePhysicalDiameterUVPerMM, 0.000001),
+                    0.0
+                );
+
+            float diameterM = diameterMM * 0.001;
+            float radiusM = diameterM * 0.5;
+            float area = 3.14159265 * radiusM * radiusM;
+            float volume = (4.0 / 3.0) * 3.14159265 * radiusM * radiusM * radiusM;
+            float massKg = max(volume * 1000.0, 0.000000000001);
+
+            float3 airDir = gRainAirVelocityWorld / speed;
+
+            /*
+                One-sided surface incidence:
+                the air must travel into the surface normal side.
+                The normal component is ultimately cancelled by the rigid
+                visor; the incidence factor controls aerodynamic pressure.
+            */
+            float incidence =
+                saturate(
+                    -dot(
+                        airDir,
+                        normalWorld
+                    )
+                );
+
+            if (incidence <= 0.000001)
+                return float3(0.0, 0.0, 0.0);
+
+            float dragForce =
+                0.5
+                * max(gRainAirDensity, 0.0)
+                * speed
+                * speed
+                * max(gRainAirDragCoeff, 0.0)
+                * area
+                * incidence;
+
             return
-                float3(0.0, -gRainStateGravity, 0.0)
-                + gRainAcceleration * gRainStateForceScale;
+                (gRainAirVelocityWorld / speed)
+                * (dragForce / massKg);
+        }
+
+        float3 rainStateExternalForceWorld(
+            float3 normalWorld,
+            float radius
+        )
+        {
+            float3 forceWorld = float3(0.0, 0.0, 0.0);
+
+            if (gRainForceMask >= 1.0)
+                forceWorld += float3(0.0, -gRainStateGravity, 0.0);
+
+            if (fmod(floor(gRainForceMask / 2.0), 2.0) >= 0.5)
+                forceWorld +=
+                    gRainAcceleration
+                    * gRainPhysicsAccelScale;
+
+            if (fmod(floor(gRainForceMask / 4.0), 2.0) >= 0.5)
+                forceWorld +=
+                    rainStateAirflowAccelerationWorld(
+                        normalWorld,
+                        radius
+                    )
+                    * gRainPhysicsAccelScale;
+
+            return forceWorld;
         }
 
         float2 rainStateSurfaceForce(
             float2 position,
+            float radius,
             out float forceMagnitude
         )
         {
-            float3 forceWorld =
-                rainStateExternalForceWorld();
-
             float3 normalWorld =
                 rainStateNormalWorld(position);
+
+            float3 forceWorld =
+                rainStateExternalForceWorld(
+                    normalWorld,
+                    radius
+                );
 
             float2 tangentForce =
                 rainStateProjectForce(
@@ -1306,6 +1402,7 @@ local rainStateUpdateParams = {
             float2 tangentForce =
                 rainStateSurfaceForce(
                     position,
+                    radius,
                     forceMagnitude
                 );
 
