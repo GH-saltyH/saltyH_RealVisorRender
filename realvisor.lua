@@ -297,7 +297,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
         RAIN_GPU_STATE_SINGLE_DROP_Y = -0.500,
 
-        -- C3: explicit surface exit/death/respawn. No edge wrapping.
+        -- Persistent lifecycle: explicit surface exit/death/respawn. No edge wrapping.
         RAIN_GPU_STATE_LIFECYCLE = true,
         RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
@@ -540,68 +540,23 @@ local rainStateSingleDropDirty = false
 -- not need to change when the UI wording changes.
 ------------------------------------------------------------
 local RAIN_DEBUG_OPTIONS = {
-    '[0] Normal rain',
-    '[1] Force magnitude / components',
-    '[2] Input acceleration',
-    '[3] Solid render-path test',
-    '[4] Mesh UV coverage',
-    '[5] Surface normal (object RGB)',
-    '[6] Projected movement direction / strength',
-    '[7] Normal processing (legacy)',
-    '[8] Normal sampling / no saturate',
-    '[9] UV sampling (legacy)',
-    '[10] UV behavior',
-    '[11] UV behavior (legacy)',
-    '[12] UV behavior (legacy)',
-    '[13] UV transform (legacy)',
-    '[14] UV transform (legacy)',
-    '[15] World-space normal gradient',
-    '[16] Force projection',
-    '[17] Velocity response',
-    '[18] Persistent state position / velocity',
-    '[19] Persistent independent drops',
-    '[20] Persistent velocity',
-    '[21] Persistent position integration',
-    '[22] Raw persistent state',
-    '[23] Predicted motion',
-    '[24] Motion scale',
-    '[25] Accumulated displacement (historical)',
-    '[26] Velocity delta',
-    '[27] Surface force',
-    '[28] Adhesion threshold',
-    '[29] Physical drop',
-    '[30] Force -> velocity',
-    '[31] Air drag input',
-    '[32] Airflow input',
-    '[33] Airflow normal projection',
-    '[34] Combined force',
-    '[35] Radius / mass / adhesion',
-    '[36] Measured 3x3 L/M/S grid',
-    '[37] UV tangent comparison',
-    '[38] C2 controlled L/M/S movement',
-    '[39] C3 boundary lifecycle',
-    '[40] Boundary Mask',
-    '[41] Boundary lifecycle decision',
-    '[42] Lifecycle Meta state probe',
-    '[43] Lifecycle texel probe + position marker',
-    '[44] Physical texel lifecycle map',
-    '[45] Direct State RG + Boundary Mask diagnostic',
-    '[46] Boundary Mask only (selected State texel)',
-    '[47] C2 adhesion threshold / actual movement',
-    '[48] C2 persistent velocity magnitude',
-    '[49] C2 six-panel movement + velocity',
-    '[50] CSP physical 9-drop reference set',
-    '[51] Physical 9-drop unified-force state'
+    '[0] Canonical persistent physical droplets',
+    '[40] Boundary mask',
+    '[41] Lifecycle state',
+    '[51] Physical state viewer'
 }
+
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[0] Disabled',
     '[1] Initialize only',
-    '[0] Canonical persistent physical droplets',
-    '[40] Boundary mask',
-    '[41] Lifecycle state',
-    '[51] Physical state viewer',
+    '[3] Canonical persistent RainFX physics',
+    '[4] Canonical persistent physics + 3x3 physical-size diagnostic',
+    '[6] Canonical persistent physics + boundary lifecycle',
+    '[7] Single persistent droplet position probe',
+    '[10] Canonical physical 9-drop validation'
 }
+
 
 local rainStateUpdateParams = {
     defines = { RAIN_GPU_STATE_PASS = true },
@@ -631,8 +586,8 @@ local rainStateUpdateParams = {
         gRainStateFlowAcceleration = cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
         gRainStateFlowDrag = cfg.RUNTIME.RAIN_FLOW_DRAG,
         gRainStateGravity = 9.81,
-        gRainStateAdhesionMin = 0.65,
-        gRainStateAdhesionMax = 2.20,
+        gRainStateAdhesionMin = cfg.RUNTIME.RAIN_ADHESION_MIN,
+        gRainStateAdhesionMax = cfg.RUNTIME.RAIN_ADHESION_MAX,
         gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
