@@ -4710,9 +4710,11 @@ render.on('main.track.transparent', function()
                 and rainStateMetaA
                 or rainStateMetaB,
 
+            txRainSurfaceNormal =
+                textureRainSurfaceNormal,
+
         },
 
-        
         values = {
             gRainDebug = cfg.RUNTIME.RAIN_DEBUG,
 
@@ -4723,7 +4725,46 @@ render.on('main.track.transparent', function()
                 and 9
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
-                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
+                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
+
+            gRainAcceleration = rainAccelerationCurrent,
+
+            gRainForceMask =
+                (cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and RAIN_FORCE_GRAVITY or 0)
+                + (cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED and RAIN_FORCE_INERTIA or 0)
+                + (cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and RAIN_FORCE_AIRFLOW or 0),
+
+            gRainPhysicsAccelScale =
+                cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE,
+
+            gRainStateGravity =
+                math.abs(
+                    ac.getSim()
+                    and ac.getSim().gravity
+                    or -9.81
+                ),
+
+            gRainAirVelocityWorld:set(
+                -ac.getCar(0).velocity.x,
+                -ac.getCar(0).velocity.y,
+                -ac.getCar(0).velocity.z
+            ),
+
+            gRainAirDensity =
+                cfg.RUNTIME.RAIN_AIR_DENSITY,
+
+            gRainAirDragCoeff =
+                cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
+
+            gRainStatePhysicalDiameterUVPerMM =
+                cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
+
+            gRainObjectToWorld =
+                startingTransform,
+
+            gRainDebugPredictionTime = 0.25,
+            gRainDebugForceArrowScale = 0.015,
+            gRainDebugStateSpeedScale = 0.016
         },
 
         shader = 
