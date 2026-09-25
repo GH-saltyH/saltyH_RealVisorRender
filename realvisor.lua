@@ -64,6 +64,10 @@ local appFolder =
     }
         
 
+local RAIN_FORCE_GRAVITY = 1
+local RAIN_FORCE_INERTIA = 2
+local RAIN_FORCE_AIRFLOW = 4
+
 local cfg = scriptSettings:mapConfig({
 
     --------------------------------------------------------
