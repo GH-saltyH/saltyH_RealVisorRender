@@ -6380,48 +6380,34 @@ local function updateRainFlow(dt)
         return
     end
 
-    local velocity = car.velocity
+    local accelerationG = car.acceleration
 
-    if rainPreviousVelocity == nil then
-        rainPreviousVelocity =
-            vec3(
-                velocity.x,
-                velocity.y,
-                velocity.z
-            )
-
+    if not accelerationG
+        or not car.side
+        or not car.up
+        or not car.look then
         return
     end
 
     ------------------------------------------------------------
-    -- Acceleration is derived from velocity delta.
-    -- This is the inertial input used by every individual drop.
-    ------------------------------------------------------------
-    local rawAcceleration =
-        vec3(
-            (velocity.x - rainPreviousVelocity.x) / dt,
-            (velocity.y - rainPreviousVelocity.y) / dt,
-            (velocity.z - rainPreviousVelocity.z) / dt
-        )
-
-    rainPreviousVelocity:set(velocity)
-
-    ------------------------------------------------------------
-    -- Keep acceleration in WORLD space.
+    -- ac.getCar(0).acceleration is car-local G acceleration.
+    -- Convert it to WORLD m/s^2 using the verified car basis.
+    -- A droplet attached to the visor experiences inertial force
+    -- opposite the vehicle's acceleration, hence the final negation.
     --
-    -- RainFX physics must not use the camera basis: the visor can rotate
-    -- independently of the vehicle and its camera-space normal field is
-    -- intentionally almost uniform in the exposed region.
-    --
-    -- The shader receives this world-space vector and projects it onto
-    -- each drop's local surface tangent frame using the object-space
-    -- normal texture plus the rendered mesh UV derivatives.
+    -- Car-local axes:
+    --   X = side, Y = up, Z = look/forward.
     ------------------------------------------------------------
+    local accelerationWorld =
+        car.side * accelerationG.x
+        + car.up * accelerationG.y
+        + car.look * accelerationG.z
+
     local targetAcceleration =
         vec3(
-            rawAcceleration.x * cfg.RUNTIME.RAIN_ACCEL_GAIN,
-            rawAcceleration.y * cfg.RUNTIME.RAIN_ACCEL_GAIN,
-            rawAcceleration.z * cfg.RUNTIME.RAIN_ACCEL_GAIN
+            -accelerationWorld.x * 9.81,
+            -accelerationWorld.y * 9.81,
+            -accelerationWorld.z * 9.81
         )
 
     ------------------------------------------------------------
