@@ -369,8 +369,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_PHYSICAL_TEST = true,
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_MIN_MM = 0.5,
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_MAX_MM = 6.0,
-        RAIN_GPU_STATE_PHYSICAL_RADIUS_MIN = 0.032,
-        RAIN_GPU_STATE_PHYSICAL_RADIUS_MAX = 0.115,
+        RAIN_GPU_STATE_PHYSICAL_RADIUS_MIN = 0.000732421875,
+        RAIN_GPU_STATE_PHYSICAL_RADIUS_MAX = 0.0087890625,
         RAIN_GPU_STATE_PHYSICAL_LIGHT_AVG_MM = 0.95,
         RAIN_GPU_STATE_PHYSICAL_MODERATE_AVG_MM = 1.50,
         RAIN_GPU_STATE_PHYSICAL_HEAVY_AVG_MM = 2.50,
@@ -1504,7 +1504,13 @@ local rainStateMetaUpdateParams = {
                     else
                         diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
 
-                    float radius = lerp(0.032, 0.115, saturate((diameterMM - 0.5) / 5.5));
+                    /*
+                        Physical reference calibration:
+                        1.0 mm diameter = 0.0029296875 UV diameter,
+                        based on the measured 2/4/6 mm reference values.
+                        Radius is therefore half of that diameter scale.
+                    */
+                    float radius = diameterMM * 0.00146484375;
                     float volumeMin = 0.5 * 0.5 * 0.5;
                     float volumeMax = 6.0 * 6.0 * 6.0;
                     float volume = diameterMM * diameterMM * diameterMM;
@@ -1576,7 +1582,11 @@ local rainStateMetaUpdateParams = {
                         else
                             diameterMM = slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
 
-                        meta.r = lerp(0.032, 0.115, saturate((diameterMM - 0.5) / 5.5));
+                        /*
+                            Keep the exact measured UV diameter calibration
+                            on respawn as well, so size remains deterministic.
+                        */
+                        meta.r = diameterMM * 0.00146484375;
 
                         float volumeMin = 0.5 * 0.5 * 0.5;
                         float volumeMax = 6.0 * 6.0 * 6.0;
@@ -4845,14 +4855,25 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateTestGrid =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-            or 
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or
             (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
         )
         and 1.0
         or 0.0
 
+    /*
+        Mode 9 is a physical-reference C2 isolation test.
+        Keep these flags active every frame, not only during initialization.
+        Otherwise the first frame uses the controlled gravity path but later
+        frames silently fall back to randomized surface adhesion.
+    */
     rainStateUpdateParams.values.gRainStateC2Isolation =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+        )
         and 1.0
         or 0.0
     rainStateUpdateParams.values.gRainStateC2Force:set(
@@ -4862,7 +4883,12 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainStateC2AdhesionBase =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
     rainStateUpdateParams.values.gRainStateC2UseGravity =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 and 1.0 or 0.0
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+        )
+        and 1.0
+        or 0.0
     rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
 
