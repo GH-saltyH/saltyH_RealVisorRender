@@ -523,9 +523,6 @@ local rainStateA = nil
 local rainStateB = nil
 local rainStateMetaA = nil
 local rainStateMetaB = nil
-local rainStateDebugOrigin = nil
-local rainStateDebugCapturePending = false
-local rainStateDebugSampleTimer = 0.0
 local rainStateReadIsA = true
 local rainStateInitialized = false
 local rainStateLastFrame = -1
@@ -1330,35 +1327,6 @@ local rainStateUpdateParams = {
             }
 
             return float4(p, v);
-        }
-    ]],
-}
-
-local rainStateDebugOriginUpdateParams = {
-    textures = {
-        txRainState = false,
-    },
-
-    values = {
-        gRainStateCount = 256.0,
-    },
-
-    shader = [[
-        SamplerState samPointRainOrigin {
-            Filter = MIN_MAG_MIP_POINT;
-            AddressU = CLAMP;
-            AddressV = CLAMP;
-            AddressW = CLAMP;
-        };
-
-        float4 main(PS_IN pin) {
-            float count = max(gRainStateCount, 1.0);
-            float index = min(floor(pin.Tex.x * count), count - 1.0);
-            float2 suv = float2((index + 0.5) / count, 0.5);
-            float2 position = txRainState.SampleLevel(
-                samPointRainOrigin, suv, 0.0
-            ).rg;
-            return float4(position, 0.0, 1.0);
         }
     ]],
 }
@@ -4439,12 +4407,8 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    )
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
-                and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
@@ -4479,14 +4443,7 @@ local function initializeRainGPUState()
             render.TextureFormat.R32G32B32A32.Float
         ):setName('RainFX State Meta B')
 
-    rainStateDebugOrigin =
-        ui.ExtraCanvas(
-            vec2(count, 1),
-            1,
-            render.TextureFormat.R32G32B32A32.Float
-        ):setName('RainFX Debug Origin')
-
-    if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB or not rainStateDebugOrigin then
+    if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB then
         ac.warn(
             appNameDebug
             .. ' Rain GPU state: ExtraCanvas allocation failed'
@@ -4496,7 +4453,6 @@ local function initializeRainGPUState()
         rainStateB = nil
         rainStateMetaA = nil
         rainStateMetaB = nil
-        rainStateDebugOrigin = nil
         return false
     end
 
@@ -4513,12 +4469,8 @@ local function initializeRainGPUState()
             math.floor(
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    )
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
-                and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
@@ -4568,65 +4520,6 @@ local function initializeRainGPUState()
 
     rainStateReadIsA = not rainStateReadIsA
 
-    if rainStateDebugCapturePending and rainStateDebugOrigin then
-        local currentState =
-            rainStateReadIsA and rainStateA or rainStateB
-
-        rainStateDebugOriginUpdateParams.values.gRainStateCount =
-            math.max(
-                1,
-                math.floor(
-                    cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-                    and 9
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
-                    and 3
-                    or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
-                )
-            )
-
-        rainStateDebugOriginUpdateParams.textures.txRainState =
-            currentState
-
-        rainStateDebugOrigin:updateWithShader(
-            rainStateDebugOriginUpdateParams
-        )
-
-        rainStateDebugCapturePending = false
-        rainStateDebugSampleTimer = 0.0
-
-        ac.log(
-            appNameDebug
-            .. ' Rain Debug ' .. tostring(cfg.RUNTIME.RAIN_DEBUG)
-            .. ': displacement sample captured'
-        )
-    end
-
-    if cfg.RUNTIME.RAIN_DEBUG == 26 and rainStateDebugOrigin then
-        rainStateDebugSampleTimer =
-            rainStateDebugSampleTimer + math.min(dt, 0.05)
-
-        local sampleInterval =
-            math.max(
-                cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL,
-                0.01
-            )
-
-        if rainStateDebugSampleTimer >= sampleInterval then
-            local currentState =
-                rainStateReadIsA and rainStateA or rainStateB
-
-            rainStateDebugOriginUpdateParams.values.gRainStateCount =
-                math.max(1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
-
-            rainStateDebugOriginUpdateParams.textures.txRainState =
-                currentState
-
-            rainStateDebugOrigin:updateWithShader(
-                rainStateDebugOriginUpdateParams
-            )
-
-            rainStateDebugSampleTimer = 0.0
-        end
     end
 end
 
@@ -4682,11 +4575,6 @@ render.on('main.track.transparent', function()
 
     if rainLastDebugMode ~= cfg.RUNTIME.RAIN_DEBUG then
         rainLastDebugMode = cfg.RUNTIME.RAIN_DEBUG
-        if cfg.RUNTIME.RAIN_DEBUG == 25
-            or cfg.RUNTIME.RAIN_DEBUG == 26
-            or cfg.RUNTIME.RAIN_DEBUG == 36 then
-            rainStateDebugCapturePending = true
-        end
 
         ac.log(
             appNameDebug
@@ -4811,9 +4699,6 @@ render.on('main.track.transparent', function()
                 and rainStateMetaA
                 or rainStateMetaB,
 
-            txRainStateOrigin =
-                rainStateDebugOrigin,
-
         },
 
         
@@ -4898,12 +4783,8 @@ render.on('main.track.transparent', function()
             gRainStateCount =
                 cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    )
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
                 and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
-                and 3
                 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
                 and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
