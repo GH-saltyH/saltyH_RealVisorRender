@@ -4862,12 +4862,12 @@ local function updateRainGPUState(sim)
         and 1.0
         or 0.0
 
-    /*
+    --[[
         Mode 9 is a physical-reference C2 isolation test.
         Keep these flags active every frame, not only during initialization.
         Otherwise the first frame uses the controlled gravity path but later
         frames silently fall back to randomized surface adhesion.
-    */
+    ]]
     rainStateUpdateParams.values.gRainStateC2Isolation =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
