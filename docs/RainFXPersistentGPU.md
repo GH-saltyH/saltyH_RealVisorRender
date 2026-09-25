@@ -253,3 +253,140 @@ Interpretation:
 - A red marker remains only a predicted crossing diagnostic; in this mode the absence of lifecycle respawn makes yellow directly useful for inspecting the mask boundary.
 
 This test deliberately does not modify drag, mass/adhesion, merge, residue, or the normal-map asset.
+
+
+## 22. 2026-09-25 signed visor-V coordinate audit and Stage 7A test environment
+
+The project-wide persistent-state coordinate contract is:
+
+- U: 0 = left, 1 = right.
+- V: -1 = top, 0 = bottom.
+- visor center: (0.5, -0.5).
+- increasing V therefore means moving downward on the visor.
+
+This contract is a physical/state-space rule, not merely a debug-display convention.
+
+### 22.1 Audit result
+
+The following paths were checked:
+
+1. Persistent state integration:
+   - State.RG is already raw visor UV.
+   - Position integration remains `position + velocity * dt`.
+   - No Y sign inversion is required here.
+
+2. Direct C2 gravity validation:
+   - Mode 8/9 uses `float2(0, +gRainStateGravity)`.
+   - This is correct for the signed visor-V contract: positive V is downward.
+   - Debug 50 therefore represented the expected vertical direction.
+
+3. World gravity path:
+   - Physical gravity remains world-space `float3(0, -gRainGravity, 0)`.
+   - This sign is correct in the AC world coordinate system and must not be changed merely because visor V uses a different sign convention.
+   - The world force is converted to signed visor UV through the surface tangent frame.
+
+4. Surface tangent projection:
+   - `rainSurfaceBasisWorld()` reconstructs tangent V directly from the mesh's dP/dv.
+   - The previous handedness correction in `rainProjectForceToUVWorld()` could negate tangent V after that reconstruction.
+   - That correction has been removed. The function now preserves the actual mesh-V direction and keeps only the intentionally existing U mirror.
+   - This is the important correction for the suspected inversion between the older surface-normal tests and the Mode 9 direct-C2 test.
+
+5. Debug 38:
+   - Its diagnostic origin was `(0.5, 0.5)`, which violated the signed visor-V contract.
+   - It is now `(0.5, -0.5)`.
+   - The visual offset remains diagnostic-only.
+
+6. Debug 45:
+   - The lower-half State.V encoding previously used `-position.y`, which visually inverted the signed V axis.
+   - It now uses `position.y + 1`, so top V=-1 maps to 0 and bottom V=0 maps to 1.
+   - This is display encoding only; State.RG physics was not changed.
+
+7. Debug 4:
+   - The UV coverage green channel was also changed to encode increasing V directly from top to bottom instead of visually reversing it.
+   - No physics value is modified by this diagnostic.
+
+The remaining uses of negative V are intentional coordinate-domain constructions, such as random spawn generation `-hash()` and the fixed center `(0.5,-0.5)`. They are not movement-direction inversions.
+
+### 22.2 New Stage 7A environment: physical surface-normal + gravity
+
+A new persistent state mode was added:
+
+- STATE_MODE = 10: physical 9-drop surface-normal + gravity validation.
+- Uses the same nine fixed physical-reference droplets as Debug 50.
+- Keeps the calibrated diameters/masses unchanged.
+- Uses the normal-map + mesh-derived UV tangent path instead of C2 direct tangent gravity.
+- Uses `ac.getSim().gravity` as the physical gravity source.
+- Uses the existing physical size-dependent maximum-speed model.
+- Vehicle acceleration can be isolated by setting `RAIN_TEST_ACCEL_ENABLED = false`.
+- Drag is independently disabled by `RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0.0`.
+- The normal persistent physics path is therefore:
+
+`world gravity -> surface normal/tangent projection -> adhesion -> flow acceleration -> max speed -> position integration`
+
+No airflow is included.
+
+The existing CSP API reference confirms `ac.getSim()` is the simulation-state reference used by CSP Lua; the project already uses its `gravity` field in this branch. citeturn2search3
+
+### 22.3 Stage 7A acceptance procedure
+
+Use:
+
+- STATE_MODE = 10
+- RAIN_DEBUG = 50
+- RAIN_TEST_ACCEL_ENABLED = false
+- RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0
+- C2 gravity multiplier is irrelevant in this mode.
+- Keep the established physical gravity gain unchanged.
+
+Test in a stationary vehicle.
+
+Observe, in order:
+
+1. Do drops remain stationary below their individual adhesion threshold?
+2. Which drops begin flowing first?
+3. After flow begins, do they move toward the physical bottom direction rather than toward the visor top?
+4. Does each drop follow its local surface curvature instead of sharing one screen-space direction?
+5. Does increasing/decreasing visor pitch alter the projected path consistently with the surface normal?
+6. Does speed eventually stop increasing because of the size-dependent MaxSpeed rather than an artificial direction reversal?
+7. Do 0.5/0.95/1.5/2.0/2.5/4.0/6.0 mm drops retain the previously accepted relative ordering?
+
+Do not tune the gravity gain during the first run. The first acceptance target is direction and surface-following consistency.
+
+### 22.4 Expected diagnostic interpretation
+
+The key comparison is now:
+
+- Mode 9 / Debug 50: direct C2 gravity in signed tangent-state coordinates. This is the direction reference.
+- Mode 10 / Debug 50: the same physical droplets, but gravity must pass through the real surface-normal/tangent projection first.
+
+Therefore:
+
+- If Mode 9 flows downward and Mode 10 flows upward, the remaining problem is in the world-gravity -> mesh tangent projection path.
+- If both flow downward but Mode 10 differs locally across the visor, that difference is expected and is the actual curvature response under test.
+- If Mode 10 has the correct direction but no movement, inspect the projected tangent force versus adhesion before changing acceleration.
+- If direction is correct but speed keeps increasing indefinitely, inspect MaxSpeed activation before adding drag.
+- Do not change the established gravity magnitude, droplet dimensions, or size exponent to compensate for a sign error.
+
+### 22.5 Next physical integration gates
+
+After Stage 7A passes:
+
+1. Stage 7B/vehicle-force gate:
+   - re-enable `RAIN_TEST_ACCEL_ENABLED`;
+   - keep airflow and drag disabled;
+   - compare gravity-only against gravity + vehicle acceleration;
+   - verify acceleration is projected through the same local tangent frame and does not reverse the signed V convention.
+
+2. Stage 7C/drag:
+   - implement velocity-relative drag;
+   - validate that drag changes speed and direction response without becoming an additional arbitrary movement direction.
+
+3. Airflow:
+   - combine relative air velocity with the verified external-force pipeline;
+   - keep airflow separate until its force model is independently validated.
+
+The physical subsystem must therefore be integrated one force at a time:
+
+`gravity -> vehicle acceleration -> drag -> airflow`
+
+with the signed visor-V contract preserved at every stage.
