@@ -7815,8 +7815,20 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_DEBUG = newRainDebugIndex - 1
     end
 
-    -- STATE_MODE is another important branch point, so expose it here too.
-    local stateModeIndex = math.max(0, math.min(#RAIN_GPU_STATE_MODE_OPTIONS - 1, math.floor(cfg.RUNTIME.RAIN_GPU_STATE_MODE))) + 1
+    -- STATE_MODE has a non-contiguous physical validation mode (51),
+    -- so UI index and actual mode value are intentionally separate.
+    local RAIN_GPU_STATE_MODE_VALUES = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 51
+    }
+
+    local stateModeIndex = 1
+    for i, modeValue in ipairs(RAIN_GPU_STATE_MODE_VALUES) do
+        if modeValue == cfg.RUNTIME.RAIN_GPU_STATE_MODE then
+            stateModeIndex = i
+            break
+        end
+    end
+
     local newStateModeIndex, stateModeChanged = ui.combo(
         'STATE_MODE',
         stateModeIndex,
@@ -7824,7 +7836,8 @@ function windowMain(dt)
     )
 
     if stateModeChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE = newStateModeIndex - 1
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE =
+            RAIN_GPU_STATE_MODE_VALUES[newStateModeIndex]
     end
 
     --------------------------------------------------------
