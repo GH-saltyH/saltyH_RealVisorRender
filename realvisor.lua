@@ -5514,6 +5514,20 @@ render.on('main.track.transparent', function()
             gRainAcceleration =
                 rainAccelerationCurrent,
 
+            gRainForceMask =
+                (cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and RAIN_FORCE_GRAVITY or 0)
+                + (cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED and RAIN_FORCE_INERTIA or 0)
+                + (cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and RAIN_FORCE_AIRFLOW or 0),
+
+            gRainPhysicsAccelScale =
+                cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE,
+
+            gRainAirDensity =
+                cfg.RUNTIME.RAIN_AIR_DENSITY,
+
+            gRainAirDragCoeff =
+                cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
+
             -- Airflow is opposite vehicle world velocity.
             -- Debug 31 consumes this value only; persistent physics is
             -- intentionally unchanged until the direction test is verified.
