@@ -1278,3 +1278,128 @@ The state-mode sequence is restored to:
 
 No State Mode 51 exists.
 The number 51 is reserved for the new visual diagnostic so the historical state-mode progression remains intact.
+
+## 30. Legacy prototype physics removal and canonical model consolidation — 2026-09-26
+
+The persistent RainFX system has now been cleaned so the active implementation no longer contains the earlier artificial-force prototype models.
+
+### 30.1 Removed prototype model families
+
+The following are no longer part of the runtime physics or configuration:
+
+- synthetic tangent-force injection used by the old Stage 1 state proof;
+- the old global RAIN_FORCE_SCALE multiplier;
+- the old finite-difference/camera-axis acceleration gains;
+- the old acceleration-response smoothing multiplier;
+- the old artificial RAIN_GRAVITY = 0.35 surface-force model;
+- C2 controlled force/adhesion/gravity multiplier branches;
+- C3 temporary speed, acceleration, drag and max-speed overrides;
+- legacy arbitrary radius/mass state initialization;
+- procedural curvature/slope force fields;
+- procedural travel-distance/lifetime physics;
+- the old persistent debug-origin displacement infrastructure;
+- the old procedural render shader's independent force/travel simulation.
+
+These values are not retained as compatibility physics. They must not be reintroduced into the canonical RainFX path.
+
+### 30.2 Canonical external-force model
+
+All active external sources are selected by one bitmask:
+
+- bit 1: gravity;
+- bit 2: vehicle inertia;
+- bit 4: airflow.
+
+The enabled sources are summed once in WORLD space and then passed through the same surface projection:
+
+F_external = F_gravity + F_inertia + F_airflow
+
+All source accelerations remain in SI m/s² until the established common RAIN_PHYSICS_ACCEL_SCALE conversion.
+
+Vehicle inertia uses the verified car basis:
+
+a_inertia_world = -(car.side * accelerationG.x + car.up * accelerationG.y + car.look * accelerationG.z) * 9.81
+
+The Lua side no longer applies an additional temporal response multiplier to this acceleration. The current ac.getCar(0).acceleration value is passed directly.
+
+### 30.3 Canonical droplet physical model
+
+Droplet metadata now uses the physical UV diameter mapping for every persistent droplet.
+
+Authoritative mapping:
+
+- 1 mm diameter = 0.0029296875 UV;
+- radius = diameter × 0.00146484375 UV;
+- water density basis = 1000 kg/m³ in the aerodynamic mass calculation;
+- aerodynamic drag coefficient = 0.47;
+- air density = 1.20 kg/m³;
+- aerodynamic area = πr²;
+- spherical volume = 4/3 πr³.
+
+The first nine droplets remain the fixed validation population:
+
+- Light: 0.5 / 0.95 / 2.0 mm;
+- Moderate: 0.5 / 1.5 / 4.0 mm;
+- Heavy: 0.5 / 2.5 / 6.0 mm.
+
+Production indices after the first nine use deterministic physical diameters in the same 0.5–6.0 mm range rather than the removed arbitrary normalized-radius generator.
+
+The established normalized mass profile remains the project metadata domain for adhesion/max-speed response. It is not interpreted as kilograms.
+
+### 30.4 Canonical motion response
+
+After external-force projection:
+
+1. surface adhesion threshold is evaluated from droplet mass;
+2. only the force above adhesion contributes to flow acceleration;
+3. the resulting velocity is damped by the established surface-flow drag;
+4. the physical size-dependent speed cap is applied;
+5. persistent UV position is integrated;
+6. lifecycle mode handles surface exit/death/respawn without wrapping.
+
+The physical max-speed law remains:
+
+V_max(D) = V_1mm × D^0.67
+
+with the current calibrated V_1mm = 0.016 UV/s.
+
+This law is a visor-surface calibration. It is not a direct copy of free-fall terminal velocity.
+
+### 30.5 Render-path consolidation
+
+shaders/rainVisorScreen.hlsl is now display-only.
+
+It no longer calculates gravity, vehicle acceleration, airflow drag, adhesion, procedural travel distance, or synthetic droplet trajectories. It reads txRainState, txRainStateMeta and txRainBoundaryMask.
+
+The normal render path and Debug 51 therefore observe the same persistent physical state.
+
+The canonical debug set is intentionally small:
+
+- Debug 0: canonical persistent physical droplets;
+- Debug 40: boundary mask;
+- Debug 41: lifecycle state;
+- Debug 51: physical persistent-state viewer.
+
+The previous debug modes that represented obsolete prototype force models are no longer part of the active debug UI.
+
+### 30.6 State modes after cleanup
+
+Only the following state modes remain:
+
+- 0: disabled;
+- 1: initialize only;
+- 3: canonical persistent RainFX physics;
+- 4: canonical physical 3×3 diagnostic population;
+- 6: canonical physical physics + lifecycle;
+- 7: single persistent droplet position probe;
+- 10: canonical nine-droplet physical validation.
+
+Modes 2, 5, 8 and 9 are removed rather than retained as compatibility physics.
+
+### 30.7 Validation rule
+
+Future physical tuning must modify the canonical model only.
+
+Do not introduce a new independent force multiplier, artificial gravity, synthetic tangent force, camera-space acceleration gain, temporary speed override, or legacy radius/mass model merely to make a diagnostic easier to observe.
+
+If a diagnostic needs amplification, it should be a visualization-only operation and must not alter txRainState integration.
