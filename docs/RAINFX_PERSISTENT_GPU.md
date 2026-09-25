@@ -1159,3 +1159,122 @@ Selecting [1] Debug 50 physical profile explicitly upgrades the Meta size/mass p
 Mode 51 does not depend on that UI selection: it always forces the physical profile.
 
 This provides both historical reproducibility and a clean physical validation mode.
+## 29. Correction: physical validation belongs to Debug 51, not State Mode 51 — 2026-09-26
+
+The previous implementation incorrectly introduced `STATE_MODE = 51` for the Phase A physical viewer. This mixed two independent concepts:
+
+- `RAIN_GPU_STATE_MODE` selects state/update behavior.
+- `RAIN_DEBUG` selects visualization.
+
+The correction is now applied:
+
+```text
+STATE_MODE = 10
+DEBUG = 51
+Droplet Size Model = Debug 50 physical profile
+```
+
+State Mode 10 remains the established physical surface-normal + gravity validation path and is now the Phase A physical unified-force state-update path.
+
+Debug 51 is the new visualization path. It reads the actual persistent State + Meta textures produced by the physics pass and does not create a separate physics model.
+
+Debug 50 remains the historical CSP physical reference visualization. It is not the Phase A unified-force viewer.
+
+### 29.1 Why the previous Mode 51 could hide the real problem
+
+The project has several independent switches:
+
+```text
+State Mode -> controls GPU state initialization/update behavior
+Droplet Size Model -> controls Meta radius/mass profile
+Rain Debug -> controls final pixel visualization
+```
+
+The normal render path (`RAIN_DEBUG = 0`) does not render persistent GPU state. It renders the procedural `rainDropLayer()` result. Therefore a physically moving persistent state can exist correctly in the GPU textures while being invisible in the normal rain image.
+
+Each debug output in `shaders/rainVisorScreen.hlsl` is also an independent diagnostic renderer. Selecting a debug mode does not automatically mean that its output represents the complete unified physics pipeline.
+
+This explains why a force can be correctly integrated yet appear visually absent or inconsistent between tests.
+
+### 29.2 Phase A visual contract
+
+For physical-force testing, use:
+
+```text
+STATE_MODE = 10
+RAIN_DEBUG = 51
+Droplet Size Model = [1] Debug 50 physical profile
+```
+
+Debug 51 samples `txRainState` and `txRainStateMeta` directly and visualizes the resulting persistent positions and physical radii.
+
+The debug renderer does not independently calculate gravity, inertia, airflow, adhesion, drag, or max speed. The physics shader has already produced the State texel that Debug 51 displays.
+
+```text
+External forces
+    ↓
+unified force
+    ↓
+surface projection
+    ↓
+adhesion
+    ↓
+flow acceleration
+    ↓
+surface drag
+    ↓
+max speed
+    ↓
+position integration
+    ↓
+txRainState
+    ↓
+Debug 51
+```
+
+### 29.3 Why old Debug 19/29/etc. are not sufficient for Phase A
+
+Those diagnostics were created for earlier stages and intentionally contain their own visualization assumptions, such as artificial marker-radius remapping, legacy L/M/S assumptions, stage-specific color/strength encoding, diagnostic-only force calculations, or outputs that visualize a field rather than the integrated state.
+
+They remain useful for their original purposes, but they cannot all be considered interchangeable views of the unified physical engine.
+
+Debug 51 is therefore the canonical Phase A integrated-state viewer.
+
+### 29.4 Combination matrix
+
+| State Mode | Size Model | Debug | Meaning |
+|---|---|---|---|
+| 10 | Legacy | 19/29/etc. | historical physical/state diagnostics |
+| 10 | Physical | 50 | historical Debug 50 reference visualization |
+| 10 | Physical | 51 | **Phase A canonical integrated-state visualization** |
+| 3 | Physical | 51 | unified-force state visualization on normal persistent physics |
+| 3 | Legacy | 51 | useful only for comparing physical vs legacy Meta behavior |
+
+The key rule is that Debug 51 is a viewer, not a physics mode.
+
+### 29.5 Phase A test sequence
+
+Do not change State Mode between A1-A4.
+
+Keep:
+
+```text
+STATE_MODE = 10
+Droplet Size Model = Debug 50 physical profile
+DEBUG = 51
+```
+
+Then change only the Gravity / Vehicle Inertia / Airflow checkboxes.
+
+This makes the visual result comparable across all four force-isolation tests.
+
+### 29.6 Established continuity
+
+The state-mode sequence is restored to:
+
+```text
+0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
+```
+
+No State Mode 51 exists.
+The number 51 is reserved for the new visual diagnostic so the historical state-mode progression remains intact.
