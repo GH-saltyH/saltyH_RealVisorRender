@@ -746,10 +746,7 @@ local rainStateUpdateParams = {
         {
             if (radius <= 0.000001)
             {
-                return max(
-                    gRainStateMaxSpeed,
-                    0.0
-                );
+                return 0.0;
             }
 
             float diameterUV =
@@ -1215,7 +1212,7 @@ local rainStateUpdateParams = {
                     );
                 }
 
-                if (gRainStateTestGrid > 0.5 && index < 9.0) {
+                if (gRainStatePhysicalGridTest > 0.5 && index < 9.0) {
                     const float measuredX[3] = {
                         0.250, 0.500, 0.750
                     };
@@ -1342,6 +1339,7 @@ local rainStateMetaUpdateParams = {
         gRainStateCount = 256.0,
         gRainStateInit = 0.0,
         gRainStatePhysicalTest = 0.0,
+        gRainStatePhysicalGridTest = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
@@ -4460,6 +4458,10 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateInit = 1.0
     rainStateUpdateParams.values.gRainStatePhysicalTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+        and 1.0
+        or 0.0
+    rainStateUpdateParams.values.gRainStatePhysicalGridTest =
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
         and 1.0
         or 0.0
 
