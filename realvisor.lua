@@ -6856,7 +6856,13 @@ function windowMain(dt)
     )
     
     ui.separator()
-    
+
+    --------------------------------------------------------
+    -- Main UI Tabs
+    --------------------------------------------------------
+    ui.tabBar('RealVisorMainTabs', function()
+
+        ui.tabItem('Transform', 0, function()
 
     --------------------------------------------------------
     -- Profile Selector
@@ -7316,6 +7322,10 @@ function windowMain(dt)
     profileContextMenu('Motion Response', 'MOTION_SMOOTHING')        
 
         
+        end)
+
+        ui.tabItem('KN5', 0, function()
+
     --------------------------------------------------------
     -- Glass debug: MESH & Material Configuration
     --------------------------------------------------------
@@ -7474,6 +7484,10 @@ function windowMain(dt)
         ui.text('\t\t*' .. textDebugCamRotation)
     end
     
+
+        end)
+
+        ui.tabItem('RainFX', 0, function()
 
     --------------------------------------------------------
     -- RainFX Debug controls
@@ -7759,6 +7773,10 @@ function windowMain(dt)
         end
 
     end
+
+        end)
+
+    end)
 
     --------------------------------------------------------
     -- Material Parameter: floating editor window
