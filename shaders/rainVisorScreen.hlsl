@@ -436,19 +436,17 @@ float2 rainProjectForceToUVWorld(
             )
         );
 
-    if (
-        dot(
-            cross(
-                normalWorld,
-                tangentU
-            ),
-            tangentV
-        ) < 0.0
-    )
-    {
-        tangentV = -tangentV;
-    }
+    /*
+        IMPORTANT coordinate contract:
+            pin.Tex.y = -1 at visor top
+            pin.Tex.y =  0 at visor bottom
+            therefore increasing mesh V is physically the screen-down UV direction.
 
+        tangentVWorld came directly from dP/dv in rainSurfaceBasisWorld().
+        Do not apply a handedness correction here: flipping tangentV would
+        silently reverse the project's signed V direction while still looking
+        mathematically right-handed. U remains intentionally mirrored below.
+    */
     float2 result =
         float2(
             -dot(forceWorld, tangentU),
@@ -3600,7 +3598,8 @@ float4 rainPersistentC2ControlledMovementDebugOutput(PS_IN pin)
         );
 
         float2 current = state.rg;
-        float2 origin = float2(0.5, 0.5);
+        // Signed visor UV center: V = -0.5, not +0.5.
+        float2 origin = float2(0.5, -0.5);
 
         current += visualOffsets[i];
         origin += visualOffsets[i];
@@ -5230,7 +5229,7 @@ float4 rainPersistentLifecycleStateMaskDiagnosticDebugOutput(PS_IN pin)
 
     return float4(
         saturate(position.x),
-        saturate(-position.y),
+        saturate(position.y + 1.0),
         currentMask >= 0.5 ? 1.0 : 0.0,
         1.0
     );
@@ -5458,7 +5457,7 @@ float4 main(PS_IN pin)
         float3 uvColor =
             float3(
                 u,
-                saturate((-v - 0.30) / 0.40),
+                saturate((v + 0.70) / 0.40),
                 0.0
             );
 
