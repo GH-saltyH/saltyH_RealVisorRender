@@ -4957,6 +4957,30 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainAcceleration =
         rainAccelerationCurrent
 
+    local forceMask = 0
+    if cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED then
+        forceMask = forceMask + RAIN_FORCE_GRAVITY
+    end
+    if cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED then
+        forceMask = forceMask + RAIN_FORCE_INERTIA
+    end
+    if cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED then
+        forceMask = forceMask + RAIN_FORCE_AIRFLOW
+    end
+
+    rainStateUpdateParams.values.gRainForceMask = forceMask
+    rainStateUpdateParams.values.gRainPhysicsAccelScale =
+        cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
+    rainStateUpdateParams.values.gRainAirVelocityWorld:set(
+        -ac.getCar(0).velocity.x,
+        -ac.getCar(0).velocity.y,
+        -ac.getCar(0).velocity.z
+    )
+    rainStateUpdateParams.values.gRainAirDensity =
+        cfg.RUNTIME.RAIN_AIR_DENSITY
+    rainStateUpdateParams.values.gRainAirDragCoeff =
+        cfg.RUNTIME.RAIN_AIR_DRAG_COEFF
+
     rainStateUpdateParams.values.gRainStateFlowAcceleration =
         cfg.RUNTIME.RAIN_FLOW_ACCELERATION
 
@@ -4976,7 +5000,7 @@ local function updateRainGPUState(sim)
 
     rainStateUpdateParams.values.gRainStateGravity =
         gravityMagnitude
-        * gravityGain
+        * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
 
     rainStateUpdateParams.values.gRainStateForceScale =
         cfg.RUNTIME.RAIN_FORCE_SCALE
@@ -5027,7 +5051,7 @@ local function updateRainGPUState(sim)
         physicsMode and 1.0 or 0.0
 
     rainStateUpdateParams.values.gRainStateUseAirDrag =
-        cfg.RUNTIME.RAIN_GPU_STATE_USE_AIR_DRAG and 1.0 or 0.0
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and 1.0 or 0.0
 
     rainStateUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
