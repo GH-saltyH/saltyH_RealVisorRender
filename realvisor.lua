@@ -217,6 +217,22 @@ local cfg = scriptSettings:mapConfig({
         RAIN_ENABLED = true,
 
         ------------------------------------------------------------
+        -- Unified external-force source controls (Phase A)
+        ------------------------------------------------------------
+        RAIN_FORCE_GRAVITY_ENABLED = true,
+        RAIN_FORCE_INERTIA_ENABLED = true,
+        RAIN_FORCE_AIRFLOW_ENABLED = false,
+
+        -- All external accelerations enter the GPU in SI m/s^2 and
+        -- share this compact surface-force conversion.
+        -- This preserves the previously validated gravity calibration.
+        RAIN_PHYSICS_ACCEL_SCALE = 0.03567788,
+
+        -- Air model constants (SI).
+        RAIN_AIR_DENSITY = 1.20,
+        RAIN_AIR_DRAG_COEFF = 0.47,
+
+        ------------------------------------------------------------
         -- v0.6.1 Combined-force validation (Stage Gate)
         --
         -- Isolation switch for the surface-normal + gravity + vehicle
