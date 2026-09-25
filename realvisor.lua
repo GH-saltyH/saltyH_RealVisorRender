@@ -1147,7 +1147,7 @@ local rainStateUpdateParams = {
         {
             float3 forceWorld = float3(0.0, 0.0, 0.0);
 
-            if (gRainForceMask >= 1.0)
+            if (fmod(floor(gRainForceMask), 2.0) >= 0.5)
                 forceWorld += float3(0.0, -gRainStateGravity, 0.0);
 
             if (fmod(floor(gRainForceMask / 2.0), 2.0) >= 0.5)
