@@ -286,13 +286,12 @@ local cfg = scriptSettings:mapConfig({
         -- Persistent state:
         -- 0 = disabled
         -- 1 = initialize only
-        -- 2 = synthetic force validation
-        -- 3 = persistent RainFX physics
-        -- 4 = persistent physics with the measured 3x3 L/M/S test grid
+        -- 3 = canonical persistent RainFX physics
+        -- 4 = canonical persistent physics + 3x3 physical-size diagnostic
+        -- 6 = canonical persistent physics + boundary lifecycle
+        -- 7 = single persistent droplet position probe
+        -- 10 = canonical physical 9-drop validation
         RAIN_GPU_STATE_MODE = 3,
-
-        -- 0 = legacy arbitrary size model, 1 = Debug 50 physical profile.
-        RAIN_GPU_STATE_SIZE_MODEL = 1,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -7059,8 +7058,6 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_DEBUG = newRainDebugIndex - 1
     end
 
-    -- STATE_MODE has a non-contiguous physical validation mode (51),
-    -- so UI index and actual mode value are intentionally separate.
     local RAIN_GPU_STATE_MODE_VALUES = {
         0, 1, 3, 4, 6, 7, 10
     }
