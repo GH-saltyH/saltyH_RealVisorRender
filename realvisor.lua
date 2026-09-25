@@ -628,7 +628,6 @@ local rainStateUpdateParams = {
     values = {
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
-        gRainStateForce = vec2(0.0, 0.0),
         gRainAcceleration = vec3(0.0, 0.0, 0.0),
         gRainForceMask = 0.0,
         gRainPhysicsAccelScale = cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE,
@@ -636,8 +635,6 @@ local rainStateUpdateParams = {
         gRainAirDensity = cfg.RUNTIME.RAIN_AIR_DENSITY,
         gRainAirDragCoeff = cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
         gRainAirDragScale = 0.000050,
-        gRainStateDrag = 0.35,
-        gRainStateMaxSpeed = 0.12,
         gRainStatePhysicalDiameterUVPerMM =
             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
         gRainStatePhysicalMaxSpeed1MM =
@@ -650,31 +647,13 @@ local rainStateUpdateParams = {
         gRainStateForceScale = 100000.0,
         gRainStateAdhesionMin = 0.65,
         gRainStateAdhesionMax = 2.20,
-        gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
-        gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
-        gRainStateMeshUMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
-        gRainStateMeshUMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
         gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
         gRainStatePhysics = 0.0,
-        gRainStateTestGrid = 0.0,
-        gRainStateC2Isolation = 0.0,
-        gRainStateC2Force = vec2(1.5, 0.0),
-        gRainStateC2AdhesionBase = 1.2,
-        gRainStateC2UseGravity = 0.0,
-        gRainStateC2GravityMultiplier = 1.0,
-        gRainStatePhysicalTest = 0.0,
-        gRainStateUsePhysicalSizeProfile = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
-        gRainStateC3TestSpeed = 0.0,
-        gRainStateC3FlowAcceleration = 0.20,
-        gRainStateC3Drag = 3.0,
-        gRainStateC3MaxSpeed = 0.15,
-        -- Reserved. Persistent air drag is not applied until its velocity-relative model is integrated.
-        gRainStateUseAirDrag = 0.0,
         gRainStateSingleDropTest = 0.0,
         gRainStateSingleDropPosition = vec2(
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
@@ -707,16 +686,23 @@ local rainStateUpdateParams = {
         */
         float rainStatePhysicalDiameterMM(float index)
         {
-            float profile = floor(index / 3.0);
-            float slot = index - profile * 3.0;
+            // First nine entries are the fixed physical validation population.
+            if (index < 9.0)
+            {
+                float profile = floor(index / 3.0);
+                float slot = index - profile * 3.0;
 
-            if (profile < 0.5)
-                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
+                if (profile < 0.5)
+                    return slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
 
-            if (profile < 1.5)
-                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
+                if (profile < 1.5)
+                    return slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
 
-            return slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
+                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
+            }
+
+            // Production droplets use a deterministic physical diameter range.
+            return lerp(0.5, 6.0, rainStateHash(index + 701.0));
         }
 
         float rainStatePhysicalMassProfile(float diameterMM)
@@ -801,27 +787,6 @@ local rainStateUpdateParams = {
             return float2(0.5, -0.5);
         }
 
-        bool rainStateC3SpeedTestActive()
-        {
-            return
-                gRainStateLifecycle > 0.5
-                && gRainStateC3TestSpeed > 0.5;
-        }
-
-        float rainStateFlowAccelerationValue()
-        {
-            return rainStateC3SpeedTestActive()
-                ? gRainStateC3FlowAcceleration
-                : gRainStateFlowAcceleration;
-        }
-
-        float rainStateDragValue()
-        {
-            return rainStateC3SpeedTestActive()
-                ? gRainStateC3Drag
-                : gRainStateDrag;
-        }
-
         /*
             Stage 7C physical max-speed model.
 
@@ -841,13 +806,7 @@ local rainStateUpdateParams = {
             float radius
         )
         {
-            if (
-                (
-                    gRainStatePhysicalTest <= 0.5
-                    && gRainStateUsePhysicalSizeProfile <= 0.5
-                )
-                || radius <= 0.000001
-            )
+            if (radius <= 0.000001)
             {
                 return max(
                     gRainStateMaxSpeed,
@@ -890,23 +849,7 @@ local rainStateUpdateParams = {
             float radius
         )
         {
-            if (rainStateC3SpeedTestActive())
-            {
-                return gRainStateC3MaxSpeed;
-            }
-
-            if (
-                gRainStatePhysicalTest > 0.5
-                || gRainStateUsePhysicalSizeProfile > 0.5
-            )
-            {
-                return rainStatePhysicalMaxSpeed(radius);
-            }
-
-            return max(
-                gRainStateMaxSpeed,
-                0.0
-            );
+            return rainStatePhysicalMaxSpeed(radius);
         }
 
         float3 rainStateNormalWorld(float2 p) {
@@ -1103,13 +1046,6 @@ local rainStateUpdateParams = {
             return tangentForce;
         }
 
-        float rainStateControlledAdhesion(float mass)
-        {
-            return
-                gRainStateC2AdhesionBase
-                / sqrt(max(mass, 0.000001));
-        }
-
         float rainStateAdhesion(
             float stateIndex,
             float mass
@@ -1270,49 +1206,6 @@ local rainStateUpdateParams = {
         {
             float forceMagnitude = 0.0;
 
-            if (gRainStateC2Isolation > 0.5)
-            {
-                float2 tangentForce =
-                    gRainStateC2UseGravity > 0.5
-                    ? float2(
-                        0.0,
-                        gRainStateGravity
-                        * gRainPhysicsAccelScale
-                        * gRainStateC2GravityMultiplier
-                    )
-                    : gRainStateC2Force;
-                forceMagnitude = length(tangentForce);
-
-                float adhesion = rainStateControlledAdhesion(mass);
-
-                velocity += rainStateFlowAcceleration(
-                    tangentForce,
-                    forceMagnitude,
-                    adhesion,
-                    dt
-                );
-
-                velocity = rainStateApplyDrag(
-                    velocity,
-                    forceMagnitude,
-                    adhesion,
-                    dt
-                );
-
-                velocity = rainStateClampSpeed(
-                    velocity,
-                    radius
-                );
-
-                position = rainStateIntegratePosition(
-                    position,
-                    velocity,
-                    dt
-                );
-
-                return float4(position, velocity);
-            }
-
             float2 tangentForce =
                 rainStateSurfaceForce(
                     position,
@@ -1361,44 +1254,6 @@ local rainStateUpdateParams = {
             );
         }
 
-        float4 rainStateUpdateTest(
-            float2 position,
-            float2 velocity,
-            float dt
-        )
-        {
-            velocity +=
-                gRainStateForce
-                * dt;
-
-            velocity *=
-                exp(
-                    -max(
-                        gRainStateDrag,
-                        0.0
-                    )
-                    * dt
-                );
-
-            velocity =
-                rainStateClampSpeed(
-                    velocity,
-                    0.0
-                );
-
-            position =
-                rainStateIntegratePosition(
-                    position,
-                    velocity,
-                    dt
-                );
-
-            return float4(
-                position,
-                velocity
-            );
-        }
-
         float4 main(PS_IN pin) {
             float count = max(gRainStateCount, 1.0);
             float index = min(floor(pin.Tex.x * count), count - 1.0);
@@ -1410,28 +1265,16 @@ local rainStateUpdateParams = {
                     return float4(gRainStateSingleDropPosition.x, gRainStateSingleDropPosition.y , 0.0, 0.0);
                 }
 
-                if ((
-                    gRainStatePhysicalTest > 0.5
-                    || gRainStateUsePhysicalSizeProfile > 0.5
-                ) && index < 9.0)
+                if (index < 9.0)
                 {
-                    float u = lerp(
-                        gRainStateMeshUMin,
-                        gRainStateMeshUMax,
-                        index / 8.0
-                    );
+                    float u = lerp(0.250, 0.750, index / 8.0);
 
                     return float4(
                         u,
-                        gRainStateMeshVMin
-                        + (gRainStateMeshVMax - gRainStateMeshVMin) * 0.5,
+                        -0.500,
                         0.0,
                         0.0
                     );
-                }
-
-                if (gRainStateC2Isolation > 0.5 && index < 3.0) {
-                    return float4(0.5, -0.5, 0.0, 0.0);
                 }
 
                 if (gRainStateTestGrid > 0.5 && index < 9.0) {
@@ -1450,9 +1293,7 @@ local rainStateUpdateParams = {
                     // Debug 36 test points are raw visor UV values.
                     // Legacy calibration values only constrain this fixed
                     // measurement set; they do not remap state coordinates.
-                    float testX = clamp(measuredX[ix], gRainStateMeshUMin, gRainStateMeshUMax);
-                    float testY = clamp(measuredY[iy], gRainStateMeshVMin, gRainStateMeshVMax);
-                    return float4(testX, testY, 0.0, 0.0);
+                    return float4(measuredX[ix], measuredY[iy], 0.0, 0.0);
                 }
 
                 float2 p =
@@ -1497,10 +1338,7 @@ local rainStateUpdateParams = {
             {
                 if (meta.a > 1.5)
                 {
-                    if ((
-                    gRainStatePhysicalTest > 0.5
-                    || gRainStateUsePhysicalSizeProfile > 0.5
-                ) && index < 9.0)
+                    if (index < 9.0)
                     {
                         float u = lerp(
                             gRainStateMeshUMin,
@@ -1510,8 +1348,7 @@ local rainStateUpdateParams = {
 
                         return float4(
                             u,
-                            gRainStateMeshVMin
-                            + (gRainStateMeshVMax - gRainStateMeshVMin) * 0.5,
+                            -0.500,
                             0.0,
                             0.0
                         );
@@ -1551,11 +1388,7 @@ local rainStateUpdateParams = {
                 );
             }
 
-            return rainStateUpdateTest(
-                p,
-                v,
-                dt
-            );
+            return float4(p, v);
         }
     ]],
 }
@@ -1722,10 +1555,7 @@ local rainStateMetaUpdateParams = {
                     gRainStateTestGrid < 0.5
                     && count == 3.0;
 
-                if ((
-                    gRainStatePhysicalTest > 0.5
-                    || gRainStateUsePhysicalSizeProfile > 0.5
-                ) && index < 9.0)
+                if (index < 9.0)
                 {
                     float diameterMM =
                         rainStatePhysicalDiameterMM(index);
@@ -1793,10 +1623,7 @@ local rainStateMetaUpdateParams = {
                     meta.a = 1.0;
                     meta.b = 0.0;
 
-                    if ((
-                    gRainStatePhysicalTest > 0.5
-                    || gRainStateUsePhysicalSizeProfile > 0.5
-                ) && index < 9.0)
+                    if (index < 9.0)
                     {
                         float profile = floor(index / 3.0);
                         float slot = index - profile * 3.0;
@@ -4776,407 +4603,11 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateCount = count
     rainStateUpdateParams.values.gRainStateInit = 1.0
     rainStateUpdateParams.values.gRainStateTestGrid =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-            or
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            or
-            ((cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5) and cfg.RUNTIME.RAIN_DEBUG == 5)
-        )
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
         and 1.0
         or 0.0
-    rainStateUpdateParams.values.gRainStateC2Isolation =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-        )
-        and 1.0
-        or 0.0
-    rainStateUpdateParams.values.gRainStateC2Force:set(
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y
-    )
-    rainStateUpdateParams.values.gRainStateC2AdhesionBase =
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
-    rainStateUpdateParams.values.gRainStateC2UseGravity =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9) and 1.0 or 0.0
-    rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
     rainStateUpdateParams.values.gRainStatePhysicalTest =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            )
-            and 1.0
-            or 0.0
-    rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
-        )
-        and 1.0
-        or 0.0
-    rainStateUpdateParams.values.gRainStateSingleDropTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
-    rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
-    )
-    
-    rainStateUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-        and 0.0
-        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
-    rainStateUpdateParams.values.gRainStateBoundaryMargin =
-        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
-    rainStateUpdateParams.values.gRainStateRespawnGapMin =
-        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
-    rainStateUpdateParams.values.gRainStateRespawnGapMax =
-        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
-    rainStateUpdateParams.values.gRainStatePhysics = 0.0
-    rainStateUpdateParams.values.gRainStateMeshVMin = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN
-    rainStateUpdateParams.values.gRainStateMeshVMax = cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
-    rainStateUpdateParams.textures.txRainState = false
-    rainStateUpdateParams.textures.txRainStateMeta = false
-    rainStateUpdateParams.textures.txRainSurfaceNormal = false
-    rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
-
-    rainStateMetaUpdateParams.values.gRainStateCount = count
-    rainStateMetaUpdateParams.values.gRainStateInit = 1.0
-    rainStateMetaUpdateParams.values.gRainStatePhysicalTest =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            )
-            and 1.0
-            or 0.0
-    rainStateMetaUpdateParams.values.gRainStateUsePhysicalSizeProfile =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
-        )
-        and 1.0
-        or 0.0
-    rainStateMetaUpdateParams.values.gRainStateTestGrid =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-            or 
-            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
-        )
-        and 1.0
-        or 0.0
-    rainStateMetaUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-        and 0.0
-        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
-    rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
-        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
-    rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
-        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
-    rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
-        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
-    rainStateMetaUpdateParams.values.gRainStateSingleDropTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
-    rainStateMetaUpdateParams.textures.txRainStateMeta = false
-    rainStateMetaUpdateParams.textures.txRainState = false
-    rainStateMetaUpdateParams.textures.txRainBoundaryMask =
-        textureRainBoundaryMask
-
-    rainStateA:updateWithShader(rainStateUpdateParams)
-    rainStateB:updateWithShader(rainStateUpdateParams)
-    rainStateMetaA:updateWithShader(rainStateMetaUpdateParams)
-    rainStateMetaB:updateWithShader(rainStateMetaUpdateParams)
-
-    rainStateDebugOriginUpdateParams.values.gRainStateCount = count
-    rainStateDebugOriginUpdateParams.textures.txRainState = rainStateA
-    rainStateDebugOrigin:updateWithShader(rainStateDebugOriginUpdateParams)
-
-    rainStateUpdateParams.values.gRainStateInit = 0.0
-    rainStateMetaUpdateParams.values.gRainStateInit = 0.0
-    
-    rainStateReadIsA = true
-    rainStateInitialized = true
-    rainStateConfiguredMode = cfg.RUNTIME.RAIN_GPU_STATE_MODE
-    rainStateDebugSampleTimer = 0.0
-    rainStateLastFrame = -1
-
-    ac.log(
-        appNameDebug
-        .. ' Rain GPU state initialized: '
-        .. tostring(count)
-        .. ' texels'
-    )
-
-    return true
-end
-
-
-local function updateRainGPUState(sim)
-    if rainStateSingleDropDirty then
-        rainStateA = nil
-        rainStateB = nil
-        rainStateMetaA = nil
-        rainStateMetaB = nil
-        rainStateDebugOrigin = nil
-        rainStateInitialized = false
-        rainStateReadIsA = true
-        rainStateLastFrame = -1
-        rainStateSingleDropDirty = false
-    end
-
-    if rainStateConfiguredMode ~= nil
-        and rainStateConfiguredMode ~= cfg.RUNTIME.RAIN_GPU_STATE_MODE then
-        rainStateA = nil
-        rainStateB = nil
-        rainStateMetaA = nil
-        rainStateMetaB = nil
-        rainStateDebugOrigin = nil
-        rainStateInitialized = false
-        rainStateReadIsA = true
-        rainStateLastFrame = -1
-        rainStateConfiguredMode = nil
-    end
-
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE <= 0 then
-        return
-    end
-
-    if not initializeRainGPUState() then
-        return
-    end
-
-    if not rainStateInitialized then
-        return
-    end
-
-    local frame = sim and sim.frame
-    if frame == nil or rainStateLastFrame == frame then
-        return
-    end
-
-    rainStateLastFrame = frame
-
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 1 then
-        return
-    end
-
-    local dt = sim.dt
-    if not dt or dt <= 0.000001 then
-        return
-    end
-
-    local physicsMode =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3
-
-    local transform =
-        rainTargetMesh
-        and rainTargetMesh:getWorldTransformationRaw():clone()
-        or mat4x4.identity()
-
-    rainStateUpdateParams.values.gRainStateDeltaTime =
-        math.min(dt, 0.05)
-
-    rainStateUpdateParams.values.gRainStateCount =
-        math.max(
-            1,
-            math.floor(
-                cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-                and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-                    or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-                    )
-                and 9
-                or (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8)
-                and 3
-                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-                and 1
-                or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
-            )
-        )
-
-    rainStateUpdateParams.values.gRainStateForce:set(
-        cfg.RUNTIME.RAIN_GPU_STATE_TEST_FORCE_X,
-        cfg.RUNTIME.RAIN_GPU_STATE_TEST_FORCE_Y
-    )
-
-    rainStateUpdateParams.values.gRainStateDrag =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9)
-        and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_DRAG
-        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-        and cfg.RUNTIME.RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG
-        or (
-            physicsMode
-            and cfg.RUNTIME.RAIN_FLOW_DRAG
-            or cfg.RUNTIME.RAIN_GPU_STATE_DRAG
-        )
-
-    rainStateUpdateParams.values.gRainStateMaxSpeed =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9)
-        and cfg.RUNTIME.RAIN_GPU_STATE_C2_TEST_MAX_SPEED
-        or (
-            physicsMode
-            and (
-                cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
-                / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
-            )
-            or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED
-        )
-
-    rainStateUpdateParams.values.gRainAcceleration =
-        rainAccelerationCurrent
-
-    local forceMask = 0
-    if cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED then
-        forceMask = forceMask + RAIN_FORCE_GRAVITY
-    end
-    if cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED then
-        forceMask = forceMask + RAIN_FORCE_INERTIA
-    end
-    if cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED then
-        forceMask = forceMask + RAIN_FORCE_AIRFLOW
-    end
-
-    rainStateUpdateParams.values.gRainForceMask = forceMask
-    rainStateUpdateParams.values.gRainPhysicsAccelScale =
-        cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
-    rainStateUpdateParams.values.gRainAirVelocityWorld:set(
-        -ac.getCar(0).velocity.x,
-        -ac.getCar(0).velocity.y,
-        -ac.getCar(0).velocity.z
-    )
-    rainStateUpdateParams.values.gRainAirDensity =
-        cfg.RUNTIME.RAIN_AIR_DENSITY
-    rainStateUpdateParams.values.gRainAirDragCoeff =
-        cfg.RUNTIME.RAIN_AIR_DRAG_COEFF
-
-    rainStateUpdateParams.values.gRainStateFlowAcceleration =
-        cfg.RUNTIME.RAIN_FLOW_ACCELERATION
-
-    rainStateUpdateParams.values.gRainStateUVScale =
-        cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE
-
-    local stateSimGravity =
-        ac.getSim()
-        and ac.getSim().gravity
-        or -cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_REFERENCE
-
-    local gravityMagnitude =
-        math.abs(stateSimGravity)
-
-    -- Keep gravity in SI m/s^2 until the unified GPU force stage.
-    rainStateUpdateParams.values.gRainStateGravity =
-        gravityMagnitude
-
-    rainStateUpdateParams.values.gRainStateForceScale =
-        cfg.RUNTIME.RAIN_FORCE_SCALE
-
-    rainStateUpdateParams.values.gRainStateAdhesionMin =
-        cfg.RUNTIME.RAIN_ADHESION_MIN
-
-    rainStateUpdateParams.values.gRainStateAdhesionMax =
-        cfg.RUNTIME.RAIN_ADHESION_MAX
-
-    rainStateUpdateParams.values.gRainStateMeshVMin =
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN
-
-    rainStateUpdateParams.values.gRainStateMeshVMax =
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX
-
-    rainStateUpdateParams.values.gRainObjectToWorld =
-        transform
-
-    rainStateUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-        and 0.0
-        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
-    rainStateUpdateParams.values.gRainStateBoundaryMargin =
-        cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
-    rainStateUpdateParams.values.gRainStateRespawnGapMin =
-        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
-    rainStateUpdateParams.values.gRainStateRespawnGapMax =
-        cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
-
-    -- The accelerated C3 physics override is a lifecycle-validation tool only.
-    -- Never let it alter the normal persistent physics modes.
-    rainStateUpdateParams.values.gRainStateC3TestSpeed =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
-            and cfg.RUNTIME.RAIN_GPU_STATE_C3_TEST_SPEED
-        )
-        and 1.0
-        or 0.0
-    rainStateUpdateParams.values.gRainStateC3FlowAcceleration =
-        cfg.RUNTIME.RAIN_GPU_STATE_C3_FLOW_ACCELERATION
-    rainStateUpdateParams.values.gRainStateC3Drag =
-        cfg.RUNTIME.RAIN_GPU_STATE_C3_DRAG
-    rainStateUpdateParams.values.gRainStateC3MaxSpeed =
-        cfg.RUNTIME.RAIN_GPU_STATE_C3_MAX_SPEED
-
-    rainStateUpdateParams.values.gRainStatePhysics =
-        physicsMode and 1.0 or 0.0
-
-    rainStateUpdateParams.values.gRainStateUseAirDrag =
-        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and 1.0 or 0.0
-
-    rainStateUpdateParams.values.gRainStateSingleDropTest =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
-    rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
-        cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
-    )
-
-    rainStateUpdateParams.values.gRainStateTestGrid =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            or
-            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 and cfg.RUNTIME.RAIN_DEBUG == 5)
-        )
-        and 1.0
-        or 0.0
-
-    --[[
-        Mode 9 is a physical-reference C2 isolation test.
-        Keep these flags active every frame, not only during initialization.
-        Otherwise the first frame uses the controlled gravity path but later
-        frames silently fall back to randomized surface adhesion.
-    ]]
-    rainStateUpdateParams.values.gRainStateC2Isolation =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-        )
-        and 1.0
-        or 0.0
-    rainStateUpdateParams.values.gRainStateC2Force:set(
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y
-    )
-    rainStateUpdateParams.values.gRainStateC2AdhesionBase =
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE
-    rainStateUpdateParams.values.gRainStateC2UseGravity =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-        )
-        and 1.0
-        or 0.0
-    rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
-        cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
-
-    -- Keep the physical max-speed branch active every frame in Mode 9.
-    -- This mirrors the persistent C2 flags above and avoids an
-    -- initialization-only state mismatch.
-    rainStateUpdateParams.values.gRainStatePhysicalTest =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            )
-            and 1.0
-            or 0.0
-    rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
-        (
-            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
-        )
+        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
         and 1.0
         or 0.0
 
@@ -5201,9 +4632,12 @@ local function updateRainGPUState(sim)
     rainStateMetaUpdateParams.values.gRainStateDeltaTime =
         math.min(dt, 0.05)
     rainStateMetaUpdateParams.values.gRainStateLifecycle =
-        cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
-        and 0.0
-        or (cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE and 1.0 or 0.0)
+        (
+            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
+        )
+        and 1.0
+        or 0.0
     rainStateMetaUpdateParams.values.gRainStateBoundaryMargin =
         cfg.RUNTIME.RAIN_GPU_STATE_BOUNDARY_MARGIN
     rainStateMetaUpdateParams.values.gRainStateRespawnGapMin =
@@ -5516,9 +4950,6 @@ render.on('main.track.transparent', function()
                     -car.velocity.z
                 ),
 
-            gRainAirDragScale =
-                cfg.RUNTIME.RAIN_AIR_DRAG_SCALE,
-
             gRainDebug =
                 cfg.RUNTIME.RAIN_DEBUG,
 
@@ -5555,27 +4986,6 @@ render.on('main.track.transparent', function()
             gRainAdhesionMax =
                 cfg.RUNTIME.RAIN_ADHESION_MAX,
 
-            gRainGravity =
-                cfg.RUNTIME.RAIN_GRAVITY,
-
-            gRainForceScale =
-                cfg.RUNTIME.RAIN_FORCE_SCALE,
-
-
-            gRainDropLifetimeMin =
-                cfg.RUNTIME.RAIN_DROP_LIFETIME_MIN,
-
-            gRainDropLifetimeMax =
-                cfg.RUNTIME.RAIN_DROP_LIFETIME_MAX,
-
-            gRainDropRespawnGapMin =
-                cfg.RUNTIME.RAIN_DROP_RESPAWN_GAP_MIN,
-
-            gRainDropRespawnGapMax =
-                cfg.RUNTIME.RAIN_DROP_RESPAWN_GAP_MAX,
-
-            gRainFlowMax =
-                cfg.RUNTIME.RAIN_FLOW_MAX,
 
             gRainFlowAcceleration =
                 cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
@@ -5608,14 +5018,6 @@ render.on('main.track.transparent', function()
                 and 1
                 or cfg.RUNTIME.RAIN_GPU_STATE_COUNT,
 
-            gRainStateMaxSpeed =
-                cfg.RUNTIME.RAIN_GPU_STATE_MODE >= 3
-                and (
-                    cfg.RUNTIME.RAIN_FLOW_MAX_SPEED
-                    / math.max(cfg.RUNTIME.RAIN_GPU_STATE_UV_SCALE, 0.000001)
-                )
-                or cfg.RUNTIME.RAIN_GPU_STATE_MAX_SPEED,
-
             gRainStatePhysicalDiameterUVPerMM =
                 cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
 
@@ -5633,18 +5035,6 @@ render.on('main.track.transparent', function()
 
             gRainStateDebugVelocityScale =
                 cfg.RUNTIME.RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE,
-
-            gRainStateMeshVMin =
-                cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
-
-            gRainStateMeshVMax =
-                cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
-
-            gRainStateMeshUMin =
-                cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
-
-            gRainStateMeshUMax =
-                cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
 
             gRainStateDeltaTime =
                 sim.dt
@@ -7760,15 +7150,7 @@ function windowMain(dt)
         rainStateConfiguredMode = nil
     end
 
-    if cfg.RUNTIME.RAIN_DEBUG == 51 then
-        ui.text('Debug 51 is the physical unified-force state viewer. Use State Mode 10 + physical size profile.')
-    else
-        ui.text(
-            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
-            and 'Legacy state mode + Debug 50 physical size/mass profile'
-            or 'Legacy state mode + legacy arbitrary size/mass profile'
-        )
-    end
+    ui.text('Canonical physical RainFX state: physical droplet profile + unified external forces.')
 
     --------------------------------------------------------
     -- Unified external-force source controls (Phase A)
@@ -7827,162 +7209,6 @@ function windowMain(dt)
     ui.text('Use STATE_MODE = 3. Test one source at a time, then enable combinations:')
     ui.text('1) Gravity only -> 2) Inertia only -> 3) Gravity + Inertia -> 4) Airflow')
     ui.text('Airflow is intentionally OFF by default until its incidence/mass response is verified.')
-
-    local newCenterX, changed = ui.slider(
-        'CENTER_X',
-        cfg.RUNTIME.RAIN_DEBUG_CENTER_X,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_DEBUG_CENTER_X = newCenterX
-    end
-    
-
-    local newCenterY, changed = ui.slider(
-        'CENTER_Y',
-        cfg.RUNTIME.RAIN_DEBUG_CENTER_Y,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_DEBUG_CENTER_Y = newCenterY
-    end
-    
-    
-    local newVerticalUVMin, changed = ui.slider(
-        '(Test Boundary) V Min',
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MIN = newVerticalUVMin
-    end
-    
-    
-    local newVerticalUVMax, changed = ui.slider(
-        '(Test Boundary) V Max',
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_V_MAX = newVerticalUVMax
-    end
-    
-    local newHorizontalUVMin, changed = ui.slider(
-        '(Test Boundary) U Min',
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MIN = newHorizontalUVMin
-    end
-    
-    
-    local newHorizontalUVMax, changed = ui.slider(
-        '(Test Boundary) U Max',
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX,
-        -2.0,
-        2.0,
-        '%.3f'
-    )
-    
-    if changed then
-        cfg.RUNTIME.RAIN_GPU_STATE_MESH_U_MAX = newHorizontalUVMax
-    end
-
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 5 then
-        ui.text('C2: same physical spawn/force/adhesion base; only radius/mass differs')
-        local c2x, c2changed = ui.slider(
-            'C2_FORCE_X',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X,
-            0.0,
-            3.0,
-            '%.3f'
-        )
-        if c2changed then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_X = c2x
-        end
-
-        local c2y, c2changedY = ui.slider(
-            'C2_FORCE_Y',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y,
-            -3.0,
-            3.0,
-            '%.3f'
-        )
-        if c2changedY then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_FORCE_Y = c2y
-        end
-
-        local c2adh, c2adhChanged = ui.slider(
-            'C2_ADHESION_BASE',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE,
-            0.1,
-            3.0,
-            '%.3f'
-        )
-        if c2adhChanged then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_ADHESION_BASE = c2adh
-        end
-    end
-
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 then
-        ui.separator()
-        ui.text(
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
-            and 'Surface-normal + gravity test: 9 fixed physical droplets / vehicle acceleration OFF / drag OFF'
-            or 'CSP physical reference test: 9 fixed droplets / Light, Moderate, Heavy / Min-Average-Max'
-        )
-        ui.text('Debug 50: pink = droplet, white alpha 0.5 = at least one droplet is moving; transparent = all stationary.')
-        ui.text('Diameters: L 0.5/0.95/2.0 mm | M 0.5/1.5/4.0 mm | H 0.5/2.5/6.0 mm')
-    end
-
-    if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 8 
-        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
-        or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 then
-        ui.separator()
-        ui.text('C2 gravity test: |ac.getSim().gravity| -> compact force -> adhesion -> velocity')
-        ui.text('Reference: 9.81 m/s². Default gain maps 9.81 -> 0.35 compact force.')
-
-        local gravityGain, gravityGainChanged = ui.slider(
-            'GRAVITY_GAIN',
-            cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN,
-            0.001,
-            1.000,
-            '%.5f'
-        )
-        if gravityGainChanged then
-            cfg.RUNTIME.RAIN_GPU_STATE_GRAVITY_GAIN = gravityGain
-        end
-
-        local gravityMultiplier, gravityMultiplierChanged = ui.slider(
-            'C2_GRAVITY_MULTIPLIER',
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER,
-            0.0,
-            5.0,
-            '%.3f'
-        )
-        if gravityMultiplierChanged then
-            cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER = gravityMultiplier
-        end
-
-        ui.text(string.format('getSim().gravity: %.3f m/s²', math.abs(ac.getSim().gravity)))
-    end
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
         ui.separator()
