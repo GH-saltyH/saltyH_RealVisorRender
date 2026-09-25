@@ -232,9 +232,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_AIR_DENSITY = 1.20,
         RAIN_AIR_DRAG_COEFF = 0.47,
 
-        -- Master amount
-        RAIN_AMOUNT = 250.0,
-
         -- Drop dynamics
         -- Acceleration after surface adhesion is exceeded.
         RAIN_FLOW_ACCELERATION = 0.020,
@@ -283,11 +280,6 @@ local cfg = scriptSettings:mapConfig({
         -- size-dependent max-speed curve.
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
 
-        -- Debug 25: amplify the measured accumulated displacement only for
-        -- visualization. This does not change physics or state integration.
-        RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE = 50.0,
-        RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL = 0.25,
-        RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE = 50.0,
         -- Debug
         -- 0 = normal rain
         -- 1 = projected force magnitude / components
@@ -4595,24 +4587,6 @@ render.on('main.track.transparent', function()
         return
     end
 
-
-    --------------------------------------------------------
-    -- Speed
-    --------------------------------------------------------
-    
-    local speed =
-        car.velocity:length()
-    
-    
-    local speed01 =
-        math.clamp(
-            speed / cfg.RUNTIME.RAIN_SPEED_MAX,
-            0.0,
-            1.0
-        )
-    
-    local acceleration = 
-        car.acceleration
 
     
     --------------------------------------------------------
