@@ -232,20 +232,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_AIR_DENSITY = 1.20,
         RAIN_AIR_DRAG_COEFF = 0.47,
 
-        ------------------------------------------------------------
-        -- Legacy compatibility flag
-        --
-        -- The active force-source isolation control is now the
-        -- RAIN_FORCE_INERTIA_ENABLED checkbox/bitmask source.
-        -- This value remains only so old settings files still load.
-        ------------------------------------------------------------
-        RAIN_TEST_ACCEL_ENABLED = true,
-
-        -- Stage 7A validation: surface-normal + physical gravity only.
-        -- Vehicle acceleration remains disabled by RAIN_TEST_ACCEL_ENABLED.
-        -- Drag is separately disabled for the first gravity-flow acceptance pass.
-        RAIN_GPU_STATE_SURFACE_GRAVITY_TEST_DRAG = 0.0,
-
         -- Master amount
         RAIN_AMOUNT = 250.0,
 
@@ -269,32 +255,6 @@ local cfg = scriptSettings:mapConfig({
         -- Maximum procedural surface speed in UV-space units per second.
         RAIN_FLOW_MAX_SPEED = 0.035,
 
-        -- Quadratic air-drag test coefficient.
-        -- Debug 31 only: converts relative air speed squared into
-        -- the same compact force space used by RainFX.
-        RAIN_AIR_DRAG_SCALE = 0.000050,
-
-        -- World-space acceleration influence.
-        -- RainFX keeps vehicle acceleration in WORLD space and projects
-        -- it onto each droplet's local surface tangent frame in HLSL.
-        -- Use one scalar so response does not depend on the car's
-        -- orientation relative to the global world axes.
-        RAIN_ACCEL_GAIN = 0.000024,
-
-        -- Legacy per-camera-axis gains retained for config compatibility.
-        -- They are no longer used by RainFX physics.
-        RAIN_ACCEL_GAIN_X = 0.00000505,
-        RAIN_ACCEL_GAIN_Y = 0.000001,
-        RAIN_ACCEL_GAIN_Z = 0.000024,
-
-        -- Acceleration response / damping
-        RAIN_FLOW_RESPONSE = 5.0,
-
-        -- Maximum procedural travel distance in grid-space units.
-        -- The shader uses this guard to keep moving drops inside its
-        -- current-cell + 8-neighbor search envelope.
-        RAIN_FLOW_MAX = 0.65,
-
         -- Rain surface / adhesion model
         -- UV center is intentionally explicit so the surface model
         -- can later be remapped without rewriting the physics.
@@ -314,19 +274,6 @@ local cfg = scriptSettings:mapConfig({
         -- effective tangential force is below its own threshold.
         RAIN_ADHESION_MIN = 0.65,
         RAIN_ADHESION_MAX = 2.20,
-
-        -- Physical gravity used by the surface model.
-        RAIN_GRAVITY = 0.35,
-
-        -- Converts physical acceleration units into the compact
-        -- surface-force space used by the procedural visor model.
-        RAIN_FORCE_SCALE = 100000.0,
-
-        -- Procedural lifetime of one drop before it respawns.
-        RAIN_DROP_LIFETIME_MIN = 4.0,
-        RAIN_DROP_LIFETIME_MAX = 10.0,
-        RAIN_DROP_RESPAWN_GAP_MIN = 0.15,
-        RAIN_DROP_RESPAWN_GAP_MAX = 0.75,
 
         ------------------------------------------------------------
         -- v0.6.1 RainFX persistent GPU state validation
@@ -348,7 +295,7 @@ local cfg = scriptSettings:mapConfig({
         -- 8 = C2 gravity-derived L/M/S momentum validation
         -- 9 = C2 physical 9-drop reference test (direct tangent gravity)
         -- 10 = physical 9-drop surface-normal + gravity validation
-        RAIN_GPU_STATE_MODE = 10,
+        RAIN_GPU_STATE_MODE = 3,
 
         -- 0 = legacy arbitrary size model, 1 = Debug 50 physical profile.
         RAIN_GPU_STATE_SIZE_MODEL = 1,
@@ -363,80 +310,19 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
         RAIN_GPU_STATE_RESPAWN_GAP_MAX = 0.75,
 
-        -- C3 lifecycle validation only.
-        -- These values temporarily accelerate persistent physics so
-        -- boundary exit/death/respawn can be observed quickly.
-        -- They do not modify the final RainFX physics parameters.
-        RAIN_GPU_STATE_C3_TEST_SPEED = true,
-        RAIN_GPU_STATE_C3_FLOW_ACCELERATION = 0.20,
-        RAIN_GPU_STATE_C3_DRAG = 3.0,
-        RAIN_GPU_STATE_C3_MAX_SPEED = 0.15,
-
-        RAIN_GPU_STATE_UV_SCALE = 18.0,
-        -- Legacy names retained for settings compatibility.
-        -- TEST-POINT BOUNDS ONLY: these values no longer transform
-        -- persistent state, rendering, physics, normal sampling, or masks.
-        RAIN_GPU_STATE_MESH_V_MIN = -0.700,
-        RAIN_GPU_STATE_MESH_V_MAX = -0.300,
-        
-        RAIN_GPU_STATE_MESH_U_MIN = 0.3,
-        RAIN_GPU_STATE_MESH_U_MAX = 0.7,
-
-        -- Synthetic force used only by the Stage 1 state validation.
-        -- This is deliberately independent from the final RainFX force model.
-        RAIN_GPU_STATE_TEST_FORCE_X = 0.035,
-        RAIN_GPU_STATE_TEST_FORCE_Y = 0.010,
-
-        -- C2 controlled radius/mass/adhesion isolation.
-        -- Force is expressed directly in persistent tangent-state coordinates.
-        RAIN_GPU_STATE_C2_FORCE_X = 0.500,
-        RAIN_GPU_STATE_C2_FORCE_Y = 0.000,
-        RAIN_GPU_STATE_C2_ADHESION_BASE = 1.200,
-
-        -- Gravity reference model for persistent C2 validation.
-        -- AC getSim().gravity is normally about -9.81 m/s².
-        -- The gain converts physical gravity magnitude into the compact
-        -- persistent-force space. Default preserves the existing 0.35 gravity input.
-        RAIN_GPU_STATE_GRAVITY_REFERENCE = 9.81,
-        RAIN_GPU_STATE_GRAVITY_GAIN = 0.03567788,
-        RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER = 1.0,
-        RAIN_GPU_STATE_C2_TEST_DRAG = 0.0,
-        RAIN_GPU_STATE_C2_TEST_MAX_SPEED = 1.0,
-
-        -- Mode 9 / Debug 50: CSP physical reference droplets.
-        -- Profiles use Min / representative midpoint of Average-Median range / Max.
-        RAIN_GPU_STATE_PHYSICAL_TEST = true,
-        RAIN_GPU_STATE_PHYSICAL_DIAMETER_MIN_MM = 0.5,
-        RAIN_GPU_STATE_PHYSICAL_DIAMETER_MAX_MM = 6.0,
-        RAIN_GPU_STATE_PHYSICAL_RADIUS_MIN = 0.000732421875,
-        RAIN_GPU_STATE_PHYSICAL_RADIUS_MAX = 0.0087890625,
-        RAIN_GPU_STATE_PHYSICAL_LIGHT_AVG_MM = 0.95,
-        RAIN_GPU_STATE_PHYSICAL_MODERATE_AVG_MM = 1.50,
-        RAIN_GPU_STATE_PHYSICAL_HEAVY_AVG_MM = 2.50,
-
         -- Stage 7C: physical-reference size-dependent surface max speed.
         -- 1 mm diameter occupies exactly 0.0029296875 visor UV in the
         -- calibrated Debug 50 mesh measurement.
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
-        -- Initial calibration target. This is a visor-surface speed in UV/s,
-        -- not the free-fall terminal velocity reported by raindrop studies.
-        --RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.004,
-        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.016,
         -- Atlas/Ulbrich-style size exponent used as the first-order
         -- size-dependent max-speed curve.
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
-
-        RAIN_GPU_STATE_DRAG = 0.35,
-        RAIN_GPU_STATE_MAX_SPEED = 0.12,
 
         -- Debug 25: amplify the measured accumulated displacement only for
         -- visualization. This does not change physics or state integration.
         RAIN_GPU_STATE_DEBUG_DISPLACEMENT_SCALE = 50.0,
         RAIN_GPU_STATE_DEBUG_SAMPLE_INTERVAL = 0.25,
         RAIN_GPU_STATE_DEBUG_VELOCITY_SCALE = 50.0,
-        -- Reserved; production drag remains disabled until the velocity-relative model is integrated.
-        RAIN_GPU_STATE_USE_AIR_DRAG = false,
-
         -- Debug
         -- 0 = normal rain
         -- 1 = projected force magnitude / components
