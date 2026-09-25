@@ -956,7 +956,10 @@ local rainStateUpdateParams = {
         )
         {
             if (
-                gRainStatePhysicalTest <= 0.5
+                (
+                    gRainStatePhysicalTest <= 0.5
+                    && gRainStateUsePhysicalSizeProfile <= 0.5
+                )
                 || radius <= 0.000001
             )
             {
@@ -1006,7 +1009,10 @@ local rainStateUpdateParams = {
                 return gRainStateC3MaxSpeed;
             }
 
-            if (gRainStatePhysicalTest > 0.5)
+            if (
+                gRainStatePhysicalTest > 0.5
+                || gRainStateUsePhysicalSizeProfile > 0.5
+            )
             {
                 return rainStatePhysicalMaxSpeed(radius);
             }
@@ -4911,7 +4917,11 @@ local function initializeRainGPUState()
     rainStateUpdateParams.values.gRainStateC2GravityMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_C2_GRAVITY_MULTIPLIER
     rainStateUpdateParams.values.gRainStatePhysicalTest =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10) and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+            and 1.0
+            or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateSingleDropPosition:set(
@@ -4940,7 +4950,11 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.values.gRainStateCount = count
     rainStateMetaUpdateParams.values.gRainStateInit = 1.0
     rainStateMetaUpdateParams.values.gRainStatePhysicalTest =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10) and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+            and 1.0
+            or 0.0
     rainStateMetaUpdateParams.values.gRainStateTestGrid =
         (
             cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4
@@ -5252,7 +5266,11 @@ local function updateRainGPUState(sim)
     -- This mirrors the persistent C2 flags above and avoids an
     -- initialization-only state mismatch.
     rainStateUpdateParams.values.gRainStatePhysicalTest =
-        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9 or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10) and 1.0 or 0.0
+        (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 9
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10
+            or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51)
+            and 1.0
+            or 0.0
 
     rainStateMetaUpdateParams.values.gRainStateCount =
         math.max(
