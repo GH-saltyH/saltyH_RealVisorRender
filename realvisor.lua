@@ -348,10 +348,10 @@ local cfg = scriptSettings:mapConfig({
         -- 8 = C2 gravity-derived L/M/S momentum validation
         -- 9 = C2 physical 9-drop reference test (direct tangent gravity)
         -- 10 = physical 9-drop surface-normal + gravity validation
-        RAIN_GPU_STATE_MODE = 51,
+        RAIN_GPU_STATE_MODE = 10,
 
         -- 0 = legacy arbitrary size model, 1 = Debug 50 physical profile.
-        RAIN_GPU_STATE_SIZE_MODEL = 0,
+        RAIN_GPU_STATE_SIZE_MODEL = 1,
 
         -- Signed visor-UV position used by the single-drop probe.
         RAIN_GPU_STATE_SINGLE_DROP_X = 0.500,
@@ -447,7 +447,7 @@ local cfg = scriptSettings:mapConfig({
         -- 6 = local projected movement direction / strength (world-space physics)
         -- 18 = persistent GPU state position / velocity diagnostic
         -- 49 = C2 six-panel movement + velocity diagnostic
-        RAIN_DEBUG = 49,
+        RAIN_DEBUG = 51,
 
         RAIN_DEBUG_CENTER_X = 0.5,
         RAIN_DEBUG_CENTER_Y = -0.5,
@@ -711,7 +711,8 @@ local RAIN_DEBUG_OPTIONS = {
     '[47] C2 adhesion threshold / actual movement',
     '[48] C2 persistent velocity magnitude',
     '[49] C2 six-panel movement + velocity',
-    '[50] CSP physical 9-drop reference set'
+    '[50] CSP physical 9-drop reference set',
+    '[51] Physical 9-drop unified-force state'
 }
 
 local RAIN_GPU_STATE_MODE_OPTIONS = {
@@ -726,7 +727,6 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[8] Persistent C2 gravity-derived L/M/S test',
     '[9] CSP physical 9-drop reference test',
     '[10] Physical 9-drop surface-normal + gravity test',
-    '[51] Phase A physical 9-drop unified-force test',
 }
 
 local rainStateUpdateParams = {
@@ -4926,8 +4926,7 @@ local function initializeRainGPUState()
             or 0.0
     rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
         (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51
-            or cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
         )
         and 1.0
         or 0.0
@@ -4966,8 +4965,7 @@ local function initializeRainGPUState()
             or 0.0
     rainStateMetaUpdateParams.values.gRainStateUsePhysicalSizeProfile =
         (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51
-            or cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
         )
         and 1.0
         or 0.0
@@ -5291,8 +5289,7 @@ local function updateRainGPUState(sim)
             or 0.0
     rainStateUpdateParams.values.gRainStateUsePhysicalSizeProfile =
         (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51
-            or cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
+            cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
         )
         and 1.0
         or 0.0
@@ -7818,7 +7815,7 @@ function windowMain(dt)
     -- STATE_MODE has a non-contiguous physical validation mode (51),
     -- so UI index and actual mode value are intentionally separate.
     local RAIN_GPU_STATE_MODE_VALUES = {
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 51
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
     }
 
     local stateModeIndex = 1
@@ -7878,8 +7875,7 @@ function windowMain(dt)
     end
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 51 then
-        ui.text('Mode 51 forces the Debug 50 physical profile: 0.5/0.95/2.0, 0.5/1.5/4.0, 0.5/2.5/6.0 mm')
-        ui.text('Profile mass uses the same normalized volume-derived model established by Debug 50.')
+        ui.text('Debug 51 is the physical unified-force state viewer. Use State Mode 10 + physical size profile.')
     else
         ui.text(
             cfg.RUNTIME.RAIN_GPU_STATE_SIZE_MODEL == 1
