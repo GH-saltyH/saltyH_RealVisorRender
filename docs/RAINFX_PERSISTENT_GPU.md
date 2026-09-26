@@ -2061,3 +2061,46 @@ Decision rules:
 2. If callback latency is only ~1–2 frames but mesh interval is large, inspect callback-to-ready/apply scheduling.
 3. If callback and mesh intervals are both ~1–2 frames despite visible stepping, investigate `alterVertices()` visibility/synchronization or quantization in the staging/readback values.
 4. Do not tune rain forces, speed constants, or integration dt until the cadence path is isolated.
+
+
+### 40. Dynamic surface Stage 3 — fixed 10-frame accessData latency and pipelined readback (2026-09-26)
+
+Observed cadence with the initial serial readback implementation:
+- `Dynamic state cadence callback: avgLatency=10.00f min=10 max=10 | avgInterval=10.00f min=10 max=10`
+- `Dynamic state cadence mesh: avgInterval=10.00f min=10 max=10`
+- values remained exactly constant over repeated logs
+
+Interpretation:
+- The target CSP/runtime delivers `ExtraCanvas:accessData()` callbacks with a deterministic 10-frame latency in this workload.
+- The initial Stage 3 implementation allowed only one pending readback at a time.
+- Therefore the fixed 10-frame asynchronous latency was incorrectly converted into a fixed 10-frame update cadence:
+  request -> wait 10 frames -> callback -> next request.
+- Physics dt/integration itself remains valid; the visible stepping came from renderer-state delivery cadence.
+
+SDK verification:
+- public CSP Lua SDK documents `ExtraCanvas:accessData(callback)` as an asynchronous GPU->CPU download and routes its completion through the SDK asynchronous reply mechanism.
+- `ExtraCanvasData:floatValue(x,y)` is the documented accessor for `R32FLOAT` staging data.
+- The SDK does not promise a callback on the next frame, so renderer architecture must tolerate multi-frame latency.
+
+Correction: asynchronous readback ring
+- Replace the single staging canvas + global pending gate with a configurable ring of independent R32FLOAT staging canvases.
+- Current default: `RAIN_DYNAMIC_STATE_READBACK_RING_SIZE = 16`.
+- One free slot is submitted each render frame.
+- Each slot stores its own:
+  - staging canvas
+  - shader parameter table
+  - pending flag
+  - request frame
+- With the measured 10-frame latency and a 16-slot ring, the expected steady state is:
+  - request frame N -> callback near N+10
+  - request frame N+1 -> callback near N+11
+  - therefore callback cadence can approach one per render frame even though absolute latency remains ~10 frames.
+- If every ring slot is still pending, that frame is skipped rather than overwriting an in-flight canvas.
+- Out-of-order callbacks are protected by request-frame ordering; an older late callback cannot replace a newer accepted state.
+
+Next validation target:
+- callback `avgLatency` may remain approximately 10 frames.
+- callback `avgInterval` should fall from exactly 10 frames toward approximately 1 frame after pipeline warm-up.
+- mesh `avgInterval` should similarly approach approximately 1 frame.
+- visually, droplet translation should become continuous at the game render cadence while remaining delayed by the pipeline latency.
+- record FPS because the new architecture intentionally trades several tiny in-flight readbacks for high update cadence.
