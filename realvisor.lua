@@ -5353,31 +5353,33 @@ local function initializeRainDynamicSurfaceTest()
         )
     end
 
-    local parent = rainTargetMesh:getParent()
-    if not parent or #parent == 0 then
-        ac.warn(appNameDebug .. ' Dynamic surface test: rainTargetMesh parent unavailable')
+    local sceneParent = rainTargetMesh:getParent()
+    if sceneParent and #sceneParent > 0 then
+        -- Clean up stale copies left by older revisions which attached the
+        -- transport mesh to the normal visor scene hierarchy.
+        local staleDynamicMeshes =
+            sceneParent:findNodes(RAIN_DYNAMIC_SURFACE_MESH_NAME)
+
+        if staleDynamicMeshes and #staleDynamicMeshes > 0 then
+            local staleCount = #staleDynamicMeshes
+            staleDynamicMeshes:dispose()
+            ac.log(
+                appNameDebug
+                .. ' Dynamic surface cleanup: removed '
+                .. tostring(staleCount)
+                .. ' stale scene mesh reference(s)'
+            )
+        end
+    end
+
+    -- Renderer-owned transport geometry must not participate in the normal
+    -- scene/material pass. Keep it detached and apply the visor world
+    -- transform explicitly in render.mesh().
+    rainDynamicSurfaceParent = ac.emptySceneReference()
+    if not rainDynamicSurfaceParent then
+        ac.warn(appNameDebug .. ' Dynamic surface test: detached scene reference unavailable')
         return false
     end
-
-    -- Dynamic test meshes used to be created with keepAlive=true. That can
-    -- leave old copies attached to the scene after a Lua reload, where they
-    -- are rendered by the normal scene pass using their fallback material.
-    -- Remove all stale copies before creating the renderer-owned mesh.
-    local staleDynamicMeshes =
-        parent:findNodes(RAIN_DYNAMIC_SURFACE_MESH_NAME)
-
-    if staleDynamicMeshes and #staleDynamicMeshes > 0 then
-        local staleCount = #staleDynamicMeshes
-        staleDynamicMeshes:dispose()
-        ac.log(
-            appNameDebug
-            .. ' Dynamic surface cleanup: removed '
-            .. tostring(staleCount)
-            .. ' stale scene mesh reference(s)'
-        )
-    end
-
-    rainDynamicSurfaceParent = parent
 
     local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
     local meshVertices = ac.VertexBuffer(count * 4)
@@ -5457,11 +5459,6 @@ local function initializeRainDynamicSurfaceTest()
         ac.warn(appNameDebug .. ' Dynamic surface test: createMesh() failed')
         return false
     end
-
-    -- This mesh is renderer-owned. Prevent the regular scene/material pass
-    -- from drawing the quad transport geometry; render.mesh() below is the
-    -- only path that should shade it.
-    rainDynamicSurfaceMesh:setVisible(false, false)
 
     ac.log(
         appNameDebug
@@ -6127,6 +6124,7 @@ render.on('main.track.transparent', function()
 
         local dynamicDrawn = render.mesh({
             mesh = rainDynamicSurfaceMesh,
+            transform = startingTransform,
             shader = rainDynamicDropShader.HLSL
         })
 
@@ -6160,6 +6158,7 @@ render.on('main.track.transparent', function()
 
         render.mesh({
             mesh = rainDynamicSurfaceMesh,
+            transform = startingTransform,
             shader = RAIN_DYNAMIC_SURFACE_DIAGNOSTIC_HLSL
         })
 
