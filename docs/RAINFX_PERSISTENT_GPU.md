@@ -1734,3 +1734,110 @@ Do not tune RainFX physics during this test.
 If Stage 1.1 succeeds, the final renderer should not assume a single flat plane. Each droplet quad should be positioned on the visor surface and oriented from the local surface tangent/normal frame. The persistent state already provides visor UV position and physical radius; the remaining renderer-side problem is converting those UV positions into accurate local 3D surface positions.
 
 This is a geometry-mapping problem, separate from the persistent GPU physics model.
+
+## 35. Dynamic Mesh Renderer — Stage 2 actual KN5 surface mapping — 2026-09-26
+
+Stage 1.1 successfully established the visor hierarchy and a curved diagnostic surface at approximately 75–80 FPS. The synthetic curvature is now replaced by the actual GLASS_EXT_DUMMY mesh geometry.
+
+### 35.1 Double-sided geometry decision
+
+The extracted visor surface is a **calculation source**, not the final droplet render surface. It does not need to be rendered from both sides.
+
+The final droplet geometry is still expected to be a set of small 3D quads placed on the real visor surface. During diagnostics, droplet quads use render.CullMode.None deliberately so normal winding/camera-side orientation cannot hide a valid mapping result. Final culling policy is deferred until the inside-facing visor normal convention is validated.
+
+### 35.2 Verified SDK path
+
+The public CSP Lua SDK documents:
+
+- ac.SceneReference:getVertices()
+- ac.SceneReference:getIndices()
+- ac.VertexBuffer:get(index)
+- ac.IndicesBuffer
+- ac.SceneReference:getParent()
+- ac.SceneReference:createMesh()
+
+getVertices() and getIndices() are called only once during Stage 2 initialization. The SDK explicitly notes that these calls copy mesh data and may be expensive per frame, while getVertices() is suitable for obtaining data once and later using alterVertices().
+
+The SDK also states that KN5 vertex order can be changed by the built-in mesh optimizer. Stage 2 therefore never assumes original exporter vertex ordering; triangle lookup is based on the returned index/UV/position data.
+
+### 35.3 UV → 3D mapping
+
+The Stage 2 CPU lookup pipeline is:
+
+~~~
+GLASS_EXT_DUMMY
+    ↓ getVertices()/getIndices() once
+triangle list
+    ↓ UV-space 32×32 buckets
+candidate triangles
+    ↓ barycentric UV containment
+position + interpolated normal
+    ↓ triangle UV derivatives
+tangent U / tangent V
+    ↓
+3D droplet quad
+~~~
+
+For each candidate triangle, the three returned UVs are used to compute barycentric coordinates. The same barycentric weights interpolate vertex positions and normals.
+
+The tangent frame is derived from the triangle's position/UV derivatives. The U tangent is orthogonalized against the interpolated normal. V is reconstructed from normal × tangentU and its sign is compared against the triangle's UV-derived V tangent so the established raw visor UV convention remains intact:
+
+- U increases left → right.
+- V increases top → bottom.
+
+### 35.4 Diagnostic droplet geometry
+
+Stage 2 currently generates 256 deterministic UV samples. It does **not** read rainStateA or rainStateMetaA yet.
+
+Each successful UV sample becomes a 1.5 mm diagnostic droplet:
+
+- physical diameter → UV diameter uses the existing authoritative 0.0029296875 UV/mm mapping;
+- UV radius is converted into local 3D distance through the triangle's meters-per-UV scale;
+- quad center uses interpolated surface position;
+- quad orientation uses the local tangent U/V frame and interpolated surface normal;
+- a small configurable surface offset (0.00005 m) is applied.
+
+The dynamic test mesh is created under rainTargetMesh:getParent(). This is intentional: the extracted vertex positions remain in the mesh's local coordinate space while the parent retains the loaded visor's transform hierarchy.
+
+### 35.5 Runtime switch
+
+~~~
+RAIN_DYNAMIC_SURFACE_TEST_ENABLED = false
+~~~
+
+When enabled, the render callback performs the existing persistent GPU physics update, then renders only the Stage 2 256-droplet diagnostic mesh. The canonical fullscreen RainFX renderer is skipped for that frame.
+
+Stage 1 remains available independently through RAIN_DYNAMIC_MESH_TEST_ENABLED.
+
+### 35.6 Validation target
+
+The next in-game validation should check:
+
+1. Console reports successful vertex/index extraction.
+2. The mapped sample count is close to the requested 256. A lower count means the deterministic UV probes landed outside the actual GLASS_EXT_DUMMY UV island.
+3. Droplets appear on the actual visor curvature rather than on the synthetic Stage 1.1 paraboloid.
+4. Pitch/yaw/roll and head motion remain aligned because the dynamic mesh is attached to the extracted mesh's parent.
+5. The droplet orientation follows local visor curvature rather than remaining screen-facing.
+6. Performance remains near the Stage 1/1.1 75–80 FPS range.
+
+### 35.7 Important limitation before Stage 3
+
+The deterministic UV probes are only a geometry validation population. They are not the persistent droplet state.
+
+If Stage 2 succeeds, the next experiment should replace the deterministic UV source with decoded persistent GPU state:
+
+~~~
+rainStateA/B
+    ↓ accessData()
+CPU decode of 256 UV positions/radii
+    ↓
+existing UV → 3D lookup
+    ↓
+VertexBuffer update
+    ↓
+alterVertices()
+    ↓
+render.mesh()
+~~~
+
+Only after this readback path is measured should we decide whether a separate compact KN5 surface mesh is necessary. The current getVertices()/getIndices() path already provides the authoritative source geometry, so a manually authored reduced surface is not required for correctness at this stage.
