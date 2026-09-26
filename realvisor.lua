@@ -57,6 +57,21 @@ local appFolder =
     local rainDynamicSurfaceMesh = nil
     local rainDynamicSurfaceParent = nil
     local rainDynamicSurfaceInitialized = false
+    local rainDynamicSurfaceMeshVertices = nil
+    local rainDynamicSurfaceMeshCount = 0
+
+    -- Stage 3: persistent GPU state -> async CPU readback -> dynamic vertices.
+    local rainDynamicStateReadbackCanvas = nil
+    local rainDynamicStateReadbackParams = nil
+    local rainDynamicStateReadbackCount = 0
+    local rainDynamicStateReadbackPending = false
+    local rainDynamicStateReadbackReady = false
+    local rainDynamicStateReadbackErrorLogged = false
+    local rainDynamicStateFirstApplyLogged = false
+    local rainDynamicStateU = {}
+    local rainDynamicStateV = {}
+    local rainDynamicStateRadius = {}
+    local rainDynamicStateAlive = {}
 
     
     --------------------------------------------------------
@@ -321,6 +336,11 @@ local cfg = scriptSettings:mapConfig({
         -- This test still uses deterministic CPU positions; it does not
         -- read the persistent GPU state yet.
         RAIN_DYNAMIC_SURFACE_TEST_ENABLED = false,
+
+        -- Stage 3: render the actual persistent GPU droplet positions through
+        -- the validated KN5 UV -> 3D mapping using asynchronous readback.
+        RAIN_DYNAMIC_SURFACE_STATE_ENABLED = false,
+
         RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM = 1.50,
         RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M = 0.00005,
         RAIN_DYNAMIC_SURFACE_TEST_UV_BUCKETS = 32,
@@ -5271,6 +5291,8 @@ local function initializeRainDynamicSurfaceTest()
     local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
     local meshVertices = ac.VertexBuffer(count * 4)
     local meshIndices = ac.IndicesBuffer(count * 6)
+    rainDynamicSurfaceMeshVertices = meshVertices
+    rainDynamicSurfaceMeshCount = count
 
     local diameterUV =
         cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM
@@ -5354,6 +5376,280 @@ local function initializeRainDynamicSurfaceTest()
     )
 
     return true
+end
+
+
+--------------------------------------------------------
+-- Dynamic mesh renderer experiment: Stage 3
+--
+-- Keep persistent physics on GPU. A tiny R32FLOAT staging canvas flattens
+-- only the renderer ABI required by the CPU:
+--   [0..N)     U
+--   [N..2N)    V encoded as V + 1 (signed visor V is -1..0)
+--   [2N..3N)   physical radius in UV
+--   [3N..4N)   alive flag (1 only for lifecycle state == alive)
+--
+-- accessData() is asynchronous. The callback only copies scalar values into
+-- Lua arrays; alterVertices() is applied from the render callback afterwards.
+--------------------------------------------------------
+
+local RAIN_DYNAMIC_STATE_READBACK_HLSL = [[
+SamplerState samPointRain {
+    Filter = MIN_MAG_MIP_POINT;
+    AddressU = CLAMP;
+    AddressV = CLAMP;
+    AddressW = CLAMP;
+};
+
+float4 main(PS_IN pin)
+{
+    float count = max(gRainStateCount, 1.0);
+    float total = count * 4.0;
+    float slot = min(floor(pin.Tex.x * total), total - 1.0);
+    float channel = floor(slot / count);
+    float index = slot - channel * count;
+    float2 suv = float2((index + 0.5) / count, 0.5);
+
+    float4 state = txRainState.SampleLevel(samPointRain, suv, 0.0);
+    float4 meta = txRainStateMeta.SampleLevel(samPointRain, suv, 0.0);
+
+    float value = 0.0;
+
+    if (channel < 0.5) {
+        value = saturate(state.r);
+    } else if (channel < 1.5) {
+        // Encode signed visor V (-1..0) into documented 0..1 CPU scalar range.
+        value = saturate(state.g + 1.0);
+    } else if (channel < 2.5) {
+        value = max(meta.r, 0.0);
+    } else {
+        // Renderer only needs visibility, not the complete lifecycle enum.
+        value = (meta.a > 0.5 && meta.a < 1.5) ? 1.0 : 0.0;
+    }
+
+    return float4(value, value, value, value);
+}
+]]
+
+local function initializeRainDynamicStateReadback()
+    local count = rainStateCountForMode()
+
+    if rainDynamicStateReadbackCanvas
+        and rainDynamicStateReadbackCount == count
+    then
+        return true
+    end
+
+    rainDynamicStateReadbackCanvas = ui.ExtraCanvas(
+        vec2(count * 4, 1),
+        1,
+        render.TextureFormat.R32.Float
+    ):setName('RainFX Dynamic Mesh Readback')
+
+    if not rainDynamicStateReadbackCanvas then
+        ac.warn(appNameDebug .. ' Dynamic state readback: staging canvas allocation failed')
+        return false
+    end
+
+    rainDynamicStateReadbackCount = count
+    rainDynamicStateReadbackPending = false
+    rainDynamicStateReadbackReady = false
+
+    rainDynamicStateReadbackParams = {
+        textures = {
+            txRainState = false,
+            txRainStateMeta = false,
+        },
+        values = {
+            gRainStateCount = count,
+        },
+        shader = RAIN_DYNAMIC_STATE_READBACK_HLSL,
+    }
+
+    ac.log(
+        appNameDebug
+        .. ' Dynamic state readback initialized: '
+        .. tostring(count)
+        .. ' drops / '
+        .. tostring(count * 4)
+        .. ' R32FLOAT scalars'
+    )
+
+    return true
+end
+
+local function requestRainDynamicStateReadback()
+    if rainDynamicStateReadbackPending then
+        return
+    end
+
+    if not initializeRainDynamicStateReadback() then
+        return
+    end
+
+    local state =
+        rainStateReadIsA and rainStateA or rainStateB
+    local meta =
+        rainStateReadIsA and rainStateMetaA or rainStateMetaB
+
+    if not state or not meta then
+        return
+    end
+
+    local count = rainDynamicStateReadbackCount
+
+    rainDynamicStateReadbackParams.textures.txRainState = state
+    rainDynamicStateReadbackParams.textures.txRainStateMeta = meta
+    rainDynamicStateReadbackParams.values.gRainStateCount = count
+
+    rainDynamicStateReadbackCanvas:updateWithShader(
+        rainDynamicStateReadbackParams
+    )
+
+    rainDynamicStateReadbackPending = true
+
+    rainDynamicStateReadbackCanvas:accessData(function(err, data)
+        rainDynamicStateReadbackPending = false
+
+        if err or not data then
+            if not rainDynamicStateReadbackErrorLogged then
+                ac.warn(
+                    appNameDebug
+                    .. ' Dynamic state readback failed: '
+                    .. tostring(err or 'missing data')
+                )
+                rainDynamicStateReadbackErrorLogged = true
+            end
+            return
+        end
+
+        for i = 0, count - 1 do
+            local dst = i + 1
+            rainDynamicStateU[dst] =
+                data:floatValue(i, 0)
+            rainDynamicStateV[dst] =
+                data:floatValue(count + i, 0) - 1.0
+            rainDynamicStateRadius[dst] =
+                data:floatValue(count * 2 + i, 0)
+            rainDynamicStateAlive[dst] =
+                data:floatValue(count * 3 + i, 0)
+        end
+
+        rainDynamicStateReadbackReady = true
+    end)
+end
+
+local function applyRainDynamicStateToSurfaceMesh()
+    if not rainDynamicStateReadbackReady
+        or not rainDynamicSurfaceMesh
+        or not rainDynamicSurfaceMeshVertices
+        or not rainDynamicSurfaceLookup
+        or not rainDynamicSurfaceVertices
+    then
+        return
+    end
+
+    rainDynamicStateReadbackReady = false
+
+    local stateCount = rainDynamicStateReadbackCount
+    local meshCount = rainDynamicSurfaceMeshCount
+    local surfaceOffset = cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
+    local mappedAlive = 0
+    local lookupMisses = 0
+
+    for i = 0, meshCount - 1 do
+        local vertexIndex = i * 4 + 1
+        local active =
+            i < stateCount
+            and (rainDynamicStateAlive[i + 1] or 0.0) > 0.5
+
+        local sample = nil
+        local radiusUV = 0.0
+
+        if active then
+            local uv = vec2(
+                rainDynamicStateU[i + 1] or 0.0,
+                rainDynamicStateV[i + 1] or -1.0
+            )
+            radiusUV = rainDynamicStateRadius[i + 1] or 0.0
+            sample = rainDynamicSurfaceSample(
+                rainDynamicSurfaceLookup,
+                rainDynamicSurfaceVertices,
+                uv
+            )
+        end
+
+        if sample and radiusUV > 0.0 then
+            mappedAlive = mappedAlive + 1
+
+            local center =
+                sample.position + sample.normal * surfaceOffset
+            local uOffset =
+                sample.tangentU * (radiusUV * sample.metersPerUVU)
+            local vOffset =
+                sample.tangentV * (radiusUV * sample.metersPerUVV)
+
+            rainDynamicSurfaceMeshVertices:set(
+                vertexIndex,
+                ac.MeshVertex.new(
+                    center - uOffset - vOffset,
+                    sample.normal,
+                    vec2(0, 0)
+                )
+            )
+            rainDynamicSurfaceMeshVertices:set(
+                vertexIndex + 1,
+                ac.MeshVertex.new(
+                    center + uOffset - vOffset,
+                    sample.normal,
+                    vec2(1, 0)
+                )
+            )
+            rainDynamicSurfaceMeshVertices:set(
+                vertexIndex + 2,
+                ac.MeshVertex.new(
+                    center + uOffset + vOffset,
+                    sample.normal,
+                    vec2(1, 1)
+                )
+            )
+            rainDynamicSurfaceMeshVertices:set(
+                vertexIndex + 3,
+                ac.MeshVertex.new(
+                    center - uOffset + vOffset,
+                    sample.normal,
+                    vec2(0, 1)
+                )
+            )
+        else
+            if active then
+                lookupMisses = lookupMisses + 1
+            end
+
+            local dead = vec3(0, 0, 0)
+            local fallbackNormal = vec3(0, 0, 1)
+            rainDynamicSurfaceMeshVertices:set(vertexIndex,     ac.MeshVertex.new(dead, fallbackNormal, vec2(0, 0)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 1, ac.MeshVertex.new(dead, fallbackNormal, vec2(1, 0)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 2, ac.MeshVertex.new(dead, fallbackNormal, vec2(1, 1)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 3, ac.MeshVertex.new(dead, fallbackNormal, vec2(0, 1)))
+        end
+    end
+
+    rainDynamicSurfaceMesh:alterVertices(
+        rainDynamicSurfaceMeshVertices
+    )
+
+    if not rainDynamicStateFirstApplyLogged then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic state first mesh update: '
+            .. tostring(mappedAlive)
+            .. ' live drops mapped, '
+            .. tostring(lookupMisses)
+            .. ' surface lookup misses'
+        )
+        rainDynamicStateFirstApplyLogged = true
+    end
 end
 
 --------------------------------------------------------
@@ -5457,6 +5753,27 @@ render.on('main.track.transparent', function()
     -- renderer available. Enable the test switch to render only
     -- the 256 small mesh quads.
     --------------------------------------------------------
+
+    if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
+
+        if not initializeRainDynamicSurfaceTest() then
+            return
+        end
+
+        requestRainDynamicStateReadback()
+        applyRainDynamicStateToSurfaceMesh()
+
+        render.setBlendMode(render.BlendMode.AlphaBlend)
+        render.setCullMode(render.CullMode.None)
+        render.setDepthMode(render.DepthMode.ReadOnly)
+
+        render.mesh({
+            mesh = rainDynamicSurfaceMesh,
+            shader = RAIN_DYNAMIC_SURFACE_TEST_HLSL
+        })
+
+        return
+    end
 
     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_ENABLED then
 
