@@ -1841,3 +1841,25 @@ render.mesh()
 ~~~
 
 Only after this readback path is measured should we decide whether a separate compact KN5 surface mesh is necessary. The current getVertices()/getIndices() path already provides the authoritative source geometry, so a manually authored reduced surface is not required for correctness at this stage.
+
+## 36. Dynamic Mesh Renderer — Stage 2 UV-domain correction — 2026-09-26
+
+The first Stage 2 run extracted 14,510 vertices, 83,262 indices and 27,746 valid UV triangles, but all 256 deterministic UV probes missed the surface.
+
+The immediate cause identified in the test code was an incorrect assumption that the extracted KN5 UV domain was 0..1. The established visor convention uses V = -1..0. The deterministic probe used frac(), which produces only 0..1, so its output could be entirely outside the actual visor UV island.
+
+The fix is deliberately more general than simply changing V to -1 + frac():
+
+1. Scan all extracted vertex UVs once and record actual minU, maxU, minV, maxV.
+2. Build the UV bucket index using these actual bounds rather than assuming 0..1.
+3. Continue using frac() only to generate a deterministic normalized sample in [0,1).
+4. Convert that normalized sample into the actual mesh UV domain:
+   U = minU + u01 * (maxU - minU)
+   V = minV + v01 * (maxV - minV).
+5. Log the extracted UV bounds for direct in-game verification.
+
+This preserves the raw UV coordinate convention and avoids introducing another hard-coded coordinate conversion.
+
+Commit: 0ed7deaa92d09fe8194131bcc13c05331dbdd918.
+
+The next run must report the new Dynamic surface UV bounds line. The bounds themselves are now an important diagnostic datum before any further geometry or physics work.
