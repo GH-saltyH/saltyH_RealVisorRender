@@ -50,6 +50,14 @@ local appFolder =
     local rainDynamicMeshTestIndices = nil
     local rainDynamicMeshTestInitialized = false
 
+    -- Stage 2: actual visor surface extraction / UV lookup test.
+    local rainDynamicSurfaceVertices = nil
+    local rainDynamicSurfaceIndices = nil
+    local rainDynamicSurfaceLookup = nil
+    local rainDynamicSurfaceMesh = nil
+    local rainDynamicSurfaceParent = nil
+    local rainDynamicSurfaceInitialized = false
+
     
     --------------------------------------------------------
     -- Path: Settings
@@ -307,6 +315,15 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MESH_TEST_Z = -0.020,
         RAIN_DYNAMIC_MESH_TEST_CURVATURE_X = 0.90,
         RAIN_DYNAMIC_MESH_TEST_CURVATURE_Y = 0.35,
+
+        -- Stage 2: use the real GLASS_EXT_DUMMY KN5 mesh as the
+        -- authoritative UV -> local 3D surface mapping source.
+        -- This test still uses deterministic CPU positions; it does not
+        -- read the persistent GPU state yet.
+        RAIN_DYNAMIC_SURFACE_TEST_ENABLED = false,
+        RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM = 1.50,
+        RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M = 0.00005,
+        RAIN_DYNAMIC_SURFACE_TEST_UV_BUCKETS = 32,
 
         RAIN_DEBUG = 0,
 
@@ -4790,6 +4807,308 @@ local function initializeRainDynamicMeshTest()
 end
 
 --------------------------------------------------------
+-- Dynamic mesh renderer experiment: Stage 2
+--
+-- Replace the synthetic curved surface from Stage 1.1 with the actual
+-- GLASS_EXT_DUMMY KN5 mesh. getVertices()/getIndices() are called once,
+-- then a UV-space bucket index is built for CPU barycentric lookup.
+--
+-- This stage intentionally does NOT consume rainStateA/metaA yet. It uses
+-- deterministic UV samples to validate the geometry mapping in isolation.
+--------------------------------------------------------
+
+local RAIN_DYNAMIC_SURFACE_TEST_HLSL = [[
+float4 main(PS_IN pin)
+{
+    float2 uv = pin.Tex;
+    float edge = smoothstep(
+        0.0,
+        0.10,
+        min(
+            min(uv.x, 1.0 - uv.x),
+            min(uv.y, 1.0 - uv.y)
+        )
+    );
+
+    return float4(0.10 + uv.x * 0.70, 0.25 + uv.y * 0.65, 1.0, 0.72 + edge * 0.18);
+}
+]]
+
+local function rainDynamicSurfaceFrac(x)
+    return x - math.floor(x)
+end
+
+local function rainDynamicSurfaceBuildLookup(vertices, indices)
+    local bucketCount = math.max(
+        math.floor(cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_UV_BUCKETS),
+        4
+    )
+
+    local buckets = {}
+    for i = 1, bucketCount * bucketCount do
+        buckets[i] = {}
+    end
+
+    local triangles = {}
+    local triangleCount = math.floor(#indices / 3)
+    local validTriangleCount = 0
+
+    local function bucketIndex(x, y)
+        x = math.max(0, math.min(bucketCount - 1, x))
+        y = math.max(0, math.min(bucketCount - 1, y))
+        return y * bucketCount + x + 1
+    end
+
+    for tri = 0, triangleCount - 1 do
+        local i0 = indices:get(tri * 3 + 1)
+        local i1 = indices:get(tri * 3 + 2)
+        local i2 = indices:get(tri * 3 + 3)
+
+        local v0 = vertices:get(i0 + 1)
+        local v1 = vertices:get(i1 + 1)
+        local v2 = vertices:get(i2 + 1)
+
+        local u0 = v0.uv
+        local u1 = v1.uv
+        local u2 = v2.uv
+
+        local du1 = u1.x - u0.x
+        local dv1 = u1.y - u0.y
+        local du2 = u2.x - u0.x
+        local dv2 = u2.y - u0.y
+        local determinant = du1 * dv2 - du2 * dv1
+
+        if math.abs(determinant) > 0.0000001 then
+            local minU = math.min(u0.x, u1.x, u2.x)
+            local maxU = math.max(u0.x, u1.x, u2.x)
+            local minV = math.min(u0.y, u1.y, u2.y)
+            local maxV = math.max(u0.y, u1.y, u2.y)
+
+            local minX = math.floor(math.max(0, math.min(bucketCount - 1, minU * bucketCount)))
+            local maxX = math.floor(math.max(0, math.min(bucketCount - 1, maxU * bucketCount)))
+            local minY = math.floor(math.max(0, math.min(bucketCount - 1, minV * bucketCount)))
+            local maxY = math.floor(math.max(0, math.min(bucketCount - 1, maxV * bucketCount)))
+
+            local triangle = {
+                i0 = i0, i1 = i1, i2 = i2,
+                u0 = u0, u1 = u1, u2 = u2,
+                determinant = determinant,
+            }
+
+            validTriangleCount = validTriangleCount + 1
+            triangles[validTriangleCount] = triangle
+
+            for by = minY, maxY do
+                for bx = minX, maxX do
+                    local bucket = buckets[bucketIndex(bx, by)]
+                    bucket[#bucket + 1] = validTriangleCount
+                end
+            end
+        end
+    end
+
+    return {
+        bucketCount = bucketCount,
+        buckets = buckets,
+        triangles = triangles,
+        validTriangleCount = validTriangleCount,
+        vertexCount = #vertices,
+        indexCount = #indices,
+    }
+end
+
+local function rainDynamicSurfaceFindTriangle(lookup, uv)
+    local bucketCount = lookup.bucketCount
+    local bx = math.max(0, math.min(bucketCount - 1, math.floor(uv.x * bucketCount)))
+    local by = math.max(0, math.min(bucketCount - 1, math.floor(uv.y * bucketCount)))
+    local bucket = lookup.buckets[by * bucketCount + bx + 1]
+
+    local best = nil
+    local bestMargin = -math.huge
+
+    for i = 1, #bucket do
+        local triangle = lookup.triangles[bucket[i]]
+        local u0, u1, u2 = triangle.u0, triangle.u1, triangle.u2
+        local den = triangle.determinant
+
+        local w1 = ((u2.y - u0.y) * (uv.x - u0.x) - (u2.x - u0.x) * (uv.y - u0.y)) / den
+        local w2 = ((u1.x - u0.x) * (uv.y - u0.y) - (u1.y - u0.y) * (uv.x - u0.x)) / den
+        local w0 = 1.0 - w1 - w2
+        local margin = math.min(w0, w1, w2)
+
+        if margin >= -0.00001 and margin > bestMargin then
+            best = triangle
+            bestMargin = margin
+            best.w0, best.w1, best.w2 = w0, w1, w2
+        end
+    end
+
+    return best
+end
+
+local function rainDynamicSurfaceSample(lookup, vertices, uv)
+    local triangle = rainDynamicSurfaceFindTriangle(lookup, uv)
+    if not triangle then
+        return nil
+    end
+
+    local v0 = vertices:get(triangle.i0 + 1)
+    local v1 = vertices:get(triangle.i1 + 1)
+    local v2 = vertices:get(triangle.i2 + 1)
+    local w0, w1, w2 = triangle.w0, triangle.w1, triangle.w2
+
+    local position = v0.pos * w0 + v1.pos * w1 + v2.pos * w2
+    local normal = v0.normal * w0 + v1.normal * w1 + v2.normal * w2
+
+    if normal:lengthSquared() < 0.0000001 then return nil end
+    normal:normalize()
+
+    local edge1 = v1.pos - v0.pos
+    local edge2 = v2.pos - v0.pos
+    local du1, dv1 = v1.uv.x - v0.uv.x, v1.uv.y - v0.uv.y
+    local du2, dv2 = v2.uv.x - v0.uv.x, v2.uv.y - v0.uv.y
+    local det = du1 * dv2 - du2 * dv1
+    if math.abs(det) < 0.0000001 then return nil end
+
+    local tangentU = (edge1 * dv2 - edge2 * dv1) / det
+    local tangentV = (edge2 * du1 - edge1 * du2) / det
+    local tangentULength = tangentU:length()
+    local tangentVLength = tangentV:length()
+    if tangentULength < 0.0000001 or tangentVLength < 0.0000001 then return nil end
+
+    tangentU = tangentU - normal * tangentU:dot(normal)
+    if tangentU:lengthSquared() < 0.0000001 then return nil end
+    tangentU:normalize()
+
+    local canonicalV = normal:cross(tangentU)
+    if canonicalV:lengthSquared() < 0.0000001 then return nil end
+    canonicalV:normalize()
+    if canonicalV:dot(tangentV) < 0.0 then canonicalV = -canonicalV end
+
+    return {
+        position = position,
+        normal = normal,
+        tangentU = tangentU,
+        tangentV = canonicalV,
+        metersPerUVU = tangentULength,
+        metersPerUVV = tangentVLength,
+    }
+end
+
+local function initializeRainDynamicSurfaceTest()
+    if rainDynamicSurfaceInitialized then
+        return rainDynamicSurfaceMesh ~= nil
+    end
+
+    rainDynamicSurfaceInitialized = true
+
+    if not rainTargetMesh or #rainTargetMesh == 0 then
+        ac.warn(appNameDebug .. ' Dynamic surface test: rainTargetMesh unavailable')
+        return false
+    end
+
+    local vertices = rainTargetMesh:getVertices()
+    local indices = rainTargetMesh:getIndices()
+
+    if not vertices or not indices or #vertices == 0 or #indices < 3 then
+        ac.warn(appNameDebug .. ' Dynamic surface test: failed to extract vertices/indices')
+        return false
+    end
+
+    rainDynamicSurfaceVertices = vertices
+    rainDynamicSurfaceIndices = indices
+    rainDynamicSurfaceLookup = rainDynamicSurfaceBuildLookup(vertices, indices)
+
+    ac.log(
+        appNameDebug
+        .. ' Dynamic surface extraction: '
+        .. tostring(#vertices) .. ' vertices / '
+        .. tostring(#indices) .. ' indices / '
+        .. tostring(rainDynamicSurfaceLookup.validTriangleCount) .. ' valid UV triangles'
+    )
+
+    local parent = rainTargetMesh:getParent()
+    if not parent or #parent == 0 then
+        ac.warn(appNameDebug .. ' Dynamic surface test: rainTargetMesh parent unavailable')
+        return false
+    end
+    rainDynamicSurfaceParent = parent
+
+    local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
+    local meshVertices = ac.VertexBuffer(count * 4)
+    local meshIndices = ac.IndicesBuffer(count * 6)
+
+    local diameterUV =
+        cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM
+        * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+    local radiusUV = diameterUV * 0.5
+    local surfaceOffset = cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
+
+    local vertexIndex, indexIndex = 1, 1
+    local hitCount, missCount = 0, 0
+
+    for i = 0, count - 1 do
+        local u = rainDynamicSurfaceFrac((i + 0.5) * 0.7548776662)
+        local v = rainDynamicSurfaceFrac((i + 0.5) * 0.5698402911)
+        local sample = rainDynamicSurfaceSample(rainDynamicSurfaceLookup, vertices, vec2(u, v))
+
+        if sample then
+            hitCount = hitCount + 1
+            local center = sample.position + sample.normal * surfaceOffset
+            local uOffset = sample.tangentU * (radiusUV * sample.metersPerUVU)
+            local vOffset = sample.tangentV * (radiusUV * sample.metersPerUVV)
+
+            meshVertices:set(vertexIndex,     ac.MeshVertex.new(center - uOffset - vOffset, sample.normal, vec2(0, 0)))
+            meshVertices:set(vertexIndex + 1, ac.MeshVertex.new(center + uOffset - vOffset, sample.normal, vec2(1, 0)))
+            meshVertices:set(vertexIndex + 2, ac.MeshVertex.new(center + uOffset + vOffset, sample.normal, vec2(1, 1)))
+            meshVertices:set(vertexIndex + 3, ac.MeshVertex.new(center - uOffset + vOffset, sample.normal, vec2(0, 1)))
+        else
+            missCount = missCount + 1
+            local dead = vec3(0, 0, 0)
+            local fallbackNormal = vec3(0, 0, 1)
+            for j = 0, 3 do
+                meshVertices:set(vertexIndex + j, ac.MeshVertex.new(dead, fallbackNormal, vec2(j == 1 or j == 2 and 1 or 0, j >= 2 and 1 or 0)))
+            end
+        end
+
+        local base = vertexIndex - 1
+        meshIndices:set(indexIndex, base)
+        meshIndices:set(indexIndex + 1, base + 1)
+        meshIndices:set(indexIndex + 2, base + 2)
+        meshIndices:set(indexIndex + 3, base)
+        meshIndices:set(indexIndex + 4, base + 2)
+        meshIndices:set(indexIndex + 5, base + 3)
+
+        vertexIndex = vertexIndex + 4
+        indexIndex = indexIndex + 6
+    end
+
+    rainDynamicSurfaceMesh = rainDynamicSurfaceParent:createMesh(
+        'RealVisor_DynamicSurfaceTest',
+        nil,
+        meshVertices,
+        meshIndices,
+        true,
+        false
+    )
+
+    if not rainDynamicSurfaceMesh then
+        ac.warn(appNameDebug .. ' Dynamic surface test: createMesh() failed')
+        return false
+    end
+
+    ac.log(
+        appNameDebug
+        .. ' Dynamic surface test initialized: '
+        .. tostring(hitCount) .. '/' .. tostring(count)
+        .. ' UV samples mapped, '
+        .. tostring(missCount) .. ' outside surface'
+    )
+
+    return true
+end
+
+--------------------------------------------------------
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
 render.on('main.track.transparent', function()
@@ -4890,6 +5209,24 @@ render.on('main.track.transparent', function()
     -- renderer available. Enable the test switch to render only
     -- the 256 small mesh quads.
     --------------------------------------------------------
+
+    if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_ENABLED then
+
+        if not initializeRainDynamicSurfaceTest() then
+            return
+        end
+
+        render.setBlendMode(render.BlendMode.AlphaBlend)
+        render.setCullMode(render.CullMode.None)
+        render.setDepthMode(render.DepthMode.ReadOnly)
+
+        render.mesh({
+            mesh = rainDynamicSurfaceMesh,
+            shader = RAIN_DYNAMIC_SURFACE_TEST_HLSL
+        })
+
+        return
+    end
 
     if cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_ENABLED then
 
