@@ -117,6 +117,13 @@ local appFolder =
             LOADED = false,
             HLSL = nil,
         },
+
+        {
+            ID = 'RAINFXDYNAMICDROP',
+            PATH = appFolder .. '/shaders/rainVisorDynamicDrop.hlsl',
+            LOADED = false,
+            HLSL = nil,
+        },
     }
         
 
@@ -370,6 +377,11 @@ local cfg = scriptSettings:mapConfig({
         -- latency on the target CSP build. Keep more slots than that latency
         -- so one asynchronous readback can be issued every render frame.
         RAIN_DYNAMIC_STATE_READBACK_RING_SIZE = 16,
+
+        -- Cadence instrumentation is validated (10-frame async latency with
+        -- one completed snapshot and one mesh update every frame). Keep the
+        -- counters available but silence periodic logging for normal testing.
+        RAIN_DYNAMIC_STATE_CADENCE_DEBUG = false,
 
         RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM = 1.50,
         RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M = 0.00005,
@@ -5686,7 +5698,9 @@ local function requestRainDynamicStateReadback()
 
             rainDynamicStateLastCallbackFrame = callbackFrame
 
-            if rainDynamicStateCallbackCount % 120 == 0 then
+            if cfg.RUNTIME.RAIN_DYNAMIC_STATE_CADENCE_DEBUG
+                and rainDynamicStateCallbackCount % 120 == 0
+            then
                 local callbackIntervals =
                     math.max(rainDynamicStateCallbackCount - 1, 1)
 
@@ -5795,7 +5809,9 @@ local function applyRainDynamicStateToSurfaceMesh()
 
         rainDynamicStateLastApplyFrame = applyFrame
 
-        if rainDynamicStateApplyCount % 30 == 0 then
+        if cfg.RUNTIME.RAIN_DYNAMIC_STATE_CADENCE_DEBUG
+            and rainDynamicStateApplyCount % 30 == 0
+        then
             local applyIntervals =
                 math.max(rainDynamicStateApplyCount - 1, 1)
 
@@ -5946,16 +5962,17 @@ render.on('main.track.transparent', function()
 
 
     local rainShader = nil
+    local rainDynamicDropShader = nil
 
 
     for i, shader in ipairs(shaders) do
 
-        if shader.ID == 'RAINFXVISOR' 
+        if shader.ID == 'RAINFXVISOR'
             and shader.LOADED then
-
-                rainShader = shader
-            break
-
+            rainShader = shader
+        elseif shader.ID == 'RAINFXDYNAMICDROP'
+            and shader.LOADED then
+            rainDynamicDropShader = shader
         end
     end
 
@@ -6041,6 +6058,11 @@ render.on('main.track.transparent', function()
             return
         end
 
+        if not rainDynamicDropShader then
+            ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
+            return
+        end
+
         updateRainDynamicStateRenderClock(sim)
         requestRainDynamicStateReadback()
         applyRainDynamicStateToSurfaceMesh()
@@ -6051,7 +6073,7 @@ render.on('main.track.transparent', function()
 
         render.mesh({
             mesh = rainDynamicSurfaceMesh,
-            shader = RAIN_DYNAMIC_SURFACE_TEST_HLSL
+            shader = rainDynamicDropShader.HLSL
         })
 
         return
