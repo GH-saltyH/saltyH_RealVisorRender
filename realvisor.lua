@@ -61,13 +61,13 @@ local appFolder =
     local rainDynamicSurfaceMeshCount = 0
 
     -- Stage 3: persistent GPU state -> async CPU readback -> dynamic vertices.
-    local rainDynamicStateReadbackCanvas = nil
-    local rainDynamicStateReadbackParams = nil
+    local rainDynamicStateReadbackSlots = {}
     local rainDynamicStateReadbackCount = 0
-    local rainDynamicStateReadbackPending = false
+    local rainDynamicStateReadbackNextSlot = 1
     local rainDynamicStateReadbackReady = false
     local rainDynamicStateReadbackErrorLogged = false
     local rainDynamicStateFirstApplyLogged = false
+    local rainDynamicStateLatestAcceptedRequestFrame = -1
 
     -- Stage 3 cadence diagnostics. Frame counters only; no per-frame logging.
     local rainDynamicStateRequestFrame = -1
@@ -357,6 +357,11 @@ local cfg = scriptSettings:mapConfig({
         -- Stage 3: render the actual persistent GPU droplet positions through
         -- the validated KN5 UV -> 3D mapping using asynchronous readback.
         RAIN_DYNAMIC_SURFACE_STATE_ENABLED = false,
+
+        -- accessData() currently returns with a measured fixed ~10-frame
+        -- latency on the target CSP build. Keep more slots than that latency
+        -- so one asynchronous readback can be issued every render frame.
+        RAIN_DYNAMIC_STATE_READBACK_RING_SIZE = 16,
 
         RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM = 1.50,
         RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M = 0.00005,
@@ -5450,38 +5455,76 @@ float4 main(PS_IN pin)
 
 local function initializeRainDynamicStateReadback()
     local count = rainStateCountForMode()
+    local ringSize = math.max(
+        math.floor(cfg.RUNTIME.RAIN_DYNAMIC_STATE_READBACK_RING_SIZE),
+        2
+    )
 
-    if rainDynamicStateReadbackCanvas
+    if #rainDynamicStateReadbackSlots == ringSize
         and rainDynamicStateReadbackCount == count
     then
         return true
     end
 
-    rainDynamicStateReadbackCanvas = ui.ExtraCanvas(
-        vec2(count * 4, 1),
-        1,
-        render.TextureFormat.R32.Float
-    ):setName('RainFX Dynamic Mesh Readback')
+    rainDynamicStateReadbackSlots = {}
+    rainDynamicStateReadbackCount = count
+    rainDynamicStateReadbackNextSlot = 1
+    rainDynamicStateReadbackReady = false
+    rainDynamicStateLatestAcceptedRequestFrame = -1
 
-    if not rainDynamicStateReadbackCanvas then
-        ac.warn(appNameDebug .. ' Dynamic state readback: staging canvas allocation failed')
-        return false
+    for slotIndex = 1, ringSize do
+        local canvas = ui.ExtraCanvas(
+            vec2(count * 4, 1),
+            1,
+            render.TextureFormat.R32.Float
+        ):setName(
+            'RainFX Dynamic Mesh Readback '
+            .. tostring(slotIndex)
+        )
+
+        if not canvas then
+            ac.warn(
+                appNameDebug
+                .. ' Dynamic state readback: staging canvas allocation failed at slot '
+                .. tostring(slotIndex)
+            )
+            rainDynamicStateReadbackSlots = {}
+            return false
+        end
+
+        rainDynamicStateReadbackSlots[slotIndex] = {
+            canvas = canvas,
+            pending = false,
+            requestFrame = -1,
+            params = {
+                textures = {
+                    txRainState = false,
+                    txRainStateMeta = false,
+                },
+                values = {
+                    gRainStateCount = count,
+                },
+                shader = RAIN_DYNAMIC_STATE_READBACK_HLSL,
+            },
+        }
     end
 
-    rainDynamicStateReadbackCount = count
-    rainDynamicStateReadbackPending = false
-    rainDynamicStateReadbackReady = false
-
-    rainDynamicStateReadbackParams = {
-        textures = {
-            txRainState = false,
-            txRainStateMeta = false,
-        },
-        values = {
-            gRainStateCount = count,
-        },
-        shader = RAIN_DYNAMIC_STATE_READBACK_HLSL,
-    }
+    -- Restart diagnostics when the pipeline is rebuilt so old serial-readback
+    -- samples do not contaminate the ring-buffer cadence measurements.
+    rainDynamicStateRequestFrame = -1
+    rainDynamicStateLastCallbackFrame = -1
+    rainDynamicStateLastApplyFrame = -1
+    rainDynamicStateCallbackCount = 0
+    rainDynamicStateCallbackLatencySum = 0
+    rainDynamicStateCallbackLatencyMin = math.huge
+    rainDynamicStateCallbackLatencyMax = 0
+    rainDynamicStateCallbackIntervalSum = 0
+    rainDynamicStateCallbackIntervalMin = math.huge
+    rainDynamicStateCallbackIntervalMax = 0
+    rainDynamicStateApplyCount = 0
+    rainDynamicStateApplyIntervalSum = 0
+    rainDynamicStateApplyIntervalMin = math.huge
+    rainDynamicStateApplyIntervalMax = 0
 
     ac.log(
         appNameDebug
@@ -5489,17 +5532,14 @@ local function initializeRainDynamicStateReadback()
         .. tostring(count)
         .. ' drops / '
         .. tostring(count * 4)
-        .. ' R32FLOAT scalars'
+        .. ' R32FLOAT scalars / ring='
+        .. tostring(ringSize)
     )
 
     return true
 end
 
 local function requestRainDynamicStateReadback()
-    if rainDynamicStateReadbackPending then
-        return
-    end
-
     if not initializeRainDynamicStateReadback() then
         return
     end
@@ -5513,23 +5553,52 @@ local function requestRainDynamicStateReadback()
         return
     end
 
+    local ringSize = #rainDynamicStateReadbackSlots
+    if ringSize == 0 then
+        return
+    end
+
+    -- Find the next free staging slot. With a ring larger than the measured
+    -- callback latency, normal operation should find one immediately.
+    local slot = nil
+    local slotIndex = rainDynamicStateReadbackNextSlot
+
+    for attempt = 1, ringSize do
+        local candidate = rainDynamicStateReadbackSlots[slotIndex]
+        if candidate and not candidate.pending then
+            slot = candidate
+            break
+        end
+
+        slotIndex = slotIndex % ringSize + 1
+    end
+
+    if not slot then
+        -- All readbacks are still in flight. Skip this frame rather than
+        -- overwriting a staging canvas whose asynchronous transfer is pending.
+        return
+    end
+
+    rainDynamicStateReadbackNextSlot =
+        slotIndex % ringSize + 1
+
     local count = rainDynamicStateReadbackCount
-
-    rainDynamicStateReadbackParams.textures.txRainState = state
-    rainDynamicStateReadbackParams.textures.txRainStateMeta = meta
-    rainDynamicStateReadbackParams.values.gRainStateCount = count
-
-    rainDynamicStateReadbackCanvas:updateWithShader(
-        rainDynamicStateReadbackParams
-    )
-
-    rainDynamicStateReadbackPending = true
     local requestSim = ac.getSim()
-    rainDynamicStateRequestFrame =
+    local requestFrame =
         requestSim and requestSim.frame or -1
 
-    rainDynamicStateReadbackCanvas:accessData(function(err, data)
-        rainDynamicStateReadbackPending = false
+    slot.params.textures.txRainState = state
+    slot.params.textures.txRainStateMeta = meta
+    slot.params.values.gRainStateCount = count
+    slot.requestFrame = requestFrame
+
+    slot.canvas:updateWithShader(slot.params)
+
+    slot.pending = true
+    rainDynamicStateRequestFrame = requestFrame
+
+    slot.canvas:accessData(function(err, data)
+        slot.pending = false
 
         if err or not data then
             if not rainDynamicStateReadbackErrorLogged then
@@ -5546,10 +5615,11 @@ local function requestRainDynamicStateReadback()
         local callbackSim = ac.getSim()
         local callbackFrame =
             callbackSim and callbackSim.frame or -1
+        local sourceRequestFrame = slot.requestFrame
 
-        if callbackFrame >= 0 and rainDynamicStateRequestFrame >= 0 then
+        if callbackFrame >= 0 and sourceRequestFrame >= 0 then
             local latencyFrames =
-                math.max(callbackFrame - rainDynamicStateRequestFrame, 0)
+                math.max(callbackFrame - sourceRequestFrame, 0)
 
             rainDynamicStateCallbackCount =
                 rainDynamicStateCallbackCount + 1
@@ -5582,7 +5652,7 @@ local function requestRainDynamicStateReadback()
 
             rainDynamicStateLastCallbackFrame = callbackFrame
 
-            if rainDynamicStateCallbackCount % 30 == 0 then
+            if rainDynamicStateCallbackCount % 120 == 0 then
                 local callbackIntervals =
                     math.max(rainDynamicStateCallbackCount - 1, 1)
 
@@ -5615,6 +5685,14 @@ local function requestRainDynamicStateReadback()
                 )
             end
         end
+
+        -- Multiple readbacks are now in flight. Do not let an unusually late
+        -- older callback overwrite state from a newer completed request.
+        if sourceRequestFrame < rainDynamicStateLatestAcceptedRequestFrame then
+            return
+        end
+
+        rainDynamicStateLatestAcceptedRequestFrame = sourceRequestFrame
 
         for i = 0, count - 1 do
             local dst = i + 1
