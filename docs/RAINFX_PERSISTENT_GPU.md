@@ -1891,3 +1891,38 @@ Important conclusion:
 - The extracted KN5 data independently confirms the visor uses a negative V domain.
 - Do not replace bbox sampling or add UV-island heuristics until this corrected symmetric bucket mapping is runtime-tested.
 - Next validation criterion: rerun Stage 2 and compare the mapped count against 1/256; visible quads are the secondary confirmation.
+
+
+### 38. Dynamic surface Stage 2 — lookup accuracy gate (2026-09-26)
+
+Observed after fixing UV bucket query normalization:
+- deterministic bbox sampling: 88/256 mapped, 168 outside surface
+- this is a large improvement over 1/256 and confirms the bucket-coordinate fix is active
+- however, bbox samples alone cannot distinguish a sparse/non-rectangular visor UV island from residual lookup errors
+
+Accuracy policy:
+1. Do not tune the random/bbox sampler to artificially raise the hit count.
+2. Validate the lookup independently using points that are mathematically guaranteed to be inside valid UV triangles.
+3. Only after the lookup path is proven accurate should actual persistent rain-state UVs be connected.
+4. Keep this validation initialization-only so steady-state renderer FPS is unaffected.
+
+Implemented self-test:
+- every valid UV triangle receives three deterministic interior barycentric probes:
+  - centroid: (1/3, 1/3, 1/3)
+  - biased interior: (0.60, 0.20, 0.20)
+  - biased interior: (0.20, 0.60, 0.20)
+- with 27,746 valid triangles this produces 83,238 guaranteed-inside lookup probes
+- each probe is passed through the production `rainDynamicSurfaceFindTriangle()` path
+
+Failure classification:
+- `bucket-membership`: the source triangle was not present in the bucket selected for its guaranteed-inside probe
+- `containment`: the source triangle was present in the selected bucket but the production lookup still returned no containing triangle
+
+Expected diagnostic logs:
+- `Dynamic surface lookup self-test: X/83238 guaranteed-inside probes mapped (...%), Y missed`
+- if Y > 0:
+  `Dynamic surface lookup self-test misses: A bucket-membership / B containment`
+
+Decision gate:
+- approximately 100% self-test success means the UV bucket + barycentric lookup is considered validated; the 88/256 bbox hit rate can then be interpreted as visor UV-island occupancy rather than lookup failure
+- any measurable miss count must be resolved before persistent GPU state is connected
