@@ -2383,3 +2383,37 @@ Decision gate:
 - Test with `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`.
 - If droplets now appear clearly circular, physical-radius visual validation can continue.
 - If square silhouettes remain, stop physics tuning and debug shader selection / quad UV transport, because the hard radial clip should make a square impossible when the intended shader and UVs are actually active.
+
+
+### 40. Dynamic surface Stage 3 — black quad root-cause isolation (2026-09-27)
+
+Observed:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` correctly updates actual persistent drop positions, lifecycle and physical quad size.
+- Despite `shaders/rainVisorDynamicDrop.hlsl` containing a circular `clip()` mask and blue diagnostic color, the visible result remained black square quads.
+- Therefore the problem could not be explained by the radial mask alone: if that shader were the visible draw, failed clipping would still produce blue squares rather than black squares.
+
+Source review:
+- Stage 3 does use `RAINFXDYNAMICDROP` / `shaders/rainVisorDynamicDrop.hlsl`.
+- `render.mesh()` accepts an HLSL shader string directly according to the CSP SDK.
+- `createMesh()` attaches the new mesh to the scene hierarchy.
+- CSP SDK documents `keepAlive=true` as a long-lasting scene node that can survive script reload.
+- The Stage 2/3 dynamic surface mesh had been created with `keepAlive=true`.
+
+Root-cause hypothesis:
+- Old `RealVisor_DynamicSurfaceTest` meshes can survive Lua reloads and remain attached to the scene.
+- Both stale and current attached meshes can be rendered by the normal scene/material pass using the fallback/null material, producing black square transport geometry.
+- This automatic scene draw can obscure the separately issued `render.mesh()` custom-shader draw.
+
+Correction:
+1. Dynamic surface test mesh now uses `keepAlive=false`.
+2. Before creating the current mesh, all child nodes named `RealVisor_DynamicSurfaceTest` under the target parent are found and disposed.
+3. The newly created mesh is marked `setVisible(false, false)` so the normal scene/material pass does not render it.
+4. Stage 3 continues to draw it explicitly with `render.mesh({ mesh=..., shader=rainDynamicDropShader.HLSL })`.
+5. The first manual draw now logs:
+   `Dynamic drop manual draw: result=... shaderBytes=...`
+
+Expected validation:
+- stale cleanup log may report one or more removed meshes on the first run after this change
+- manual draw should report `result=true` and a nonzero shader byte count
+- visible output should come only from the dynamic drop shader; with the current shader that means circular blue diagnostic droplets rather than black square quads
+- if the hidden SceneReference is not drawable manually on the target CSP build, the result will be no visible dynamic drops; in that case switch to a detached/manual-only mesh path rather than re-enabling automatic scene rendering
