@@ -1926,3 +1926,37 @@ Expected diagnostic logs:
 Decision gate:
 - approximately 100% self-test success means the UV bucket + barycentric lookup is considered validated; the 88/256 bbox hit rate can then be interpreted as visor UV-island occupancy rather than lookup failure
 - any measurable miss count must be resolved before persistent GPU state is connected
+
+
+### 39. Dynamic surface Stage 2 — area-weighted surface sampling (2026-09-26)
+
+Validated runtime result before this change:
+- extraction: 14510 vertices / 83262 indices / 27746 valid UV triangles
+- UV bounds: U=-0.001407..0.999791, V=-0.670310..-0.003990
+- guaranteed-inside self-test: 83238/83238 mapped (100.000%), 0 missed
+- bbox diagnostic sampling: 88/256 mapped, 168 outside surface
+- visible mapped points followed the visor surface correctly but were sparse
+
+Conclusion:
+- UV -> triangle lookup is validated and is no longer the source of the 88/256 count.
+- The 88/256 count measured rectangular UV-bbox occupancy, not lookup accuracy.
+- A detached/seam UV island can expand the global bbox and create large empty UV regions between islands; this can lower bbox rejection-sampling hit rate even when lookup is perfect.
+- Production persistent-state spawning is a separate path: it samples the signed visor domain and accepts candidates only when the boundary mask is valid. Therefore an auxiliary seam island matters to production spawning only if the boundary mask itself marks it as valid.
+
+Stage 2 diagnostic policy change:
+- Keep the 83,238 guaranteed-inside self-test as the accuracy gate.
+- Stop using global bbox rejection sampling for the visible 256-quad geometry validation.
+- Build cumulative UV triangle area while extracting the KN5 mesh.
+- Select 256 triangles by stratifying the cumulative UV-area distribution.
+- Generate a uniform barycentric point inside each selected triangle using the sqrt(r1) method.
+- Feed every generated UV back through the production `rainDynamicSurfaceSample()` path.
+- Expected visual diagnostic result is now 256/256 mapped if the already-validated lookup remains correct.
+
+New diagnostic:
+- log summed UV triangle area, bbox UV area and their ratio:
+  `Dynamic surface UV area: triangles=... bbox=... summed-ratio=...%`
+- this ratio is only a diagnostic because overlapping UV triangles can make summed triangle area differ from unique island coverage.
+
+Decision:
+- If 256/256 area-weighted samples map and visually follow the visor curvature, Stage 2 static UV->3D surface mapping is complete.
+- Do not try to remove seam islands from the geometry lookup yet. Production-valid droplet positions are ultimately defined by persistent state + boundary mask, so filtering should be aligned with that authoritative domain rather than inferred from arbitrary UV island placement.
