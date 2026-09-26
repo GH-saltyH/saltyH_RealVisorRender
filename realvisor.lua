@@ -4911,7 +4911,6 @@ render.on('main.track.transparent', function()
 
         render.mesh({
             mesh = rainDynamicMeshTest,
-            transform = startingTransform,
             shader = RAIN_DYNAMIC_MESH_TEST_HLSL
         })
 
