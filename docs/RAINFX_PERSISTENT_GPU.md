@@ -2233,3 +2233,41 @@ Next validation:
 3. confirm motion/lifecycle behavior remains unchanged
 4. record FPS under the same camera/view condition used for the previous dynamic-mesh tests
 5. if Stage 4A is stable, begin the actual optical model as a separate Stage 4B so its cost can be isolated from renderer-architecture cost
+
+
+### 40. Dynamic mesh Stage 3 — physical-radius visual gate and size-response review (2026-09-26)
+
+Observed runtime status:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED=true` renders persistent droplets as moving quads on the extracted KN5 visor surface.
+- state mode changes are reflected.
+- lifecycle and motion direction are visually plausible.
+- steady performance remains about 70–80 FPS.
+- asynchronous readback cadence is now one completed snapshot and one mesh update per frame after the ring-buffer/prediction work; callback latency remains about 10 frames but no visible snapshot correction jumps were observed.
+- current remaining ambiguity is physical-size response because square diagnostic footprints make radius comparison difficult.
+
+Renderer diagnostic change:
+- the Stage 2/3 transport primitive remains a quad.
+- the diagnostic pixel shader now clips the visible footprint to a circle.
+- quad world dimensions are still generated directly from Meta.R physical radius, so visible circle diameter is a direct radius diagnostic rather than an arbitrary marker size.
+- this is still a geometry/physics validation shader, not the final optical rain surface.
+
+Physics size-response review from current production code:
+- Gravity and vehicle inertia enter the unified pipeline as accelerations in m/s^2 and therefore do not directly scale with droplet mass.
+- Adhesion decreases with increasing normalized mass:
+  `adhesion = adhesionBase / sqrt(mass)`.
+  Therefore larger/heavier droplets should cross the adhesion threshold more easily, all else equal.
+- Surface max speed increases with diameter:
+  `Vmax(D) = 0.016 * D^0.67 UV/s`.
+  Therefore larger droplets have the higher speed ceiling.
+- Airflow is converted from aerodynamic force to acceleration using:
+  `Fdrag ∝ area ∝ r^2`, `mass ∝ r^3`, so `a_air ∝ 1/r`.
+  Therefore smaller droplets are expected to receive stronger airflow acceleration.
+- Consequently, an observation that smaller droplets move faster under airflow can be physically consistent with the current model.
+- An observation that smaller droplets systematically move faster under isolated gravity or isolated inertia would contradict the current intended size ordering and should be treated as a diagnostic target rather than accepted behavior.
+
+Next validation priority:
+1. use the new circular Stage 3 footprint to verify that visible size ordering matches Meta.R;
+2. isolate force sources with the existing unified-force toggles;
+3. for gravity-only and inertia-only tests, verify that larger droplets are not systematically slower because of an unintended renderer/readback radius association;
+4. for airflow-only, expect a competing response: small drops receive larger aerodynamic acceleration, while large drops have lower adhesion and a higher max-speed ceiling;
+5. do not tune optical appearance or physics constants until this radius-to-motion association is verified.
