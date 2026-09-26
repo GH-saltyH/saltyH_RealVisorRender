@@ -68,6 +68,23 @@ local appFolder =
     local rainDynamicStateReadbackReady = false
     local rainDynamicStateReadbackErrorLogged = false
     local rainDynamicStateFirstApplyLogged = false
+
+    -- Stage 3 cadence diagnostics. Frame counters only; no per-frame logging.
+    local rainDynamicStateRequestFrame = -1
+    local rainDynamicStateLastCallbackFrame = -1
+    local rainDynamicStateLastApplyFrame = -1
+    local rainDynamicStateCallbackCount = 0
+    local rainDynamicStateCallbackLatencySum = 0
+    local rainDynamicStateCallbackLatencyMin = math.huge
+    local rainDynamicStateCallbackLatencyMax = 0
+    local rainDynamicStateCallbackIntervalSum = 0
+    local rainDynamicStateCallbackIntervalMin = math.huge
+    local rainDynamicStateCallbackIntervalMax = 0
+    local rainDynamicStateApplyCount = 0
+    local rainDynamicStateApplyIntervalSum = 0
+    local rainDynamicStateApplyIntervalMin = math.huge
+    local rainDynamicStateApplyIntervalMax = 0
+
     local rainDynamicStateU = {}
     local rainDynamicStateV = {}
     local rainDynamicStateRadius = {}
@@ -5507,6 +5524,9 @@ local function requestRainDynamicStateReadback()
     )
 
     rainDynamicStateReadbackPending = true
+    local requestSim = ac.getSim()
+    rainDynamicStateRequestFrame =
+        requestSim and requestSim.frame or -1
 
     rainDynamicStateReadbackCanvas:accessData(function(err, data)
         rainDynamicStateReadbackPending = false
@@ -5521,6 +5541,79 @@ local function requestRainDynamicStateReadback()
                 rainDynamicStateReadbackErrorLogged = true
             end
             return
+        end
+
+        local callbackSim = ac.getSim()
+        local callbackFrame =
+            callbackSim and callbackSim.frame or -1
+
+        if callbackFrame >= 0 and rainDynamicStateRequestFrame >= 0 then
+            local latencyFrames =
+                math.max(callbackFrame - rainDynamicStateRequestFrame, 0)
+
+            rainDynamicStateCallbackCount =
+                rainDynamicStateCallbackCount + 1
+            rainDynamicStateCallbackLatencySum =
+                rainDynamicStateCallbackLatencySum + latencyFrames
+            rainDynamicStateCallbackLatencyMin =
+                math.min(rainDynamicStateCallbackLatencyMin, latencyFrames)
+            rainDynamicStateCallbackLatencyMax =
+                math.max(rainDynamicStateCallbackLatencyMax, latencyFrames)
+
+            if rainDynamicStateLastCallbackFrame >= 0 then
+                local intervalFrames =
+                    math.max(
+                        callbackFrame - rainDynamicStateLastCallbackFrame,
+                        0
+                    )
+                rainDynamicStateCallbackIntervalSum =
+                    rainDynamicStateCallbackIntervalSum + intervalFrames
+                rainDynamicStateCallbackIntervalMin =
+                    math.min(
+                        rainDynamicStateCallbackIntervalMin,
+                        intervalFrames
+                    )
+                rainDynamicStateCallbackIntervalMax =
+                    math.max(
+                        rainDynamicStateCallbackIntervalMax,
+                        intervalFrames
+                    )
+            end
+
+            rainDynamicStateLastCallbackFrame = callbackFrame
+
+            if rainDynamicStateCallbackCount % 30 == 0 then
+                local callbackIntervals =
+                    math.max(rainDynamicStateCallbackCount - 1, 1)
+
+                ac.log(
+                    appNameDebug
+                    .. ' Dynamic state cadence callback: avgLatency='
+                    .. string.format(
+                        '%.2f',
+                        rainDynamicStateCallbackLatencySum
+                        / rainDynamicStateCallbackCount
+                    )
+                    .. 'f min='
+                    .. tostring(rainDynamicStateCallbackLatencyMin)
+                    .. ' max='
+                    .. tostring(rainDynamicStateCallbackLatencyMax)
+                    .. ' | avgInterval='
+                    .. string.format(
+                        '%.2f',
+                        rainDynamicStateCallbackIntervalSum
+                        / callbackIntervals
+                    )
+                    .. 'f min='
+                    .. tostring(
+                        rainDynamicStateCallbackIntervalMin == math.huge
+                        and 0
+                        or rainDynamicStateCallbackIntervalMin
+                    )
+                    .. ' max='
+                    .. tostring(rainDynamicStateCallbackIntervalMax)
+                )
+            end
         end
 
         for i = 0, count - 1 do
@@ -5550,6 +5643,56 @@ local function applyRainDynamicStateToSurfaceMesh()
     end
 
     rainDynamicStateReadbackReady = false
+
+    local applySim = ac.getSim()
+    local applyFrame = applySim and applySim.frame or -1
+
+    if applyFrame >= 0 then
+        rainDynamicStateApplyCount =
+            rainDynamicStateApplyCount + 1
+
+        if rainDynamicStateLastApplyFrame >= 0 then
+            local intervalFrames =
+                math.max(applyFrame - rainDynamicStateLastApplyFrame, 0)
+
+            rainDynamicStateApplyIntervalSum =
+                rainDynamicStateApplyIntervalSum + intervalFrames
+            rainDynamicStateApplyIntervalMin =
+                math.min(
+                    rainDynamicStateApplyIntervalMin,
+                    intervalFrames
+                )
+            rainDynamicStateApplyIntervalMax =
+                math.max(
+                    rainDynamicStateApplyIntervalMax,
+                    intervalFrames
+                )
+        end
+
+        rainDynamicStateLastApplyFrame = applyFrame
+
+        if rainDynamicStateApplyCount % 30 == 0 then
+            local applyIntervals =
+                math.max(rainDynamicStateApplyCount - 1, 1)
+
+            ac.log(
+                appNameDebug
+                .. ' Dynamic state cadence mesh: avgInterval='
+                .. string.format(
+                    '%.2f',
+                    rainDynamicStateApplyIntervalSum / applyIntervals
+                )
+                .. 'f min='
+                .. tostring(
+                    rainDynamicStateApplyIntervalMin == math.huge
+                    and 0
+                    or rainDynamicStateApplyIntervalMin
+                )
+                .. ' max='
+                .. tostring(rainDynamicStateApplyIntervalMax)
+            )
+        end
+    end
 
     local stateCount = rainDynamicStateReadbackCount
     local meshCount = rainDynamicSurfaceMeshCount
