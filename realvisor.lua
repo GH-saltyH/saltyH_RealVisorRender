@@ -235,6 +235,11 @@ local cfg = scriptSettings:mapConfig({
         -- Acceleration after surface adhesion is exceeded.
         RAIN_FLOW_ACCELERATION = 0.020,
 
+        -- Post-adhesion flow intensity multiplier. Default 1.0 preserves
+        -- the current physical calibration; later tuning must still respect
+        -- the absolute physical max-speed clamp.
+        RAIN_FLOW_SPEED_SCALE = 1.0,
+
         -- Linear air/viscous drag coefficient.
         RAIN_FLOW_DRAG = 7.0,
 
@@ -540,6 +545,7 @@ local rainStateUpdateParams = {
         gRainStatePhysicalMaxSpeedExponent =
             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT,
         gRainStateFlowAcceleration = cfg.RUNTIME.RAIN_FLOW_ACCELERATION,
+        gRainStateFlowSpeedScale = cfg.RUNTIME.RAIN_FLOW_SPEED_SCALE,
         gRainStateFlowDrag = cfg.RUNTIME.RAIN_FLOW_DRAG,
         gRainStateGravity = 9.81,
         gRainStateAdhesionMin = cfg.RUNTIME.RAIN_ADHESION_MIN,
@@ -986,7 +992,8 @@ local rainStateUpdateParams = {
             */
             float acceleration =
                 excess
-                * gRainStateFlowAcceleration;
+                * gRainStateFlowAcceleration
+                * max(gRainStateFlowSpeedScale, 0.0);
 
             return
                 direction
@@ -1318,21 +1325,18 @@ local rainStateMetaUpdateParams = {
         }
 
         /*
-            Debug 50 physical size/profile model. This is the single
-            shader-side profile reused by legacy test modes.
+            Final physical droplet model.
+            This pass uses exactly the same deterministic 0.5–6.0 mm
+            distribution as the persistent state initialization/update pass.
+            Future rain profiles may replace only this distribution.
         */
         float rainStatePhysicalDiameterMM(float index)
         {
-            float profile = floor(index / 3.0);
-            float slot = index - profile * 3.0;
-
-            if (profile < 0.5)
-                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 0.95 : 2.0);
-
-            if (profile < 1.5)
-                return slot < 0.5 ? 0.5 : (slot < 1.5 ? 1.5 : 4.0);
-
-            return slot < 0.5 ? 0.5 : (slot < 1.5 ? 2.5 : 6.0);
+            return lerp(
+                0.5,
+                6.0,
+                rainStateHash(index + 101.0)
+            );
         }
 
         float rainStatePhysicalMassProfile(float diameterMM)
@@ -4512,6 +4516,8 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_AIR_DRAG_COEFF
     rainStateUpdateParams.values.gRainStateFlowAcceleration =
         cfg.RUNTIME.RAIN_FLOW_ACCELERATION
+    rainStateUpdateParams.values.gRainStateFlowSpeedScale =
+        cfg.RUNTIME.RAIN_FLOW_SPEED_SCALE
     rainStateUpdateParams.values.gRainStateFlowDrag =
         cfg.RUNTIME.RAIN_FLOW_DRAG
     rainStateUpdateParams.values.gRainStateGravity =
