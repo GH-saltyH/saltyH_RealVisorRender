@@ -45,6 +45,7 @@ local appFolder =
     --------------------------------------------------------
     
     local rainDynamicMeshTest = nil
+    local rainDynamicMeshTestNode = nil
     local rainDynamicMeshTestVertices = nil
     local rainDynamicMeshTestIndices = nil
     local rainDynamicMeshTestInitialized = false
@@ -304,6 +305,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MESH_TEST_QUAD_SIZE = 0.030,
         RAIN_DYNAMIC_MESH_TEST_SPACING = 0.050,
         RAIN_DYNAMIC_MESH_TEST_Z = -0.020,
+        RAIN_DYNAMIC_MESH_TEST_CURVATURE_X = 0.90,
+        RAIN_DYNAMIC_MESH_TEST_CURVATURE_Y = 0.35,
 
         RAIN_DEBUG = 0,
 
@@ -4603,7 +4606,8 @@ end
 --------------------------------------------------------
 -- Dynamic mesh renderer experiment: Stage 1
 --
--- Creates one persistent mesh containing 256 small quads.
+-- Creates one persistent mesh containing 256 small curved-surface quads.
+-- The mesh is parented below axisRollNode so it follows the visor hierarchy.
 -- No GPU state readback and no alterVertices() are used yet.
 -- The only purpose of this stage is to validate the public
 -- createMesh() -> render.mesh() path and establish a renderer
@@ -4671,13 +4675,18 @@ local function initializeRainDynamicMeshTest()
             local y1 =
                 y0 + cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_QUAD_SIZE
 
-            local z =
-                cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_Z
+            local curvatureX = cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_CURVATURE_X
+            local curvatureY = cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_CURVATURE_Y
+
+            local z0 = cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_Z + curvatureX * x0 * x0 + curvatureY * y0 * y0
+            local z1 = cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_Z + curvatureX * x1 * x1 + curvatureY * y0 * y0
+            local z2 = cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_Z + curvatureX * x1 * x1 + curvatureY * y1 * y1
+            local z3 = cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_Z + curvatureX * x0 * x0 + curvatureY * y1 * y1
 
             rainDynamicMeshTestVertices:set(
                 vertexIndex,
                 ac.MeshVertex.new(
-                    vec3(x0, y0, z),
+                    vec3(x0, y0, z0),
                     vec3(0, 0, 1),
                     vec2(0, 0)
                 )
@@ -4687,7 +4696,7 @@ local function initializeRainDynamicMeshTest()
             rainDynamicMeshTestVertices:set(
                 vertexIndex,
                 ac.MeshVertex.new(
-                    vec3(x1, y0, z),
+                    vec3(x1, y0, z1),
                     vec3(0, 0, 1),
                     vec2(1, 0)
                 )
@@ -4697,7 +4706,7 @@ local function initializeRainDynamicMeshTest()
             rainDynamicMeshTestVertices:set(
                 vertexIndex,
                 ac.MeshVertex.new(
-                    vec3(x1, y1, z),
+                    vec3(x1, y1, z2),
                     vec3(0, 0, 1),
                     vec2(1, 1)
                 )
@@ -4707,7 +4716,7 @@ local function initializeRainDynamicMeshTest()
             rainDynamicMeshTestVertices:set(
                 vertexIndex,
                 ac.MeshVertex.new(
-                    vec3(x0, y1, z),
+                    vec3(x0, y1, z3),
                     vec3(0, 0, 1),
                     vec2(0, 1)
                 )
@@ -4727,18 +4736,29 @@ local function initializeRainDynamicMeshTest()
         end
     end
 
-    local root = ac.emptySceneReference()
-
-    if not root then
+    if not axisRollNode or #axisRollNode == 0 then
         ac.warn(
             appNameDebug
-            .. ' Dynamic mesh test: failed to create root SceneReference'
+            .. ' Dynamic mesh test: axisRollNode is not available'
+        )
+        return false
+    end
+
+    rainDynamicMeshTestNode =
+        axisRollNode:createNode(
+            'REALVISOR_DYNAMIC_MESH_TEST'
+        )
+
+    if not rainDynamicMeshTestNode then
+        ac.warn(
+            appNameDebug
+            .. ' Dynamic mesh test: failed to create child node'
         )
         return false
     end
 
     rainDynamicMeshTest =
-        root:createMesh(
+        rainDynamicMeshTestNode:createMesh(
             'RealVisor_DynamicMeshTest',
             nil,
             rainDynamicMeshTestVertices,
