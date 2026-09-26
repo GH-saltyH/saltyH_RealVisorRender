@@ -4882,17 +4882,39 @@ end
 local RAIN_DYNAMIC_SURFACE_TEST_HLSL = [[
 float4 main(PS_IN pin)
 {
-    float2 uv = pin.Tex;
-    float edge = smoothstep(
-        0.0,
-        0.10,
-        min(
-            min(uv.x, 1.0 - uv.x),
-            min(uv.y, 1.0 - uv.y)
-        )
-    );
+    // Stage 2/3 geometry diagnostic:
+    // keep the quad as the transport primitive, but clip its visible
+    // footprint to a circle so Meta.R physical-radius differences can be
+    // judged directly. Geometry dimensions are still authored from radiusUV.
+    float2 centered = pin.Tex * 2.0 - 1.0;
+    float radius = length(centered);
 
-    return float4(0.10 + uv.x * 0.70, 0.25 + uv.y * 0.65, 1.0, 0.72 + edge * 0.18);
+    clip(1.0 - radius);
+
+    float softEdge =
+        1.0 - smoothstep(0.82, 1.0, radius);
+
+    float centerHighlight =
+        1.0 - smoothstep(0.0, 0.65, radius);
+
+    float3 baseColor =
+        float3(
+            0.18 + pin.Tex.x * 0.40,
+            0.35 + pin.Tex.y * 0.35,
+            1.0
+        );
+
+    float3 color =
+        lerp(
+            baseColor,
+            float3(0.80, 0.92, 1.0),
+            centerHighlight * 0.35
+        );
+
+    return float4(
+        color,
+        0.55 + softEdge * 0.40
+    );
 }
 ]]
 
