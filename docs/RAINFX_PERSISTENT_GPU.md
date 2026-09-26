@@ -2358,3 +2358,28 @@ Next physics validation priority:
 4. decide whether attached-droplet airflow should remain force/mass based or use a retention-relative/effective surface-drive model,
 5. only then tune `RAIN_FLOW_SPEED_SCALE` / 1 mm speed calibration.
 
+
+
+### 40. Dynamic mesh Stage 4A — physical diagnostic silhouette correction (2026-09-26)
+
+Clarified shader routing:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` renders with external `shaders/rainVisorDynamicDrop.hlsl`.
+- `RAIN_DYNAMIC_SURFACE_TEST_ENABLED = true` renders with Lua-inline `RAIN_DYNAMIC_SURFACE_DIAGNOSTIC_HLSL`.
+- Therefore production-like Stage 3/4 physical visualization changes must be made in `rainVisorDynamicDrop.hlsl`, not only in the Lua diagnostic shader.
+
+Reason for change:
+- User-observed Stage 3 output still appeared as square quads.
+- Radius-profile validation is a prerequisite for reliable physics comparison, so this should not be deferred until optical rendering.
+- The dynamic-drop shader already contained a radial mask, but its soft appearance was not visually decisive enough to separate a shader-routing/UV issue from a footprint-visibility issue.
+
+Current diagnostic shader policy:
+- retain quad geometry as transport primitive
+- hard-clip pixels outside unit circle in local quad UV
+- use high, near-uniform opacity inside the circle
+- preserve a visible edge gradient only to make physical diameter easy to judge
+- do not add refraction, optical normals, film effects or final rain appearance yet
+
+Decision gate:
+- Test with `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`.
+- If droplets now appear clearly circular, physical-radius visual validation can continue.
+- If square silhouettes remain, stop physics tuning and debug shader selection / quad UV transport, because the hard radial clip should make a square impossible when the intended shader and UVs are actually active.
