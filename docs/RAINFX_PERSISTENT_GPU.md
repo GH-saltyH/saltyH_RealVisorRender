@@ -2176,3 +2176,60 @@ Decision:
 - do not add prediction/extrapolation yet: it would add correction complexity while the current fixed latency produced no visually identifiable snapping in repeated testing
 - preserve the pipelined async readback architecture
 - next renderer stage should focus on replacing the diagnostic square shader/appearance with the actual droplet visual path while preserving this cadence and rechecking FPS
+
+
+### 40. Dynamic renderer cadence validation and Stage 4A canonical-profile migration (2026-09-26)
+
+Validated Stage 3 runtime:
+- async GPU readback latency: fixed 10 frames on the tested CSP build
+- completed callback interval: 1 frame
+- dynamic mesh update interval: 1 frame
+- repeated testing found no visible snapshot correction jump or compensation pop
+- therefore the important distinction is:
+  - latency = snapshot age
+  - cadence = delivery/update frequency
+- current pipeline delivers one older snapshot every frame rather than updating only once every 10 frames
+
+Observed behavior:
+- physical movement direction remains consistent with the previous persistent renderer
+- faster droplets move farther and slower droplets move less, confirming the physics dt integration remains authoritative
+- initial Stage 3 mapping reported 255 live drops mapped and 1 surface lookup miss
+- the isolated miss is non-blocking unless it becomes persistent/recurrent; prediction can briefly move a live state outside the current surface before lifecycle/boundary state catches up
+
+Cadence decision:
+- do not spend more development time reducing the measured 10-frame asynchronous latency before optical rendering exists
+- ring-buffer readback with 16 slots is retained because it sustains one request/completion per frame
+- velocity-based render prediction remains available to compensate snapshot age
+- periodic cadence logs are now disabled by default with:
+  `RAIN_DYNAMIC_STATE_CADENCE_DEBUG = false`
+- cadence diagnostics can be re-enabled without changing the pipeline
+
+Stage 4A priority:
+- the existing `rainVisorScreen.hlsl` canonical renderer does not yet contain the final water-optics model; its production appearance is currently a simple radial smoothstep droplet mask
+- therefore the next renderer milestone is not full refraction yet
+- first reproduce that canonical radial profile in the dynamic-quad path so renderer architecture and performance can be compared without introducing a second major variable
+
+New shader:
+- `shaders/rainVisorDynamicDrop.hlsl`
+- one mesh quad represents one persistent droplet
+- local quad UV is remapped from [0,1] to [-1,1]
+- radial distance is evaluated once per covered quad pixel
+- transparent quad corners are clipped
+- profile matches the canonical renderer:
+  - inner smooth region: 0.30 × radius
+  - outer edge: 1.00 × radius
+  - color: (0.82, 0.90, 1.0)
+  - alpha scale: 0.35
+- there is no loop over 256 droplets in this shader
+
+Stage 4A render path:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED=true` now uses the file-backed `RAINFXDYNAMICDROP` shader instead of the rectangular Stage 2 diagnostic shader
+- persistent GPU physics, async state readback, KN5 UV->surface mapping and dynamic vertex updates remain unchanged
+- `RAIN_DYNAMIC_SURFACE_TEST_ENABLED` remains the static diagnostic path and still uses the old test shader
+
+Next validation:
+1. visually confirm dynamic droplets are circular rather than rectangular
+2. confirm physical radius differences remain visible
+3. confirm motion/lifecycle behavior remains unchanged
+4. record FPS under the same camera/view condition used for the previous dynamic-mesh tests
+5. if Stage 4A is stable, begin the actual optical model as a separate Stage 4B so its cost can be isolated from renderer-architecture cost
