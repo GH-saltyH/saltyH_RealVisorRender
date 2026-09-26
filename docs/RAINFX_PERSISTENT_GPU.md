@@ -2271,3 +2271,42 @@ Next validation priority:
 3. for gravity-only and inertia-only tests, verify that larger droplets are not systematically slower because of an unintended renderer/readback radius association;
 4. for airflow-only, expect a competing response: small drops receive larger aerodynamic acceleration, while large drops have lower adhesion and a higher max-speed ceiling;
 5. do not tune optical appearance or physics constants until this radius-to-motion association is verified.
+
+
+### 40. Dynamic renderer test path and size-response physics review (2026-09-26)
+
+Validated Stage 3 cadence/runtime observations:
+- asynchronous GPU readback latency is consistently about 10 render frames on the tested CSP build
+- after ring-buffered readback, callback interval = 1 frame and mesh-update interval = 1 frame
+- no visible snapshot correction jumps were observed in either the previous build or the current build
+- dynamic renderer remains around 70–80 FPS in the current physical-only test
+- persistent movement direction and lifecycle are visually plausible
+
+Correct test-switch contract:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` is the production-oriented dynamic-state test path
+- that path renders `rainDynamicSurfaceMesh` with `shaders/rainVisorDynamicDrop.hlsl` (`RAINFXDYNAMICDROP`)
+- `RAIN_DYNAMIC_SURFACE_TEST_ENABLED = true` is only the static geometry/UV diagnostic path and uses the inline `RAIN_DYNAMIC_SURFACE_TEST_HLSL`
+- therefore edits to `RAIN_DYNAMIC_SURFACE_TEST_HLSL` do not validate the persistent-state renderer
+- for actual position/size/lifecycle/motion tests use STATE_ENABLED=true and TEST_ENABLED=false
+
+Current size-response model review:
+- gravity and vehicle inertia enter the state solver as accelerations; they are not multiplied by procedural mass
+- adhesion threshold is `adhesionBase / sqrt(mass)`, so larger drops (larger mass profile) have lower depinning thresholds
+- max speed is `0.016 * D^0.67 UV/s`, so larger drops have higher absolute speed caps
+- aerodynamic acceleration is calculated from `F_drag / m`; with area ~ D^2 and water mass ~ D^3, its acceleration contribution scales approximately as 1/D before adhesion/drag/clamping
+- therefore:
+  - gravity/inertia alone should not systematically make smaller droplets faster; larger droplets should generally depin more readily and have higher caps
+  - airflow can give smaller moving drops stronger instantaneous aerodynamic acceleration, although larger drops can still depin more readily because the retention threshold falls with size
+- if smaller drops are visually faster under gravity/inertia-only tests, treat that as a model/debug discrepancy rather than an intended outcome
+
+Calibration parameter:
+- `RAIN_FLOW_SPEED_SCALE` multiplies post-adhesion acceleration only
+- it does not raise `RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM` or the size-dependent max-speed curve
+- increasing it only makes droplets approach their existing cap faster
+- before changing it, determine whether observed slowness is acceleration-limited or max-speed-limited
+
+Recommended next physics validation:
+- use the dynamic-state renderer (`RAIN_DYNAMIC_SURFACE_STATE_ENABLED=true`)
+- compare isolated gravity, isolated inertia and isolated airflow with physical-size visibility
+- priority is not another broad directional test; it is determining whether small-vs-large ordering matches the equations above
+- only after that distinction should `RAIN_FLOW_SPEED_SCALE` or the physical max-speed calibration be tuned
