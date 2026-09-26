@@ -1568,3 +1568,104 @@ but it cannot yet be implemented safely by assuming a nonexistent instancing API
 The next API-level investigation should determine whether CSP's internal `mesh.fx` template exposes a usable vertex-stage path (for example, a per-instance/per-vertex identifier that can index `txRainState`). If no such public or verified path exists, the fallback architecture should be evaluated rather than introducing undocumented calls.
 
 The current fullscreen renderer remains the authoritative implementation until that path is verified.
+
+
+## 33. Dynamic Mesh Renderer — Stage 1 static 256-quad test — 2026-09-26
+
+This experiment is isolated on branch `feature-RainFXDynamicMeshRenderer`, created directly from `feature-RainFXPersistentGPU`. The PersistentGPU branch remains the protected baseline until the renderer experiment is judged complete.
+
+### 33.1 Purpose
+
+The current canonical renderer performs a fullscreen mesh pass and, for each covered fragment, searches the persistent GPU state for up to 256 droplets. The experimental renderer tests the alternative geometry-driven architecture:
+
+```
+256 small quads × actual rasterized footprint
+```
+
+instead of:
+
+```
+screen pixels × 256 state search
+```
+
+This Stage 1 test intentionally does NOT read back `rainStateA`/`rainStateMetaA`, and it does NOT call `alterVertices()`. It isolates the public `createMesh()` + `render.mesh()` rendering path.
+
+### 33.2 Test geometry
+
+Runtime configuration:
+
+- `RAIN_DYNAMIC_MESH_TEST_GRID = 16`
+- 16 × 16 = 256 quads
+- 4 vertices per quad = 1024 vertices
+- 6 indices per quad = 1536 indices
+- quad size = 0.030 m
+- grid spacing = 0.050 m
+- local Z offset = -0.020 m
+
+The mesh is created once and retained. Each quad has local UVs 0..1 and a minimal inline test pixel shader. The same visor world transform used by the canonical renderer is applied to the test mesh, so the test follows the visor transform without changing the existing physics coordinate system.
+
+### 33.3 Public API verification
+
+The CSP public SDK source was checked directly.
+
+Verified APIs:
+
+- `ac.MeshVertex.new(pos, normal, uv)`
+- `ac.VertexBuffer(size)`
+- `ac.IndicesBuffer(size)`
+- `ac.SceneReference:createMesh(name, materialName, vertices, indices, keepAlive, moveData)`
+- `ac.SceneReference:alterVertices(vertices)`
+- `render.mesh({ mesh = ..., transform = ..., shader = ... })`
+
+The SDK defines `ac.IndicesBuffer` as 16-bit indices, so 1024 vertices are comfortably inside the limit.
+
+Stage 1 currently uses `createMesh()` and `render.mesh()` only. `alterVertices()` is intentionally deferred until the renderer path itself has been validated.
+
+### 33.4 Runtime switch
+
+```lua
+RAIN_DYNAMIC_MESH_TEST_ENABLED = false
+```
+
+When enabled, the render callback:
+
+1. updates the existing Persistent GPU physics state exactly as before;
+2. initializes the static 256-quad mesh once;
+3. renders that mesh with `render.mesh()`;
+4. skips the canonical fullscreen RainFX renderer for that frame.
+
+When disabled, the existing canonical renderer remains unchanged.
+
+### 33.5 Interpretation boundary
+
+A successful Stage 1 result does NOT yet prove that GPU persistent state can be efficiently driven through dynamic geometry.
+
+It only establishes:
+
+```
+createMesh → render.mesh → 256 small quad rasterization
+```
+
+as a viable public-API rendering path.
+
+The next stage, only if Stage 1 is visually and performance-wise useful, is:
+
+```
+rainStateA / rainStateMetaA
+        ↓
+ExtraCanvas accessData()
+        ↓
+CPU position/radius decode
+        ↓
+VertexBuffer update
+        ↓
+alterVertices()
+        ↓
+render.mesh()
+```
+
+That stage will separately measure readback latency, CPU update cost, dynamic vertex alteration cost, and the resulting visual latency.
+
+### 33.6 Current decision
+
+Do not merge this branch into `feature-RainFXPersistentGPU` yet. The branch is an isolated renderer research branch. Integration is considered only after the dynamic mesh renderer is validated against the canonical renderer for visual correctness, frame-time impact, latency, and lifecycle behavior.
