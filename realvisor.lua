@@ -41,6 +41,16 @@ local appFolder =
 
     
     --------------------------------------------------------
+    -- Dynamic mesh renderer experiment
+    --------------------------------------------------------
+    
+    local rainDynamicMeshTest = nil
+    local rainDynamicMeshTestVertices = nil
+    local rainDynamicMeshTestIndices = nil
+    local rainDynamicMeshTestInitialized = false
+
+    
+    --------------------------------------------------------
     -- Path: Settings
     --------------------------------------------------------
     
@@ -289,6 +299,12 @@ local cfg = scriptSettings:mapConfig({
         -- 40 = boundary mask
         -- 41 = lifecycle state
         -- 51 = physical persistent-state viewer
+        RAIN_DYNAMIC_MESH_TEST_ENABLED = false,
+        RAIN_DYNAMIC_MESH_TEST_GRID = 16,
+        RAIN_DYNAMIC_MESH_TEST_QUAD_SIZE = 0.030,
+        RAIN_DYNAMIC_MESH_TEST_SPACING = 0.050,
+        RAIN_DYNAMIC_MESH_TEST_Z = -0.020,
+
         RAIN_DEBUG = 0,
 
     },
@@ -4583,6 +4599,161 @@ local function updateRainGPUState(sim)
     rainStateReadIsA = not rainStateReadIsA
 end
 
+
+--------------------------------------------------------
+-- Dynamic mesh renderer experiment: Stage 1
+--
+-- Creates one persistent mesh containing 256 small quads.
+-- No GPU state readback and no alterVertices() are used yet.
+-- The only purpose of this stage is to validate the public
+-- createMesh() -> render.mesh() path and establish a renderer
+-- performance baseline against the fullscreen 256-drop search.
+--------------------------------------------------------
+
+local RAIN_DYNAMIC_MESH_TEST_HLSL = [[
+#include "rainDynamicMeshTest.hlsl"
+]]
+
+local function initializeRainDynamicMeshTest()
+    if rainDynamicMeshTestInitialized then
+        return rainDynamicMeshTest ~= nil
+    end
+
+    rainDynamicMeshTestInitialized = true
+
+    local grid = math.max(
+        math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_GRID),
+        1
+    )
+
+    local vertexCount = grid * grid * 4
+    local indexCount = grid * grid * 6
+
+    rainDynamicMeshTestVertices = ac.VertexBuffer(vertexCount)
+    rainDynamicMeshTestIndices = ac.IndicesBuffer(indexCount)
+
+    local vertexIndex = 1
+    local indexIndex = 1
+
+    local halfSpan =
+        ((grid - 1) * cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_SPACING
+        + cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_QUAD_SIZE) * 0.5
+
+    for gy = 0, grid - 1 do
+        for gx = 0, grid - 1 do
+
+            local x0 =
+                gx * cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_SPACING
+                - halfSpan
+
+            local y0 =
+                gy * cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_SPACING
+                - halfSpan
+
+            local x1 =
+                x0 + cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_QUAD_SIZE
+
+            local y1 =
+                y0 + cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_QUAD_SIZE
+
+            local z =
+                cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_Z
+
+            rainDynamicMeshTestVertices:set(
+                vertexIndex,
+                ac.MeshVertex.new(
+                    vec3(x0, y0, z),
+                    vec3(0, 0, 1),
+                    vec2(0, 0)
+                )
+            )
+            vertexIndex = vertexIndex + 1
+
+            rainDynamicMeshTestVertices:set(
+                vertexIndex,
+                ac.MeshVertex.new(
+                    vec3(x1, y0, z),
+                    vec3(0, 0, 1),
+                    vec2(1, 0)
+                )
+            )
+            vertexIndex = vertexIndex + 1
+
+            rainDynamicMeshTestVertices:set(
+                vertexIndex,
+                ac.MeshVertex.new(
+                    vec3(x1, y1, z),
+                    vec3(0, 0, 1),
+                    vec2(1, 1)
+                )
+            )
+            vertexIndex = vertexIndex + 1
+
+            rainDynamicMeshTestVertices:set(
+                vertexIndex,
+                ac.MeshVertex.new(
+                    vec3(x0, y1, z),
+                    vec3(0, 0, 1),
+                    vec2(0, 1)
+                )
+            )
+            vertexIndex = vertexIndex + 1
+
+            local base = vertexIndex - 5
+
+            rainDynamicMeshTestIndices:set(indexIndex, base)
+            rainDynamicMeshTestIndices:set(indexIndex + 1, base + 1)
+            rainDynamicMeshTestIndices:set(indexIndex + 2, base + 2)
+            rainDynamicMeshTestIndices:set(indexIndex + 3, base)
+            rainDynamicMeshTestIndices:set(indexIndex + 4, base + 2)
+            rainDynamicMeshTestIndices:set(indexIndex + 5, base + 3)
+
+            indexIndex = indexIndex + 6
+        end
+    end
+
+    local root = ac.emptySceneReference()
+
+    if not root then
+        ac.warn(
+            appNameDebug
+            .. ' Dynamic mesh test: failed to create root SceneReference'
+        )
+        return false
+    end
+
+    rainDynamicMeshTest =
+        root:createMesh(
+            'RealVisor_DynamicMeshTest',
+            nil,
+            rainDynamicMeshTestVertices,
+            rainDynamicMeshTestIndices,
+            true,
+            false
+        )
+
+    if not rainDynamicMeshTest then
+        ac.warn(
+            appNameDebug
+            .. ' Dynamic mesh test: createMesh() failed'
+        )
+        return false
+    end
+
+    ac.log(
+        appNameDebug
+        .. ' Dynamic mesh test initialized: '
+        .. tostring(grid * grid)
+        .. ' quads / '
+        .. tostring(vertexCount)
+        .. ' vertices / '
+        .. tostring(indexCount)
+        .. ' indices'
+    )
+
+    return true
+end
+
 --------------------------------------------------------
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
@@ -4672,6 +4843,45 @@ render.on('main.track.transparent', function()
     --------------------------------------------------------
 
     updateRainGPUState(sim)
+
+    --------------------------------------------------------
+    -- Render
+    --------------------------------------------------------
+
+    --------------------------------------------------------
+    -- Stage 1 dynamic mesh renderer experiment
+    --
+    -- This branch intentionally keeps the canonical fullscreen
+    -- renderer available. Enable the test switch to render only
+    -- the 256 small mesh quads.
+    --------------------------------------------------------
+
+    if cfg.RUNTIME.RAIN_DYNAMIC_MESH_TEST_ENABLED then
+
+        if not initializeRainDynamicMeshTest() then
+            return
+        end
+
+        render.setBlendMode(
+            render.BlendMode.AlphaBlend
+        )
+
+        render.setCullMode(
+            render.CullMode.None
+        )
+
+        render.setDepthMode(
+            render.DepthMode.ReadOnly
+        )
+
+        render.mesh({
+            mesh = rainDynamicMeshTest,
+            transform = startingTransform,
+            shader = RAIN_DYNAMIC_MESH_TEST_HLSL
+        })
+
+        return
+    end
 
     --------------------------------------------------------
     -- Render
