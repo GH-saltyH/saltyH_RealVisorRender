@@ -2025,3 +2025,39 @@ Stage 3 validation goals:
 - quads should move continuously with the already-validated persistent physics.
 - surface lookup misses should normally be zero for boundary-mask-valid live positions.
 - FPS and any visible one-frame readback latency should be measured before replacing the diagnostic shader with final droplet optics.
+
+
+### 40. Dynamic surface Stage 3 — persistent state readback cadence validation (2026-09-26)
+
+Observed runtime result:
+- readback initialized: 256 drops / 1024 R32FLOAT scalars
+- first dynamic mesh update: 255 live drops mapped, 1 surface lookup miss
+- visible quad sizes follow the persistent physical droplet-size profile
+- output is independent of Rain debug visualization mode as expected
+- GPU state mode changes are reflected
+- motion direction remains consistent with the earlier persistent-GPU tests
+- AC remains smooth at roughly 70–80 FPS
+- however, visible dynamic-mesh positions appear to update at a coarse cadence of about 330 ms while per-update displacement still scales plausibly with droplet speed/dt
+
+Interpretation:
+- physics integration itself is likely still running continuously because faster/slower drops preserve their relative displacement behavior
+- the coarse visual stepping is therefore suspected in the GPU->CPU asynchronous readback / CPU->mesh delivery path rather than in the force integrator
+- current Stage 3 serializes readback requests with `rainDynamicStateReadbackPending`; no second `accessData()` request is issued until the previous callback arrives
+- CSP public SDK documents `ui.ExtraCanvas:accessData()` as asynchronous and says GPU->CPU transfer usually takes about 0.15 ms, so an observed ~330 ms visual cadence is not accepted as expected API cost without measurement
+
+Cadence instrumentation added:
+- record simulation frame at each readback request
+- record callback frame and accumulate callback latency in frames
+- record callback-to-callback interval
+- record `alterVertices()` application interval
+- emit aggregate logs once per 30 successful callbacks/applies to avoid per-frame logging overhead
+
+Expected logs:
+- `Dynamic state cadence callback: avgLatency=...f min=... max=... | avgInterval=...f min=... max=...`
+- `Dynamic state cadence mesh: avgInterval=...f min=... max=...`
+
+Decision rules:
+1. If callback latency/interval is ~20–30 frames at 70–80 FPS, the serial pending gate directly explains the ~330 ms stepping; next experiment should pipeline multiple staging canvases/readbacks rather than alter physics dt.
+2. If callback latency is only ~1–2 frames but mesh interval is large, inspect callback-to-ready/apply scheduling.
+3. If callback and mesh intervals are both ~1–2 frames despite visible stepping, investigate `alterVertices()` visibility/synchronization or quantization in the staging/readback values.
+4. Do not tune rain forces, speed constants, or integration dt until the cadence path is isolated.
