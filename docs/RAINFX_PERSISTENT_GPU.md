@@ -1960,3 +1960,68 @@ New diagnostic:
 Decision:
 - If 256/256 area-weighted samples map and visually follow the visor curvature, Stage 2 static UV->3D surface mapping is complete.
 - Do not try to remove seam islands from the geometry lookup yet. Production-valid droplet positions are ultimately defined by persistent state + boundary mask, so filtering should be aligned with that authoritative domain rather than inferred from arbitrary UV island placement.
+
+
+### 40. Dynamic surface Stage 2 completion + Stage 3 persistent-state readback (2026-09-26)
+
+Runtime comparison after removing a detached/seam UV region from the KN5:
+- previous bbox sampler, before area-weighted Stage 2 visualization:
+  - UV bounds U=0.001805..0.999791
+  - V=-0.670310..-0.392184
+  - lookup self-test 18843/18843 (100.000%)
+  - bbox samples 186/256 mapped, 70 outside surface
+- latest area-weighted Stage 2:
+  - summed triangle UV area = 0.203867
+  - bbox UV area = 0.277566
+  - summed area / bbox = 73.448%
+  - lookup self-test 18843/18843 (100.000%)
+  - 256/256 area-weighted surface samples mapped, 0 lookup misses
+- visually, all 256 diagnostic points follow the visor surface with useful density.
+
+Interpretation:
+- the detached seam UV region materially enlarged the old global bbox and reduced bbox rejection hit rate.
+- Stage 2 UV -> KN5 3D surface mapping is considered complete.
+- the regular rows/gaps visible in the current 256-point diagnostic are not production spawn behavior; they come from the deterministic area-stratified diagnostic sampler and triangle ordering.
+- production positions remain authoritative in the persistent GPU state and use boundary-mask rejection sampling.
+
+Density reference:
+- using summed visor UV triangle area A ~= 0.203867 and N=256, a simple characteristic area-cell scale is:
+  `sqrt(A/N) ~= 0.02822 UV`
+- using the calibrated `1 mm = 0.0029296875 UV`, this is about 9.63 mm equivalent spacing.
+- this is only a density scale, not a hard minimum center distance; real droplets may overlap/merge and production should not be forced into a regular grid.
+
+Stage 3 architecture implemented:
+1. Persistent physics remains on the existing GPU state textures.
+2. A 4N x 1 `R32FLOAT` staging canvas exports only renderer-required values:
+   - segment 0: U
+   - segment 1: signed V encoded as V+1 into 0..1
+   - segment 2: physical radius UV
+   - segment 3: alive flag
+3. Staging texture is read asynchronously with `ui.ExtraCanvas:accessData()`.
+4. CPU uses documented `ui.ExtraCanvasData:floatValue(x,y)` to read the R32FLOAT scalars.
+5. Callback only stores scalars into reusable Lua arrays.
+6. The render callback maps each live UV through the validated triangle lookup, rebuilds its four quad vertices, and calls `SceneReference:alterVertices()`.
+7. Dead or unmappable states are collapsed to degenerate vertices.
+8. The existing diagnostic quad shader is retained for this first integration so the test isolates state->geometry motion from final optical shading.
+
+SDK reference validation:
+- CSP public Lua SDK documents `ExtraCanvas:accessData(callback)` as asynchronous GPU->CPU download, typically around 0.15 ms.
+- `ui.ExtraCanvasData:floatValue()` is the documented accessor for R32FLOAT textures.
+- `render.TextureFormat.R32.Float` is present in the public render enum.
+- `SceneReference:alterVertices(vertices)` is present in the public scene API.
+- direct CPU reading of the existing R32G32B32A32.Float state texture was deliberately avoided because the documented `color()` accessor is for RGBA8888, not float4 textures.
+
+Stage 3 runtime switch:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = false`
+- enable it to render actual persistent state through the dynamic mesh path.
+- keep `RAIN_DYNAMIC_SURFACE_TEST_ENABLED = false` while testing Stage 3.
+
+Expected first logs:
+- `Dynamic state readback initialized: 256 drops / 1024 R32FLOAT scalars`
+- `Dynamic state first mesh update: X live drops mapped, Y surface lookup misses`
+
+Stage 3 validation goals:
+- visible diagnostic quads should match persistent GPU positions and physical radii.
+- quads should move continuously with the already-validated persistent physics.
+- surface lookup misses should normally be zero for boundary-mask-valid live positions.
+- FPS and any visible one-frame readback latency should be measured before replacing the diagnostic shader with final droplet optics.
