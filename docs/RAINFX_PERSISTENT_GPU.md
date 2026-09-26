@@ -2310,3 +2310,51 @@ Recommended next physics validation:
 - compare isolated gravity, isolated inertia and isolated airflow with physical-size visibility
 - priority is not another broad directional test; it is determining whether small-vs-large ordering matches the equations above
 - only after that distinction should `RAIN_FLOW_SPEED_SCALE` or the physical max-speed calibration be tuned
+
+
+### 40. Dynamic renderer Stage 3 — diagnostic shader scope and size-dependent physics review (2026-09-26)
+
+Renderer-path clarification:
+- Stage 3 must be tested with `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`.
+- The live dynamic-mesh branch does not currently execute `shaders/rainVisorScreen.hlsl`.
+- Stage 2 static mapping and Stage 3 live-state rendering intentionally share a lightweight inline pixel shader.
+- That shader has been renamed from `RAIN_DYNAMIC_SURFACE_TEST_HLSL` to `RAIN_DYNAMIC_SURFACE_DIAGNOSTIC_HLSL` because it is not limited to Stage 2.
+- The current circular clip is therefore a Stage 2/3 geometry/physical-radius diagnostic only, not the final water optics.
+- Final dynamic-mesh optics should use a dedicated dynamic-drop HLSL stage/file rather than silently modifying the canonical fullscreen `rainVisorScreen.hlsl` path.
+
+Validated readback/cadence state:
+- async GPU->CPU latency: fixed ~10 frames on the tested CSP build
+- ring-buffered callback interval: 1 frame
+- mesh alterVertices interval: 1 frame
+- no visible snapshot jumps or correction jumps were observed in testing
+- Stage 3 live state/lifecycle/motion is therefore considered functionally validated for renderer architecture work
+
+Size-dependent physics review:
+- Physical diameter distribution remains 0.5–6.0 mm.
+- Adhesion is currently:
+  `adhesion = adhesionBase / sqrt(mass)`
+  so larger/more massive drops have a lower motion threshold.
+- Surface max speed remains:
+  `Vmax(D) = Vmax_1mm * D^0.67`
+  so larger drops have a higher permitted terminal surface speed.
+- These two terms explain the previously validated gravity-only and inertia-only observation that larger drops begin moving more readily and can move faster.
+- Airflow is currently derived from spherical-drop SI drag:
+  `Fdrag = 0.5 * rho * v^2 * Cd * area * incidence`,
+  followed by `a = Fdrag / mass`.
+  With area ~ D^2 and mass ~ D^3, the airflow acceleration term scales approximately as 1/D before adhesion and max-speed effects.
+- Therefore, once the airflow term dominates and multiple sizes have already crossed adhesion, smaller drops can receive larger instantaneous airflow acceleration even though larger drops still have lower adhesion and a higher speed ceiling.
+- This explains the current observation that small drops can appear faster in combined-force driving while earlier gravity-only/inertia-only tests showed the opposite ordering.
+
+Physical interpretation:
+- The current airflow formulation is internally consistent with a free-body drag/mass acceleration model, but a sessile/sliding windshield droplet is not a free spherical particle.
+- Real onset is strongly controlled by contact-line retention/contact-angle hysteresis. Aerodynamic forcing and retention scale differently with drop size, so the current 1/D airflow acceleration must not yet be treated as a final validated size law for attached visor droplets.
+- Do not retune gravity or inertia based on the combined-force observation; those modes were independently validated.
+- Do not change `RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM` or `RAIN_FLOW_SPEED_SCALE` yet. They remain calibration parameters pending dedicated airflow-size validation.
+
+Next physics validation priority:
+1. preserve validated gravity-only and inertia-only behavior,
+2. isolate airflow-only using controlled equal-position/equal-normal test droplets of selected diameters,
+3. measure both threshold-crossing order and post-threshold velocity growth,
+4. decide whether attached-droplet airflow should remain force/mass based or use a retention-relative/effective surface-drive model,
+5. only then tune `RAIN_FLOW_SPEED_SCALE` / 1 mm speed calibration.
+
