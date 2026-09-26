@@ -2104,3 +2104,51 @@ Next validation target:
 - mesh `avgInterval` should similarly approach approximately 1 frame.
 - visually, droplet translation should become continuous at the game render cadence while remaining delayed by the pipeline latency.
 - record FPS because the new architecture intentionally trades several tiny in-flight readbacks for high update cadence.
+
+
+### 40. Dynamic mesh Stage 3 cadence diagnosis and Stage 3.1 prediction smoothing (2026-09-26)
+
+Runtime cadence validation:
+- callback latency: exactly 10 frames
+- callback interval: exactly 10 frames
+- mesh update interval: exactly 10 frames
+- measured log remained stable:
+  - `Dynamic state cadence callback: avgLatency=10.00f min=10 max=10 | avgInterval=10.00f min=10 max=10`
+  - `Dynamic state cadence mesh: avgInterval=10.00f min=10 max=10`
+
+Interpretation:
+- the persistent GPU physics itself is not running at 10-frame cadence; prior motion tests showed correct dt-dependent displacement and force direction
+- the visible stepping is caused by the asynchronous GPU->CPU readback delivery cadence
+- a multi-slot/ring-buffer readback path was already active during this measurement, so serial `pending` blocking is not the remaining cause
+- therefore the renderer must not depend on fresh CPU readback arriving every render frame
+
+Stage 3.1 renderer policy:
+- treat each GPU readback as an authoritative snapshot, not as the per-frame rendered position
+- keep the actual physics simulation on GPU
+- extend the R32FLOAT staging ABI from 4 to 6 scalars per droplet:
+  1. U
+  2. encoded V
+  3. encoded velocity U
+  4. encoded velocity V
+  5. radius
+  6. alive flag
+- for 256 drops the staging canvas is now 1536x1 R32FLOAT
+
+Velocity encoding:
+- signed state velocity is encoded around 0.5 because the documented `ExtraCanvasData:floatValue()` path is treated as a normalized scalar transport
+- current encode range: +/-0.125 UV/s
+- this is comfortably above the current physical max-speed model (including the 6 mm upper drop size)
+
+Prediction:
+- each readback slot records the local render-clock time when its GPU snapshot was requested
+- when the snapshot eventually arrives, CPU stores U/V/velocity/radius/alive plus that original snapshot time
+- every render frame:
+  `predictedUV = snapshotUV + snapshotVelocity * elapsedTime`
+- prediction elapsed time is capped by `RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS` (currently 0.35 s) so a stalled readback cannot extrapolate indefinitely
+- `alterVertices()` is now called every render frame after the first valid snapshot, instead of only when a new callback arrives
+
+Expected validation:
+- callback cadence may remain exactly 10 frames; that is acceptable
+- mesh cadence diagnostic should move from 10 frames toward 1 frame
+- visually, droplets should move smoothly at render FPS rather than stepping every callback
+- if force direction changes sharply between snapshots, the next authoritative GPU snapshot may still produce a small correction; evaluate that separately before adding any correction blending
