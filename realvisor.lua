@@ -4871,6 +4871,12 @@ end
 --------------------------------------------------------
 -- Dynamic mesh renderer experiment: Stage 2
 --
+-- Shared Stage 2/3 diagnostic pixel shader. Stage 2 validates static
+-- UV->surface geometry; Stage 3 uses the same primitive shader while its
+-- vertices come from live persistent GPU state. This is intentionally NOT
+-- the final optical RainFX shader (shaders/rainVisorScreen.hlsl remains the
+-- canonical fullscreen path until the dynamic optical shader is designed).
+--
 -- Replace the synthetic curved surface from Stage 1.1 with the actual
 -- GLASS_EXT_DUMMY KN5 mesh. getVertices()/getIndices() are called once,
 -- then a UV-space bucket index is built for CPU barycentric lookup.
@@ -4879,7 +4885,7 @@ end
 -- deterministic UV samples to validate the geometry mapping in isolation.
 --------------------------------------------------------
 
-local RAIN_DYNAMIC_SURFACE_TEST_HLSL = [[
+local RAIN_DYNAMIC_SURFACE_DIAGNOSTIC_HLSL = [[
 float4 main(PS_IN pin)
 {
     // Stage 2/3 geometry diagnostic:
@@ -6113,7 +6119,7 @@ render.on('main.track.transparent', function()
 
         render.mesh({
             mesh = rainDynamicSurfaceMesh,
-            shader = RAIN_DYNAMIC_SURFACE_TEST_HLSL
+            shader = RAIN_DYNAMIC_SURFACE_DIAGNOSTIC_HLSL
         })
 
         return
