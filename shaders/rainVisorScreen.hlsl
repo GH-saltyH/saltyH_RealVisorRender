@@ -149,7 +149,7 @@ float2 rainDebugProjectWorldVector(float3 forceWorld, float3 normalWorld)
     float3 vWorld = normalize(mul(v, (float3x3)gRainObjectToWorld));
 
     return float2(
-        -dot(forceWorld, uWorld),
+        dot(forceWorld, uWorld),
         dot(forceWorld, vWorld)
     );
 }

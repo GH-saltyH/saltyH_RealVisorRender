@@ -783,7 +783,7 @@ local rainStateUpdateParams = {
             float3 uWorld = normalize(mul(u, (float3x3)gRainObjectToWorld));
             float3 vWorld = normalize(mul(v, (float3x3)gRainObjectToWorld));
 
-            return float2(-dot(forceWorld, uWorld), dot(forceWorld, vWorld));
+            return float2(dot(forceWorld, uWorld), dot(forceWorld, vWorld));
         }
 
         /*
@@ -4744,7 +4744,7 @@ render.on('main.track.transparent', function()
                     or -9.81
                 ),
 
-            gRainAirVelocityWorld:set(
+            gRainAirVelocityWorld = vec3(
                 -ac.getCar(0).velocity.x,
                 -ac.getCar(0).velocity.y,
                 -ac.getCar(0).velocity.z
