@@ -1669,3 +1669,68 @@ That stage will separately measure readback latency, CPU update cost, dynamic ve
 ### 33.6 Current decision
 
 Do not merge this branch into `feature-RainFXPersistentGPU` yet. The branch is an isolated renderer research branch. Integration is considered only after the dynamic mesh renderer is validated against the canonical renderer for visual correctness, frame-time impact, latency, and lifecycle behavior.
+
+## 34. Dynamic Mesh Renderer — Stage 1.1 visor hierarchy + curved surface — 2026-09-26
+
+Stage 1 runtime measurement established that the static 256-quad geometry path is materially cheaper than the canonical fullscreen renderer. The next experiment therefore moves only the geometry placement; persistent GPU physics remains unchanged.
+
+### 34.1 Stage 1 measurement
+
+Under the same 4K visor/fullscreen conditions:
+
+| Renderer | Observed FPS |
+|---|---:|
+| Canonical fullscreen RainFX, Debug 0 / State 6 | 56 |
+| Dynamic mesh test, 256 quads | 77 |
+
+This is a renderer-path comparison only. The dynamic test did not yet consume persistent GPU state.
+
+### 34.2 Hierarchy correction
+
+The first dynamic test created the mesh under ac.emptySceneReference(). The mesh was therefore independent of the RealVisor camera/visor hierarchy.
+
+The test now creates:
+
+cameraAnchor → cameraRoot → offsetNode → motionNode → scaleNode → axisPitchNode → axisYawNode → axisRollNode → rainDynamicMeshTestNode → dynamic mesh
+
+This makes the experimental mesh inherit the same camera position, offset, motion, scale and profile axis corrections as the loaded visor.
+
+The canonical RainFX renderer still uses rainTargetMesh:getWorldTransformationRaw() and is unchanged.
+
+### 34.3 Curved geometry test
+
+A flat test plane is no longer sufficient for the next visual check because the eventual droplet geometry must follow the three-dimensional visor surface. Stage 1.1 therefore replaces the flat quad grid with a simple two-axis curved surface:
+
+z = baseZ + curvatureX * x² + curvatureY * y²
+
+Current diagnostic defaults:
+
+- CURVATURE_X = 0.90
+- CURVATURE_Y = 0.35
+- Z = -0.020
+
+These curvature values are test geometry only. They are not claimed to reproduce the KN5 visor surface accurately.
+
+### 34.4 Important API boundary
+
+The repository currently contains no existing Lua implementation that extracts the vertex positions of rainTargetMesh and copies them into a custom ac.VertexBuffer. The reviewed public API confirms dynamic vertex-buffer creation and alterVertices(), but no existing project code provides a verified rainTargetMesh → VertexBuffer extraction path.
+
+Therefore Stage 1.1 deliberately does not invent such an API. The next architectural question is whether an authoritative visor-surface position mapping can be obtained through a documented CSP API, or whether a separately generated calibrated surface representation is required.
+
+### 34.5 What this experiment must establish
+
+With the test enabled, verify:
+
+1. The 256-quad mesh is visible.
+2. It follows head/camera movement and profile pitch/yaw/roll exactly with the visor.
+3. Its curvature is visibly three-dimensional rather than a flat screen plane.
+4. The mesh can be placed near the visor surface without depending on fullscreen rasterization.
+5. FPS remains comparable to the 77 FPS Stage 1 baseline.
+
+Do not tune RainFX physics during this test.
+
+### 34.6 Final geometry direction
+
+If Stage 1.1 succeeds, the final renderer should not assume a single flat plane. Each droplet quad should be positioned on the visor surface and oriented from the local surface tangent/normal frame. The persistent state already provides visor UV position and physical radius; the remaining renderer-side problem is converting those UV positions into accurate local 3D surface positions.
+
+This is a geometry-mapping problem, separate from the persistent GPU physics model.
