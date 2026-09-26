@@ -2152,3 +2152,27 @@ Expected validation:
 - mesh cadence diagnostic should move from 10 frames toward 1 frame
 - visually, droplets should move smoothly at render FPS rather than stepping every callback
 - if force direction changes sharply between snapshots, the next authoritative GPU snapshot may still produce a small correction; evaluate that separately before adding any correction blending
+
+
+### 40. Dynamic mesh Stage 3 — pipelined readback cadence validated (2026-09-26)
+
+Runtime validation after persistent GPU state was connected to the dynamic visor mesh:
+
+Observed cadence:
+- readback callback latency: avg 10.00 frames, min 10, max 10
+- callback delivery interval: avg 1.00 frame, min 1, max 1
+- mesh update interval: avg 1.00 frame, min 1, max 1
+- the same 1-frame callback/mesh cadence was confirmed in both the immediately previous test build and the current build
+- no visible snapshot correction jump or compensation jump was observed in either test
+
+Interpretation:
+- one GPU -> CPU readback result arrives about 10 frames after its source state was submitted
+- requests are successfully pipelined, so after pipeline fill a new delayed snapshot is delivered every frame
+- therefore the renderer has a fixed state age of roughly 10 frames but does not have a 10-frame stepping cadence
+- at the measured 70–80 FPS this corresponds to roughly 125–143 ms of state age while vertex positions themselves can still update every ~12.5–14.3 ms
+
+Decision:
+- Stage 3 cadence is considered validated
+- do not add prediction/extrapolation yet: it would add correction complexity while the current fixed latency produced no visually identifiable snapping in repeated testing
+- preserve the pipelined async readback architecture
+- next renderer stage should focus on replacing the diagnostic square shader/appearance with the actual droplet visual path while preserving this cadence and rechecking FPS
