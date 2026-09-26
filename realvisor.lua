@@ -4844,6 +4844,25 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
         4
     )
 
+    -- Do not assume the mesh uses the same normalized UV convention as
+    -- the fullscreen RainFX state. The visor's established V range is
+    -- -1..0, so bucket coordinates must be derived from the actual KN5 UVs.
+    local minU = math.huge
+    local maxU = -math.huge
+    local minV = math.huge
+    local maxV = -math.huge
+
+    for i = 1, #vertices do
+        local vertex = vertices:get(i)
+        minU = math.min(minU, vertex.uv.x)
+        maxU = math.max(maxU, vertex.uv.x)
+        minV = math.min(minV, vertex.uv.y)
+        maxV = math.max(maxV, vertex.uv.y)
+    end
+
+    local rangeU = math.max(maxU - minU, 0.0000001)
+    local rangeV = math.max(maxV - minV, 0.0000001)
+
     local buckets = {}
     for i = 1, bucketCount * bucketCount do
         buckets[i] = {}
@@ -4857,6 +4876,24 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
         x = math.max(0, math.min(bucketCount - 1, x))
         y = math.max(0, math.min(bucketCount - 1, y))
         return y * bucketCount + x + 1
+    end
+
+    local function uvToBucketX(u)
+        return math.floor(
+            math.max(
+                0,
+                math.min(bucketCount - 1, ((u - minU) / rangeU) * bucketCount)
+            )
+        )
+    end
+
+    local function uvToBucketY(v)
+        return math.floor(
+            math.max(
+                0,
+                math.min(bucketCount - 1, ((v - minV) / rangeV) * bucketCount)
+            )
+        )
     end
 
     for tri = 0, triangleCount - 1 do
@@ -4879,15 +4916,15 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
         local determinant = du1 * dv2 - du2 * dv1
 
         if math.abs(determinant) > 0.0000001 then
-            local minU = math.min(u0.x, u1.x, u2.x)
-            local maxU = math.max(u0.x, u1.x, u2.x)
-            local minV = math.min(u0.y, u1.y, u2.y)
-            local maxV = math.max(u0.y, u1.y, u2.y)
+            local triMinU = math.min(u0.x, u1.x, u2.x)
+            local triMaxU = math.max(u0.x, u1.x, u2.x)
+            local triMinV = math.min(u0.y, u1.y, u2.y)
+            local triMaxV = math.max(u0.y, u1.y, u2.y)
 
-            local minX = math.floor(math.max(0, math.min(bucketCount - 1, minU * bucketCount)))
-            local maxX = math.floor(math.max(0, math.min(bucketCount - 1, maxU * bucketCount)))
-            local minY = math.floor(math.max(0, math.min(bucketCount - 1, minV * bucketCount)))
-            local maxY = math.floor(math.max(0, math.min(bucketCount - 1, maxV * bucketCount)))
+            local minX = uvToBucketX(triMinU)
+            local maxX = uvToBucketX(triMaxU)
+            local minY = uvToBucketY(triMinV)
+            local maxY = uvToBucketY(triMaxV)
 
             local triangle = {
                 i0 = i0, i1 = i1, i2 = i2,
@@ -4914,6 +4951,12 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
         validTriangleCount = validTriangleCount,
         vertexCount = #vertices,
         indexCount = #indices,
+        minU = minU,
+        maxU = maxU,
+        minV = minV,
+        maxV = maxV,
+        rangeU = rangeU,
+        rangeV = rangeV,
     }
 end
 
@@ -5027,6 +5070,14 @@ local function initializeRainDynamicSurfaceTest()
         .. tostring(rainDynamicSurfaceLookup.validTriangleCount) .. ' valid UV triangles'
     )
 
+    ac.log(
+        appNameDebug
+        .. ' Dynamic surface UV bounds: U='
+        .. string.format('%.6f..%.6f', rainDynamicSurfaceLookup.minU, rainDynamicSurfaceLookup.maxU)
+        .. ' V='
+        .. string.format('%.6f..%.6f', rainDynamicSurfaceLookup.minV, rainDynamicSurfaceLookup.maxV)
+    )
+
     local parent = rainTargetMesh:getParent()
     if not parent or #parent == 0 then
         ac.warn(appNameDebug .. ' Dynamic surface test: rainTargetMesh parent unavailable')
@@ -5048,9 +5099,23 @@ local function initializeRainDynamicSurfaceTest()
     local hitCount, missCount = 0, 0
 
     for i = 0, count - 1 do
-        local u = rainDynamicSurfaceFrac((i + 0.5) * 0.7548776662)
-        local v = rainDynamicSurfaceFrac((i + 0.5) * 0.5698402911)
-        local sample = rainDynamicSurfaceSample(rainDynamicSurfaceLookup, vertices, vec2(u, v))
+        local u01 = rainDynamicSurfaceFrac((i + 0.5) * 0.7548776662)
+        local v01 = rainDynamicSurfaceFrac((i + 0.5) * 0.5698402911)
+
+        -- Sample in the mesh's actual UV domain. In the visor's established
+        -- convention this should naturally produce V values in -1..0.
+        local u =
+            rainDynamicSurfaceLookup.minU
+            + u01 * rainDynamicSurfaceLookup.rangeU
+        local v =
+            rainDynamicSurfaceLookup.minV
+            + v01 * rainDynamicSurfaceLookup.rangeV
+
+        local sample = rainDynamicSurfaceSample(
+            rainDynamicSurfaceLookup,
+            vertices,
+            vec2(u, v)
+        )
 
         if sample then
             hitCount = hitCount + 1
