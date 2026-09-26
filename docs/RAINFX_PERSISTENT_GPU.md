@@ -1863,3 +1863,31 @@ This preserves the raw UV coordinate convention and avoids introducing another h
 Commit: 0ed7deaa92d09fe8194131bcc13c05331dbdd918.
 
 The next run must report the new Dynamic surface UV bounds line. The bounds themselves are now an important diagnostic datum before any further geometry or physics work.
+
+
+### 37. Dynamic surface Stage 2 — UV bucket query normalization fix (2026-09-26)
+
+Runtime after actual KN5 UV-bound sampling:
+- extraction: 14510 vertices / 83262 indices / 27746 valid UV triangles
+- UV bounds: U=-0.001407..0.999791, V=-0.670310..-0.003990
+- result before this fix: 1/256 mapped, 255 outside surface
+- performance remained about 75–80 FPS
+
+Diagnosis:
+- Stage 2 bucket construction had already been corrected to normalize triangle UVs against the extracted KN5 bounds:
+  `(uv - minUV) / rangeUV`.
+- `rainDynamicSurfaceFindTriangle()` still used the old normalized-0..1 assumption:
+  `floor(uv.x * bucketCount)`, `floor(uv.y * bucketCount)`.
+- Because the actual visor V domain is entirely negative, almost every V query was clamped to bucket row 0 while triangles had been inserted into rows normalized over the actual V range.
+- Therefore the 1/256 result did not demonstrate a sparse visor UV island; it was primarily a build/query bucket-coordinate mismatch.
+
+Correction:
+- `rainDynamicSurfaceFindTriangle()` now computes:
+  - `normalizedU = (uv.x - lookup.minU) / lookup.rangeU`
+  - `normalizedV = (uv.y - lookup.minV) / lookup.rangeV`
+- bucket X/Y are derived from those normalized values, matching `rainDynamicSurfaceBuildLookup()`.
+
+Important conclusion:
+- The extracted KN5 data independently confirms the visor uses a negative V domain.
+- Do not replace bbox sampling or add UV-island heuristics until this corrected symmetric bucket mapping is runtime-tested.
+- Next validation criterion: rerun Stage 2 and compare the mapped count against 1/256; visible quads are the secondary confirmation.
