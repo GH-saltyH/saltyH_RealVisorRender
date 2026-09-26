@@ -4871,6 +4871,7 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
     local triangles = {}
     local triangleCount = math.floor(#indices / 3)
     local validTriangleCount = 0
+    local totalUVArea = 0.0
 
     local function bucketIndex(x, y)
         x = math.max(0, math.min(bucketCount - 1, x))
@@ -4926,10 +4927,15 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
             local minY = uvToBucketY(triMinV)
             local maxY = uvToBucketY(triMaxV)
 
+            local uvArea = math.abs(determinant) * 0.5
+            totalUVArea = totalUVArea + uvArea
+
             local triangle = {
                 i0 = i0, i1 = i1, i2 = i2,
                 u0 = u0, u1 = u1, u2 = u2,
                 determinant = determinant,
+                uvArea = uvArea,
+                cumulativeUVArea = totalUVArea,
             }
 
             validTriangleCount = validTriangleCount + 1
@@ -4957,6 +4963,8 @@ local function rainDynamicSurfaceBuildLookup(vertices, indices)
         maxV = maxV,
         rangeU = rangeU,
         rangeV = rangeV,
+        bboxUVArea = rangeU * rangeV,
+        totalUVArea = totalUVArea,
     }
 end
 
@@ -5080,6 +5088,47 @@ local function rainDynamicSurfaceValidateLookup(lookup)
     }
 end
 
+
+local function rainDynamicSurfaceAreaWeightedUV(lookup, sampleIndex, sampleCount)
+    if lookup.totalUVArea <= 0.0 or lookup.validTriangleCount <= 0 then
+        return nil
+    end
+
+    -- Stratify the cumulative UV-area domain so each requested point maps to
+    -- actual visor geometry. The two irrational-style hashes decorrelate the
+    -- within-triangle barycentric position without introducing a visible grid.
+    local areaFraction =
+        (sampleIndex + 0.5) / math.max(sampleCount, 1)
+    local targetArea = areaFraction * lookup.totalUVArea
+
+    local lo, hi = 1, lookup.validTriangleCount
+    while lo < hi do
+        local mid = math.floor((lo + hi) * 0.5)
+        if lookup.triangles[mid].cumulativeUVArea >= targetArea then
+            hi = mid
+        else
+            lo = mid + 1
+        end
+    end
+
+    local triangle = lookup.triangles[lo]
+
+    -- Uniform point over triangle area:
+    -- sqrt(r1) avoids clustering toward u0.
+    local r1 = rainDynamicSurfaceFrac((sampleIndex + 0.5) * 0.7548776662)
+    local r2 = rainDynamicSurfaceFrac((sampleIndex + 0.5) * 0.5698402911)
+    local sr1 = math.sqrt(r1)
+
+    local w0 = 1.0 - sr1
+    local w1 = sr1 * (1.0 - r2)
+    local w2 = sr1 * r2
+
+    return
+        triangle.u0 * w0
+        + triangle.u1 * w1
+        + triangle.u2 * w2
+end
+
 local function rainDynamicSurfaceSample(lookup, vertices, uv)
     local triangle = rainDynamicSurfaceFindTriangle(lookup, uv)
     if not triangle then
@@ -5169,6 +5218,22 @@ local function initializeRainDynamicSurfaceTest()
         .. string.format('%.6f..%.6f', rainDynamicSurfaceLookup.minV, rainDynamicSurfaceLookup.maxV)
     )
 
+    local uvAreaRatio =
+        rainDynamicSurfaceLookup.bboxUVArea > 0.0
+        and rainDynamicSurfaceLookup.totalUVArea / rainDynamicSurfaceLookup.bboxUVArea
+        or 0.0
+
+    ac.log(
+        appNameDebug
+        .. ' Dynamic surface UV area: triangles='
+        .. string.format('%.6f', rainDynamicSurfaceLookup.totalUVArea)
+        .. ' bbox='
+        .. string.format('%.6f', rainDynamicSurfaceLookup.bboxUVArea)
+        .. ' summed-ratio='
+        .. string.format('%.3f', uvAreaRatio * 100.0)
+        .. '%'
+    )
+
     local lookupValidation = rainDynamicSurfaceValidateLookup(rainDynamicSurfaceLookup)
     local lookupAccuracy =
         lookupValidation.total > 0
@@ -5217,23 +5282,23 @@ local function initializeRainDynamicSurfaceTest()
     local hitCount, missCount = 0, 0
 
     for i = 0, count - 1 do
-        local u01 = rainDynamicSurfaceFrac((i + 0.5) * 0.7548776662)
-        local v01 = rainDynamicSurfaceFrac((i + 0.5) * 0.5698402911)
-
-        -- Sample in the mesh's actual UV domain. In the visor's established
-        -- convention this should naturally produce V values in -1..0.
-        local u =
-            rainDynamicSurfaceLookup.minU
-            + u01 * rainDynamicSurfaceLookup.rangeU
-        local v =
-            rainDynamicSurfaceLookup.minV
-            + v01 * rainDynamicSurfaceLookup.rangeV
-
-        local sample = rainDynamicSurfaceSample(
+        -- Stage 2 visual validation should measure surface mapping, not the
+        -- occupancy of a rectangular UV bounding box. Select each diagnostic
+        -- UV directly from valid triangles, weighted by triangle UV area.
+        local uv = rainDynamicSurfaceAreaWeightedUV(
             rainDynamicSurfaceLookup,
-            vertices,
-            vec2(u, v)
+            i,
+            count
         )
+
+        local sample =
+            uv
+            and rainDynamicSurfaceSample(
+                rainDynamicSurfaceLookup,
+                vertices,
+                uv
+            )
+            or nil
 
         if sample then
             hitCount = hitCount + 1
@@ -5284,8 +5349,8 @@ local function initializeRainDynamicSurfaceTest()
         appNameDebug
         .. ' Dynamic surface test initialized: '
         .. tostring(hitCount) .. '/' .. tostring(count)
-        .. ' UV samples mapped, '
-        .. tostring(missCount) .. ' outside surface'
+        .. ' area-weighted surface samples mapped, '
+        .. tostring(missCount) .. ' lookup misses'
     )
 
     return true
