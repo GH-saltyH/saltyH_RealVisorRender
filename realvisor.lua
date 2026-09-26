@@ -51,6 +51,7 @@ local appFolder =
     local rainDynamicMeshTestInitialized = false
 
     -- Stage 2: actual visor surface extraction / UV lookup test.
+    local RAIN_DYNAMIC_SURFACE_MESH_NAME = 'RealVisor_DynamicSurfaceTest'
     local rainDynamicSurfaceVertices = nil
     local rainDynamicSurfaceIndices = nil
     local rainDynamicSurfaceLookup = nil
@@ -67,6 +68,7 @@ local appFolder =
     local rainDynamicStateReadbackReady = false
     local rainDynamicStateReadbackErrorLogged = false
     local rainDynamicStateFirstApplyLogged = false
+    local rainDynamicManualDrawLogged = false
     local rainDynamicStateLatestAcceptedRequestFrame = -1
 
     -- Stage 3 cadence diagnostics. Frame counters only; no per-frame logging.
@@ -5356,6 +5358,25 @@ local function initializeRainDynamicSurfaceTest()
         ac.warn(appNameDebug .. ' Dynamic surface test: rainTargetMesh parent unavailable')
         return false
     end
+
+    -- Dynamic test meshes used to be created with keepAlive=true. That can
+    -- leave old copies attached to the scene after a Lua reload, where they
+    -- are rendered by the normal scene pass using their fallback material.
+    -- Remove all stale copies before creating the renderer-owned mesh.
+    local staleDynamicMeshes =
+        parent:findNodes(RAIN_DYNAMIC_SURFACE_MESH_NAME)
+
+    if staleDynamicMeshes and #staleDynamicMeshes > 0 then
+        local staleCount = #staleDynamicMeshes
+        staleDynamicMeshes:dispose()
+        ac.log(
+            appNameDebug
+            .. ' Dynamic surface cleanup: removed '
+            .. tostring(staleCount)
+            .. ' stale scene mesh reference(s)'
+        )
+    end
+
     rainDynamicSurfaceParent = parent
 
     local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
@@ -5424,11 +5445,11 @@ local function initializeRainDynamicSurfaceTest()
     end
 
     rainDynamicSurfaceMesh = rainDynamicSurfaceParent:createMesh(
-        'RealVisor_DynamicSurfaceTest',
+        RAIN_DYNAMIC_SURFACE_MESH_NAME,
         nil,
         meshVertices,
         meshIndices,
-        true,
+        false,
         false
     )
 
@@ -5436,6 +5457,11 @@ local function initializeRainDynamicSurfaceTest()
         ac.warn(appNameDebug .. ' Dynamic surface test: createMesh() failed')
         return false
     end
+
+    -- This mesh is renderer-owned. Prevent the regular scene/material pass
+    -- from drawing the quad transport geometry; render.mesh() below is the
+    -- only path that should shade it.
+    rainDynamicSurfaceMesh:setVisible(false, false)
 
     ac.log(
         appNameDebug
@@ -6099,10 +6125,25 @@ render.on('main.track.transparent', function()
         render.setCullMode(render.CullMode.None)
         render.setDepthMode(render.DepthMode.ReadOnly)
 
-        render.mesh({
+        local dynamicDrawn = render.mesh({
             mesh = rainDynamicSurfaceMesh,
             shader = rainDynamicDropShader.HLSL
         })
+
+        if not rainDynamicManualDrawLogged then
+            ac.log(
+                appNameDebug
+                .. ' Dynamic drop manual draw: result='
+                .. tostring(dynamicDrawn)
+                .. ' shaderBytes='
+                .. tostring(
+                    rainDynamicDropShader.HLSL
+                    and #rainDynamicDropShader.HLSL
+                    or 0
+                )
+            )
+            rainDynamicManualDrawLogged = true
+        end
 
         return
     end
