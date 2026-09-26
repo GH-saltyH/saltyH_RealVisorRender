@@ -5002,6 +5002,84 @@ local function rainDynamicSurfaceFindTriangle(lookup, uv)
     return best
 end
 
+
+local function rainDynamicSurfaceValidateLookup(lookup)
+    -- Stage 2 accuracy gate:
+    -- generate several guaranteed-inside UV points from every valid triangle
+    -- and feed them back through the same bucket + barycentric lookup path.
+    -- This isolates lookup correctness from random samples that can legitimately
+    -- fall outside the visor UV island.
+    local probeWeights = {
+        { 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0 },
+        { 0.60, 0.20, 0.20 },
+        { 0.20, 0.60, 0.20 },
+    }
+
+    local total = 0
+    local hitCount = 0
+    local missCount = 0
+    local bucketMembershipMiss = 0
+    local containmentMiss = 0
+    local bucketCount = lookup.bucketCount
+
+    local function queryBucketIndex(uv)
+        local normalizedU = (uv.x - lookup.minU) / lookup.rangeU
+        local normalizedV = (uv.y - lookup.minV) / lookup.rangeV
+        local bx = math.max(0, math.min(
+            bucketCount - 1,
+            math.floor(normalizedU * bucketCount)
+        ))
+        local by = math.max(0, math.min(
+            bucketCount - 1,
+            math.floor(normalizedV * bucketCount)
+        ))
+        return by * bucketCount + bx + 1
+    end
+
+    for triangleIndex = 1, lookup.validTriangleCount do
+        local triangle = lookup.triangles[triangleIndex]
+
+        for probeIndex = 1, #probeWeights do
+            local weights = probeWeights[probeIndex]
+            local uv =
+                triangle.u0 * weights[1]
+                + triangle.u1 * weights[2]
+                + triangle.u2 * weights[3]
+
+            total = total + 1
+
+            local bucket = lookup.buckets[queryBucketIndex(uv)]
+            local expectedTrianglePresent = false
+            for candidateIndex = 1, #bucket do
+                if bucket[candidateIndex] == triangleIndex then
+                    expectedTrianglePresent = true
+                    break
+                end
+            end
+
+            local found = rainDynamicSurfaceFindTriangle(lookup, uv)
+            if found then
+                hitCount = hitCount + 1
+            else
+                missCount = missCount + 1
+                if expectedTrianglePresent then
+                    containmentMiss = containmentMiss + 1
+                else
+                    bucketMembershipMiss = bucketMembershipMiss + 1
+                end
+            end
+        end
+    end
+
+    return {
+        total = total,
+        hitCount = hitCount,
+        missCount = missCount,
+        bucketMembershipMiss = bucketMembershipMiss,
+        containmentMiss = containmentMiss,
+    }
+end
+
 local function rainDynamicSurfaceSample(lookup, vertices, uv)
     local triangle = rainDynamicSurfaceFindTriangle(lookup, uv)
     if not triangle then
@@ -5090,6 +5168,33 @@ local function initializeRainDynamicSurfaceTest()
         .. ' V='
         .. string.format('%.6f..%.6f', rainDynamicSurfaceLookup.minV, rainDynamicSurfaceLookup.maxV)
     )
+
+    local lookupValidation = rainDynamicSurfaceValidateLookup(rainDynamicSurfaceLookup)
+    local lookupAccuracy =
+        lookupValidation.total > 0
+        and (lookupValidation.hitCount / lookupValidation.total) * 100.0
+        or 0.0
+
+    ac.log(
+        appNameDebug
+        .. ' Dynamic surface lookup self-test: '
+        .. tostring(lookupValidation.hitCount) .. '/'
+        .. tostring(lookupValidation.total)
+        .. ' guaranteed-inside probes mapped ('
+        .. string.format('%.3f', lookupAccuracy) .. '%), '
+        .. tostring(lookupValidation.missCount) .. ' missed'
+    )
+
+    if lookupValidation.missCount > 0 then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic surface lookup self-test misses: '
+            .. tostring(lookupValidation.bucketMembershipMiss)
+            .. ' bucket-membership / '
+            .. tostring(lookupValidation.containmentMiss)
+            .. ' containment'
+        )
+    end
 
     local parent = rainTargetMesh:getParent()
     if not parent or #parent == 0 then
