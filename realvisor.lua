@@ -87,8 +87,14 @@ local appFolder =
 
     local rainDynamicStateU = {}
     local rainDynamicStateV = {}
+    local rainDynamicStateVelocityU = {}
+    local rainDynamicStateVelocityV = {}
     local rainDynamicStateRadius = {}
     local rainDynamicStateAlive = {}
+    local rainDynamicStateHasSnapshot = false
+    local rainDynamicStateSnapshotTime = 0.0
+    local rainDynamicStateRenderClock = 0.0
+    local rainDynamicStateRenderClockFrame = -1
 
     
     --------------------------------------------------------
@@ -357,6 +363,8 @@ local cfg = scriptSettings:mapConfig({
         -- Stage 3: render the actual persistent GPU droplet positions through
         -- the validated KN5 UV -> 3D mapping using asynchronous readback.
         RAIN_DYNAMIC_SURFACE_STATE_ENABLED = false,
+        RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
+        RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
 
         -- accessData() currently returns with a measured fixed ~10-frame
         -- latency on the target CSP build. Keep more slots than that latency
@@ -5408,8 +5416,10 @@ end
 -- only the renderer ABI required by the CPU:
 --   [0..N)     U
 --   [N..2N)    V encoded as V + 1 (signed visor V is -1..0)
---   [2N..3N)   physical radius in UV
---   [3N..4N)   alive flag (1 only for lifecycle state == alive)
+--   [2N..3N)   velocity U encoded around 0.5
+--   [3N..4N)   velocity V encoded around 0.5
+--   [4N..5N)   physical radius in UV
+--   [5N..6N)   alive flag (1 only for lifecycle state == alive)
 --
 -- accessData() is asynchronous. The callback only copies scalar values into
 -- Lua arrays; alterVertices() is applied from the render callback afterwards.
@@ -5426,7 +5436,7 @@ SamplerState samPointRain {
 float4 main(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
-    float total = count * 4.0;
+    float total = count * 6.0;
     float slot = min(floor(pin.Tex.x * total), total - 1.0);
     float channel = floor(slot / count);
     float index = slot - channel * count;
@@ -5435,6 +5445,7 @@ float4 main(PS_IN pin)
     float4 state = txRainState.SampleLevel(samPointRain, suv, 0.0);
     float4 meta = txRainStateMeta.SampleLevel(samPointRain, suv, 0.0);
 
+    float velocityRange = max(gRainStateVelocityEncodeRange, 0.000001);
     float value = 0.0;
 
     if (channel < 0.5) {
@@ -5443,6 +5454,10 @@ float4 main(PS_IN pin)
         // Encode signed visor V (-1..0) into documented 0..1 CPU scalar range.
         value = saturate(state.g + 1.0);
     } else if (channel < 2.5) {
+        value = saturate(0.5 + state.b / (2.0 * velocityRange));
+    } else if (channel < 3.5) {
+        value = saturate(0.5 + state.a / (2.0 * velocityRange));
+    } else if (channel < 4.5) {
         value = max(meta.r, 0.0);
     } else {
         // Renderer only needs visibility, not the complete lifecycle enum.
@@ -5471,10 +5486,12 @@ local function initializeRainDynamicStateReadback()
     rainDynamicStateReadbackNextSlot = 1
     rainDynamicStateReadbackReady = false
     rainDynamicStateLatestAcceptedRequestFrame = -1
+    rainDynamicStateHasSnapshot = false
+    rainDynamicStateSnapshotTime = 0.0
 
     for slotIndex = 1, ringSize do
         local canvas = ui.ExtraCanvas(
-            vec2(count * 4, 1),
+            vec2(count * 6, 1),
             1,
             render.TextureFormat.R32.Float
         ):setName(
@@ -5496,6 +5513,7 @@ local function initializeRainDynamicStateReadback()
             canvas = canvas,
             pending = false,
             requestFrame = -1,
+            requestTime = 0.0,
             params = {
                 textures = {
                     txRainState = false,
@@ -5503,6 +5521,8 @@ local function initializeRainDynamicStateReadback()
                 },
                 values = {
                     gRainStateCount = count,
+                    gRainStateVelocityEncodeRange =
+                        cfg.RUNTIME.RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE,
                 },
                 shader = RAIN_DYNAMIC_STATE_READBACK_HLSL,
             },
@@ -5531,12 +5551,23 @@ local function initializeRainDynamicStateReadback()
         .. ' Dynamic state readback initialized: '
         .. tostring(count)
         .. ' drops / '
-        .. tostring(count * 4)
+        .. tostring(count * 6)
         .. ' R32FLOAT scalars / ring='
         .. tostring(ringSize)
     )
 
     return true
+end
+
+local function updateRainDynamicStateRenderClock(sim)
+    if not sim or sim.frame == rainDynamicStateRenderClockFrame then
+        return
+    end
+
+    rainDynamicStateRenderClockFrame = sim.frame
+    rainDynamicStateRenderClock =
+        rainDynamicStateRenderClock
+        + math.max(sim.dt or 0.0, 0.0)
 end
 
 local function requestRainDynamicStateReadback()
@@ -5590,7 +5621,10 @@ local function requestRainDynamicStateReadback()
     slot.params.textures.txRainState = state
     slot.params.textures.txRainStateMeta = meta
     slot.params.values.gRainStateCount = count
+    slot.params.values.gRainStateVelocityEncodeRange =
+        cfg.RUNTIME.RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE
     slot.requestFrame = requestFrame
+    slot.requestTime = rainDynamicStateRenderClock
 
     slot.canvas:updateWithShader(slot.params)
 
@@ -5694,24 +5728,35 @@ local function requestRainDynamicStateReadback()
 
         rainDynamicStateLatestAcceptedRequestFrame = sourceRequestFrame
 
+        local velocityRange =
+            cfg.RUNTIME.RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE
+
         for i = 0, count - 1 do
             local dst = i + 1
             rainDynamicStateU[dst] =
                 data:floatValue(i, 0)
             rainDynamicStateV[dst] =
                 data:floatValue(count + i, 0) - 1.0
+            rainDynamicStateVelocityU[dst] =
+                (data:floatValue(count * 2 + i, 0) - 0.5)
+                * 2.0 * velocityRange
+            rainDynamicStateVelocityV[dst] =
+                (data:floatValue(count * 3 + i, 0) - 0.5)
+                * 2.0 * velocityRange
             rainDynamicStateRadius[dst] =
-                data:floatValue(count * 2 + i, 0)
+                data:floatValue(count * 4 + i, 0)
             rainDynamicStateAlive[dst] =
-                data:floatValue(count * 3 + i, 0)
+                data:floatValue(count * 5 + i, 0)
         end
 
+        rainDynamicStateSnapshotTime = slot.requestTime
+        rainDynamicStateHasSnapshot = true
         rainDynamicStateReadbackReady = true
     end)
 end
 
 local function applyRainDynamicStateToSurfaceMesh()
-    if not rainDynamicStateReadbackReady
+    if not rainDynamicStateHasSnapshot
         or not rainDynamicSurfaceMesh
         or not rainDynamicSurfaceMeshVertices
         or not rainDynamicSurfaceLookup
@@ -5720,6 +5765,7 @@ local function applyRainDynamicStateToSurfaceMesh()
         return
     end
 
+    local hadFreshSnapshot = rainDynamicStateReadbackReady
     rainDynamicStateReadbackReady = false
 
     local applySim = ac.getSim()
@@ -5777,6 +5823,14 @@ local function applyRainDynamicStateToSurfaceMesh()
     local surfaceOffset = cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
     local mappedAlive = 0
     local lookupMisses = 0
+    local predictionAge = math.max(
+        rainDynamicStateRenderClock - rainDynamicStateSnapshotTime,
+        0.0
+    )
+    predictionAge = math.min(
+        predictionAge,
+        cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS
+    )
 
     for i = 0, meshCount - 1 do
         local vertexIndex = i * 4 + 1
@@ -5789,8 +5843,12 @@ local function applyRainDynamicStateToSurfaceMesh()
 
         if active then
             local uv = vec2(
-                rainDynamicStateU[i + 1] or 0.0,
-                rainDynamicStateV[i + 1] or -1.0
+                (rainDynamicStateU[i + 1] or 0.0)
+                    + (rainDynamicStateVelocityU[i + 1] or 0.0)
+                    * predictionAge,
+                (rainDynamicStateV[i + 1] or -1.0)
+                    + (rainDynamicStateVelocityV[i + 1] or 0.0)
+                    * predictionAge
             )
             radiusUV = rainDynamicStateRadius[i + 1] or 0.0
             sample = rainDynamicSurfaceSample(
@@ -5867,7 +5925,9 @@ local function applyRainDynamicStateToSurfaceMesh()
             .. tostring(mappedAlive)
             .. ' live drops mapped, '
             .. tostring(lookupMisses)
-            .. ' surface lookup misses'
+            .. ' surface lookup misses / predictionAge='
+            .. string.format('%.4f', predictionAge)
+            .. 's'
         )
         rainDynamicStateFirstApplyLogged = true
     end
@@ -5981,6 +6041,7 @@ render.on('main.track.transparent', function()
             return
         end
 
+        updateRainDynamicStateRenderClock(sim)
         requestRainDynamicStateReadback()
         applyRainDynamicStateToSurfaceMesh()
 
