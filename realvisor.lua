@@ -4962,8 +4962,21 @@ end
 
 local function rainDynamicSurfaceFindTriangle(lookup, uv)
     local bucketCount = lookup.bucketCount
-    local bx = math.max(0, math.min(bucketCount - 1, math.floor(uv.x * bucketCount)))
-    local by = math.max(0, math.min(bucketCount - 1, math.floor(uv.y * bucketCount)))
+
+    -- BuildLookup stores triangles in buckets normalized against the actual
+    -- extracted KN5 UV bounds. Query coordinates must use the exact same
+    -- mapping (the visor V domain is negative, so uv.y * bucketCount would
+    -- otherwise clamp almost every query to bucket row 0).
+    local normalizedU = (uv.x - lookup.minU) / lookup.rangeU
+    local normalizedV = (uv.y - lookup.minV) / lookup.rangeV
+    local bx = math.max(0, math.min(
+        bucketCount - 1,
+        math.floor(normalizedU * bucketCount)
+    ))
+    local by = math.max(0, math.min(
+        bucketCount - 1,
+        math.floor(normalizedV * bucketCount)
+    ))
     local bucket = lookup.buckets[by * bucketCount + bx + 1]
 
     local best = nil
