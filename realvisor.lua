@@ -395,8 +395,12 @@ local cfg = scriptSettings:mapConfig({
 
         -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
         -- copy debug disabled while testing this branch.
-        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
+        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = false,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0,
+
+        -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
+        -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
+        RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6154,6 +6158,10 @@ render.on('main.root.transparent', function()
             appNameDebug
             .. ' Dynamic drop Stage 4B.2 pre-draw: uvDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG)
+            .. ' refractionDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG)
+            .. ' sceneSourceDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )
@@ -6165,6 +6173,7 @@ render.on('main.root.transparent', function()
         transform = 'original',
         textures = {
             txDynamicScene = 'dynamic::hdr',
+            txDynamicScreen = 'dynamic::screen',
         },
         values = {
             gDynamicDropDebugUV =
@@ -6179,6 +6188,11 @@ render.on('main.root.transparent', function()
 
             gDynamicDropRefractionDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropSceneSourceDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG
                 and 1.0
                 or 0.0,
 

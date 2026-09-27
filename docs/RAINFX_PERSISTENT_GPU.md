@@ -2893,3 +2893,39 @@ flags in the same commit:
 Test this revision using the proven remove-and-restore Lua reload procedure.
 If the original radial refraction appears only after that later reload, the
 next change should address initialization timing rather than optical math.
+
+### 54. Late-reload black footprint + scene-source discriminator (2026-09-27)
+
+Observed with the original Stage 4B.2 implementation after forcing the known
+working late Lua reload:
+- the circular droplet geometry appears
+- its interior is filled with black
+
+This proves that the callback, SceneReference visibility gate, dynamic mesh,
+quad UV, circular clip and refraction branch are executing after the late
+reload. Black is therefore treated as meaningful sampled output, not as a
+generic reload artifact. It strongly suggests that `dynamic::hdr` returns
+zero in this pass or that `pin.ScreenPos` samples an invalid region. The prior
+invisible HDR-copy result is no longer proof of correct scene alignment because
+the newly discovered startup-timing failure could have prevented that draw.
+
+Stage 4B.2D presets the following diagnostic instead of refraction:
+- dynamic surface state enabled
+- UV, HDR-copy and refraction debug disabled
+- scene-source debug enabled
+
+Each clipped circle is split into four texture tests:
+- upper-left: HDR sampled at `pin.ScreenPos`
+- upper-right: LDR `dynamic::screen` sampled at `pin.ScreenPos`
+- lower-left: HDR sampled at fixed UV `(0.5, 0.5)`
+- lower-right: LDR sampled at fixed UV `(0.5, 0.5)`
+- a thin yellow cross identifies the footprint even if every sample is black
+
+Interpretation after the late Lua reload:
+- only fixed-coordinate quadrants show scene color: `pin.ScreenPos` is invalid
+- LDR quadrants work but HDR quadrants are black: use `dynamic::screen` or move
+  the HDR sampling to a compatible render stage
+- all quadrants black around a yellow cross: neither dynamic scene texture is
+  available to this callback/path
+- all quadrants show scene content: restore refraction and focus on coordinate
+  offset math or texture/shader cache timing
