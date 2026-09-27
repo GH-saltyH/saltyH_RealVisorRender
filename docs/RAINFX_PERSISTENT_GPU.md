@@ -2455,3 +2455,94 @@ Diagnostic added:
 Commits:
 - Lua UV-debug switch/render value: 0b2ada91f5698e3d3f45e82b193084a6934b3436
 - Dynamic-drop shader UV visualization: c99fde1842d7730c33df84814a96c34076128e00
+
+
+### 41. Dynamic mesh visibility regression confirmed + render-path discriminator (2026-09-27)
+
+Observed runtime result:
+- With `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` and `RAIN_DYNAMIC_DROP_UV_DEBUG = true`, no dynamic droplets were visible while the dynamically created surface mesh was explicitly hidden with:
+  `rainDynamicSurfaceMesh:setVisible(false, false)`.
+- Re-enabling the same SceneReference with:
+  `rainDynamicSurfaceMesh:setVisible(true, false)`
+  immediately made the square transport droplets visible again.
+
+Confirmed cause:
+- On the target CSP build, `render.mesh({ mesh = <ac.SceneReference>, ... })` still respects the SceneReference visibility flag.
+- Therefore the previous assumption that a hidden scene node could still be drawn manually with `render.mesh()` was wrong.
+- `setVisible(false)` suppressed both the normal attached-scene draw and the explicit custom-shader draw.
+- CSP Lua SDK confirms:
+  - `createMesh()` creates and attaches an `ac.SceneReference` child mesh.
+  - `setVisible()` changes SceneReference visibility.
+  - `render.mesh()` accepts an `ac.SceneReference` and forwards that node reference to the custom-shader mesh renderer.
+
+Correction:
+1. Keep `rainDynamicSurfaceMesh` visible:
+   `rainDynamicSurfaceMesh:setVisible(true, false)`.
+2. Keep `keepAlive=false` and stale-node cleanup so script reloads do not accumulate old dynamic meshes.
+3. Do not yet assume that a visible square proves the custom shader is the visible path. A visible attached mesh can also be drawn by the ordinary scene/material pass.
+4. While `RAIN_DYNAMIC_DROP_UV_DEBUG=true`, force the explicit `render.mesh()` draw to use `render.DepthMode.Off` and the external shader's RG UV gradient.
+   This deliberately makes the manual draw visually dominant over a same-depth fallback scene draw.
+
+Stage 4A discriminator test:
+- Settings:
+  - `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`
+  - `RAIN_DYNAMIC_DROP_UV_DEBUG = true`
+- Expected interpretation:
+  - per-quad red/green UV gradient visible:
+    explicit `render.mesh()` custom-shader path is executing and quad UV interpolation survives createMesh -> alterVertices -> render.mesh.
+  - only black/flat fallback squares visible:
+    attached scene geometry is alive, but the explicit custom-shader draw is not the visible path; investigate render callback/pass ordering or custom mesh draw state.
+  - no geometry visible:
+    visibility/geometry state regressed again before shader diagnosis.
+
+Target mesh vs dynamic mesh architecture:
+- `rainTargetMesh`:
+  - existing KN5 visor surface mesh, currently `GLASS_EXT_DUMMY`.
+  - authoritative source of visor topology, local-space positions, normals, UVs and triangle indices.
+  - extracted once with `getVertices()` / `getIndices()`.
+  - used to build the CPU UV -> 3D surface lookup.
+  - it is NOT one quad per raindrop and is not altered every frame by the dynamic renderer.
+  - the legacy/full-surface RainFX shader path can still render this mesh directly.
+
+- `rainDynamicSurfaceMesh`:
+  - runtime-generated transport mesh created by Lua.
+  - contains `RAIN_GPU_STATE_COUNT * 4` vertices and `RAIN_GPU_STATE_COUNT * 6` indices: one quad per possible persistent droplet.
+  - every live droplet gets four 3D vertices placed on the visor by sampling the target-mesh UV lookup.
+  - every dead/unmapped droplet gets a collapsed zero-area quad.
+  - updated with `alterVertices()` from asynchronous persistent-GPU-state readback.
+  - this is the mesh intended to draw the actual individual droplet footprints in the dynamic renderer.
+
+Data/geometry flow:
+```
+persistent GPU state textures
+        |
+        | async compact readback
+        v
+U, V, velocity, radius, alive
+        |
+        | prediction + UV lookup
+        v
+rainTargetMesh-derived surface lookup
+        |
+        | local 3D center / normal / tangents / meters-per-UV
+        v
+rainDynamicSurfaceMesh vertex buffer
+        |
+        | alterVertices()
+        v
+one quad per live droplet
+        |
+        | render.mesh() + rainVisorDynamicDrop.hlsl
+        v
+visible droplet footprint
+```
+
+Important separation:
+- physics state is owned by the persistent GPU textures.
+- surface shape/mapping information is owned by the original target visor mesh.
+- per-droplet drawable geometry is owned by the dynamic mesh.
+- final per-pixel silhouette/optics are owned by the dynamic-drop shader.
+- changing the dynamic mesh does not change the original visor geometry; it only creates small drawable quads located on that geometry.
+
+Commit:
+- visibility correction + render-path discriminator: faf9658742c64c6fbbffa8eda806070c077c2208
