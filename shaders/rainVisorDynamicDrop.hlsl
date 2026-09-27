@@ -12,7 +12,8 @@
         render the physical-radius quad as a circular diagnostic droplet.
 */
 
-float gDynamicDropDebugUV;
+// gDynamicDropDebugUV is injected by render.mesh({ values = ... }).
+// Do not declare it again here.
 
 float4 main(PS_IN pin)
 {

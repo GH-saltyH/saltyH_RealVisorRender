@@ -2596,3 +2596,17 @@ Expected result:
 
 Commit:
 - root-transparent dynamic draw test: aa114078e2cff776ece7f98315ad2c2c690c9c7a
+
+### 43. Stage 4A — reverse-face black quads after root transparent test (2026-09-27)
+
+Runtime observation with both dynamic surface state and UV debug enabled:
+- Only black squares are visible, and only from the side opposite the surface normal.
+- Moving the explicit draw to `main.root.transparent` did not produce the expected red/green UV gradient.
+
+The black squares are consistent with the attached scene mesh's fallback material, but this observation alone does not establish whether the explicit call failed shader compilation, used the wrong transform, or was otherwise not visible. In particular, moving callback stages did not fix the result; do not treat pass ordering as confirmed.
+
+Two concrete problems in the explicit path were addressed for the next in-game test:
+1. `rainVisorDynamicDrop.hlsl` declared `float gDynamicDropDebugUV;` even though `render.mesh({ values = { gDynamicDropDebugUV = ... } })` provides the value through the shader template. Remove the duplicate HLSL declaration. Future Lua `values` entries must likewise not be redeclared in HLSL.
+2. Add `transform = 'original'` to the explicit `render.mesh()` call. The generated droplet vertices are in the target visor mesh's local coordinate system, and the CSP Lua SDK documents this option for using a scene mesh's original transform.
+
+Next in-game check: keep `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` and `RAIN_DYNAMIC_DROP_UV_DEBUG = true`. Red/green gradient quads on both sides indicate the explicit path is visible. Black quads on one side mean it is still unproven; capture the CSP shader error and the `Dynamic drop root draw` log before selecting another geometry API. `ac.SimpleMesh` in the public SDK describes predefined car/collider/track geometry and has no documented constructor for a custom vertex buffer, so it is not a verified replacement for `createMesh()`/`alterVertices()`.

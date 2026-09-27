@@ -6022,11 +6022,9 @@ end
 -- Stage 4A dynamic droplet final draw
 --
 -- Reference validation:
--- CSP's own debug tooling uses main.root.transparent for render.mesh()
--- diagnostics. Keep the original full-surface RainFX path on
--- main.track.transparent, but draw the runtime droplet transport mesh here so
--- it occurs at the root transparent stage instead of being obscured by a later
--- attached-scene pass.
+-- Draw the runtime droplet mesh at the root transparent stage. The vertices
+-- are in the visor mesh's local coordinates; use the scene mesh's original
+-- transform when drawing it explicitly.
 --------------------------------------------------------
 render.on('main.root.transparent', function()
     if not cfg.RUNTIME.RAIN_ENABLED
@@ -6081,6 +6079,7 @@ render.on('main.root.transparent', function()
 
     local dynamicDrawn = render.mesh({
         mesh = rainDynamicSurfaceMesh,
+        transform = 'original',
         values = {
             gDynamicDropDebugUV =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
