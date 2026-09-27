@@ -307,6 +307,14 @@ float4 main(PS_IN pin)
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
                 0.0).rgb;
+            // Sky color test on the back-facing visor: image-left keeps
+            // GeometryShot; image-right samples the final screen at the
+            // identical normalized UV and displacement. Screen may contain
+            // earlier drops, so this branch is diagnostic only.
+            if (gDynamicDropSkySourceDebug > 0.5 && local.x < 0.0)
+                refractedScene = txDynamicScreen.SampleLevel(
+                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    0.0).rgb;
         }
         else
         {

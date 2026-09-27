@@ -4216,3 +4216,25 @@ case still reserves two quads per drop. The differences indicate whether
 fragment work, CPU trail work or the shared geometry allocation is the
 largest factor; the main clean scene shot remains the same. Do not
 interpret an unpaired 50 vs 69 FPS observation as an isolated GPU cost.
+
+### 118. Paired FPS and sky-source color diagnostic (2026-09-28)
+
+At one fixed camera/weather/time, the user measures A=50–52 FPS (trail
+pixels/CPU on), B=52–54 FPS (pixels off, CPU on) and C=54–56 FPS (trail
+off). Thus the trail pixel branch and its CPU path each correlate with
+roughly two FPS at this particular scene. All three still reserve doubled
+mesh vertices, and the earlier 69–75 FPS was not a paired measurement,
+so do not attribute the remaining difference to one stage yet.
+
+The user also sees a floating sky color with trail pixels off, excluding
+trail color as the sole cause. Set `RAIN_DYNAMIC_DROP_TRAIL_ENABLED=false`
+and `RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG=true` for the next visual test.
+In the refracted body branch, keep the clean nonrecursive GeometryShot on
+the image-left half and sample `dynamic::screen` on the image-right half
+using the same corrected pixel UV and displacement. Keep alpha, outline,
+highlight, size, shadow occlusion and body geometry identical. A shift in
+color only on one half distinguishes source mismatch from optical profile
+and alpha. Previous-frame screen content may recursively show other drops
+and is not a production refraction source; disable this diagnostic after
+the comparison. Inspect the fixed camera with both sky and geometry and
+measure FPS only after restoring the final optical choice.

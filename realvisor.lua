@@ -398,12 +398,14 @@ local cfg = scriptSettings:mapConfig({
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
+        -- Compare the clean GeometryShot against the final screen on sky.
+        RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = true,
         -- Retain force-driven wave code for later optical tuning.
         RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
-        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = true,
+        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.25,
         -- Compare single-sample tangent projection with a second surface lookup.
         RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE = true,
@@ -6614,6 +6616,9 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG
                 and 1.0
                 or 0.0,
+            gDynamicDropSkySourceDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG
+                and 1.0 or 0.0,
 
             gDynamicDropSceneSourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG
