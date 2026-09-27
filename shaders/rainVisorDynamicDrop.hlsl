@@ -30,10 +30,10 @@
         split each circle into HDR/LDR and ScreenPos/fixed-center quadrants to
         distinguish a black texture binding from invalid screen coordinates.
 
-    Stage 4B.2E contract:
-    - gDynamicDropSceneCopyDebug > 0.5:
-        compare direct dynamic::hdr sampling on the left against an offscreen
-        ExtraCanvas copy on the right. Top uses ScreenPos, bottom fixed center.
+    Stage 4B.2F contract:
+    - gDynamicDropScreenUVDebug > 0.5:
+        compare four possible interpretations of mesh.fx ScreenPos using the
+        directly bound HDR scene texture.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -54,28 +54,42 @@ float4 main(PS_IN pin)
 
     clip(1.0 - r);
 
-    if (gDynamicDropSceneCopyDebug > 0.5)
+    if (gDynamicDropScreenUVDebug > 0.5)
     {
-        // Left: direct dynamic::hdr. Right: separate offscreen copy.
-        // Top: pin.ScreenPos. Bottom: fixed screen center.
-        bool useCopy = local.x >= 0.0;
-        bool useScreenPos = local.y < 0.0;
-        float2 sampleUV = useScreenPos
-            ? pin.ScreenPos
-            : float2(0.5, 0.5);
+        float2 raw = pin.ScreenPos.xy;
+        bool right = local.x >= 0.0;
+        bool bottom = local.y >= 0.0;
+        float2 sampleUV;
 
-        float3 directColor = txDynamicScene.SampleLevel(
+        if (!right && !bottom)
+        {
+            // Upper-left: current unmodified interpretation.
+            sampleUV = raw;
+        }
+        else if (right && !bottom)
+        {
+            // Upper-right: treat ScreenPos as SV_POSITION pixel coordinates.
+            sampleUV = raw * gDynamicDropInvScreenSize;
+        }
+        else if (!right && bottom)
+        {
+            // Lower-left: treat ScreenPos as NDC without vertical inversion.
+            sampleUV = raw * 0.5 + 0.5;
+        }
+        else
+        {
+            // Lower-right: treat ScreenPos as NDC with DirectX UV Y inversion.
+            sampleUV = float2(
+                raw.x * 0.5 + 0.5,
+                0.5 - raw.y * 0.5
+            );
+        }
+
+        float3 sampledColor = txDynamicScene.SampleLevel(
             samLinearClamp,
             sampleUV,
             0.0
         ).rgb;
-        float3 copiedColor = txDynamicSceneCopy.SampleLevel(
-            samLinearClamp,
-            sampleUV,
-            0.0
-        ).rgb;
-        float3 sampledColor = useCopy ? copiedColor : directColor;
-
         float separator = saturate(
             1.0
             - smoothstep(0.0, 0.035, min(abs(local.x), abs(local.y)))

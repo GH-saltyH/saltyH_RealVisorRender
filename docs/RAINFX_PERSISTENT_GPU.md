@@ -2980,3 +2980,28 @@ Correction:
   whose locals are counted independently
 - inline the small copy shader at its only call site
 - retain the Stage 4B.2E behavior and preset flags unchanged
+
+### 57. Offscreen copy black + ScreenPos scale discriminator (2026-09-27)
+
+The Stage 4B.2E screenshot and motion test show:
+- upper-left direct HDR changes with scene content but displays a very narrow
+  central region across the whole quadrant
+- lower-left is a flat central-screen color, as expected from deliberately
+  sampling only fixed UV `(0.5, 0.5)`
+- both right-side offscreen-copy quadrants remain black
+- circles are currently viewed from the visor-normal back side; `CullMode.None`
+  intentionally keeps both sides visible and is unrelated to screen UV scale
+
+The copy experiment is removed from the draw path. The black copy could mean
+that `dynamic::hdr` is unavailable in the ExtraCanvas pass or that the copy
+shader returned black; the observation alone does not establish which.
+
+Stage 4B.2F binds only direct HDR and compares four ScreenPos interpretations:
+- upper-left: raw `pin.ScreenPos.xy`
+- upper-right: pixel-coordinate interpretation multiplied by inverse viewport
+- lower-left: NDC mapped with `raw * 0.5 + 0.5`
+- lower-right: NDC mapped to DirectX UV with vertical inversion
+
+The correct quadrant should reproduce the background behind each circle at the
+same location and scale. All other optical/source diagnostics are preset off;
+ScreenPos UV debug is preset on.
