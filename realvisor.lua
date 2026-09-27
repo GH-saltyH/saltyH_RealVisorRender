@@ -295,7 +295,7 @@ local cfg = scriptSettings:mapConfig({
         ------------------------------------------------------------
         RAIN_FORCE_GRAVITY_ENABLED = true,
         RAIN_FORCE_INERTIA_ENABLED = true,
-        RAIN_FORCE_AIRFLOW_ENABLED = true,
+        RAIN_FORCE_AIRFLOW_ENABLED = false,
 
         -- All external accelerations enter the GPU in SI m/s^2 and
         -- share this compact surface-force conversion.
@@ -398,6 +398,10 @@ local cfg = scriptSettings:mapConfig({
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
+        -- Retain force-driven wave code for later optical tuning.
+        RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
+        -- Compare an uneven right-half outline with the circular left half.
+        RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
 
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
@@ -6543,8 +6547,12 @@ float4 main(PS_IN pin)
 
             gDynamicDropRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
+            gDynamicDropShapeDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_DEBUG and 1.0 or 0.0,
             gDynamicDropWaveDirection = waveDirection,
-            gDynamicDropWaveEnvelope = waveState.envelope,
+            gDynamicDropWaveEnvelope =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WAVE_ENABLED
+                and waveState.envelope or 0.0,
             gDynamicDropWavePhase = waveState.phase,
         },
         shader = rainDynamicDropShader.HLSL
@@ -8938,7 +8946,7 @@ function windowMain(dt)
     ui.text('Canonical force-source isolation')
     ui.text('Use STATE_MODE = 3. Test one source at a time, then enable combinations:')
     ui.text('1) Gravity only -> 2) Inertia only -> 3) Gravity + Inertia -> 4) Airflow')
-    ui.text('Airflow is enabled for the combined force and optical-wave test.')
+    ui.text('Airflow is OFF by default; enable it for force tests.')
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
         ui.separator()

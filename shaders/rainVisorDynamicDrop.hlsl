@@ -206,11 +206,26 @@ float4 main(PS_IN pin)
         return float4(sceneColor, 1.0);
     }
 
-    // Reconstruct a hemisphere-like local normal from the circular footprint.
+    // Optical silhouette study: the left half is the approved circle. On
+    // the right, indent two angular bands within the existing quad so the
+    // boundary and the lens profile move together. Fade across the center
+    // seam to keep the two halves connected without new geometry or samples.
+    float footprintScale = 1.0;
+    if (gDynamicDropShapeDebug > 0.5)
+    {
+        float angle = atan2(local.y, local.x);
+        float contour = 0.065 * (0.5 + 0.5 * sin(3.0 * angle + 0.7))
+            + 0.045 * (0.5 + 0.5 * sin(5.0 * angle - 0.9));
+        footprintScale = 1.0 - contour * smoothstep(0.0, 0.35, -local.x);
+        r /= footprintScale;
+        clip(1.0 - r);
+    }
+
+    // Reconstruct a hemisphere-like local normal from the optical footprint.
     // This is an optical profile only: the actual visor surface normal remains
     // owned by the transport mesh and the target-surface lookup.
     float z = sqrt(saturate(1.0 - r * r));
-    float3 dropNormal = normalize(float3(local.x, local.y, z));
+    float3 dropNormal = normalize(float3(local / footprintScale, z));
 
     float fresnel = pow(saturate(1.0 - z), 2.4);
 

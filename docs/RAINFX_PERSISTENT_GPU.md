@@ -4063,3 +4063,21 @@ own radius; a shared car-forward estimate can therefore differ in incidence
 and strength. Compare stationary versus steady speed, acceleration and
 braking, with inertia-only, airflow-only and both sources enabled. Check
 FPS at 512 drops. Keep the existing left optical half as the reference.
+
+### 112. Pause ripple tuning and compare an irregular silhouette (2026-09-27)
+
+The user can discern the six-pixel wave but cannot assess it in isolation
+before flow and merging are in place. Set `RAIN_DYNAMIC_DROP_WAVE_ENABLED=false`
+and pass a zero envelope to the existing HLSL code, retaining it for later.
+Restore `RAIN_FORCE_AIRFLOW_ENABLED=false` as the physics baseline for this
+optical comparison. Leave the approved clean-scene refraction unchanged.
+
+Enable `RAIN_DYNAMIC_DROP_SHAPE_DEBUG=true`. Keep the image-left circular
+half as the optical reference. Indent the image-right contour by at most
+approximately 11% using two smooth angular harmonics; fade deformation
+across the center so the halves meet. Apply the adjusted normalized radius
+to clipping, lens normal, boundary fade, rim and alpha. No extra scene shot,
+sample or geometry is added. Compare whether the irregular right half reads
+as a water drop on bright and dark backgrounds, whether the center seam is
+visible, and FPS at 512 drops. This is a shared fixed shape preview, not
+individual droplet deformation, trailing or merging yet.
