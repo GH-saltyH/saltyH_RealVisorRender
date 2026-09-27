@@ -3083,3 +3083,21 @@ logs its chosen stage. After a late Lua reload, check whether the image's
 upper-right red-rim and lower-right blue-rim interiors gain scene color; the
 upper-left green-rim control should remain purple. The image is horizontally
 reversed because the observer is looking at the back of the visor normal.
+
+### 62. Track-stage HDR visible, but enlarged (2026-09-27)
+
+The user reports that the green-rim control remains purple and the opposing
+HDR sample now contains the forward scene, enlarged like a magnifying glass.
+The accompanying image shows scene colors within the circular diagnostic
+footprints. This establishes that direct `dynamic::hdr` can be sampled in the
+track transparent draw with the current prepass. It does not yet establish
+that `pin.ScreenPos` addresses the same projected screen pixel or that the
+prepass is needed at this stage.
+
+Keep the track draw, prepass, flags and control unchanged. Replace the blue-rim
+fixed-center sample with `saturate((pin.ScreenPos.xy - 0.5) * 8 + 0.5)`.
+The red-rim sample remains unscaled. In the user's reverse-side view, compare
+the red upper-right and blue lower-right interiors while moving the camera:
+whether the blue region shows a wider piece of the scene, becomes smaller in
+scale, or clamps to edge colors will constrain the coordinate scale. The
+green upper-left still tests the ordinary file texture.

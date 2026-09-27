@@ -32,8 +32,8 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare raw and fixed HDR samples, the known normal-map texture, and a
-        visualization of mesh.fx ScreenPos before further coordinate work.
+        compare raw and center-expanded HDR samples, the known normal-map
+        texture, and a visualization of mesh.fx ScreenPos.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -76,10 +76,12 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: sample HDR at a fixed coordinate, independent of
-            // screen projection and droplet location.
+            // Lower-left: magnify the variation in ScreenPos around screen
+            // center by 8x. Compare with unscaled HDR in upper-left to test
+            // whether ScreenPos traverses too little of the scene texture.
+            float2 expandedUV = (raw - 0.5) * 8.0 + 0.5;
             sampledColor = txDynamicScene.SampleLevel(
-                samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
+                samLinearClamp, saturate(expandedUV), 0.0).rgb;
         }
         else
         {
