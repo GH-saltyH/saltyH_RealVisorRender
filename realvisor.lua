@@ -5465,10 +5465,15 @@ local function initializeRainDynamicSurfaceTest()
         return false
     end
 
-    -- This mesh is renderer-owned. Prevent the regular scene/material pass
-    -- from drawing the quad transport geometry; render.mesh() below is the
-    -- only path that should shade it.
-    rainDynamicSurfaceMesh:setVisible(false, false)
+    -- IMPORTANT: render.mesh() with an ac.SceneReference still respects the
+    -- SceneReference visibility flag on the target CSP build. Hiding this mesh
+    -- also suppresses the explicit custom-shader draw, so keep it visible.
+    --
+    -- This means the regular scene/material pass can also see the transport
+    -- geometry. Stage 4A diagnostics deliberately disambiguate the two paths:
+    -- the explicit render.mesh() draw uses DepthMode.Off + RG UV output while
+    -- RAIN_DYNAMIC_DROP_UV_DEBUG is enabled.
+    rainDynamicSurfaceMesh:setVisible(true, false)
 
     ac.log(
         appNameDebug
@@ -6130,7 +6135,17 @@ render.on('main.track.transparent', function()
 
         render.setBlendMode(render.BlendMode.AlphaBlend)
         render.setCullMode(render.CullMode.None)
-        render.setDepthMode(render.DepthMode.ReadOnly)
+
+        -- Stage 4A render-path discriminator:
+        -- UV debug must be visible even if the scene pass draws the same
+        -- transport mesh with its fallback material at identical depth.
+        -- If this path is actually executing, the RG UV gradient should
+        -- overwrite the fallback square and be unmistakable.
+        render.setDepthMode(
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+            and render.DepthMode.Off
+            or render.DepthMode.ReadOnly
+        )
 
         local dynamicDrawn = render.mesh({
             mesh = rainDynamicSurfaceMesh,
