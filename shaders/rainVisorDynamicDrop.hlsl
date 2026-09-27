@@ -60,10 +60,10 @@ float4 main(PS_IN pin)
         float2 expandedUV = saturate((raw - 0.5) * 8.0 + 0.5);
         float2 sceneUVA = saturate(
             (raw - 0.5) * gDynamicDropGeometryUVScaleA + 0.5);
-        float2 pixelUV = saturate(
-            pin.PosH.xy * gDynamicDropInvRenderTargetSize);
         float2 windowUV = saturate(
             pin.PosH.xy * gDynamicDropInvScreenSize);
+        float2 pixelUV = saturate(
+            pin.PosH.xy * gDynamicDropInvRenderTargetSize);
         bool compareSnapshot = gDynamicDropSnapshotDebug > 0.5
             && gDynamicDropGeometryShotDebug < 0.5;
         bool right = local.x >= 0.0;
@@ -72,10 +72,10 @@ float4 main(PS_IN pin)
 
         if (!right && !bottom)
         {
-            // Upper-left: live HDR at the exact raster pixel.
+            // Upper-left: live HDR mapped from upscaled raster coordinates.
             sampledColor = txDynamicScene.SampleLevel(
                 samLinearClamp,
-                compareSnapshot ? pixelUV
+                compareSnapshot ? windowUV
                     : (gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw),
                 0.0).rgb;
         }
@@ -88,10 +88,10 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: opaque-stage HDR copy at the same raster pixel.
+            // Lower-left: opaque-stage HDR copy at the same screen UV.
             sampledColor = txDynamicSnapshot.SampleLevel(
                 samLinearClamp,
-                compareSnapshot ? pixelUV
+                compareSnapshot ? windowUV
                     : (gDynamicDropGeometryShotDebug > 0.5
                         ? sceneUVA : expandedUV),
                 0.0).rgb;
@@ -100,10 +100,10 @@ float4 main(PS_IN pin)
         }
         else
         {
-            // Lower-right: window-space live HDR reference.
+            // Lower-right: target-size UV control (previously dark).
             if (compareSnapshot)
                 sampledColor = txDynamicScene.SampleLevel(
-                    samLinearClamp, windowUV, 0.0).rgb;
+                    samLinearClamp, pixelUV, 0.0).rgb;
             else if (gDynamicDropGeometryShotDebug > 0.5)
             {
                 if (gDynamicDropPixelUVDebug > 0.5)

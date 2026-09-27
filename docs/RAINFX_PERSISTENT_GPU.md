@@ -3357,3 +3357,23 @@ at the identical UV. Image lower-left (magenta rim) reads live HDR at the
 previous `PosH / windowSize` UV, which previously showed offset scene detail.
 Image upper-left (green rim) remains a known file-texture control. Log copy
 size and capture frame; test after the late Lua file reload.
+
+### 77. Account for DLSS raster coordinates in HDR UV comparison (2026-09-27)
+
+The user observes that the earlier opaque snapshot and live HDR, both sampled
+with `PosH / targetSize`, are dark and smeared. The live HDR sampled with
+`PosH / windowSize` shows recognizable scene color in the same droplet.
+The snapshot capture frame equals the draw frame and its dimensions match the
+HDR (2161x1249), while the DLSS-upscaled window is 3240x1872. This strongly
+suggests `PosH` is measured in upscaled window pixels in this callback;
+normalizing it by the smaller render target addresses the wrong UV region.
+The scene still has a previously observed positional offset, which this
+measurement does not explain.
+
+Preset both the direct live HDR (red rim) and opaque-stage snapshot (blue rim)
+with `PosH / sim.windowSize`, using per-frame window dimensions supplied by
+Lua so the ratio adapts to resolution and upscaling changes. Keep the old
+`PosH / renderTargetSize` live sample (magenta rim) as a dark-UV control and
+the normal map (green rim) as a texture control. Viewed through the visor's
+back face, red appears upper-right, blue lower-right, magenta lower-left, and
+green upper-left. Compare red and blue for scene detail and feedback artifacts.
