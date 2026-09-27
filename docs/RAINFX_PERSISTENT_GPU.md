@@ -3480,3 +3480,14 @@ shader returns unchanged. On the visor back face, magenta appears image
 lower-left. If this revision crashes, the second read is sufficient to
 trigger the regression. If it runs, the combination or original shader
 branch arrangement caused the crash and must be tested independently.
+
+### 84. Reproduce the two-sample combination (2026-09-27)
+
+Stage 82 (only the projected screen sample) and Stage 83 (only the window-UV
+screen sample) both run without a crash. Reintroduce the projected sample in
+the blue quadrant while preserving the window-UV sample in magenta, matching
+the two new reads from Stage 80. Leave the first/green quadrants, bindings,
+flags and `return` placement unchanged. A crash here narrows the trigger to
+the combined compiled shader path rather than either read alone. If this
+runs, the original crash might have depended on branch layout or transient
+shader compilation/caching; collect the visible quadrants before proceeding.
