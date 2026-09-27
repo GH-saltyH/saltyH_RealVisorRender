@@ -60,10 +60,10 @@ local appFolder =
     local rainDynamicSurfaceInitialized = false
     local rainDynamicSurfaceMeshVertices = nil
     local rainDynamicSurfaceMeshCount = 0
-    local rainDynamicSceneCopy = nil
-    local rainDynamicSceneCopyWidth = 0
-    local rainDynamicSceneCopyHeight = 0
-    local rainDynamicSceneCopyReadyLogged = false
+    -- Keep Stage 4B.2E resources in one script-global table. This deliberately
+    -- avoids adding top-level locals: this large Lua chunk is already close to
+    -- LuaJIT's 200-local limit for a single function.
+    rainDynamicSceneCopyState = {}
 
     -- Stage 3: persistent GPU state -> async CPU readback -> dynamic vertices.
     local rainDynamicStateReadbackSlots = {}
@@ -5004,70 +5004,6 @@ float4 main(PS_IN pin)
 }
 ]]
 
-local RAIN_DYNAMIC_SCENE_COPY_HLSL = [[
-float4 main(PS_IN pin)
-{
-    return txInput.SampleLevel(samLinearClamp, pin.Tex, 0.0);
-}
-]]
-
-local function updateRainDynamicSceneCopy(sim)
-    local scale = math.clamp(
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_COPY_SCALE,
-        0.25,
-        1.0
-    )
-    local width = math.max(
-        1,
-        math.floor((sim.windowWidth or 1) * scale + 0.5)
-    )
-    local height = math.max(
-        1,
-        math.floor((sim.windowHeight or 1) * scale + 0.5)
-    )
-
-    if not rainDynamicSceneCopy
-        or rainDynamicSceneCopyWidth ~= width
-        or rainDynamicSceneCopyHeight ~= height
-    then
-        if rainDynamicSceneCopy then
-            rainDynamicSceneCopy:dispose()
-        end
-
-        rainDynamicSceneCopy = ui.ExtraCanvas(
-            vec2(width, height),
-            1,
-            render.AntialiasingMode.None,
-            render.TextureFormat.R16G16B16A16.Float
-        )
-        rainDynamicSceneCopy:setName('RealVisor dynamic HDR copy')
-        rainDynamicSceneCopyWidth = width
-        rainDynamicSceneCopyHeight = height
-        rainDynamicSceneCopyReadyLogged = false
-    end
-
-    local copied = rainDynamicSceneCopy:updateSceneWithShader({
-        async = true,
-        textures = {
-            txInput = 'dynamic::hdr',
-        },
-        shader = RAIN_DYNAMIC_SCENE_COPY_HLSL,
-    })
-
-    if copied and not rainDynamicSceneCopyReadyLogged then
-        ac.log(
-            appNameDebug
-            .. ' Dynamic HDR offscreen copy ready: '
-            .. tostring(width)
-            .. 'x'
-            .. tostring(height)
-        )
-        rainDynamicSceneCopyReadyLogged = true
-    end
-
-    return copied
-end
-
 local function rainDynamicSurfaceFrac(x)
     return x - math.floor(x)
 end
@@ -6203,7 +6139,68 @@ render.on('main.root.transparent', function()
     requestRainDynamicStateReadback()
     applyRainDynamicStateToSurfaceMesh()
 
-    if not updateRainDynamicSceneCopy(sim) then
+    local sceneCopyScale = math.clamp(
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_COPY_SCALE,
+        0.25,
+        1.0
+    )
+    local sceneCopyWidth = math.max(
+        1,
+        math.floor((sim.windowWidth or 1) * sceneCopyScale + 0.5)
+    )
+    local sceneCopyHeight = math.max(
+        1,
+        math.floor((sim.windowHeight or 1) * sceneCopyScale + 0.5)
+    )
+
+    if not rainDynamicSceneCopyState.canvas
+        or rainDynamicSceneCopyState.width ~= sceneCopyWidth
+        or rainDynamicSceneCopyState.height ~= sceneCopyHeight
+    then
+        if rainDynamicSceneCopyState.canvas then
+            rainDynamicSceneCopyState.canvas:dispose()
+        end
+
+        rainDynamicSceneCopyState.canvas = ui.ExtraCanvas(
+            vec2(sceneCopyWidth, sceneCopyHeight),
+            1,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float
+        )
+        rainDynamicSceneCopyState.canvas:setName(
+            'RealVisor dynamic HDR copy'
+        )
+        rainDynamicSceneCopyState.width = sceneCopyWidth
+        rainDynamicSceneCopyState.height = sceneCopyHeight
+        rainDynamicSceneCopyState.readyLogged = false
+    end
+
+    local sceneCopied =
+        rainDynamicSceneCopyState.canvas:updateSceneWithShader({
+            async = true,
+            textures = {
+                txInput = 'dynamic::hdr',
+            },
+            shader = [[
+float4 main(PS_IN pin)
+{
+    return txInput.SampleLevel(samLinearClamp, pin.Tex, 0.0);
+}
+]],
+        })
+
+    if sceneCopied and not rainDynamicSceneCopyState.readyLogged then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic HDR offscreen copy ready: '
+            .. tostring(sceneCopyWidth)
+            .. 'x'
+            .. tostring(sceneCopyHeight)
+        )
+        rainDynamicSceneCopyState.readyLogged = true
+    end
+
+    if not sceneCopied then
         return
     end
 
@@ -6253,7 +6250,7 @@ render.on('main.root.transparent', function()
         textures = {
             txDynamicScene = 'dynamic::hdr',
             txDynamicScreen = 'dynamic::screen',
-            txDynamicSceneCopy = rainDynamicSceneCopy,
+            txDynamicSceneCopy = rainDynamicSceneCopyState.canvas,
         },
         values = {
             gDynamicDropDebugUV =

@@ -2963,3 +2963,20 @@ source/refraction diagnostics disabled. A yellow cross remains as the geometry
 marker. If the right side becomes stable and scene-like while the left remains
 dark or erratic, refraction must sample the offscreen copy rather than
 `dynamic::hdr` directly.
+
+### 56. LuaJIT top-level local limit correction (2026-09-27)
+
+The first Stage 4B.2E revision could not load:
+- `main function has more than 200 local variables`
+
+LuaJIT compiles the complete script chunk as a function, and this file was
+already close to its 200-local limit. The offscreen-copy revision added four
+resource-state locals, one shader-source local and one helper-function local.
+
+Correction:
+- remove all six newly added top-level locals
+- keep canvas, dimensions and log state in one script-global state table
+- move temporary dimensions and the copy call into the root-render callback,
+  whose locals are counted independently
+- inline the small copy shader at its only call site
+- retain the Stage 4B.2E behavior and preset flags unchanged
