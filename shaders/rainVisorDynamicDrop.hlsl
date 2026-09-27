@@ -81,11 +81,12 @@ float4 main(PS_IN pin)
         }
         else if (right && !bottom)
         {
-            // Upper-right: compare the postprocessed screen source at the
-            // same output-window UV against the two pre-upscale HDR sources.
+            // Upper-right: apply the per-axis output/input resolution ratio
+            // to the postprocessed screen source. The factor is implicitly
+            // windowSize / renderTargetSize in pixelUV versus windowUV.
             if (compareSnapshot)
                 sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, windowUV, 0.0).rgb;
+                    samLinearClamp, pixelUV, 0.0).rgb * 8.0;
             else
                 sampledColor = txDynamicControl.SampleLevel(
                     samLinearClamp, float2(0.5, 0.5), 0.0).rgb;

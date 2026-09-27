@@ -3397,3 +3397,20 @@ landmark positions against both HDR quadrants near the top-left and
 bottom-right. If it is black or stale at this draw stage, investigate capture
 at a later stage before modifying the production optical path. The selected
 screen and window dimensions remain dynamic across resolutions.
+
+### 79. Test the measured upscaling ratio on the processed screen source (2026-09-27)
+
+The user reports that `dynamic::screen` at `PosH / windowSize` is dark but
+contains the same size and position as the live and copied HDR samples. Test
+the user's top-left anchored correction directly on this source: the green
+quadrant now reads `dynamic::screen` at
+`PosH / renderTargetSize = (PosH / windowSize) * (windowSize / renderTargetSize)`.
+Both dimensions come from the active sim and render target on every draw, so
+it adapts to DLSS quality modes and other resolutions. Multiply the debug
+screen RGB by 8 to reveal detail; this is diagnostic brightness only. Keep
+red and blue on the previous `PosH / windowSize` HDR UVs, and magenta on the
+old target-size HDR UV as controls. Viewed from the back, green appears
+upper-left; compare its background landmarks with the actual scene there and
+at the lower-right. Samples beyond UV 1 clamp to the edge, so expect the
+corrected candidate to lose detail at the far bottom/right if the processed
+screen texture does not contain a full-resolution image at this stage.
