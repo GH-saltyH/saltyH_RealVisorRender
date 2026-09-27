@@ -68,6 +68,8 @@ local appFolder =
     local rainDynamicStateReadbackReady = false
     local rainDynamicStateReadbackErrorLogged = false
     local rainDynamicStateFirstApplyLogged = false
+    local rainDynamicRootCallbackLogged = false
+    local rainDynamicManualPreDrawLogged = false
     local rainDynamicManualDrawLogged = false
     local rainDynamicStateLatestAcceptedRequestFrame = -1
 
@@ -4991,6 +4993,18 @@ float4 main(PS_IN pin)
 }
 ]]
 
+-- Stage 4B.2C absolute draw-path discriminator. Keep this shader independent
+-- from the external drop shader, dynamic::hdr and all Lua-provided values so
+-- mode 3 can distinguish callback/draw failure from shader binding failure.
+local RAIN_DYNAMIC_DROP_INLINE_MAGENTA_HLSL = [[
+float4 main(PS_IN pin)
+{
+    float2 centered = pin.Tex * 2.0 - 1.0;
+    clip(1.0 - length(centered));
+    return float4(1.0, 0.0, 1.0, 1.0);
+}
+]]
+
 local function rainDynamicSurfaceFrac(x)
     return x - math.floor(x)
 end
@@ -6092,6 +6106,21 @@ render.on('main.root.transparent', function()
         return
     end
 
+    local dynamicDropShaderMode =
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG and 1
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG and 2
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG and 3
+        or 0
+
+    if not rainDynamicRootCallbackLogged then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic drop root callback entered: mode='
+            .. tostring(dynamicDropShaderMode)
+        )
+        rainDynamicRootCallbackLogged = true
+    end
+
     -- Safe even if the track callback already updated physics this frame:
     -- updateRainGPUState() is frame-guarded internally.
     updateRainGPUState(sim)
@@ -6101,28 +6130,24 @@ render.on('main.root.transparent', function()
     end
 
     local rainDynamicDropShader = nil
-    for _, shader in ipairs(shaders) do
-        if shader.ID == 'RAINFXDYNAMICDROP'
-            and shader.LOADED then
-            rainDynamicDropShader = shader
-            break
+    if dynamicDropShaderMode ~= 3 then
+        for _, shader in ipairs(shaders) do
+            if shader.ID == 'RAINFXDYNAMICDROP'
+                and shader.LOADED then
+                rainDynamicDropShader = shader
+                break
+            end
         end
-    end
 
-    if not rainDynamicDropShader then
-        ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
-        return
+        if not rainDynamicDropShader then
+            ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
+            return
+        end
     end
 
     updateRainDynamicStateRenderClock(sim)
     requestRainDynamicStateReadback()
     applyRainDynamicStateToSurfaceMesh()
-
-    local dynamicDropShaderMode =
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG and 1
-        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG and 2
-        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG and 3
-        or 0
 
     render.setBlendMode(
         (dynamicDropShaderMode == 1 or dynamicDropShaderMode == 3)
@@ -6147,31 +6172,60 @@ render.on('main.root.transparent', function()
     -- render.mesh() consumes the SceneReference, then hide it again.
     rainDynamicSurfaceMesh:setVisible(true, false)
 
-    -- Put the mode define into the actual shader source string. This avoids
-    -- relying on CSP's separate define/cache path for the discriminator test.
-    local dynamicDropShaderSource =
-        '#define RAIN_DYNAMIC_DROP_MODE '
-        .. tostring(dynamicDropShaderMode)
-        .. '\n'
-        .. rainDynamicDropShader.HLSL
+    local dynamicDropShaderSource = nil
+    local dynamicDrawParams = nil
 
-    local dynamicDrawn = render.mesh({
-        mesh = rainDynamicSurfaceMesh,
-        transform = 'original',
-        textures = {
-            txDynamicScene = 'dynamic::hdr',
-        },
-        values = {
-            gDynamicDropInvScreenSize = vec2(
-                1.0 / math.max(sim.windowWidth or 1, 1),
-                1.0 / math.max(sim.windowHeight or 1, 1)
-            ),
+    if dynamicDropShaderMode == 3 then
+        -- Absolute isolation path: no external shader text, HDR texture,
+        -- values or defines participate in this draw.
+        dynamicDropShaderSource = RAIN_DYNAMIC_DROP_INLINE_MAGENTA_HLSL
+        dynamicDrawParams = {
+            mesh = rainDynamicSurfaceMesh,
+            transform = 'original',
+            shader = dynamicDropShaderSource,
+        }
+    else
+        -- Put the mode define into the actual shader source string. This
+        -- avoids relying on CSP's separate define/cache path.
+        dynamicDropShaderSource =
+            '#define RAIN_DYNAMIC_DROP_MODE '
+            .. tostring(dynamicDropShaderMode)
+            .. '\n'
+            .. rainDynamicDropShader.HLSL
 
-            gDynamicDropRefractionPixels =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
-        },
-        shader = dynamicDropShaderSource
-    })
+        dynamicDrawParams = {
+            mesh = rainDynamicSurfaceMesh,
+            transform = 'original',
+            textures = {
+                txDynamicScene = 'dynamic::hdr',
+            },
+            values = {
+                gDynamicDropInvScreenSize = vec2(
+                    1.0 / math.max(sim.windowWidth or 1, 1),
+                    1.0 / math.max(sim.windowHeight or 1, 1)
+                ),
+
+                gDynamicDropRefractionPixels =
+                    cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
+            },
+            shader = dynamicDropShaderSource,
+        }
+    end
+
+    if not rainDynamicManualPreDrawLogged then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic drop pre-draw: mode='
+            .. tostring(dynamicDropShaderMode)
+            .. ' inline='
+            .. tostring(dynamicDropShaderMode == 3)
+            .. ' shaderBytes='
+            .. tostring(#dynamicDropShaderSource)
+        )
+        rainDynamicManualPreDrawLogged = true
+    end
+
+    local dynamicDrawn = render.mesh(dynamicDrawParams)
 
     rainDynamicSurfaceMesh:setVisible(false, false)
 

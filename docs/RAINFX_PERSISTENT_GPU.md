@@ -2813,3 +2813,27 @@ With the existing test settings, an opaque double-sided magenta circle is mandat
 - no magenta circles but log reports `mode=3` and `result=true`: investigate CSP shader-source caching or a different visible/draw pass
 - log reports a mode other than 3: configuration selection is wrong before shader compilation
 - `result=false` or missing root-draw log: investigate callback/shader readiness/draw execution rather than refraction
+
+### 51. Stage 4B.2B draw-return log absent + Stage 4B.2C callback/draw isolation (2026-09-27)
+
+Observed after full restart with mode-3 settings:
+- no visible shape
+- the one-time `Dynamic drop root draw` line is absent from the log
+
+The missing post-draw line means the previous test did not establish that
+`render.mesh()` returned. Stage 4B.2C therefore adds three ordered checkpoints
+and makes mode 3 independent from every external shader input:
+- `Dynamic drop root callback entered: mode=3` is emitted before dynamic-mesh initialization
+- `Dynamic drop pre-draw: mode=3 inline=true ...` is emitted immediately before `render.mesh()`
+- the existing `Dynamic drop root draw: result=...` line is emitted only after `render.mesh()` returns
+- mode 3 uses a minimal Lua-inline shader which clips by `pin.Tex` and returns opaque magenta
+- mode 3 does not load or concatenate `rainVisorDynamicDrop.hlsl`
+- mode 3 does not bind `dynamic::hdr`, pass Lua values, or use shader defines
+- `AlphaBlend`, `DepthMode.Off`, `CullMode.None` and the validated `original` transform remain unchanged
+
+With the existing mode-3 settings and a full game restart, interpretation is now:
+- all three lines plus magenta circles: callback, mesh initialization, shader compilation and draw all work
+- callback line only: initialization or the state-update path exits before drawing
+- callback and pre-draw lines, but no root-draw line: `render.mesh()` fails or stops execution while compiling/drawing the minimal inline shader
+- all three lines but no magenta circles: draw submission returns, so investigate mesh visibility/geometry rather than shader inputs
+- no callback line: the root-transparent callback is not running with the two required runtime flags enabled
