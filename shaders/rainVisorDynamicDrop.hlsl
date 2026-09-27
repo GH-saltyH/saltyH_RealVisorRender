@@ -90,11 +90,18 @@ float4 main(PS_IN pin)
             0.0
         ).rgb;
 
-        // Keep the proven Stage 4B.0 rim/highlight at low strength so the
-        // droplet boundary remains identifiable over smooth backgrounds.
+        // Stage 4B.2A branch marker: an intentionally obvious cyan ring. It
+        // separates "the refraction branch did not run" from "the sampled
+        // background was too smooth for the offset to be noticeable".
+        float diagnosticRing =
+            smoothstep(0.68, 0.76, r)
+            * (1.0 - smoothstep(0.90, 0.98, r));
+
+        // Keep the proven Stage 4B.0 directional highlight as a secondary
+        // orientation marker.
         float3 opticalAccent =
-            float3(0.72, 0.86, 1.00) * fresnel * 0.08
-            + float3(0.92, 0.98, 1.00) * highlight * 0.14;
+            float3(0.08, 0.85, 1.00) * diagnosticRing * 0.55
+            + float3(0.92, 0.98, 1.00) * highlight * 0.24;
 
         return float4(refractedScene + opticalAccent, 1.0);
     }

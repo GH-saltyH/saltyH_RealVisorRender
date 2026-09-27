@@ -2743,3 +2743,30 @@ Expected result:
 - weak pale rim and upper-left highlight remain visible
 - no global image shift, mirror, scale mismatch or brightness seam appears
 - depth occlusion and double-sided visibility remain unchanged
+
+### 48. Stage 4B.2 visibility inconclusive + Stage 4B.2A branch discriminator (2026-09-27)
+
+Observed with HDR copy disabled, refraction debug enabled and an 8-pixel maximum offset:
+- no distinguishable droplet footprint
+- no observable refraction
+
+This does not yet prove the refraction branch failed. The branch replaces the footprint with the sampled HDR scene at alpha `1.0`; at a high output resolution, an 8-pixel radial displacement over smooth background detail can remain visually indistinguishable. The previous low-alpha optical profile is intentionally bypassed in this branch, and its weak accent was not sufficient as a branch marker.
+
+Stage 4B.2A discriminator:
+- increase the diagnostic maximum displacement from `8` to `48` pixels
+- add a strong cyan annular marker only inside the refraction branch
+- retain a stronger upper-left highlight as an orientation marker
+- preserve radial offset falloff at the center and exact footprint boundary
+
+Validation settings, followed by a full game restart:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`
+- `RAIN_DYNAMIC_DROP_UV_DEBUG = false`
+- `RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = false`
+- `RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true`
+- `RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 48.0`
+
+Interpretation:
+- cyan rings visible and background inside them strongly bends: refraction value binding, branch execution and HDR offset sampling all work
+- cyan rings visible but background remains unchanged: branch/value binding works; investigate offset scale or scene sampling
+- no cyan rings: refraction branch/value binding is not active, independent of scene texture visibility
+- black-filled circles after Lua reload: repeat after a full game restart because the confirmed `dynamic::hdr` hot-reload binding caveat still applies

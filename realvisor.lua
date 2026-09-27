@@ -394,7 +394,9 @@ local cfg = scriptSettings:mapConfig({
         -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = false,
-        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0,
+        -- Stage 4B.2A uses an intentionally exaggerated displacement so the
+        -- branch remains observable at high output resolutions.
+        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 48.0,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
