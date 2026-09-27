@@ -6280,6 +6280,8 @@ float4 main(PS_IN pin)
         or render.DepthMode.ReadOnly
     )
 
+    local dynamicRenderTargetSize = render.getRenderTargetSize()
+
     -- Visibility-gated manual draw test:
     -- keep the attached mesh hidden between callbacks so the ordinary scene
     -- pass cannot render its black fallback material. Enable it only while
@@ -6287,6 +6289,7 @@ float4 main(PS_IN pin)
     rainDynamicSurfaceMesh:setVisible(true, false)
 
     if not rainDynamicManualPreDrawLogged then
+        local dynamicHDRSize = ui.imageSize('dynamic::hdr')
         ac.log(
             appNameDebug
             .. ' Dynamic drop Stage 4B.2 pre-draw: uvDebug='
@@ -6309,6 +6312,14 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
             .. ' pixelUV='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
+            .. ' windowSize='
+            .. tostring(sim.windowWidth) .. 'x' .. tostring(sim.windowHeight)
+            .. ' targetSize='
+            .. tostring(dynamicRenderTargetSize.x) .. 'x'
+            .. tostring(dynamicRenderTargetSize.y)
+            .. ' hdrSize='
+            .. tostring(dynamicHDRSize.x) .. 'x'
+            .. tostring(dynamicHDRSize.y)
             .. ' earlyCaptureFrame='
             .. tostring(rainDynamicSceneCopyState.captureFrame)
             .. ' drawFrame='
@@ -6377,6 +6388,11 @@ float4 main(PS_IN pin)
             gDynamicDropInvScreenSize = vec2(
                 1.0 / math.max(sim.windowWidth or 1, 1),
                 1.0 / math.max(sim.windowHeight or 1, 1)
+            ),
+
+            gDynamicDropInvRenderTargetSize = vec2(
+                1.0 / math.max(dynamicRenderTargetSize.x, 1),
+                1.0 / math.max(dynamicRenderTargetSize.y, 1)
             ),
 
             gDynamicDropRefractionPixels =

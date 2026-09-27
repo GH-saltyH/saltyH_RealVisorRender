@@ -3323,3 +3323,21 @@ and the 20.5x GeometryShot candidate side by side. Compare a center droplet
 over a stationary background landmark first, then one near an edge. If the
 large center offset remains, inspect the source's viewport subrect or texture
 origin; dimensions alone are not sufficient.
+
+### 75. HDR allocation-size UV reads blank; use active target dimensions (2026-09-27)
+
+With `PosH.xy / txDynamicScene.GetDimensions()`, the user sees the magenta
+marker blending toward the yellow quadrant separator but little identifiable
+scene content. The debug shader still executes, while the resource-size UV
+apparently addresses a mostly empty or dark part of `dynamic::hdr`. Do not
+assume the texture's allocation size equals the displayed viewport size.
+
+The CSP Lua SDK also exposes `render.getRenderTargetSize()`. Read it within
+the draw callback and pass its inverse as a Lua shader value. The magenta
+sample now uses `PosH.xy * gDynamicDropInvRenderTargetSize` for the current
+pixel. On the first draw, log the active render target size, window size and
+`ui.imageSize('dynamic::hdr')`; this distinguishes common size mismatches
+without adding more shader assumptions. The direct HDR sample has no
+brightness multiplier. If magenta still shows an offset, the next candidate
+is a viewport origin/subrect or source timing difference, not a constant
+droplet UV scale.

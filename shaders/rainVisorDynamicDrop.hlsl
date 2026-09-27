@@ -60,10 +60,8 @@ float4 main(PS_IN pin)
         float2 expandedUV = saturate((raw - 0.5) * 8.0 + 0.5);
         float2 sceneUVA = saturate(
             (raw - 0.5) * gDynamicDropGeometryUVScaleA + 0.5);
-        uint hdrWidth, hdrHeight;
-        txDynamicScene.GetDimensions(hdrWidth, hdrHeight);
         float2 pixelUV = saturate(
-            pin.PosH.xy / float2(hdrWidth, hdrHeight));
+            pin.PosH.xy * gDynamicDropInvRenderTargetSize);
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
