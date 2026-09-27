@@ -91,15 +91,20 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: opaque-stage HDR copy at the same screen UV.
-            sampledColor = txDynamicSnapshot.SampleLevel(
-                samLinearClamp,
-                compareSnapshot ? windowUV
-                    : (gDynamicDropGeometryShotDebug > 0.5
-                        ? sceneUVA : expandedUV),
-                0.0).rgb;
-            if (gDynamicDropGeometryShotDebug > 0.5)
-                sampledColor *= 8.0;
+            // Lower-left: isolate the projected screen source read.
+            if (compareSnapshot)
+                sampledColor = txDynamicScreen.SampleLevel(
+                    samLinearClamp, saturate(raw), 0.0).rgb * 8.0;
+            else
+            {
+                sampledColor = txDynamicSnapshot.SampleLevel(
+                    samLinearClamp,
+                    gDynamicDropGeometryShotDebug > 0.5
+                        ? sceneUVA : expandedUV,
+                    0.0).rgb;
+                if (gDynamicDropGeometryShotDebug > 0.5)
+                    sampledColor *= 8.0;
+            }
         }
         else
         {

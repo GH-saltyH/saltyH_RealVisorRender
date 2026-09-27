@@ -3455,3 +3455,17 @@ sample at `PosH / renderTargetSize`, so the next run can confirm the regression
 was limited to the latest shader changes. Do not infer a `return` compiler
 problem from this crash. Investigate crash logs before reintroducing the
 projected-UV screen read.
+
+### 82. Isolate the projected screen sample after confirmed recovery (2026-09-27)
+
+The user confirms Stage 81 no longer crashes. Stage 80 had changed two
+samples: the blue quadrant to `dynamic::screen` at `pin.ScreenPos`, and the
+magenta quadrant to `dynamic::screen` at `PosH / windowSize`. Test only the
+first change now. Keep all settings, other quadrants, texture bindings, and
+shader returns as in the working Stage 81 revision. With the back-facing
+visor, the isolated projected screen sample appears in the image lower-right
+blue-rim quadrant, multiplied by 8 for visibility. If this single change
+crashes, do not reintroduce this sample; if it runs, the remaining magenta
+change or the combination needs separate testing. HLSL crashes do not yield
+engine logs in the user's environment, so single-variable revisions are the
+only available diagnostic here.
