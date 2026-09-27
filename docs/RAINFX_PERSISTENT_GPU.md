@@ -3531,3 +3531,17 @@ upper-left, magenta lower-left, red upper-right. Compare landmark size and
 position against the real scene at a central and edge droplet; note any
 clamped/smeared region. These fractional calibration values are diagnostic,
 not yet a production optical correction.
+
+### 87. Narrow the calibration interval using measured landmark sizes (2026-09-27)
+
+The user measures original 1.6 versus blue 2.0 at 28% correction (1.25x),
+and original 1.56 versus green 1.78 at 55% correction (approximately 1.14x).
+Neither candidate smears. The two baselines are similar but not identical;
+compare a matching stationary landmark to avoid attributing differences in
+object/depth to UV scale. Move the magenta quadrant to the previously tested
+55% candidate, blue to 70%, and green to 85% of the per-axis measured
+window/target resolution ratio. Preserve the same screen source, single
+screen sample instruction, 8x debug gain and red HDR reference. If size
+converges but positional offset does not, size and offset need separate
+calibration rather than one scalar. Near UV=1, clipping may return a constant
+edge color; report that separately from normal scene image.
