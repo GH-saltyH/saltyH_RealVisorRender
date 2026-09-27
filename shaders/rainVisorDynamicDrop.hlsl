@@ -80,18 +80,22 @@ float4 main(PS_IN pin)
             }
             else
             {
-                // Compare 85%, 92%, and 98% of the measured output/input
-                // resolution correction on the same scene source.
+                // Compare an opaque-stage screen copy against the live
+                // screen at identical 98% UV; magenta retains 85% live.
                 float2 resolutionRatio = gDynamicDropInvRenderTargetSize
                     / gDynamicDropInvScreenSize;
                 float calibration = right
                     ? (bottom ? 0.85 : 0.98)
-                    : 0.92;
+                    : 0.98;
                 float2 screenUV = saturate(windowUV
                     * lerp(float2(1.0, 1.0), resolutionRatio,
                         calibration));
-                sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, screenUV, 0.0).rgb * 8.0;
+                if (right && !bottom)
+                    sampledColor = txDynamicSnapshot.SampleLevel(
+                        samLinearClamp, screenUV, 0.0).rgb * 8.0;
+                else
+                    sampledColor = txDynamicScreen.SampleLevel(
+                        samLinearClamp, screenUV, 0.0).rgb * 8.0;
             }
         }
         else if (!right && !bottom)

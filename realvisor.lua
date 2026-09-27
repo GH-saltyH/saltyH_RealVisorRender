@@ -6096,8 +6096,8 @@ end
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
 --------------------------------------------------------
--- Capture the HDR input before the track transparent droplet draw. A capture
--- made inside the transparent callback already contained earlier droplets.
+-- Capture the screen scene before the track transparent droplet draw to
+-- compare it with a live screen sample at exactly the same UV.
 render.on('main.track.opaque', function()
     if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
         or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
@@ -6109,7 +6109,7 @@ render.on('main.track.opaque', function()
     local sim = ac.getSim()
     if not sim then return end
 
-    local captureSize = ui.imageSize('dynamic::hdr')
+    local captureSize = ui.imageSize('dynamic::screen')
     if captureSize.x < 1 or captureSize.y < 1 then
         captureSize = render.getRenderTargetSize()
     end
@@ -6131,7 +6131,7 @@ render.on('main.track.opaque', function()
         rainDynamicSceneCopyState.width = captureWidth
         rainDynamicSceneCopyState.height = captureHeight
     end
-    rainDynamicSceneCopyState.canvas:copyFrom('dynamic::hdr')
+    rainDynamicSceneCopyState.canvas:copyFrom('dynamic::screen')
     rainDynamicSceneCopyState.captureFrame = sim.frame
 end)
 

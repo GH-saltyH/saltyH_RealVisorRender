@@ -3558,3 +3558,26 @@ ratio from current Lua values. Compare a stationary landmark's size and
 position separately. Near-full correction may clamp UV at a screen edge and
 smear; record which quadrant and where. The earlier full correction smearing
 is not disproved by an acceptable central measurement.
+
+### 89. Compare live screen feedback against an earlier screen snapshot (2026-09-27)
+
+The user's image shows repeated, nested droplet outlines inside the drops.
+As the corrected sample UV approaches the on-screen drop position, the
+repeated boundary fills its interior; farther from the upper-left, the
+calibration error separates the recursive copies. This supports a feedback
+explanation for the formerly smeared full-position UV. It does not prove
+that an opaque-stage screen capture is free from previous-frame droplets.
+
+For the next controlled test copy `dynamic::screen` at
+`main.track.opaque` into a canvas sized to the screen texture (fall back to
+render target size). Continue drawing at `main.track.transparent`. In the
+screen-UV diagnostic, the green quadrant reads this earlier screen copy at
+98% of the dynamically measured window/target ratio; blue reads the live
+screen at exactly the same 98% UV. Both multiply RGB by 8. Magenta keeps the
+live screen at 85% as a deliberately offset reference; red keeps live HDR at
+window-normalized UV. From the back of the visor green appears image
+upper-left and blue lower-right. Observe whether the green interior loses
+nested outlines while blue retains them, and compare scene detail/brightness.
+Log captureFrame, drawFrame and snapshotSize already emitted at first draw.
+If both contain recursion, the earlier screen stage is not a clean source;
+then use a truly independent capture or change render timing.
