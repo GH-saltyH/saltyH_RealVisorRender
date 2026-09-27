@@ -3469,3 +3469,14 @@ crashes, do not reintroduce this sample; if it runs, the remaining magenta
 change or the combination needs separate testing. HLSL crashes do not yield
 engine logs in the user's environment, so single-variable revisions are the
 only available diagnostic here.
+
+### 83. Isolate the other changed screen read (2026-09-27)
+
+The user confirms Stage 82 with only the new blue `dynamic::screen` sample at
+`pin.ScreenPos` does not crash. Restore the previously running blue snapshot
+sample. Now change only magenta to read `dynamic::screen` at
+`PosH / windowSize`, multiplying RGB by 8, with all other quadrants and
+shader returns unchanged. On the visor back face, magenta appears image
+lower-left. If this revision crashes, the second read is sufficient to
+trigger the regression. If it runs, the combination or original shader
+branch arrangement caused the crash and must be tested independently.
