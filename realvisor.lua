@@ -4993,18 +4993,6 @@ float4 main(PS_IN pin)
 }
 ]]
 
--- Stage 4B.2C absolute draw-path discriminator. Keep this shader independent
--- from the external drop shader, dynamic::hdr and all Lua-provided values so
--- mode 3 can distinguish callback/draw failure from shader binding failure.
-local RAIN_DYNAMIC_DROP_INLINE_MAGENTA_HLSL = [[
-float4 main(PS_IN pin)
-{
-    float2 centered = pin.Tex * 2.0 - 1.0;
-    clip(1.0 - length(centered));
-    return float4(1.0, 0.0, 1.0, 1.0);
-}
-]]
-
 local function rainDynamicSurfaceFrac(x)
     return x - math.floor(x)
 end
@@ -6106,17 +6094,10 @@ render.on('main.root.transparent', function()
         return
     end
 
-    local dynamicDropShaderMode =
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG and 1
-        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG and 2
-        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG and 3
-        or 0
-
     if not rainDynamicRootCallbackLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop root callback entered: mode='
-            .. tostring(dynamicDropShaderMode)
+            .. ' Dynamic drop baseline callback entered'
         )
         rainDynamicRootCallbackLogged = true
     end
@@ -6130,19 +6111,17 @@ render.on('main.root.transparent', function()
     end
 
     local rainDynamicDropShader = nil
-    if dynamicDropShaderMode ~= 3 then
-        for _, shader in ipairs(shaders) do
-            if shader.ID == 'RAINFXDYNAMICDROP'
-                and shader.LOADED then
-                rainDynamicDropShader = shader
-                break
-            end
+    for _, shader in ipairs(shaders) do
+        if shader.ID == 'RAINFXDYNAMICDROP'
+            and shader.LOADED then
+            rainDynamicDropShader = shader
+            break
         end
+    end
 
-        if not rainDynamicDropShader then
-            ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
-            return
-        end
+    if not rainDynamicDropShader then
+        ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
+        return
     end
 
     updateRainDynamicStateRenderClock(sim)
@@ -6150,7 +6129,7 @@ render.on('main.root.transparent', function()
     applyRainDynamicStateToSurfaceMesh()
 
     render.setBlendMode(
-        (dynamicDropShaderMode == 1 or dynamicDropShaderMode == 3)
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
         or render.BlendMode.BlendAccurate
     )
@@ -6161,7 +6140,7 @@ render.on('main.root.transparent', function()
     -- RG quad-UV gradient from both normal directions if this callback is the
     -- final visible custom-shader path.
     render.setDepthMode(
-        (dynamicDropShaderMode == 1 or dynamicDropShaderMode == 3)
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.DepthMode.Off
         or render.DepthMode.ReadOnly
     )
@@ -6172,74 +6151,43 @@ render.on('main.root.transparent', function()
     -- render.mesh() consumes the SceneReference, then hide it again.
     rainDynamicSurfaceMesh:setVisible(true, false)
 
-    local dynamicDropShaderSource = nil
-    local dynamicDrawParams = nil
-
-    if dynamicDropShaderMode == 3 then
-        -- Absolute isolation path: no external shader text, HDR texture,
-        -- values or defines participate in this draw.
-        dynamicDropShaderSource = RAIN_DYNAMIC_DROP_INLINE_MAGENTA_HLSL
-        dynamicDrawParams = {
-            mesh = rainDynamicSurfaceMesh,
-            transform = 'original',
-            shader = dynamicDropShaderSource,
-        }
-    else
-        -- Put the mode define into the actual shader source string. This
-        -- avoids relying on CSP's separate define/cache path.
-        dynamicDropShaderSource =
-            '#define RAIN_DYNAMIC_DROP_MODE '
-            .. tostring(dynamicDropShaderMode)
-            .. '\n'
-            .. rainDynamicDropShader.HLSL
-
-        dynamicDrawParams = {
-            mesh = rainDynamicSurfaceMesh,
-            transform = 'original',
-            textures = {
-                txDynamicScene = 'dynamic::hdr',
-            },
-            values = {
-                gDynamicDropInvScreenSize = vec2(
-                    1.0 / math.max(sim.windowWidth or 1, 1),
-                    1.0 / math.max(sim.windowHeight or 1, 1)
-                ),
-
-                gDynamicDropRefractionPixels =
-                    cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
-            },
-            shader = dynamicDropShaderSource,
-        }
-    end
-
     if not rainDynamicManualPreDrawLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop pre-draw: mode='
-            .. tostring(dynamicDropShaderMode)
-            .. ' inline='
-            .. tostring(dynamicDropShaderMode == 3)
+            .. ' Dynamic drop baseline pre-draw: uvDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG)
             .. ' shaderBytes='
-            .. tostring(#dynamicDropShaderSource)
+            .. tostring(#rainDynamicDropShader.HLSL)
         )
         rainDynamicManualPreDrawLogged = true
     end
 
-    local dynamicDrawn = render.mesh(dynamicDrawParams)
+    -- Exact Stage 4B.0 call shape which previously produced the confirmed
+    -- pale rim, transparent center and upper-left highlight. HDR/refraction
+    -- controls are intentionally ignored in this regression baseline.
+    local dynamicDrawn = render.mesh({
+        mesh = rainDynamicSurfaceMesh,
+        transform = 'original',
+        values = {
+            gDynamicDropDebugUV =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+                and 1.0
+                or 0.0,
+        },
+        shader = rainDynamicDropShader.HLSL
+    })
 
     rainDynamicSurfaceMesh:setVisible(false, false)
 
     if not rainDynamicManualDrawLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop root draw: result='
+            .. ' Dynamic drop baseline root draw: result='
             .. tostring(dynamicDrawn)
-            .. ' mode='
-            .. tostring(dynamicDropShaderMode)
             .. ' shaderBytes='
             .. tostring(
-                dynamicDropShaderSource
-                and #dynamicDropShaderSource
+                rainDynamicDropShader.HLSL
+                and #rainDynamicDropShader.HLSL
                 or 0
             )
         )

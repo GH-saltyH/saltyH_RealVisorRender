@@ -2837,3 +2837,30 @@ With the existing mode-3 settings and a full game restart, interpretation is now
 - callback and pre-draw lines, but no root-draw line: `render.mesh()` fails or stops execution while compiling/drawing the minimal inline shader
 - all three lines but no magenta circles: draw submission returns, so investigate mesh visibility/geometry rather than shader inputs
 - no callback line: the root-transparent callback is not running with the two required runtime flags enabled
+
+### 52. Stage 4B.2C absent + exact Stage 4B.0 regression baseline (2026-09-27)
+
+Observed with the isolated inline-magenta mode:
+- no visible output
+
+The important difference from the last confirmed optical result is not the
+refraction formula. The confirmed Stage 4B.0 path submitted the external HLSL
+unchanged and passed only CSP-injected `gDynamicDropDebugUV`. Later tests
+changed the shader submission contract by adding HDR bindings, compile-time
+mode source composition, and finally an inline shader. The previously absent
+post-draw log also leaves failure during shader submission/compilation as the
+leading explanation for the completely absent output.
+
+Regression baseline:
+- restore `rainVisorDynamicDrop.hlsl` exactly to the confirmed Stage 4B.0 profile
+- restore the confirmed `render.mesh()` table: mesh, `original` transform,
+  CSP-injected `gDynamicDropDebugUV`, and unchanged external shader text
+- retain callback-entry, pre-draw and post-draw checkpoints with `baseline` in
+  their names
+- deliberately ignore HDR-copy/refraction controls for this one test
+- continue to avoid redeclaring the Lua-provided value inside HLSL
+
+Expected with UV debug disabled after a full restart: the confirmed nearly
+transparent center, pale blue-white rim and upper-left highlight should return.
+If it does, geometry, visibility gating, state readback and vertex updates are
+still valid; HDR sampling can then be reintroduced as the only new variable.
