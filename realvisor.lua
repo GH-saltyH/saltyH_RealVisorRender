@@ -412,8 +412,11 @@ local cfg = scriptSettings:mapConfig({
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
         RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
-        -- Compare live HDR with a copy taken during the earlier opaque pass.
-        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = true,
+        -- Compare live HDR with an opaque-pass copy if needed.
+        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = false,
+        -- Render the scene again without the hidden transport mesh to test
+        -- a source that cannot contain previous droplet draws.
+        RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6224,6 +6227,39 @@ float4 main(PS_IN pin)
         return
     end
 
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG then
+        local shotWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5))
+        local shotHeight = math.max(1, math.floor((sim.windowHeight or 1) * 0.5))
+        if not rainDynamicSceneCopyState.geometryShot
+            or rainDynamicSceneCopyState.shotWidth ~= shotWidth
+            or rainDynamicSceneCopyState.shotHeight ~= shotHeight
+        then
+            if rainDynamicSceneCopyState.geometryShot then
+                rainDynamicSceneCopyState.geometryShot:dispose()
+            end
+            rainDynamicSceneCopyState.geometryShot = ac.GeometryShot(
+                ac.findNodes('sceneRoot:yes'),
+                vec2(shotWidth, shotHeight),
+                1,
+                false,
+                render.AntialiasingMode.None,
+                render.TextureFormat.R16G16B16A16.Float
+            )
+            rainDynamicSceneCopyState.shotWidth = shotWidth
+            rainDynamicSceneCopyState.shotHeight = shotHeight
+        end
+        rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
+            sim.cameraClipNear,
+            sim.cameraClipFar
+        )
+        rainDynamicSceneCopyState.geometryShot:update(
+            sim.cameraPosition,
+            sim.cameraLook,
+            sim.cameraUp,
+            sim.cameraFOV
+        )
+    end
+
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
@@ -6266,6 +6302,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG)
             .. ' hdrSnapshot='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG)
+            .. ' geometryShot='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
             .. ' earlyCaptureFrame='
             .. tostring(rainDynamicSceneCopyState.captureFrame)
             .. ' drawFrame='
@@ -6281,7 +6319,8 @@ float4 main(PS_IN pin)
         transform = 'original',
         textures = {
             txDynamicScene = 'dynamic::hdr',
-            txDynamicSnapshot = rainDynamicSceneCopyState.canvas
+            txDynamicSnapshot = rainDynamicSceneCopyState.geometryShot
+                or rainDynamicSceneCopyState.canvas
                 or 'dynamic::hdr',
             txDynamicScreen = 'dynamic::screen',
             txDynamicControl = textureRainSurfaceNormal,
@@ -6313,7 +6352,8 @@ float4 main(PS_IN pin)
                 or 0.0,
 
             gDynamicDropSnapshotDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
+                (cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
+                    or cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
                 and 1.0
                 or 0.0,
 

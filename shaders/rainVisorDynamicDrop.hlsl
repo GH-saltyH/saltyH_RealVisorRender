@@ -32,8 +32,8 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare direct HDR, a pre-draw HDR snapshot, a known file texture,
-        and LDR. The HDR samples use the same center-expanded UV when
+        compare direct HDR, an independent scene source, a known file texture,
+        and LDR. The scene samples use the same center-expanded UV when
         gDynamicDropSnapshotDebug is enabled.
 */
 
@@ -81,7 +81,7 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: copy taken immediately before render.mesh(), with
+            // Lower-left: independently rendered scene when enabled, with
             // the identical 8x UV mapping as direct HDR above.
             sampledColor = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, expandedUV, 0.0).rgb;

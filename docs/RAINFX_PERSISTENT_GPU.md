@@ -3191,3 +3191,23 @@ opaque stage did not expose usable HDR. If the canvas contains scene color
 without nested droplets, this earlier capture is a usable clean source. If
 both still contain nested droplets, the opaque HDR input already retains
 previous draws and another clean-source strategy is needed.
+
+### 68. Opaque-stage HDR still contains shifted self-image (2026-09-27)
+
+The user observes self-images in both the live HDR and the `main.track.opaque`
+capture: each droplet shows an offset image of its own lower-left quadrant
+along with the surrounding scene. Since the capture precedes transparent
+draws in the current frame, a simple stage change did not remove the recent
+drop content. The earlier sparse-frame test remains the evidence that recent
+draws feed into the input, without specifying the exact retention interval.
+
+For the next test disable the opaque HDR snapshot and enable
+`RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG=true`. Use an `ac.GeometryShot` at half
+window resolution over `ac.findNodes('sceneRoot:yes')`, updated with current
+camera position, forward/up vectors, FOV and clip planes. The transport mesh
+remains hidden during the independent capture. Feed this shot into the blue
+quadrant with the same 8x UV transform as the red live HDR; green normal-map
+and magenta LDR controls stay unchanged. Check whether the blue quadrant
+contains track scene and whether it has nested droplet images. This is a
+diagnostic with an additional scene render every frame; visual alignment and
+GPU cost must be measured before considering it as an optical source.
