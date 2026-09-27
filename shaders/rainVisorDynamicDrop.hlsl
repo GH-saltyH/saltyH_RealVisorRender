@@ -81,10 +81,14 @@ float4 main(PS_IN pin)
         }
         else if (right && !bottom)
         {
-            // Upper-right: known nonblack normal-map pixel at (0.5, 0.5)
-            // verifies ordinary file-texture sampling in the same draw.
-            sampledColor = txDynamicControl.SampleLevel(
-                samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
+            // Upper-right: compare the postprocessed screen source at the
+            // same output-window UV against the two pre-upscale HDR sources.
+            if (compareSnapshot)
+                sampledColor = txDynamicScreen.SampleLevel(
+                    samLinearClamp, windowUV, 0.0).rgb;
+            else
+                sampledColor = txDynamicControl.SampleLevel(
+                    samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
         }
         else if (!right && bottom)
         {

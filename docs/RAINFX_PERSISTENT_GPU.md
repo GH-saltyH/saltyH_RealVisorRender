@@ -3377,3 +3377,23 @@ Lua so the ratio adapts to resolution and upscaling changes. Keep the old
 the normal map (green rim) as a texture control. Viewed through the visor's
 back face, red appears upper-right, blue lower-right, magenta lower-left, and
 green upper-left. Compare red and blue for scene detail and feedback artifacts.
+
+### 78. Compare a postprocessing screen source for DLSS alignment (2026-09-27)
+
+The user observes a displacement that grows toward the bottom-right. A screen
+pixel at half the 3240-wide output, 1620, normalized by the window width is
+0.5 and reads texel 1080 of a 2161-wide HDR input. This is the precise
+pre-upscale coordinate implied by the user's hypothesis. Changing that UV to
+`1620 / 2161` gives 0.75, but the earlier target-size test produced dark,
+smeared samples; applying the inverse DLSS ratio to the existing HDR UV does
+not fix a source whose content belongs to a different rendering stage.
+
+For the next test, keep red (live HDR) and blue (opaque-stage HDR copy) using
+`PosH / windowSize`, keep magenta as the previous target-size control, and
+replace the green file-texture control with `dynamic::screen` at the same
+window UV. On the back-facing visor, green is the upper-left image quadrant.
+Check whether green shows post-upscale scene detail, and compare its apparent
+landmark positions against both HDR quadrants near the top-left and
+bottom-right. If it is black or stale at this draw stage, investigate capture
+at a later stage before modifying the production optical path. The selected
+screen and window dimensions remain dynamic across resolutions.
