@@ -3491,3 +3491,21 @@ flags and `return` placement unchanged. A crash here narrows the trigger to
 the combined compiled shader path rather than either read alone. If this
 runs, the original crash might have depended on branch layout or transient
 shader compilation/caching; collect the visible quadrants before proceeding.
+
+### 85. Merge the screen reads into one shader sampling site (2026-09-27)
+
+The user confirms Stage 84 crashes when the projected and window-UV screen
+samples coexist, although each individually ran in Stages 82 and 83. The
+pattern implicates the combined compiled HLSL path; without crash logs, it
+does not prove whether the root cause is the shader compiler, texture
+hazard, or resource limits. Avoid adding more separate `SampleLevel` calls on
+`dynamic::screen` in the diagnostic path.
+
+In snapshot comparison mode, select one UV based on droplet quadrant first:
+green uses `PosH / renderTargetSize`, blue uses `pin.ScreenPos`, and magenta
+uses `PosH / windowSize`. Then call `txDynamicScreen.SampleLevel` once from
+one shared branch and apply the same 8x RGB gain. Red remains live HDR at the
+window UV. Preserve the original noncomparison diagnostic path and the
+existing shader returns. This attempts to preserve all three coordinate
+candidates while limiting the active screen texture sampling code to one
+site. Check crash status before interpreting the visual result.

@@ -70,47 +70,50 @@ float4 main(PS_IN pin)
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
 
-        if (!right && !bottom)
+        if (compareSnapshot)
         {
-            // Upper-left: original HDR scene at the window-normalized UV.
+            if (!right && !bottom)
+            {
+                // Red: live HDR reference.
+                sampledColor = txDynamicScene.SampleLevel(
+                    samLinearClamp, windowUV, 0.0).rgb;
+            }
+            else
+            {
+                // One screen read per pixel: green=target UV,
+                // blue=CSP projection, magenta=window UV.
+                float2 screenUV = right
+                    ? (bottom ? windowUV : pixelUV)
+                    : saturate(raw);
+                sampledColor = txDynamicScreen.SampleLevel(
+                    samLinearClamp, screenUV, 0.0).rgb * 8.0;
+            }
+        }
+        else if (!right && !bottom)
+        {
             sampledColor = txDynamicScene.SampleLevel(
                 samLinearClamp,
-                compareSnapshot ? windowUV
-                    : (gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw),
+                gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw,
                 0.0).rgb;
         }
         else if (right && !bottom)
         {
-            // Upper-right: screen scene at the ratio-corrected target UV.
-            if (compareSnapshot)
-                sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, pixelUV, 0.0).rgb * 8.0;
-            else
-                sampledColor = txDynamicControl.SampleLevel(
-                    samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
+            sampledColor = txDynamicControl.SampleLevel(
+                samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
         }
         else if (!right && bottom)
         {
-            // Lower-left: projected screen UV combined with window-UV read.
-            if (compareSnapshot)
-                sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, saturate(raw), 0.0).rgb * 8.0;
-            else
-                sampledColor = txDynamicSnapshot.SampleLevel(
-                    samLinearClamp,
-                    gDynamicDropGeometryShotDebug > 0.5
-                        ? sceneUVA : expandedUV,
-                    0.0).rgb;
-            if (!compareSnapshot && gDynamicDropGeometryShotDebug > 0.5)
+            sampledColor = txDynamicSnapshot.SampleLevel(
+                samLinearClamp,
+                gDynamicDropGeometryShotDebug > 0.5
+                    ? sceneUVA : expandedUV,
+                0.0).rgb;
+            if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor *= 8.0;
         }
         else
         {
-            // Lower-right: isolate screen scene at original window UV.
-            if (compareSnapshot)
-                sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, windowUV, 0.0).rgb * 8.0;
-            else if (gDynamicDropGeometryShotDebug > 0.5)
+            if (gDynamicDropGeometryShotDebug > 0.5)
             {
                 if (gDynamicDropPixelUVDebug > 0.5)
                     sampledColor = txDynamicScene.SampleLevel(
