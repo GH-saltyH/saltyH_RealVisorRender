@@ -2417,3 +2417,41 @@ Expected validation:
 - manual draw should report `result=true` and a nonzero shader byte count
 - visible output should come only from the dynamic drop shader; with the current shader that means circular blue diagnostic droplets rather than black square quads
 - if the hidden SceneReference is not drawable manually on the target CSP build, the result will be no visible dynamic drops; in that case switch to a detached/manual-only mesh path rather than re-enabling automatic scene rendering
+
+
+### 40. Dynamic drop visibility regression — UV transport isolation (2026-09-27)
+
+Resume point:
+- Stage 3 persistent GPU state -> async readback -> dynamic mesh had already been validated:
+  - first update example: 255 live drops mapped, 1 surface lookup miss
+  - callback latency measured 10 frames, but callback interval and mesh update interval were both 1 frame after ring-buffering
+  - no visible snapshot/prediction correction jumps were observed
+- Physical/lifecycle motion remained plausible and performance stayed around the previous 70–80 FPS range.
+- Stage 4A attempted to replace diagnostic square quads with circular droplet footprints.
+- User observed: after the square disappeared, the replacement circular droplets were also invisible.
+- Work was reverted to the incomplete-resume state and debugging restarted from this exact symptom.
+
+Current hypothesis:
+- The external `shaders/rainVisorDynamicDrop.hlsl` circular shader uses `pin.Tex` to compute radial distance and clips pixels outside the unit circle.
+- If dynamic-mesh UV interpolation is broken or flat (for example all vertices reaching the pixel shader as UV=(0,0)), then every pixel has radius > 1 and the entire quad is clipped.
+- CSP SDK verification:
+  - `ac.MeshVertex` contains `pos`, `normal`, and `uv`.
+  - `alterVertices(ac.VertexBuffer)` forwards the vertex buffer to the dynamic-mesh update path.
+  - Therefore UV support exists in the public API; the remaining question is whether this specific createMesh/alterVertices/render.mesh path preserves and interpolates the intended quad UVs at runtime.
+
+Diagnostic added:
+- `RAIN_DYNAMIC_DROP_UV_DEBUG = true` by default for this temporary test.
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` remains the correct render path.
+- The external dynamic-drop shader now receives `gDynamicDropDebugUV`.
+- When UV debug is enabled:
+  - circular clipping is completely bypassed
+  - output is `float4(pin.Tex.x, pin.Tex.y, 0.15, 1)`
+  - expected successful result: every live quad is visible and contains a red/green 0..1 gradient
+- Interpretation:
+  - visible per-quad gradient => shader binding + UV transport are valid; investigate clip/depth/silhouette logic next
+  - visible flat-color quads => dynamic mesh renders but UV transport/interpolation is wrong
+  - still no quads => problem is not the circular clip; investigate external shader binding/render state/depth path
+
+Commits:
+- Lua UV-debug switch/render value: 0b2ada91f5698e3d3f45e82b193084a6934b3436
+- Dynamic-drop shader UV visualization: c99fde1842d7730c33df84814a96c34076128e00
