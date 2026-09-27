@@ -2864,3 +2864,32 @@ Expected with UV debug disabled after a full restart: the confirmed nearly
 transparent center, pale blue-white rim and upper-left highlight should return.
 If it does, geometry, visibility gating, state readback and vertex updates are
 still valid; HDR sampling can then be reintroduced as the only new variable.
+
+### 53. Startup timing clue + original Stage 4B.2 restoration (2026-09-27)
+
+New observation:
+- the restored Stage 4B.0 profile remains absent after an ordinary game start
+- removing the Lua file and restoring it, thereby forcing a later Lua reload,
+  makes the profile appear
+
+This is strong evidence that the earlier optical/refraction implementations
+were not necessarily invalid. The result depends on script initialization or
+render-resource readiness timing. Likely boundaries now include root callback
+registration, dynamic SceneReference readiness, and external shader/HDR target
+availability during the initial game load.
+
+For a controlled confirmation, restore the original Stage 4B.2 implementation
+from commit `ee73bea` without the later cyan marker, compile-time modes, shader
+source concatenation, or inline discriminator. Preset its required source
+flags in the same commit:
+- dynamic mesh test: disabled
+- deterministic surface test: disabled
+- dynamic surface state: enabled
+- UV debug: disabled
+- HDR-copy debug: disabled
+- refraction debug: enabled
+- refraction displacement: 8 pixels
+
+Test this revision using the proven remove-and-restore Lua reload procedure.
+If the original radial refraction appears only after that later reload, the
+next change should address initialization timing rather than optical math.

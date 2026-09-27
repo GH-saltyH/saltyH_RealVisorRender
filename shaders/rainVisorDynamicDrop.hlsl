@@ -12,10 +12,22 @@
         Stage 4B.0 transparent optical-profile test. This does not sample the
         scene yet; it validates low-alpha composition, a Fresnel-like rim and
         a compact directional highlight before refraction is introduced.
+
+    Stage 4B.1 contract:
+    - gDynamicDropHDRCopyDebug > 0.5:
+        after circular clipping, copy txDynamicScene at pin.ScreenPos without
+        an offset. Correct screen-space alignment makes the footprint nearly
+        disappear into the scene.
+
+    Stage 4B.2 contract:
+    - gDynamicDropRefractionDebug > 0.5:
+        sample the same HDR scene with a controlled radial pixel offset. This
+        validates lens direction and screen-space stability before tuning the
+        final water optical model.
 */
 
-// gDynamicDropDebugUV is injected by render.mesh({ values = ... }).
-// Do not declare it again here.
+// All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
+// textures/values = ... }). Do not redeclare them in this file.
 
 float4 main(PS_IN pin)
 {
@@ -32,6 +44,19 @@ float4 main(PS_IN pin)
 
     clip(1.0 - r);
 
+    if (gDynamicDropHDRCopyDebug > 0.5)
+    {
+        // mesh.fx provides ScreenPos directly in normalized 0..1 screen
+        // coordinates. No Lua-side resolution or projection math is needed.
+        float3 sceneColor = txDynamicScene.SampleLevel(
+            samLinearClamp,
+            pin.ScreenPos,
+            0.0
+        ).rgb;
+
+        return float4(sceneColor, 1.0);
+    }
+
     // Reconstruct a hemisphere-like local normal from the circular footprint.
     // This is an optical profile only: the actual visor surface normal remains
     // owned by the transport mesh and the target-surface lookup.
@@ -45,6 +70,34 @@ float4 main(PS_IN pin)
         saturate(dot(dropNormal, lightDirection)),
         28.0
     );
+
+    if (gDynamicDropRefractionDebug > 0.5)
+    {
+        // Fade the displacement back near the clipped boundary to avoid a
+        // harsh discontinuity while retaining an obvious radial lens test.
+        float boundaryFade = 1.0 - smoothstep(0.82, 1.0, r);
+        float radialProfile = smoothstep(0.05, 0.75, r) * boundaryFade;
+
+        float2 refractionOffset =
+            dropNormal.xy
+            * radialProfile
+            * gDynamicDropRefractionPixels
+            * gDynamicDropInvScreenSize;
+
+        float3 refractedScene = txDynamicScene.SampleLevel(
+            samLinearClamp,
+            saturate(pin.ScreenPos + refractionOffset),
+            0.0
+        ).rgb;
+
+        // Keep the proven Stage 4B.0 rim/highlight at low strength so the
+        // droplet boundary remains identifiable over smooth backgrounds.
+        float3 opticalAccent =
+            float3(0.72, 0.86, 1.00) * fresnel * 0.08
+            + float3(0.92, 0.98, 1.00) * highlight * 0.14;
+
+        return float4(refractedScene + opticalAccent, 1.0);
+    }
 
     // Keep the center almost transparent. The rim and small highlight are the
     // only strong contributions in this pre-refraction validation stage.

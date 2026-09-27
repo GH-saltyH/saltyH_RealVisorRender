@@ -379,26 +379,24 @@ local cfg = scriptSettings:mapConfig({
 
         -- Stage 3: render the actual persistent GPU droplet positions through
         -- the validated KN5 UV -> 3D mapping using asynchronous readback.
-        RAIN_DYNAMIC_SURFACE_STATE_ENABLED = false,
+        RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true,
 
         -- Temporary Stage 4A transport diagnostic:
         -- when true, dynamic-drop shader shows quad UV directly and bypasses
         -- circular clipping. This isolates shader binding/UV interpolation
         -- from the later droplet silhouette.
-        RAIN_DYNAMIC_DROP_UV_DEBUG = true,
+        RAIN_DYNAMIC_DROP_UV_DEBUG = false,
 
         -- Stage 4B.1: copy the HDR scene at pin.ScreenPos into each clipped
         -- droplet footprint without offset. A correct result should be nearly
         -- invisible and proves scene-texture/screen-UV alignment before
         -- refraction is introduced.
-        RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = true,
+        RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = false,
 
         -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
         -- copy debug disabled while testing this branch.
-        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = false,
-        -- Stage 4B.2A uses an intentionally exaggerated displacement so the
-        -- branch remains observable at high output resolutions.
-        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 48.0,
+        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
+        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6097,7 +6095,7 @@ render.on('main.root.transparent', function()
     if not rainDynamicRootCallbackLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop baseline callback entered'
+            .. ' Dynamic drop Stage 4B.2 callback entered'
         )
         rainDynamicRootCallbackLogged = true
     end
@@ -6154,7 +6152,7 @@ render.on('main.root.transparent', function()
     if not rainDynamicManualPreDrawLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop baseline pre-draw: uvDebug='
+            .. ' Dynamic drop Stage 4B.2 pre-draw: uvDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
@@ -6162,17 +6160,35 @@ render.on('main.root.transparent', function()
         rainDynamicManualPreDrawLogged = true
     end
 
-    -- Exact Stage 4B.0 call shape which previously produced the confirmed
-    -- pale rim, transparent center and upper-left highlight. HDR/refraction
-    -- controls are intentionally ignored in this regression baseline.
     local dynamicDrawn = render.mesh({
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
+        textures = {
+            txDynamicScene = 'dynamic::hdr',
+        },
         values = {
             gDynamicDropDebugUV =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
                 and 1.0
                 or 0.0,
+
+            gDynamicDropHDRCopyDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropRefractionDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropInvScreenSize = vec2(
+                1.0 / math.max(sim.windowWidth or 1, 1),
+                1.0 / math.max(sim.windowHeight or 1, 1)
+            ),
+
+            gDynamicDropRefractionPixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
         },
         shader = rainDynamicDropShader.HLSL
     })
@@ -6182,7 +6198,7 @@ render.on('main.root.transparent', function()
     if not rainDynamicManualDrawLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop baseline root draw: result='
+            .. ' Dynamic drop Stage 4B.2 root draw: result='
             .. tostring(dynamicDrawn)
             .. ' shaderBytes='
             .. tostring(
