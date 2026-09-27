@@ -60,6 +60,8 @@ local appFolder =
     local rainDynamicSurfaceInitialized = false
     local rainDynamicSurfaceMeshVertices = nil
     local rainDynamicSurfaceMeshCount = 0
+    -- Script-global table avoids the LuaJIT limit on chunk-level locals.
+    rainDynamicSceneCopyState = {}
     -- Stage 3: persistent GPU state -> async CPU readback -> dynamic vertices.
     local rainDynamicStateReadbackSlots = {}
     local rainDynamicStateReadbackCount = 0
@@ -403,6 +405,8 @@ local cfg = scriptSettings:mapConfig({
 
         -- Stage 4B.2F: compare possible interpretations of mesh.fx ScreenPos.
         RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = true,
+        -- Repeat the copy prepass that preceded the last visible HDR result.
+        RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6132,6 +6136,44 @@ render.on('main.root.transparent', function()
     requestRainDynamicStateReadback()
     applyRainDynamicStateToSurfaceMesh()
 
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS then
+        local copyWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5 + 0.5))
+        local copyHeight = math.max(1, math.floor((sim.windowHeight or 1) * 0.5 + 0.5))
+        if not rainDynamicSceneCopyState.canvas
+            or rainDynamicSceneCopyState.width ~= copyWidth
+            or rainDynamicSceneCopyState.height ~= copyHeight
+        then
+            if rainDynamicSceneCopyState.canvas then
+                rainDynamicSceneCopyState.canvas:dispose()
+            end
+            rainDynamicSceneCopyState.canvas = ui.ExtraCanvas(
+                vec2(copyWidth, copyHeight),
+                1,
+                render.AntialiasingMode.None,
+                render.TextureFormat.R16G16B16A16.Float
+            )
+            rainDynamicSceneCopyState.width = copyWidth
+            rainDynamicSceneCopyState.height = copyHeight
+            rainDynamicSceneCopyState.readyLogged = false
+        end
+
+        local copyReady = rainDynamicSceneCopyState.canvas:updateSceneWithShader({
+            async = true,
+            textures = { txInput = 'dynamic::hdr' },
+            shader = [[
+float4 main(PS_IN pin)
+{
+    return txInput.SampleLevel(samLinearClamp, pin.Tex, 0.0);
+}
+]],
+        })
+        if not copyReady then return end
+        if not rainDynamicSceneCopyState.readyLogged then
+            ac.log(appNameDebug .. ' Dynamic HDR diagnostic prepass ready')
+            rainDynamicSceneCopyState.readyLogged = true
+        end
+    end
+
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
@@ -6166,6 +6208,8 @@ render.on('main.root.transparent', function()
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG)
             .. ' screenUVDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG)
+            .. ' prepass='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )

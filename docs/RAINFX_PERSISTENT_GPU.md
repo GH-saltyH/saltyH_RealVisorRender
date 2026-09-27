@@ -3005,3 +3005,22 @@ Stage 4B.2F binds only direct HDR and compares four ScreenPos interpretations:
 The correct quadrant should reproduce the background behind each circle at the
 same location and scale. All other optical/source diagnostics are preset off;
 ScreenPos UV debug is preset on.
+
+### 58. All four ScreenPos candidates black (2026-09-27)
+
+The user reported all quadrants black after removing the ExtraCanvas prepass.
+This does not distinguish unavailable HDR from a missing diagnostic branch.
+The preceding frame showed nonblack direct HDR only when the ExtraCanvas copy
+call ran before the mesh draw, so the prepass is restored for a controlled
+comparison. The mesh still samples `dynamic::hdr` directly in all quadrants;
+the copy output is not used as input. ScreenPos UV debug and the prepass are
+enabled in the committed configuration.
+
+Every quadrant now has a colored outer rim independent of HDR: upper-left red,
+upper-right green, lower-left blue and lower-right magenta. A yellow cross
+marks the center. If these colors are absent, investigate shader execution or
+the Lua value binding before interpreting black as a texture result. If colors
+are present but all four interiors remain black, HDR sampling fails at these
+coordinates despite the restored prepass. If the left side regains the previous
+scene colors, the prepass changed resource availability or render state and
+the earlier coordinate-only test was not controlled.

@@ -90,13 +90,20 @@ float4 main(PS_IN pin)
             sampleUV,
             0.0
         ).rgb;
+        float3 marker = !right
+            ? (bottom ? float3(0.2, 0.5, 1.0) : float3(1.0, 0.15, 0.15))
+            : (bottom ? float3(0.9, 0.2, 1.0) : float3(0.15, 1.0, 0.3));
+        // Keep the sampled interior intact. An outer rim and cross prove
+        // this branch is running even if the HDR sample is entirely black.
+        float rim = smoothstep(0.90, 0.97, r);
         float separator = saturate(
             1.0
             - smoothstep(0.0, 0.035, min(abs(local.x), abs(local.y)))
         );
 
         return float4(
-            lerp(sampledColor, float3(1.0, 0.75, 0.0), separator),
+            lerp(lerp(sampledColor, marker, rim),
+                float3(1.0, 0.75, 0.0), separator),
             1.0
         );
     }
