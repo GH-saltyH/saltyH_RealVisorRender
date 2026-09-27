@@ -409,6 +409,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
         RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
+        -- Leave three empty frames before each diagnostic draw to check
+        -- whether HDR/LDR contains droplets from earlier frames.
+        RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6178,6 +6181,12 @@ float4 main(PS_IN pin)
         end
     end
 
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG
+        and sim.frame % 4 ~= 0
+    then
+        return
+    end
+
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
@@ -6216,6 +6225,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS)
             .. ' drawStage='
             .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'track' or 'root')
+            .. ' sparseFrame='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )

@@ -3134,3 +3134,22 @@ quadrant. In the user's back-side view, blue is at lower-right and magenta at
 lower-left. Compare whether scene and nested droplets also appear in the
 magenta LDR quadrant. The two quadrants sample neighboring pixels of the same
 UV transform, so compare the presence and relative scale, not pixel equality.
+
+### 65. Nested drop offset and sparse-frame source test (2026-09-27)
+
+The user reports that nested droplets remain visible and marks an offset
+between a source droplet and its smaller image in the captured scene. The
+sample can therefore contain another rendered drop at an incorrect screen
+location. The reported result alone does not determine whether the source
+was produced earlier in the current frame or retained from a previous frame;
+it also does not establish that HDR and LDR behave identically.
+
+Preset `RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG=true`: update state as usual, but
+draw the dynamic mesh only when `sim.frame % 4 == 0`. The three intervening
+frames contain no draws from this callback. Keep track stage, disabled prepass,
+the raw/8x HDR quadrants, the 8x LDR quadrant, and the normal-map control.
+Visible flicker is expected. On a frame with visible quadrants, inspect
+whether either the blue HDR or magenta LDR region still contains a smaller
+droplet. If nested images disappear after empty frames, recent rendered
+frames contributed to the scene source; if they remain, the diagnostic must
+also consider a current-frame contribution or longer retention.
