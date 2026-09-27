@@ -4043,3 +4043,23 @@ pixels. The image-left half remains the approved optical reference.
 Compare acceleration and braking against a stationary car, then toggle
 inertia off and back on and check the single trigger log and FPS. This
 prototype still shares one force signal across all drops.
+
+### 111. Add shared airflow to the diagnostic wave (2026-09-27)
+
+Enable `RAIN_FORCE_AIRFLOW_ENABLED` for the next in-game comparison. Use
+the existing car world velocity, air density, drag coefficient and physics
+acceleration scale to estimate aerodynamic acceleration for a representative
+drop with `RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM`. Use the car forward
+axis as a visor-front normal for the same one-sided incidence rule as the
+physics shader. Add the projected world airflow vector to the existing
+inertial wave force before calculating envelope, phase and direction. Turning
+off one force source preserves the other; turning both off clears the wave.
+Reset the one-time trigger log and force history when either source toggle
+changes, and log the estimated airflow magnitude to aid comparisons.
+
+This optical prototype is a common wave for all drops. The GPU physics
+evaluates airflow per drop using the sampled actual surface normal and its
+own radius; a shared car-forward estimate can therefore differ in incidence
+and strength. Compare stationary versus steady speed, acceleration and
+braking, with inertia-only, airflow-only and both sources enabled. Check
+FPS at 512 drops. Keep the existing left optical half as the reference.

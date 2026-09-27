@@ -295,7 +295,7 @@ local cfg = scriptSettings:mapConfig({
         ------------------------------------------------------------
         RAIN_FORCE_GRAVITY_ENABLED = true,
         RAIN_FORCE_INERTIA_ENABLED = true,
-        RAIN_FORCE_AIRFLOW_ENABLED = false,
+        RAIN_FORCE_AIRFLOW_ENABLED = true,
 
         -- All external accelerations enter the GPU in SI m/s^2 and
         -- share this compact surface-force conversion.
@@ -6343,6 +6343,15 @@ float4 main(PS_IN pin)
     end
     local car = ac.getCar(0)
     local inertiaEnabled = cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED
+    local airflowEnabled = cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED
+    local waveSourceMask = (inertiaEnabled and 2 or 0)
+        + (airflowEnabled and 4 or 0)
+    if waveState.sourceMask ~= waveSourceMask then
+        waveState.sourceMask = waveSourceMask
+        waveState.envelope = 0.0
+        waveState.previousForce = 0.0
+        waveState.triggerLogged = false
+    end
     local externalAcceleration = rainAccelerationCurrent
     local forceX = inertiaEnabled and car and car.side and (
         externalAcceleration.x * car.side.x
@@ -6354,6 +6363,38 @@ float4 main(PS_IN pin)
         + externalAcceleration.y * car.look.y
         + externalAcceleration.z * car.look.z
     ) * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE or 0.0
+    -- The physics shader evaluates airflow separately for each drop's size
+    -- and surface normal. This shared optical test uses one representative
+    -- diameter and the car's forward axis as the visor-front normal.
+    local airflowMagnitude = 0.0
+    if airflowEnabled and car and car.velocity and car.look then
+        local velocity = car.velocity
+        local speed = math.sqrt(velocity.x * velocity.x
+            + velocity.y * velocity.y + velocity.z * velocity.z)
+        if speed > 0.0001 then
+            local incidence = math.max(0.0, math.min(1.0,
+                (velocity.x * car.look.x + velocity.y * car.look.y
+                    + velocity.z * car.look.z) / speed))
+            local radiusM = math.max(0.000001,
+                cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM
+                    * 0.0005)
+            -- Exact area/mass ratio of the physics shader's water sphere:
+            -- (pi*r^2) / ((4/3)*pi*r^3*1000) = 3/(4000*r).
+            airflowMagnitude = 0.5 * math.max(0.0, cfg.RUNTIME.RAIN_AIR_DENSITY)
+                * speed * speed
+                * math.max(0.0, cfg.RUNTIME.RAIN_AIR_DRAG_COEFF)
+                * 3.0 / (4000.0 * radiusM) * incidence
+                * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
+            forceX = forceX - velocity.x / speed * airflowMagnitude
+                * car.side.x - velocity.y / speed * airflowMagnitude
+                * car.side.y - velocity.z / speed * airflowMagnitude
+                * car.side.z
+            forceY = forceY - velocity.x / speed * airflowMagnitude
+                * car.look.x - velocity.y / speed * airflowMagnitude
+                * car.look.y - velocity.z / speed * airflowMagnitude
+                * car.look.z
+        end
+    end
     local forceMagnitude = math.sqrt(forceX * forceX + forceY * forceY)
     local waveDT = math.min(math.max(sim.dt or 0.0, 0.0), 0.1)
     local waveDrive = math.min(1.0, math.max(0.0,
@@ -6367,7 +6408,7 @@ float4 main(PS_IN pin)
     )
     waveState.previousForce = forceMagnitude
     waveState.phase = (waveState.phase + waveDT * 9.0) % (math.pi * 2.0)
-    if not inertiaEnabled then
+    if not inertiaEnabled and not airflowEnabled then
         waveState.envelope = 0.0
         waveState.previousForce = 0.0
         waveState.triggerLogged = false
@@ -6375,8 +6416,10 @@ float4 main(PS_IN pin)
     if waveState.envelope > 0.15 and not waveState.triggerLogged then
         ac.log(appNameDebug .. ' Dynamic drop wave force: inertia='
             .. tostring(inertiaEnabled)
-            .. ' source=rainAccelerationCurrent magnitude='
+            .. ' airflow=' .. tostring(airflowEnabled)
+            .. ' source=rainAccelerationCurrent+airflow magnitude='
             .. string.format('%.3f', forceMagnitude)
+            .. ' airflowMagnitude=' .. string.format('%.3f', airflowMagnitude)
             .. ' envelope=' .. string.format('%.3f', waveState.envelope))
         waveState.triggerLogged = true
     end
@@ -8895,7 +8938,7 @@ function windowMain(dt)
     ui.text('Canonical force-source isolation')
     ui.text('Use STATE_MODE = 3. Test one source at a time, then enable combinations:')
     ui.text('1) Gravity only -> 2) Inertia only -> 3) Gravity + Inertia -> 4) Airflow')
-    ui.text('Airflow is intentionally OFF by default until its incidence/mass response is verified.')
+    ui.text('Airflow is enabled for the combined force and optical-wave test.')
 
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 then
         ui.separator()
