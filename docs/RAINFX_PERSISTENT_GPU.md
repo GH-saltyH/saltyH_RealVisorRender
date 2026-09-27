@@ -3174,3 +3174,20 @@ Compare live and copy for background content and nested drop images. This
 tests whether an explicit pre-draw snapshot avoids live texture feedback.
 If both retain nested drops, the snapshot itself already contains earlier
 draws, so stage timing or a clean source must be addressed separately.
+
+### 67. Transparent-stage copy already contains prior drops (2026-09-27)
+
+The user reports nested droplets in both the direct HDR sample and the
+snapshot taken immediately before the mesh draw within the track transparent
+callback. A direct copy at that point therefore does not isolate a clean
+background. Keep continuous drawing and all four source quadrants, but move
+the `ui.ExtraCanvas:copyFrom('dynamic::hdr')` call into a separate
+`main.track.opaque` callback. Continue drawing and sampling the canvas on
+`main.track.transparent`. Log both the capture frame and draw frame in the
+existing first-draw log to confirm the earlier callback fired.
+
+If the blue-rim canvas is black while red-rim live HDR has scene colors, the
+opaque stage did not expose usable HDR. If the canvas contains scene color
+without nested droplets, this earlier capture is a usable clean source. If
+both still contain nested droplets, the opaque HDR input already retains
+previous draws and another clean-source strategy is needed.

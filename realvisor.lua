@@ -412,7 +412,7 @@ local cfg = scriptSettings:mapConfig({
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
         RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
-        -- Compare live HDR with a direct texture copy taken before mesh draw.
+        -- Compare live HDR with a copy taken during the earlier opaque pass.
         RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
@@ -6090,6 +6090,41 @@ end
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
 --------------------------------------------------------
+-- Capture the HDR input before the track transparent droplet draw. A capture
+-- made inside the transparent callback already contained earlier droplets.
+render.on('main.track.opaque', function()
+    if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
+        or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
+        or not cfg.RUNTIME.RAIN_ENABLED
+    then
+        return
+    end
+
+    local sim = ac.getSim()
+    if not sim then return end
+
+    local captureWidth = math.max(1, sim.windowWidth or 1)
+    local captureHeight = math.max(1, sim.windowHeight or 1)
+    if not rainDynamicSceneCopyState.canvas
+        or rainDynamicSceneCopyState.width ~= captureWidth
+        or rainDynamicSceneCopyState.height ~= captureHeight
+    then
+        if rainDynamicSceneCopyState.canvas then
+            rainDynamicSceneCopyState.canvas:dispose()
+        end
+        rainDynamicSceneCopyState.canvas = ui.ExtraCanvas(
+            vec2(captureWidth, captureHeight),
+            1,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float
+        )
+        rainDynamicSceneCopyState.width = captureWidth
+        rainDynamicSceneCopyState.height = captureHeight
+    end
+    rainDynamicSceneCopyState.canvas:copyFrom('dynamic::hdr')
+    rainDynamicSceneCopyState.captureFrame = sim.frame
+end)
+
 -- Stage 4A dynamic droplet final draw
 --
 -- Reference validation:
@@ -6189,28 +6224,6 @@ float4 main(PS_IN pin)
         return
     end
 
-    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG then
-        local captureWidth = math.max(1, sim.windowWidth or 1)
-        local captureHeight = math.max(1, sim.windowHeight or 1)
-        if not rainDynamicSceneCopyState.canvas
-            or rainDynamicSceneCopyState.width ~= captureWidth
-            or rainDynamicSceneCopyState.height ~= captureHeight
-        then
-            if rainDynamicSceneCopyState.canvas then
-                rainDynamicSceneCopyState.canvas:dispose()
-            end
-            rainDynamicSceneCopyState.canvas = ui.ExtraCanvas(
-                vec2(captureWidth, captureHeight),
-                1,
-                render.AntialiasingMode.None,
-                render.TextureFormat.R16G16B16A16.Float
-            )
-            rainDynamicSceneCopyState.width = captureWidth
-            rainDynamicSceneCopyState.height = captureHeight
-        end
-        rainDynamicSceneCopyState.canvas:copyFrom('dynamic::hdr')
-    end
-
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
@@ -6253,6 +6266,10 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG)
             .. ' hdrSnapshot='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG)
+            .. ' earlyCaptureFrame='
+            .. tostring(rainDynamicSceneCopyState.captureFrame)
+            .. ' drawFrame='
+            .. tostring(sim.frame)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )
