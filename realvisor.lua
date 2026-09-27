@@ -5531,12 +5531,13 @@ local function initializeRainDynamicSurfaceTest()
         end
 
         local base = vertexIndex - 1
-        meshIndices:set(indexIndex, base)
-        meshIndices:set(indexIndex + 1, base + 1)
-        meshIndices:set(indexIndex + 2, base + 2)
-        meshIndices:set(indexIndex + 3, base)
-        meshIndices:set(indexIndex + 4, base + 2)
-        meshIndices:set(indexIndex + 5, base + 3)
+        -- Draw the trail first; the body should conceal its center endpoint.
+        meshIndices:set(indexIndex, base + 4)
+        meshIndices:set(indexIndex + 1, base + 5)
+        meshIndices:set(indexIndex + 2, base + 6)
+        meshIndices:set(indexIndex + 3, base + 4)
+        meshIndices:set(indexIndex + 4, base + 6)
+        meshIndices:set(indexIndex + 5, base + 7)
 
         -- Reserve a second quad for a velocity-aligned optical trail.
         -- It remains degenerate until a moving GPU state is read back.
@@ -5546,12 +5547,12 @@ local function initializeRainDynamicSurfaceTest()
         meshVertices:set(vertexIndex + 5, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 2)))
         meshVertices:set(vertexIndex + 6, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 3)))
         meshVertices:set(vertexIndex + 7, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 3)))
-        meshIndices:set(indexIndex + 6, base + 4)
-        meshIndices:set(indexIndex + 7, base + 5)
-        meshIndices:set(indexIndex + 8, base + 6)
-        meshIndices:set(indexIndex + 9, base + 4)
-        meshIndices:set(indexIndex + 10, base + 6)
-        meshIndices:set(indexIndex + 11, base + 7)
+        meshIndices:set(indexIndex + 6, base)
+        meshIndices:set(indexIndex + 7, base + 1)
+        meshIndices:set(indexIndex + 8, base + 2)
+        meshIndices:set(indexIndex + 9, base)
+        meshIndices:set(indexIndex + 10, base + 2)
+        meshIndices:set(indexIndex + 11, base + 3)
 
         vertexIndex = vertexIndex + 8
         indexIndex = indexIndex + 12
@@ -6108,8 +6109,10 @@ local function applyRainDynamicStateToSurfaceMesh()
         then
             trailSpeed = math.sqrt(trailU * trailU + trailV * trailV)
             if trailSpeed > 0.0005 then
-                local tailLength = math.min(radiusUV * 5.0,
-                    math.max(radiusUV * 0.45,
+                -- Include the head's radius before measuring visible length:
+                -- shorter strips remain entirely inside larger bodies.
+                local tailLength = math.min(radiusUV * 6.0,
+                    radiusUV + math.max(radiusUV * 1.2,
                         trailSpeed * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS))
                 trailSample = rainDynamicSurfaceSample(
                     rainDynamicSurfaceLookup,

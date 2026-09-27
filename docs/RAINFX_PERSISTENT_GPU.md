@@ -4146,3 +4146,47 @@ track; add neighbor lookup with fixed visor-UV cells before implementing
 merge/split (all-pairs checks would grow quadratically at 512 drops);
 then transfer water volume between merged drops and trail deposits. Keep
 the clean-scene shot shared and measure each new GPU pass separately.
+
+### 116. Expose trails outside large bodies and plan rain-fed lifecycle (2026-09-28)
+
+The first in-game test shows a short trail on small drops, apparently
+emerging from their center, and no clear trail on larger drops. The initial
+strip starts at the drop center, is submitted *after* the body and could
+be only 0.45 body radii long. Render strip triangles before body triangles
+within the same mesh, so the body covers the connecting tip. Measure strip
+length from the drop center as its body radius plus at least 1.2 extra
+radii, capped at six radii; continue suppressing stationary strips. Fade
+the optical trail before it reaches the center. The per-drop 0.25-second
+velocity term and no-extra-scene-shot contract remain unchanged. Verify
+that trails are actually visible outside bodies of different sizes and
+measure FPS at 512 drops.
+
+The user's dark screenshot shows an objectionable pale outline. The rim is
+currently an additive fixed pale color, so future shape/lifecycle changes
+will not remove it. Attenuate both main-drop and trail additive rim from
+their sampled clean-scene luminance, keeping a weak contribution in dark
+scenes. Check bright/dark backgrounds separately: very bright sampled
+refraction can still create a line despite reduced artificial accent.
+
+The current production mode is `RAIN_GPU_STATE_MODE=3`, while the existing
+exit/wait/respawn meta shader is gated on mode 6. Even mode 6 only kills
+drops at the visor boundary; stationary drops cannot cycle. Next lifecycle
+experiment should run the already implemented mode-6 boundary behavior
+in isolation and verify that it does not hide or freeze the mesh. Then add
+bounded age and probabilistic rain-driven turnover using the existing
+Meta.B timer, with staggered, deterministic per-slot timing. The bundled
+`lib.lua` declares `ac.getConditionsSet().rainIntensity`; feed a clamped
+rain rate into GPU meta updates. Age out a small subset of stationary drops
+and reuse their slots after the existing wait gap; preserve the visor mask,
+the current physical diameter distribution and a configurable maximum
+creation rate. Guard debug modes and ensure no new drops are emitted when
+rain intensity is zero. A fixed-rate diagnostic override can test this
+separately from actual weather.
+
+Impact splash is feasible as a later, gated birth event: only sufficiently
+large, newly spawned drops can split some of their volume into a few
+short-lived radial fragments with stronger initial surface velocity.
+Count fragments against the same 512 state slots, check the surface mask,
+conserve an approximate volume budget and cap the event rate. First prove
+age-based stationary replenishment; then test single impact, fragment
+directions, lifetime and GPU/FPS costs before enabling many splashes.

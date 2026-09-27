@@ -65,6 +65,7 @@ float4 main(PS_IN pin)
         float trailEdge = max(abs(local.x), abs(local.y) / trailWidth);
         clip(1.0 - trailEdge);
         float fade = smoothstep(-1.0, -0.25, local.x)
+            * (1.0 - smoothstep(-0.20, 0.75, local.x))
             * (1.0 - smoothstep(0.78, 1.0, trailEdge));
         float2 offset = float2(local.y, -local.x) * 6.0;
         float3 trailScene;
@@ -83,8 +84,9 @@ float4 main(PS_IN pin)
                 saturate(pin.ScreenPos + offset * gDynamicDropInvScreenSize),
                 0.0).rgb;
         float rim = smoothstep(0.72, 1.0, trailEdge);
+        float trailLuma = dot(trailScene, float3(0.2126, 0.7152, 0.0722));
         return float4(trailScene + float3(0.72, 0.86, 1.0)
-            * rim * 0.10, 0.50 * fade);
+            * rim * lerp(0.025, 0.10, saturate(trailLuma)), 0.50 * fade);
     }
 
     clip(1.0 - r);
@@ -318,8 +320,11 @@ float4 main(PS_IN pin)
 
         // Keep the proven Stage 4B.0 rim/highlight at low strength so the
         // droplet boundary remains identifiable over smooth backgrounds.
+        float sceneLuma = dot(refractedScene,
+            float3(0.2126, 0.7152, 0.0722));
         float3 opticalAccent =
-            float3(0.72, 0.86, 1.00) * fresnel * 0.16
+            float3(0.72, 0.86, 1.00) * fresnel
+                * lerp(0.035, 0.16, saturate(sceneLuma))
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
 
         // The translucent candidate was preferred over full replacement:
