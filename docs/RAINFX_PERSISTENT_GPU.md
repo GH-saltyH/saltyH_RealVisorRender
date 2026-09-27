@@ -3414,3 +3414,30 @@ upper-left; compare its background landmarks with the actual scene there and
 at the lower-right. Samples beyond UV 1 clamp to the edge, so expect the
 corrected candidate to lose detail at the far bottom/right if the processed
 screen texture does not contain a full-resolution image at this stage.
+
+### 80. Compare three coordinates against the same screen scene (2026-09-27)
+
+The user reports that the `dynamic::screen` sample at
+`PosH / renderTargetSize` smears, while `PosH / windowSize` remains
+recognizable but offset. Do not apply the scaling as a production fix.
+
+The Stage 4B diagnostic rasterizes the physical drop quads with `render.mesh`.
+Each pixel receives interpolated drop-local UV (`pin.Tex`), projected screen
+UV (`pin.ScreenPos`) and raster position (`pin.PosH`); the shader clips pixels
+outside the unit circle and reads one scene texture at a selected UV. There
+is no camera pass for each droplet. The circular diagnostic divides each
+single droplet into quadrants and outputs sampled RGB with colored border and
+cross. Depth testing is read-only so foreground geometry can occlude it.
+
+Next compare one `dynamic::screen` source using three coordinate definitions,
+with identical 8x diagnostic RGB gain: shader upper-right green uses
+`PosH / renderTargetSize` (the known smeared ratio candidate), shader
+lower-left blue uses CSP's interpolated `pin.ScreenPos` (projection
+candidate), shader lower-right magenta uses `PosH / windowSize` (recognizable
+but offset reference). Shader upper-left red retains the HDR window-UV
+reference without gain. From behind the visor these appear image upper-left,
+lower-right, lower-left, and upper-right respectively. Observe the same
+background landmark within a centered droplet and one near a screen edge.
+The test isolates coordinate mapping because the three candidate samples use
+the same texture, shader, gain and draw stage. If none align, inspect the
+screen scene's capture/projection stage rather than multiplying UV again.
