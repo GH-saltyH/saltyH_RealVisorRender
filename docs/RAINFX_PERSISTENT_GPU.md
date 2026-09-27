@@ -3872,3 +3872,24 @@ expected direction without introducing self-images, clipped edges or
 unexpected black areas. Measure FPS at the reference camera before selecting
 an optical strength. The green quarter is the exact undistorted control;
 other optical properties are intentionally unchanged for this test.
+
+### 104. Compare 8px and 16px displacement against CSP refraction model (2026-09-27)
+
+The user sees a gentle bend at 8 pixels and a rough, strong bend at 24
+pixels. There is no recursive droplet image and no measurable FPS change. A
+supplied close-up shows the hard edge distortion in the stronger quadrant.
+The CSP public `custom_objects/common/refraction.hlsl` does not prescribe a
+fixed pixel offset for a rain drop: its `calculateRefractionOffset()`
+projects a normal onto camera directions and scales by incidence, screen
+aspect, camera tangent and inverse view-space distance; the shader then
+samples engine-owned previous-frame color. That is a useful structural
+reference, not an empirical 8px or 24px target for this visor geometry.
+
+Keep green undistorted and blue at 8 shot pixels; change only magenta from
+24 to 16 shot pixels. Retain the clean full-resolution scene shot, single
+sample site and all preset debug flags. Compare the same straight background
+edge in the two refracted quadrants, especially at the drop center and rim;
+look for a smooth transition, acceptable bending and no hard kink. Check
+FPS in the reference view. After choosing a visual range, express the
+strength relative to projected droplet size/camera geometry rather than
+assuming that a fixed pixel count is valid across resolutions and sizes.

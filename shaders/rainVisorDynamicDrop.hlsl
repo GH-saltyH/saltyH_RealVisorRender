@@ -92,7 +92,7 @@ float4 main(PS_IN pin)
                     float radialProfile = smoothstep(0.05, 0.75, r)
                         * boundaryFade;
                     float refractionPixels = !bottom ? 0.0
-                        : (right ? gDynamicDropRefractionPixels * 3.0
+                        : (right ? gDynamicDropRefractionPixels * 2.0
                             : gDynamicDropRefractionPixels);
                     sceneUV += local * radialProfile * refractionPixels
                         * gDynamicDropInvRenderTargetSize;
