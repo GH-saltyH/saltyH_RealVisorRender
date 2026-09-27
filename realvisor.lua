@@ -419,7 +419,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
         -- Keep the best empirical scale as a reference against projection.
         RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
-        RAIN_DYNAMIC_DROP_PROJECTIVE_UV_DEBUG = true,
+        RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6307,8 +6307,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG)
             .. ' geometryShot='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
-            .. ' projectiveUV='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PROJECTIVE_UV_DEBUG)
+            .. ' pixelUV='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
             .. ' earlyCaptureFrame='
             .. tostring(rainDynamicSceneCopyState.captureFrame)
             .. ' drawFrame='
@@ -6369,8 +6369,8 @@ float4 main(PS_IN pin)
 
             gDynamicDropGeometryUVScaleA =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A,
-            gDynamicDropProjectiveUVDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_PROJECTIVE_UV_DEBUG
+            gDynamicDropPixelUVDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG
                 and 1.0
                 or 0.0,
 
