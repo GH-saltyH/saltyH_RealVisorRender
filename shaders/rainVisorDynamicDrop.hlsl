@@ -3,59 +3,63 @@
 
     RAIN_DYNAMIC_SURFACE_STATE_ENABLED uses this shader.
 
-    Debug contract:
-    - gDynamicDropDebugUV > 0.5:
+    Compile-time mode contract (`RAIN_DYNAMIC_DROP_MODE` from Lua defines):
+    - 0: Stage 4B.0 transparent optical profile
+    - 1: quad-local UV gradient
+    - 2: unshifted HDR scene copy
+    - 3: exaggerated radial refraction + cyan branch marker
+
+    Mode 1:
         bypass circular clipping and display interpolated quad UV directly.
         Expected result per quad: horizontal red gradient, vertical green
         gradient, opaque output.
-    - otherwise:
+    Mode 0:
         Stage 4B.0 transparent optical-profile test. This does not sample the
         scene yet; it validates low-alpha composition, a Fresnel-like rim and
         a compact directional highlight before refraction is introduced.
 
     Stage 4B.1 contract:
-    - gDynamicDropHDRCopyDebug > 0.5:
+    - mode 2:
         after circular clipping, copy txDynamicScene at pin.ScreenPos without
         an offset. Correct screen-space alignment makes the footprint nearly
         disappear into the scene.
 
     Stage 4B.2 contract:
-    - gDynamicDropRefractionDebug > 0.5:
+    - mode 3:
         sample the same HDR scene with a controlled radial pixel offset. This
         validates lens direction and screen-space stability before tuning the
         final water optical model.
 */
 
-// All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
+// txDynamicScene, gDynamicDropInvScreenSize and
+// gDynamicDropRefractionPixels are injected by render.mesh({
 // textures/values = ... }). Do not redeclare them in this file.
 
 float4 main(PS_IN pin)
 {
-    if (gDynamicDropDebugUV > 0.5)
-    {
-        // Do not clip anything in this branch. If the dynamic mesh is bound
-        // and pin.Tex is transported correctly, each quad must show a 0..1
-        // red/green gradient. A flat color identifies broken UV transport.
-        return float4(pin.Tex.x, pin.Tex.y, 0.15, 1.0);
-    }
+#if RAIN_DYNAMIC_DROP_MODE == 1
+    // Do not clip anything in this mode. If the dynamic mesh is bound and
+    // pin.Tex is transported correctly, each quad must show a 0..1 red/green
+    // gradient. A flat color identifies broken UV transport.
+    return float4(pin.Tex.x, pin.Tex.y, 0.15, 1.0);
+#else
 
     float2 local = (pin.Tex - 0.5) * 2.0;
     float r = length(local);
 
     clip(1.0 - r);
 
-    if (gDynamicDropHDRCopyDebug > 0.5)
-    {
-        // mesh.fx provides ScreenPos directly in normalized 0..1 screen
-        // coordinates. No Lua-side resolution or projection math is needed.
-        float3 sceneColor = txDynamicScene.SampleLevel(
-            samLinearClamp,
-            pin.ScreenPos,
-            0.0
-        ).rgb;
+#if RAIN_DYNAMIC_DROP_MODE == 2
+    // mesh.fx provides ScreenPos directly in normalized 0..1 screen
+    // coordinates. No Lua-side resolution or projection math is needed.
+    float3 sceneColor = txDynamicScene.SampleLevel(
+        samLinearClamp,
+        pin.ScreenPos,
+        0.0
+    ).rgb;
 
-        return float4(sceneColor, 1.0);
-    }
+    return float4(sceneColor, 1.0);
+#else
 
     // Reconstruct a hemisphere-like local normal from the circular footprint.
     // This is an optical profile only: the actual visor surface normal remains
@@ -71,40 +75,39 @@ float4 main(PS_IN pin)
         28.0
     );
 
-    if (gDynamicDropRefractionDebug > 0.5)
-    {
-        // Fade the displacement back near the clipped boundary to avoid a
-        // harsh discontinuity while retaining an obvious radial lens test.
-        float boundaryFade = 1.0 - smoothstep(0.82, 1.0, r);
-        float radialProfile = smoothstep(0.05, 0.75, r) * boundaryFade;
+#if RAIN_DYNAMIC_DROP_MODE == 3
+    // Fade the displacement back near the clipped boundary to avoid a harsh
+    // discontinuity while retaining an obvious radial lens test.
+    float boundaryFade = 1.0 - smoothstep(0.82, 1.0, r);
+    float radialProfile = smoothstep(0.05, 0.75, r) * boundaryFade;
 
-        float2 refractionOffset =
-            dropNormal.xy
-            * radialProfile
-            * gDynamicDropRefractionPixels
-            * gDynamicDropInvScreenSize;
+    float2 refractionOffset =
+        dropNormal.xy
+        * radialProfile
+        * gDynamicDropRefractionPixels
+        * gDynamicDropInvScreenSize;
 
-        float3 refractedScene = txDynamicScene.SampleLevel(
-            samLinearClamp,
-            saturate(pin.ScreenPos + refractionOffset),
-            0.0
-        ).rgb;
+    float3 refractedScene = txDynamicScene.SampleLevel(
+        samLinearClamp,
+        saturate(pin.ScreenPos + refractionOffset),
+        0.0
+    ).rgb;
 
-        // Stage 4B.2A branch marker: an intentionally obvious cyan ring. It
-        // separates "the refraction branch did not run" from "the sampled
-        // background was too smooth for the offset to be noticeable".
-        float diagnosticRing =
-            smoothstep(0.68, 0.76, r)
-            * (1.0 - smoothstep(0.90, 0.98, r));
+    // Stage 4B.2A branch marker: an intentionally obvious cyan ring. It
+    // separates "the refraction branch did not run" from "the sampled
+    // background was too smooth for the offset to be noticeable".
+    float diagnosticRing =
+        smoothstep(0.68, 0.76, r)
+        * (1.0 - smoothstep(0.90, 0.98, r));
 
-        // Keep the proven Stage 4B.0 directional highlight as a secondary
-        // orientation marker.
-        float3 opticalAccent =
-            float3(0.08, 0.85, 1.00) * diagnosticRing * 0.55
-            + float3(0.92, 0.98, 1.00) * highlight * 0.24;
+    // Keep the proven Stage 4B.0 directional highlight as a secondary
+    // orientation marker.
+    float3 opticalAccent =
+        float3(0.08, 0.85, 1.00) * diagnosticRing * 0.55
+        + float3(0.92, 0.98, 1.00) * highlight * 0.24;
 
-        return float4(refractedScene + opticalAccent, 1.0);
-    }
+    return float4(refractedScene + opticalAccent, 1.0);
+#else
 
     // Keep the center almost transparent. The rim and small highlight are the
     // only strong contributions in this pre-refraction validation stage.
@@ -121,4 +124,7 @@ float4 main(PS_IN pin)
     );
 
     return float4(color, alpha);
+#endif
+#endif
+#endif
 }

@@ -2770,3 +2770,26 @@ Interpretation:
 - cyan rings visible but background remains unchanged: branch/value binding works; investigate offset scale or scene sampling
 - no cyan rings: refraction branch/value binding is not active, independent of scene texture visibility
 - black-filled circles after Lua reload: repeat after a full game restart because the confirmed `dynamic::hdr` hot-reload binding caveat still applies
+
+### 49. Stage 4B.2A runtime mode selection failure + compile-time mode isolation (2026-09-27)
+
+Observed after a full restart with refraction debug enabled and the diagnostic increased to 48 pixels:
+- no cyan branch-marker ring
+- no identifiable footprint
+
+Because the fallback Stage 4B.0 optical profile also did not appear, the visible output remains consistent with the unshifted HDR-copy branch. The runtime scalar values used to choose mutually exclusive shader paths are therefore not a reliable mode-selection mechanism on the target path/build.
+
+Correction:
+- compute one `dynamicDropShaderMode` in Lua with explicit priority: local UV = 1, HDR copy = 2, refraction = 3, optical profile = 0
+- pass it using `render.mesh().defines` as `RAIN_DYNAMIC_DROP_MODE`
+- use HLSL preprocessor branches (`#if`) so only the selected diagnostic path is compiled
+- remove the three runtime scalar mode values from the injected cbuffer
+- retain only genuinely numerical runtime inputs in `values`: inverse screen size and refraction pixels
+- continue to avoid redeclaring Lua-provided textures/values in HLSL
+
+This makes mode exclusivity structural: when mode 3 is compiled, the unshifted HDR-copy return statement is absent from the compiled path.
+
+Validation settings remain the Stage 4B.2A settings and require a full game restart. Expected interpretation remains:
+- cyan ring visible: compile-time refraction path is selected
+- cyan ring plus bent background: screen-space refraction is working
+- no cyan ring: investigate define compilation/caching or whether a different shader/file is being executed; runtime scalar ambiguity has been removed

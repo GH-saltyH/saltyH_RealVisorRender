@@ -6141,28 +6141,26 @@ render.on('main.root.transparent', function()
     -- render.mesh() consumes the SceneReference, then hide it again.
     rainDynamicSurfaceMesh:setVisible(true, false)
 
+    -- Select exactly one shader path at compile time. Runtime scalar mode
+    -- selection remained stuck on the HDR-copy branch on the target CSP build
+    -- even after a full restart, so do not use injected cbuffer values for
+    -- mutually exclusive diagnostic modes.
+    local dynamicDropShaderMode =
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG and 1
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG and 2
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG and 3
+        or 0
+
     local dynamicDrawn = render.mesh({
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
+        defines = {
+            RAIN_DYNAMIC_DROP_MODE = dynamicDropShaderMode,
+        },
         textures = {
             txDynamicScene = 'dynamic::hdr',
         },
         values = {
-            gDynamicDropDebugUV =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
-                and 1.0
-                or 0.0,
-
-            gDynamicDropHDRCopyDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG
-                and 1.0
-                or 0.0,
-
-            gDynamicDropRefractionDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG
-                and 1.0
-                or 0.0,
-
             gDynamicDropInvScreenSize = vec2(
                 1.0 / math.max(sim.windowWidth or 1, 1),
                 1.0 / math.max(sim.windowHeight or 1, 1)
