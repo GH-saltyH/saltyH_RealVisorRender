@@ -3024,3 +3024,23 @@ are present but all four interiors remain black, HDR sampling fails at these
 coordinates despite the restored prepass. If the left side regains the previous
 scene colors, the prepass changed resource availability or render state and
 the earlier coordinate-only test was not controlled.
+
+### 59. Diagnostic executes, all HDR coordinate samples black (2026-09-27)
+
+The user confirmed the yellow cross and red/green/blue/magenta quadrant rims
+appear exactly as coded, while all four sampled interiors are black. Thus the
+mesh, UVs and diagnostic shader branch work. The next version keeps the same
+HDR copy prepass, draw stage and preset flags and changes only the four
+interiors:
+- upper-left: `dynamic::hdr` sampled at raw `pin.ScreenPos`
+- upper-right: a CSP solid red texture sampled at a fixed center UV
+- lower-left: `dynamic::hdr` sampled at fixed center UV
+- lower-right: raw `ScreenPos.xy` encoded as red/green at 4× gain, with a
+  constant blue channel so this quadrant cannot be entirely black
+
+The colored rims remain independent branch markers. Red control texture
+visible with both HDR samples black means texture bindings in general work,
+while this HDR source is black or inaccessible in the draw. A black control
+interior with a visible rim means even a known solid texture failed to bind;
+examine the `render.mesh()` texture-injection path. The coordinate quadrant
+shows whether ScreenPos itself varies independently of either texture.

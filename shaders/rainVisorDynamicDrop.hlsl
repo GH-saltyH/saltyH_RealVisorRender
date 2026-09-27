@@ -32,8 +32,8 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare four possible interpretations of mesh.fx ScreenPos using the
-        directly bound HDR scene texture.
+        compare raw and fixed HDR samples, a known solid texture, and a
+        visualization of mesh.fx ScreenPos before further coordinate work.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -59,37 +59,36 @@ float4 main(PS_IN pin)
         float2 raw = pin.ScreenPos.xy;
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
-        float2 sampleUV;
+        float3 sampledColor;
 
         if (!right && !bottom)
         {
-            // Upper-left: current unmodified interpretation.
-            sampleUV = raw;
+            // Upper-left: exact raw HDR scene sample used by the first test.
+            sampledColor = txDynamicScene.SampleLevel(
+                samLinearClamp, raw, 0.0).rgb;
         }
         else if (right && !bottom)
         {
-            // Upper-right: treat ScreenPos as SV_POSITION pixel coordinates.
-            sampleUV = raw * gDynamicDropInvScreenSize;
+            // Upper-right: known solid red input verifies texture sampling.
+            sampledColor = txDynamicControl.SampleLevel(
+                samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
         }
         else if (!right && bottom)
         {
-            // Lower-left: treat ScreenPos as NDC without vertical inversion.
-            sampleUV = raw * 0.5 + 0.5;
+            // Lower-left: sample HDR at a fixed coordinate, independent of
+            // screen projection and droplet location.
+            sampledColor = txDynamicScene.SampleLevel(
+                samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
         }
         else
         {
-            // Lower-right: treat ScreenPos as NDC with DirectX UV Y inversion.
-            sampleUV = float2(
-                raw.x * 0.5 + 0.5,
-                0.5 - raw.y * 0.5
-            );
+            // Lower-right: raw screen coordinate channels at 4× gain.
+            sampledColor = saturate(float3(
+                abs(raw.x) * 4.0,
+                abs(raw.y) * 4.0,
+                0.25
+            ));
         }
-
-        float3 sampledColor = txDynamicScene.SampleLevel(
-            samLinearClamp,
-            sampleUV,
-            0.0
-        ).rgb;
         float3 marker = !right
             ? (bottom ? float3(0.2, 0.5, 1.0) : float3(1.0, 0.15, 0.15))
             : (bottom ? float3(0.9, 0.2, 1.0) : float3(0.15, 1.0, 0.3));
