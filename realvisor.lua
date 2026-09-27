@@ -6222,7 +6222,7 @@ float4 main(PS_IN pin)
         textures = {
             txDynamicScene = 'dynamic::hdr',
             txDynamicScreen = 'dynamic::screen',
-            txDynamicControl = 'color::ff3333',
+            txDynamicControl = textureRainSurfaceNormal,
         },
         values = {
             gDynamicDropDebugUV =

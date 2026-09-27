@@ -32,7 +32,7 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare raw and fixed HDR samples, a known solid texture, and a
+        compare raw and fixed HDR samples, the known normal-map texture, and a
         visualization of mesh.fx ScreenPos before further coordinate work.
 */
 
@@ -69,7 +69,8 @@ float4 main(PS_IN pin)
         }
         else if (right && !bottom)
         {
-            // Upper-right: known solid red input verifies texture sampling.
+            // Upper-right: known nonblack normal-map pixel at (0.5, 0.5)
+            // verifies ordinary file-texture sampling in the same draw.
             sampledColor = txDynamicControl.SampleLevel(
                 samLinearClamp, float2(0.5, 0.5), 0.0).rgb;
         }

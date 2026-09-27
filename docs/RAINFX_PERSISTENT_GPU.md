@@ -3044,3 +3044,25 @@ while this HDR source is black or inaccessible in the draw. A black control
 interior with a visible rim means even a known solid texture failed to bind;
 examine the `render.mesh()` texture-injection path. The coordinate quadrant
 shows whether ScreenPos itself varies independently of either texture.
+
+### 60. Normal-side reversal and file-texture control (2026-09-27)
+
+The user viewed the diagnostic from the opposite side of the visor normal.
+The screenshot confirms that shader-local right appears on the image's left:
+- image upper-left, green rim: shader upper-right, `txDynamicControl`
+- image upper-right, red rim: shader upper-left, raw HDR
+- image lower-left, magenta rim: shader lower-right, `ScreenPos` channels
+- image lower-right, blue rim: shader lower-left, fixed-center HDR
+
+The green-rim control interior was black with `color::ff3333`. This does not
+yet prove general texture binding is broken because that special texture name
+may not resolve as expected for this shader. The magenta-rim interior was
+yellowish, confirming nonzero `ScreenPos.xy` values. Both HDR interiors were
+black in this capture.
+
+Replace the single control texture source with the project's existing
+`GLASS_EXT_RAINFX_surfaceNormal_objectSpace_2K.dds`, already used by the GPU
+physics update. Its decoded center pixel is RGBA `(129, 8, 172, 255)`, so the
+green-rim interior (image upper-left) should show a distinctly purple/blue
+color if ordinary file-texture sampling works in the dynamic mesh draw. Keep
+the prepass, all other sources and preset flags unchanged.
