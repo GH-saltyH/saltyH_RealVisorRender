@@ -3283,3 +3283,23 @@ move toward alignment; this helps distinguish a scale error from a constant
 center offset. Keep the center-only droplets as a sanity check, not the main
 scale criterion. The render remains a screen-scene mapping diagnostic, with
 no droplet-surface refraction applied yet.
+
+### 73. Compare empirical screen scale with projective division (2026-09-27)
+
+The user notes that peripheral droplets rotate with visor curvature, making
+their content harder to compare directly, and that even central droplets are
+not perfectly camera-aligned. The `GeometryShot` also has limits: its output
+is dark and lacks some current post-processing/foliage effects. Do not treat
+it as the final optical source.
+
+The center-anchored 20.5x/22x candidates remain empirical screen warps. A
+more principled candidate is to use the homogeneous screen position supplied
+by mesh.fx: `ScreenPos.xy / ScreenPos.w`. This removes arbitrary scale if
+`ScreenPos` retains clip-space `w`. The current shader adds this as the
+magenta-rim candidate, with saturating to the 0..1 image bounds. The blue-rim
+candidate stays at 20.5x, the green rim stays as the texture control, and red
+remains the live HDR reference. Compare both at recognizable scene details,
+especially on the periphery; report if the magenta sample shows the correct
+feature size and direction, or collapses to an edge color. This diagnoses UV
+mapping only; the independent scene remains darker and does not prove final
+post-processing fidelity.

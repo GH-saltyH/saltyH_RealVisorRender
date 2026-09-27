@@ -60,8 +60,8 @@ float4 main(PS_IN pin)
         float2 expandedUV = saturate((raw - 0.5) * 8.0 + 0.5);
         float2 sceneUVA = saturate(
             (raw - 0.5) * gDynamicDropGeometryUVScaleA + 0.5);
-        float2 sceneUVB = saturate(
-            (raw - 0.5) * gDynamicDropGeometryUVScaleB + 0.5);
+        float2 projectiveUV = saturate(
+            pin.ScreenPos.xy / max(abs(pin.ScreenPos.w), 0.00001));
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
@@ -93,11 +93,15 @@ float4 main(PS_IN pin)
         }
         else
         {
-            // Lower-right: independent scene at the second candidate scale.
+            // Lower-right: projective screen UV (xy divided by w).
             // Fall back to LDR if the geometry shot is disabled.
             if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor = txDynamicSnapshot.SampleLevel(
-                    samLinearClamp, sceneUVB, 0.0).rgb * 8.0;
+                    samLinearClamp,
+                    gDynamicDropProjectiveUVDebug > 0.5
+                        ? projectiveUV
+                        : expandedUV,
+                    0.0).rgb * 8.0;
             else
                 sampledColor = txDynamicScreen.SampleLevel(
                     samLinearClamp, expandedUV, 0.0).rgb;

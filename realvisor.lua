@@ -417,9 +417,9 @@ local cfg = scriptSettings:mapConfig({
         -- Render the scene again without the hidden transport mesh to test
         -- a source that cannot contain previous droplet draws.
         RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
-        -- 20x nearly matches track geometry; refine without shifting center.
+        -- Keep the best empirical scale as a reference against projection.
         RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
-        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B = 22.0,
+        RAIN_DYNAMIC_DROP_PROJECTIVE_UV_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6307,6 +6307,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG)
             .. ' geometryShot='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
+            .. ' projectiveUV='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PROJECTIVE_UV_DEBUG)
             .. ' earlyCaptureFrame='
             .. tostring(rainDynamicSceneCopyState.captureFrame)
             .. ' drawFrame='
@@ -6367,8 +6369,10 @@ float4 main(PS_IN pin)
 
             gDynamicDropGeometryUVScaleA =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A,
-            gDynamicDropGeometryUVScaleB =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B,
+            gDynamicDropProjectiveUVDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_PROJECTIVE_UV_DEBUG
+                and 1.0
+                or 0.0,
 
             gDynamicDropInvScreenSize = vec2(
                 1.0 / math.max(sim.windowWidth or 1, 1),
