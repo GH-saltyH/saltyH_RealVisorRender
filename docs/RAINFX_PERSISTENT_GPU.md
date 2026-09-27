@@ -4284,3 +4284,24 @@ well as Fog sky: whether the inside actually refracts, whether the body
 color still diverges from adjacent sky, and matched Fog FPS. A full-size
 processed shot can be more expensive; this is a measurement, not a final
 quality selection.
+
+### 121. Compare YEBIS scene color before and after HDR conversion (2026-09-28)
+
+At a matched Fog camera, YEBIS at 0.5 and 1.0 both measured 54–57 FPS;
+Hurricane measured 68–69 and 67–69 FPS, respectively. At full resolution,
+background edges bend within droplets, but the distortion is mild and their
+interiors remain dark with hard-to-read colors. Resolution alone did not
+resolve the color discrepancy and has no clearly measurable cost in those
+paired conditions.
+
+With trails off, keep the full-size YEBIS shot and existing 16px optical
+offset. Preset `RAIN_DYNAMIC_DROP_YEBIS_COLORSPACE_DEBUG=true`: image-left
+of each droplet displays the raw YEBIS LDR texture, image-right applies
+the documented shader `convertHDR(sample, true)` LDR-to-HDR conversion
+before the same HDR transparent blend. Both halves use the same source UV,
+offset, optical accent and alpha. Observe the same drop on an edge in Fog
+and Hurricane, and compare each half's scene color to its surroundings;
+record FPS in a fixed camera. This conversion accounts for WeatherFX color
+hints, not for YEBIS tone mapping or exposure, so equal darkness would
+motivate investigating the render stage and full tone mapping instead of
+raising a fixed brightness multiplier.

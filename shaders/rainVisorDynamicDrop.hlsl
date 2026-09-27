@@ -315,6 +315,11 @@ float4 main(PS_IN pin)
                 refractedScene = txDynamicScreen.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
                     0.0).rgb;
+            // Compare raw YEBIS LDR on image-left with the WeatherFX
+            // LDR-to-HDR conversion on image-right in the same HDR pass.
+            // convertHDR does not reverse tone mapping or exposure.
+            if (gDynamicDropYebisColorSpaceDebug > 0.5 && local.x >= 0.0)
+                refractedScene = convertHDR(refractedScene, true);
         }
         else
         {

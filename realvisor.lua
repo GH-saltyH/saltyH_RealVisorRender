@@ -405,6 +405,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
+        -- Compare raw processed color (image-left) with WeatherFX
+        -- LDR-to-HDR conversion (image-right) before the HDR blend.
+        RAIN_DYNAMIC_DROP_YEBIS_COLORSPACE_DEBUG = true,
         -- Retain force-driven wave code for later optical tuning.
         RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
         -- Compare an uneven right-half outline with the circular left half.
@@ -6631,6 +6634,10 @@ float4 main(PS_IN pin)
                 or 0.0,
             gDynamicDropSkySourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropYebisColorSpaceDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
+                and cfg.RUNTIME.RAIN_DYNAMIC_DROP_YEBIS_COLORSPACE_DEBUG
                 and 1.0 or 0.0,
 
             gDynamicDropSceneSourceDebug =
