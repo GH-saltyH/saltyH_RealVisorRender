@@ -411,7 +411,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
-        RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
+        -- Compare live HDR with a direct texture copy taken before mesh draw.
+        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6187,6 +6189,28 @@ float4 main(PS_IN pin)
         return
     end
 
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG then
+        local captureWidth = math.max(1, sim.windowWidth or 1)
+        local captureHeight = math.max(1, sim.windowHeight or 1)
+        if not rainDynamicSceneCopyState.canvas
+            or rainDynamicSceneCopyState.width ~= captureWidth
+            or rainDynamicSceneCopyState.height ~= captureHeight
+        then
+            if rainDynamicSceneCopyState.canvas then
+                rainDynamicSceneCopyState.canvas:dispose()
+            end
+            rainDynamicSceneCopyState.canvas = ui.ExtraCanvas(
+                vec2(captureWidth, captureHeight),
+                1,
+                render.AntialiasingMode.None,
+                render.TextureFormat.R16G16B16A16.Float
+            )
+            rainDynamicSceneCopyState.width = captureWidth
+            rainDynamicSceneCopyState.height = captureHeight
+        end
+        rainDynamicSceneCopyState.canvas:copyFrom('dynamic::hdr')
+    end
+
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
@@ -6227,6 +6251,8 @@ float4 main(PS_IN pin)
             .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'track' or 'root')
             .. ' sparseFrame='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG)
+            .. ' hdrSnapshot='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )
@@ -6238,6 +6264,8 @@ float4 main(PS_IN pin)
         transform = 'original',
         textures = {
             txDynamicScene = 'dynamic::hdr',
+            txDynamicSnapshot = rainDynamicSceneCopyState.canvas
+                or 'dynamic::hdr',
             txDynamicScreen = 'dynamic::screen',
             txDynamicControl = textureRainSurfaceNormal,
         },
@@ -6264,6 +6292,11 @@ float4 main(PS_IN pin)
 
             gDynamicDropScreenUVDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropSnapshotDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
                 and 1.0
                 or 0.0,
 

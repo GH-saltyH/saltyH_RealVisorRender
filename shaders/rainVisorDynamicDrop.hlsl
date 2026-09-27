@@ -32,8 +32,9 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare raw and center-expanded HDR samples, the known normal-map
-        texture, and the LDR source at the same expanded UV.
+        compare direct HDR, a pre-draw HDR snapshot, a known file texture,
+        and LDR. The HDR samples use the same center-expanded UV when
+        gDynamicDropSnapshotDebug is enabled.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -64,9 +65,12 @@ float4 main(PS_IN pin)
 
         if (!right && !bottom)
         {
-            // Upper-left: exact raw HDR scene sample used by the first test.
+            // Upper-left: direct HDR, using the same 8x mapping as the
+            // snapshot below while snapshot comparison is enabled.
             sampledColor = txDynamicScene.SampleLevel(
-                samLinearClamp, raw, 0.0).rgb;
+                samLinearClamp,
+                gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw,
+                0.0).rgb;
         }
         else if (right && !bottom)
         {
@@ -77,10 +81,9 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: magnify the variation in ScreenPos around screen
-            // center by 8x. Compare with unscaled HDR in upper-left to test
-            // whether ScreenPos traverses too little of the scene texture.
-            sampledColor = txDynamicScene.SampleLevel(
+            // Lower-left: copy taken immediately before render.mesh(), with
+            // the identical 8x UV mapping as direct HDR above.
+            sampledColor = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, expandedUV, 0.0).rgb;
         }
         else

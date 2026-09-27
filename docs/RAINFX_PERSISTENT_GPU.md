@@ -3153,3 +3153,24 @@ whether either the blue HDR or magenta LDR region still contains a smaller
 droplet. If nested images disappear after empty frames, recent rendered
 frames contributed to the scene source; if they remain, the diagnostic must
 also consider a current-frame contribution or longer retention.
+
+### 66. Empty frames remove nested images; direct HDR snapshot test (2026-09-27)
+
+The user confirmed that a visible droplet after three consecutive frames
+without a dynamic mesh draw no longer contains a smaller drop image. Recent
+draws therefore feed the scene source. This result is consistent with
+previous-frame feedback, but does not establish an exact one-frame delay.
+
+The next test restores continuous drawing
+(`RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG=false`). At the track transparent
+callback, before `render.mesh()`, copy `dynamic::hdr` directly into a
+full-window `ui.ExtraCanvas` using `copyFrom('dynamic::hdr')` and bind that
+canvas as `txDynamicSnapshot`. The earlier `updateSceneWithShader()` prepass
+remains disabled. Preset `RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG=true`; the
+back-side-view upper-right red rim samples live HDR at the same 8x UV as the
+lower-right blue rim samples the copied HDR. The upper-left green rim remains
+the known normal-map control; the lower-left magenta rim remains 8x LDR.
+Compare live and copy for background content and nested drop images. This
+tests whether an explicit pre-draw snapshot avoids live texture feedback.
+If both retain nested drops, the snapshot itself already contains earlier
+draws, so stage timing or a clean source must be addressed separately.
