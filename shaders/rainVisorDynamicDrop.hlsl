@@ -33,7 +33,7 @@
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
         compare raw and center-expanded HDR samples, the known normal-map
-        texture, and a visualization of mesh.fx ScreenPos.
+        texture, and the LDR source at the same expanded UV.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -57,6 +57,7 @@ float4 main(PS_IN pin)
     if (gDynamicDropScreenUVDebug > 0.5)
     {
         float2 raw = pin.ScreenPos.xy;
+        float2 expandedUV = saturate((raw - 0.5) * 8.0 + 0.5);
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
@@ -79,18 +80,15 @@ float4 main(PS_IN pin)
             // Lower-left: magnify the variation in ScreenPos around screen
             // center by 8x. Compare with unscaled HDR in upper-left to test
             // whether ScreenPos traverses too little of the scene texture.
-            float2 expandedUV = (raw - 0.5) * 8.0 + 0.5;
             sampledColor = txDynamicScene.SampleLevel(
-                samLinearClamp, saturate(expandedUV), 0.0).rgb;
+                samLinearClamp, expandedUV, 0.0).rgb;
         }
         else
         {
-            // Lower-right: raw screen coordinate channels at 4× gain.
-            sampledColor = saturate(float3(
-                abs(raw.x) * 4.0,
-                abs(raw.y) * 4.0,
-                0.25
-            ));
+            // Lower-right: LDR scene with the identical expanded UV used by
+            // lower-left HDR. Compare nested drops without UV differences.
+            sampledColor = txDynamicScreen.SampleLevel(
+                samLinearClamp, expandedUV, 0.0).rgb;
         }
         float3 marker = !right
             ? (bottom ? float3(0.2, 0.5, 1.0) : float3(1.0, 0.15, 0.15))

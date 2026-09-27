@@ -3118,3 +3118,19 @@ late Lua reload, compare whether either HDR quadrant still contains scene
 color, and whether nested droplets remain. If the HDR becomes black, the
 prepass is necessary for that source at this stage; if color remains, the
 prepass can be removed from this diagnostic path.
+
+### 64. HDR available without prepass; compare LDR content (2026-09-27)
+
+The user confirmed that both HDR quadrants still show scene colors and nested
+droplets with the prepass disabled. The ExtraCanvas update therefore is not
+required for HDR visibility at `main.track.transparent` and does not explain
+the nested droplets. A live/current-frame scene source, a previous-frame
+source, or another renderer contribution remains possible.
+
+Keep the red-rim raw HDR, blue-rim 8x HDR, and green-rim normal-map control.
+Replace the magenta-rim ScreenPos-channel visualization with
+`dynamic::screen` sampled using the same 8x UV formula as the HDR blue-rim
+quadrant. In the user's back-side view, blue is at lower-right and magenta at
+lower-left. Compare whether scene and nested droplets also appear in the
+magenta LDR quadrant. The two quadrants sample neighboring pixels of the same
+UV transform, so compare the presence and relative scale, not pixel equality.
