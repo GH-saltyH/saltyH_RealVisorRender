@@ -288,8 +288,14 @@ float4 main(PS_IN pin)
                 / gDynamicDropInvScreenSize;
             float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
                 * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+            // Optical isolation: unshifted image-left, 48px image-right.
+            // If the color still looks flat, a hard background edge shows
+            // whether this shader and the independent shot are really used.
+            float refractionPixels = gDynamicDropRefractionSplitDebug > 0.5
+                ? (local.x < 0.0 ? 0.0 : 48.0)
+                : gDynamicDropRefractionPixels;
             float2 refractionOffset = dropNormal.xy * radialProfile
-                * gDynamicDropRefractionPixels
+                * refractionPixels
                 * gDynamicDropInvRenderTargetSize;
             // On the back-facing visor, only the image-right half receives
             // the force-driven prototype; the left retains proven optics.
@@ -315,11 +321,6 @@ float4 main(PS_IN pin)
                 refractedScene = txDynamicScreen.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
                     0.0).rgb;
-            // Compare raw YEBIS LDR on image-left with the WeatherFX
-            // LDR-to-HDR conversion on image-right in the same HDR pass.
-            // convertHDR does not reverse tone mapping or exposure.
-            if (gDynamicDropYebisColorSpaceDebug > 0.5 && local.x >= 0.0)
-                refractedScene = convertHDR(refractedScene, true);
         }
         else
         {
@@ -339,6 +340,11 @@ float4 main(PS_IN pin)
             float3(0.72, 0.86, 1.00) * fresnel
                 * lerp(0.035, 0.16, saturate(sceneLuma))
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
+        if (gDynamicDropGeometryShotDebug > 0.5
+            && gDynamicDropRefractionSplitDebug > 0.5)
+            opticalAccent += float3(0.95, 0.68, 0.08)
+                * (1.0 - smoothstep(0.005, 0.025, abs(local.x)))
+                * 0.55;
 
         // The translucent candidate was preferred over full replacement:
         // retain a visible convex lens while preserving the live scene.

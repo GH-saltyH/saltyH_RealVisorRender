@@ -4305,3 +4305,23 @@ record FPS in a fixed camera. This conversion accounts for WeatherFX color
 hints, not for YEBIS tone mapping or exposure, so equal darkness would
 motivate investigating the render stage and full tone mapping instead of
 raising a fixed brightness multiplier.
+
+### 122. Isolate shot sampling and optical offset (2026-09-28)
+
+The user finds no visible color difference between the two YEBIS color
+conversion halves and no recognizable bend in either. Matched Hurricane
+performance is 65–67 FPS, Fog 53–56 FPS. Do not infer that the conversion
+fixes the LDR/HDR blend or that the weather source is optically correct.
+
+Remove the conversion helper from the HLSL test path and preset
+`RAIN_DYNAMIC_DROP_REFRACTION_SPLIT_DEBUG=true` with the same full-resolution
+YEBIS source. Inside each droplet, use 0px displacement for image-left and
+48px for image-right, holding UV alignment, shot texture, alpha and blend
+unchanged. A narrow amber center separator confirms that the new shader
+compiled and is active. Compare a high-contrast track edge passing through both
+halves, alongside the same edge outside the drop. If the right half bends
+while the left does not, the source is sampled and the remaining issue is
+optical visibility/color. If they match even on high-contrast geometry,
+investigate shader activation or UV/source binding before modifying color.
+Measure paired FPS at the same Fog/Hurricane camera. Set split flag false
+after diagnosis to restore the normal 16px refraction.

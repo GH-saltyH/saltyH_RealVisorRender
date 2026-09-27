@@ -398,6 +398,9 @@ local cfg = scriptSettings:mapConfig({
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
+        -- On each drop compare unshifted geometry-shot color against a
+        -- deliberately strong 48px shift, with identical alpha/compositing.
+        RAIN_DYNAMIC_DROP_REFRACTION_SPLIT_DEBUG = true,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Diagnose whether AC post-processing carries WeatherFX fog into a
@@ -405,9 +408,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
-        -- Compare raw processed color (image-left) with WeatherFX
-        -- LDR-to-HDR conversion (image-right) before the HDR blend.
-        RAIN_DYNAMIC_DROP_YEBIS_COLORSPACE_DEBUG = true,
         -- Retain force-driven wave code for later optical tuning.
         RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
         -- Compare an uneven right-half outline with the circular left half.
@@ -6635,9 +6635,8 @@ float4 main(PS_IN pin)
             gDynamicDropSkySourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG
                 and 1.0 or 0.0,
-            gDynamicDropYebisColorSpaceDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
-                and cfg.RUNTIME.RAIN_DYNAMIC_DROP_YEBIS_COLORSPACE_DEBUG
+            gDynamicDropRefractionSplitDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_SPLIT_DEBUG
                 and 1.0 or 0.0,
 
             gDynamicDropSceneSourceDebug =
