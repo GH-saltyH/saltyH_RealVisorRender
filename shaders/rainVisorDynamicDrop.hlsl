@@ -245,7 +245,7 @@ float4 main(PS_IN pin)
                 - gDynamicDropWavePhase;
             float wavePixels = local.x < 0.0
                 ? sin(waveFront) * waveProfile
-                    * gDynamicDropWaveEnvelope * 2.5
+                    * gDynamicDropWaveEnvelope * 6.0
                 : 0.0;
             refractionOffset += gDynamicDropWaveDirection * wavePixels
                 * gDynamicDropInvRenderTargetSize;

@@ -6342,14 +6342,24 @@ float4 main(PS_IN pin)
         rainDynamicSceneCopyState.waveState = waveState
     end
     local car = ac.getCar(0)
-    local forceX = car and car.acceleration and car.acceleration.x or 0.0
-    local forceY = car and car.acceleration and car.acceleration.z or 0.0
+    local inertiaEnabled = cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED
+    local externalAcceleration = rainAccelerationCurrent
+    local forceX = inertiaEnabled and car and car.side and (
+        externalAcceleration.x * car.side.x
+        + externalAcceleration.y * car.side.y
+        + externalAcceleration.z * car.side.z
+    ) * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE or 0.0
+    local forceY = inertiaEnabled and car and car.look and (
+        externalAcceleration.x * car.look.x
+        + externalAcceleration.y * car.look.y
+        + externalAcceleration.z * car.look.z
+    ) * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE or 0.0
     local forceMagnitude = math.sqrt(forceX * forceX + forceY * forceY)
     local waveDT = math.min(math.max(sim.dt or 0.0, 0.0), 0.1)
     local waveDrive = math.min(1.0, math.max(0.0,
-        (forceMagnitude - 0.25) * 0.5))
+        (forceMagnitude - 0.05) * 3.5))
     local waveImpulse = math.min(1.0, math.max(0.0,
-        (forceMagnitude - waveState.previousForce) * 1.8))
+        (forceMagnitude - waveState.previousForce) * 7.0))
     waveState.envelope = math.max(
         waveState.envelope * math.exp(-4.0 * waveDT),
         waveDrive,
@@ -6357,6 +6367,19 @@ float4 main(PS_IN pin)
     )
     waveState.previousForce = forceMagnitude
     waveState.phase = (waveState.phase + waveDT * 9.0) % (math.pi * 2.0)
+    if not inertiaEnabled then
+        waveState.envelope = 0.0
+        waveState.previousForce = 0.0
+        waveState.triggerLogged = false
+    end
+    if waveState.envelope > 0.15 and not waveState.triggerLogged then
+        ac.log(appNameDebug .. ' Dynamic drop wave force: inertia='
+            .. tostring(inertiaEnabled)
+            .. ' source=rainAccelerationCurrent magnitude='
+            .. string.format('%.3f', forceMagnitude)
+            .. ' envelope=' .. string.format('%.3f', waveState.envelope))
+        waveState.triggerLogged = true
+    end
     local waveDirection = vec2(
         forceX / math.max(forceMagnitude, 0.001),
         forceY / math.max(forceMagnitude, 0.001)

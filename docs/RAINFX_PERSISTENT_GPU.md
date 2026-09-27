@@ -4029,3 +4029,17 @@ car X/Z to the droplet's local UV and needs visual validation. Measure FPS
 at the reference camera with 512 drops. A later iteration should encode
 per-drop motion or force into data accessible by the optical shader before
 claiming individually responsive ripples.
+
+### 110. Drive the diagnostic wave from the existing inertial force (2026-09-27)
+
+The first ripple prototype read car acceleration independently, so disabling
+the drop physics inertia force did not stop the ripple. Use the same
+`rainAccelerationCurrent` world acceleration and `RAIN_PHYSICS_ACCEL_SCALE`
+as the drop physics, projected onto the car side and forward directions.
+Gate it with `RAIN_FORCE_INERTIA_ENABLED`; disabling inertia immediately
+clears the envelope and permits a fresh trigger log when reenabled.
+For this visibility test, the image-right wave reaches at most six shot
+pixels. The image-left half remains the approved optical reference.
+Compare acceleration and braking against a stationary car, then toggle
+inertia off and back on and check the single trigger log and FPS. This
+prototype still shares one force signal across all drops.
