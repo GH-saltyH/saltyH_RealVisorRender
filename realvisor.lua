@@ -391,6 +391,11 @@ local cfg = scriptSettings:mapConfig({
         -- refraction is introduced.
         RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = true,
 
+        -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
+        -- copy debug disabled while testing this branch.
+        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = false,
+        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0,
+
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
 
@@ -6150,6 +6155,19 @@ render.on('main.root.transparent', function()
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG
                 and 1.0
                 or 0.0,
+
+            gDynamicDropRefractionDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropInvScreenSize = vec2(
+                1.0 / math.max(sim.windowWidth or 1, 1),
+                1.0 / math.max(sim.windowHeight or 1, 1)
+            ),
+
+            gDynamicDropRefractionPixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
         },
         shader = rainDynamicDropShader.HLSL
     })

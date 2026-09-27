@@ -2706,3 +2706,40 @@ Expected interpretation:
 - content is recognizable but shifted, mirrored or scaled: diagnose screen-coordinate convention or render-target layout before refraction
 - circles are black or a flat color: `dynamic::hdr` is unavailable or bound at an incompatible stage
 - scene content aligns but brightness differs: investigate HDR color conversion/render-stage compatibility before introducing offsets
+
+### 47. Stage 4B.1 confirmed + Stage 4B.2 controlled radial refraction (2026-09-27)
+
+Confirmed Stage 4B.1 result:
+- with HDR copy disabled, the validated transparent rim and upper-left highlight remain visible
+- with HDR copy enabled after a full game restart, no distinguishable droplet footprint remains
+- therefore `dynamic::hdr`, `pin.ScreenPos`, HDR brightness and screen orientation/scale all match at the selected render stage
+
+Hot-reload caveat on the target CSP build:
+- changing the HDR-copy toggle and reloading Lua alone produces a black-filled footprint
+- the intended HDR-copy result appears only after a full game restart
+- treat this as dynamic scene-texture resource/binding lifetime behavior during Lua hot reload, not as a screen-UV or droplet-geometry failure
+- optical tests using `dynamic::hdr` must use a full game restart until a reliable hot-reload rebind mechanism is confirmed
+
+Stage 4B.2 implementation:
+- add `RAIN_DYNAMIC_DROP_REFRACTION_DEBUG`
+- add an explicit diagnostic maximum of `RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0`
+- pass inverse current window size so the diagnostic strength remains measured in pixels instead of normalized UV
+- reconstruct a hemisphere-like local droplet normal from quad UV
+- offset `pin.ScreenPos` radially using the local normal
+- suppress the offset at the exact clipped boundary to avoid a hard color discontinuity
+- retain a weak version of the validated rim and upper-left highlight over the refracted HDR scene
+- values/textures passed by Lua are not redeclared in HLSL
+
+Validation settings, followed by a full game restart:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`
+- `RAIN_DYNAMIC_DROP_UV_DEBUG = false`
+- `RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = false`
+- `RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true`
+- `RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0`
+
+Expected result:
+- background detail bends radially inside each circular droplet
+- the exact center has little displacement, displacement grows toward the middle/outer region, and fades again at the boundary
+- weak pale rim and upper-left highlight remain visible
+- no global image shift, mirror, scale mismatch or brightness seam appears
+- depth occlusion and double-sided visibility remain unchanged
