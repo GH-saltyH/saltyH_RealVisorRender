@@ -4325,3 +4325,29 @@ optical visibility/color. If they match even on high-contrast geometry,
 investigate shader activation or UV/source binding before modifying color.
 Measure paired FPS at the same Fog/Hurricane camera. Set split flag false
 after diagnosis to restore the normal 16px refraction.
+
+### 123. Hold displacement constant and compare blend opacity (2026-09-28)
+
+The user sees the amber separator. On the back-facing visor the sides are
+mirrored: the visible left half, corresponding to shader `local.x >= 0`,
+contains the subtle displaced extra image; the visible right half, shader
+`local.x < 0`, is the undistorted control. The extra image almost overlaps
+the background at some angles and is hard to identify. Thus the geometry
+shot binds, the current shader runs and refraction moves the sample, but
+perceived color and visibility remain unresolved. The previous experiment
+description used shader-left and shader-right without accounting for the
+back-face mirror; future instructions use visible screen directions.
+
+Preset `RAIN_DYNAMIC_DROP_ALPHA_SPLIT_DEBUG=true` with the processed
+full-size shot and trails off. Apply the same 48px displacement to both
+halves. The visible left half uses alpha 0.85 and visible right 0.30;
+retain identical sample UV, contour, accent and `BlendAccurate`. Leave the
+thin amber separator to confirm activation. Compare a high-contrast track
+edge and a bright fog/sky area on both halves: does stronger alpha clarify
+the bend, and does it make the dark scene-color mismatch more obvious?
+If lower alpha improves overall plausibility while weaker distortion
+vanishes, fix the shot/compositing color before selecting lens opacity.
+If the 0.85 half matches the sky color and reveals clear bending, the
+original 0.55 alpha obscured an otherwise usable processed source.
+Record paired weather-specific FPS. Disable this debug flag to restore
+the normal 16px offset and shape-dependent alpha.

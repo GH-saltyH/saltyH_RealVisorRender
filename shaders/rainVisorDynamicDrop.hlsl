@@ -288,11 +288,10 @@ float4 main(PS_IN pin)
                 / gDynamicDropInvScreenSize;
             float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
                 * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
-            // Optical isolation: unshifted image-left, 48px image-right.
-            // If the color still looks flat, a hard background edge shows
-            // whether this shader and the independent shot are really used.
-            float refractionPixels = gDynamicDropRefractionSplitDebug > 0.5
-                ? (local.x < 0.0 ? 0.0 : 48.0)
+            // Keep identical 48px optics while comparing the two alpha
+            // strengths. The back-facing visor reverses image left/right.
+            float refractionPixels = gDynamicDropAlphaSplitDebug > 0.5
+                ? 48.0
                 : gDynamicDropRefractionPixels;
             float2 refractionOffset = dropNormal.xy * radialProfile
                 * refractionPixels
@@ -341,7 +340,7 @@ float4 main(PS_IN pin)
                 * lerp(0.035, 0.16, saturate(sceneLuma))
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
         if (gDynamicDropGeometryShotDebug > 0.5
-            && gDynamicDropRefractionSplitDebug > 0.5)
+            && gDynamicDropAlphaSplitDebug > 0.5)
             opticalAccent += float3(0.95, 0.68, 0.08)
                 * (1.0 - smoothstep(0.005, 0.025, abs(local.x)))
                 * 0.55;
@@ -351,6 +350,9 @@ float4 main(PS_IN pin)
         float alpha = saturate(
             0.55 + fresnel * 0.25 + highlight * 0.10
             + smoothstep(0.75, 0.98, r) * 0.08);
+        if (gDynamicDropGeometryShotDebug > 0.5
+            && gDynamicDropAlphaSplitDebug > 0.5)
+            alpha = local.x < 0.0 ? 0.30 : 0.85;
         return float4(refractedScene + opticalAccent, alpha);
     }
 
