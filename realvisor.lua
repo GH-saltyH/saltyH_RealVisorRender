@@ -403,6 +403,8 @@ local cfg = scriptSettings:mapConfig({
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
+        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = true,
+        RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.25,
 
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
@@ -5473,8 +5475,8 @@ local function initializeRainDynamicSurfaceTest()
     rainDynamicSurfaceParent = parent
 
     local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
-    local meshVertices = ac.VertexBuffer(count * 4)
-    local meshIndices = ac.IndicesBuffer(count * 6)
+    local meshVertices = ac.VertexBuffer(count * 8)
+    local meshIndices = ac.IndicesBuffer(count * 12)
     rainDynamicSurfaceMeshVertices = meshVertices
     rainDynamicSurfaceMeshCount = count
 
@@ -5488,6 +5490,9 @@ local function initializeRainDynamicSurfaceTest()
     local hitCount, missCount = 0, 0
 
     for i = 0, count - 1 do
+        -- Encode a stable per-drop shape seed in whole, even Tex.x bands.
+        -- HLSL removes the band before reconstructing 0..1 quad UV.
+        local shapeBand = ((i * 73) % 61) * 2
         -- Stage 2 visual validation should measure surface mapping, not the
         -- occupancy of a rectangular UV bounding box. Select each diagnostic
         -- UV directly from valid triangles, weighted by triangle UV area.
@@ -5512,16 +5517,16 @@ local function initializeRainDynamicSurfaceTest()
             local uOffset = sample.tangentU * (radiusUV * sample.metersPerUVU)
             local vOffset = sample.tangentV * (radiusUV * sample.metersPerUVV)
 
-            meshVertices:set(vertexIndex,     ac.MeshVertex.new(center - uOffset - vOffset, sample.normal, vec2(0, 0)))
-            meshVertices:set(vertexIndex + 1, ac.MeshVertex.new(center + uOffset - vOffset, sample.normal, vec2(1, 0)))
-            meshVertices:set(vertexIndex + 2, ac.MeshVertex.new(center + uOffset + vOffset, sample.normal, vec2(1, 1)))
-            meshVertices:set(vertexIndex + 3, ac.MeshVertex.new(center - uOffset + vOffset, sample.normal, vec2(0, 1)))
+            meshVertices:set(vertexIndex,     ac.MeshVertex.new(center - uOffset - vOffset, sample.normal, vec2(shapeBand, 0)))
+            meshVertices:set(vertexIndex + 1, ac.MeshVertex.new(center + uOffset - vOffset, sample.normal, vec2(shapeBand + 1, 0)))
+            meshVertices:set(vertexIndex + 2, ac.MeshVertex.new(center + uOffset + vOffset, sample.normal, vec2(shapeBand + 1, 1)))
+            meshVertices:set(vertexIndex + 3, ac.MeshVertex.new(center - uOffset + vOffset, sample.normal, vec2(shapeBand, 1)))
         else
             missCount = missCount + 1
             local dead = vec3(0, 0, 0)
             local fallbackNormal = vec3(0, 0, 1)
             for j = 0, 3 do
-                meshVertices:set(vertexIndex + j, ac.MeshVertex.new(dead, fallbackNormal, vec2(j == 1 or j == 2 and 1 or 0, j >= 2 and 1 or 0)))
+                meshVertices:set(vertexIndex + j, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + ((j == 1 or j == 2) and 1 or 0), j >= 2 and 1 or 0)))
             end
         end
 
@@ -5533,8 +5538,23 @@ local function initializeRainDynamicSurfaceTest()
         meshIndices:set(indexIndex + 4, base + 2)
         meshIndices:set(indexIndex + 5, base + 3)
 
-        vertexIndex = vertexIndex + 4
-        indexIndex = indexIndex + 6
+        -- Reserve a second quad for a velocity-aligned optical trail.
+        -- It remains degenerate until a moving GPU state is read back.
+        local dead = vec3(0, 0, 0)
+        local fallbackNormal = vec3(0, 0, 1)
+        meshVertices:set(vertexIndex + 4, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 2)))
+        meshVertices:set(vertexIndex + 5, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 2)))
+        meshVertices:set(vertexIndex + 6, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 3)))
+        meshVertices:set(vertexIndex + 7, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 3)))
+        meshIndices:set(indexIndex + 6, base + 4)
+        meshIndices:set(indexIndex + 7, base + 5)
+        meshIndices:set(indexIndex + 8, base + 6)
+        meshIndices:set(indexIndex + 9, base + 4)
+        meshIndices:set(indexIndex + 10, base + 6)
+        meshIndices:set(indexIndex + 11, base + 7)
+
+        vertexIndex = vertexIndex + 8
+        indexIndex = indexIndex + 12
     end
 
     rainDynamicSurfaceMesh = rainDynamicSurfaceParent:createMesh(
@@ -5997,16 +6017,18 @@ local function applyRainDynamicStateToSurfaceMesh()
     )
 
     for i = 0, meshCount - 1 do
-        local vertexIndex = i * 4 + 1
+        local vertexIndex = i * 8 + 1
+        local shapeBand = ((i * 73) % 61) * 2
         local active =
             i < stateCount
             and (rainDynamicStateAlive[i + 1] or 0.0) > 0.5
 
         local sample = nil
+        local uv = nil
         local radiusUV = 0.0
 
         if active then
-            local uv = vec2(
+            uv = vec2(
                 (rainDynamicStateU[i + 1] or 0.0)
                     + (rainDynamicStateVelocityU[i + 1] or 0.0)
                     * predictionAge,
@@ -6037,7 +6059,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center - uOffset - vOffset,
                     sample.normal,
-                    vec2(0, 0)
+                    vec2(shapeBand, 0)
                 )
             )
             rainDynamicSurfaceMeshVertices:set(
@@ -6045,7 +6067,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center + uOffset - vOffset,
                     sample.normal,
-                    vec2(1, 0)
+                    vec2(shapeBand + 1, 0)
                 )
             )
             rainDynamicSurfaceMeshVertices:set(
@@ -6053,7 +6075,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center + uOffset + vOffset,
                     sample.normal,
-                    vec2(1, 1)
+                    vec2(shapeBand + 1, 1)
                 )
             )
             rainDynamicSurfaceMeshVertices:set(
@@ -6061,7 +6083,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center - uOffset + vOffset,
                     sample.normal,
-                    vec2(0, 1)
+                    vec2(shapeBand, 1)
                 )
             )
         else
@@ -6071,10 +6093,64 @@ local function applyRainDynamicStateToSurfaceMesh()
 
             local dead = vec3(0, 0, 0)
             local fallbackNormal = vec3(0, 0, 1)
-            rainDynamicSurfaceMeshVertices:set(vertexIndex,     ac.MeshVertex.new(dead, fallbackNormal, vec2(0, 0)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 1, ac.MeshVertex.new(dead, fallbackNormal, vec2(1, 0)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 2, ac.MeshVertex.new(dead, fallbackNormal, vec2(1, 1)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 3, ac.MeshVertex.new(dead, fallbackNormal, vec2(0, 1)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex,     ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 0)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 1, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 0)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 2, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 1)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 3, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 1)))
+        end
+
+        local trailSample = nil
+        local trailSpeed = 0.0
+        local trailU = rainDynamicStateVelocityU[i + 1] or 0.0
+        local trailV = rainDynamicStateVelocityV[i + 1] or 0.0
+        if cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
+            and sample and radiusUV > 0.0 and uv
+        then
+            trailSpeed = math.sqrt(trailU * trailU + trailV * trailV)
+            if trailSpeed > 0.0005 then
+                local tailLength = math.min(radiusUV * 5.0,
+                    math.max(radiusUV * 0.45,
+                        trailSpeed * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS))
+                trailSample = rainDynamicSurfaceSample(
+                    rainDynamicSurfaceLookup,
+                    rainDynamicSurfaceVertices,
+                    vec2(uv.x - trailU / trailSpeed * tailLength,
+                        uv.y - trailV / trailSpeed * tailLength)
+                )
+            end
+        end
+        if trailSample then
+            local perpU, perpV = -trailV / trailSpeed, trailU / trailSpeed
+            local headCenter = sample.position + sample.normal * surfaceOffset
+            local tailCenter = trailSample.position
+                + trailSample.normal * surfaceOffset
+            local headWidth = sample.tangentU
+                    * (perpU * radiusUV * 0.38 * sample.metersPerUVU)
+                + sample.tangentV
+                    * (perpV * radiusUV * 0.38 * sample.metersPerUVV)
+            local tailWidth = trailSample.tangentU
+                    * (perpU * radiusUV * 0.22 * trailSample.metersPerUVU)
+                + trailSample.tangentV
+                    * (perpV * radiusUV * 0.22 * trailSample.metersPerUVV)
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 4,
+                ac.MeshVertex.new(tailCenter - tailWidth, trailSample.normal,
+                    vec2(shapeBand, 2)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 5,
+                ac.MeshVertex.new(headCenter - headWidth, sample.normal,
+                    vec2(shapeBand + 1, 2)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 6,
+                ac.MeshVertex.new(headCenter + headWidth, sample.normal,
+                    vec2(shapeBand + 1, 3)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 7,
+                ac.MeshVertex.new(tailCenter + tailWidth, trailSample.normal,
+                    vec2(shapeBand, 3)))
+        else
+            local dead = vec3(0, 0, 0)
+            local fallbackNormal = vec3(0, 0, 1)
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 4, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 2)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 5, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 2)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 6, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 3)))
+            rainDynamicSurfaceMeshVertices:set(vertexIndex + 7, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 3)))
         end
     end
 
@@ -6560,6 +6636,8 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_DEBUG and 1.0 or 0.0,
             gDynamicDropShapeStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
+            gDynamicDropTrailEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED and 1.0 or 0.0,
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,

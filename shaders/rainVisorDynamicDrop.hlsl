@@ -41,16 +41,51 @@
 
 float4 main(PS_IN pin)
 {
+    float shapeSeed = floor(pin.Tex.x * 0.5);
+    float2 quadTex = pin.Tex - float2(shapeSeed * 2.0, 0.0);
+    bool trailQuad = quadTex.y > 1.5;
+    if (trailQuad)
+        quadTex.y -= 2.0;
     if (gDynamicDropDebugUV > 0.5)
     {
         // Do not clip anything in this branch. If the dynamic mesh is bound
         // and pin.Tex is transported correctly, each quad must show a 0..1
         // red/green gradient. A flat color identifies broken UV transport.
-        return float4(pin.Tex.x, pin.Tex.y, 0.15, 1.0);
+        return float4(quadTex.x, quadTex.y, 0.15, 1.0);
     }
 
-    float2 local = (pin.Tex - 0.5) * 2.0;
+    float2 local = (quadTex - 0.5) * 2.0;
     float r = length(local);
+
+    if (trailQuad)
+    {
+        clip(gDynamicDropTrailEnabled - 0.5);
+        float along = saturate(local.x * 0.5 + 0.5);
+        float trailWidth = lerp(0.68, 1.0, along);
+        float trailEdge = max(abs(local.x), abs(local.y) / trailWidth);
+        clip(1.0 - trailEdge);
+        float fade = smoothstep(-1.0, -0.25, local.x)
+            * (1.0 - smoothstep(0.78, 1.0, trailEdge));
+        float2 offset = float2(local.y, -local.x) * 6.0;
+        float3 trailScene;
+        if (gDynamicDropGeometryShotDebug > 0.5)
+        {
+            float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+                / gDynamicDropInvScreenSize;
+            float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
+                * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+            trailScene = txDynamicSnapshot.SampleLevel(samLinearClamp,
+                saturate(sceneUV + offset * gDynamicDropInvRenderTargetSize),
+                0.0).rgb;
+        }
+        else
+            trailScene = txDynamicScene.SampleLevel(samLinearClamp,
+                saturate(pin.ScreenPos + offset * gDynamicDropInvScreenSize),
+                0.0).rgb;
+        float rim = smoothstep(0.72, 1.0, trailEdge);
+        return float4(trailScene + float3(0.72, 0.86, 1.0)
+            * rim * 0.10, 0.50 * fade);
+    }
 
     clip(1.0 - r);
 
@@ -206,18 +241,19 @@ float4 main(PS_IN pin)
         return float4(sceneColor, 1.0);
     }
 
-    // Optical silhouette study: the left half is the approved circle. On
-    // the right, indent two angular bands within the existing quad so the
-    // boundary and the lens profile move together. Fade across the center
-    // seam to keep the two halves connected without new geometry or samples.
+    // Each drop has a stable, distinct angular contour. The same adjusted
+    // radius drives clipping, lens normal, rim and alpha.
     float footprintScale = 1.0;
     if (gDynamicDropShapeDebug > 0.5)
     {
         float angle = atan2(local.y, local.x);
-        float contour = 0.14 * (0.5 + 0.5 * sin(3.0 * angle + 0.7))
-            + 0.10 * (0.5 + 0.5 * sin(5.0 * angle - 0.9));
+        float phase = shapeSeed * 2.3999632;
+        float contour = (0.09 + 0.07 * frac(shapeSeed * 0.7548777))
+            * (0.5 + 0.5 * sin(3.0 * angle + phase + 0.7))
+            + (0.06 + 0.07 * frac(shapeSeed * 0.5698403))
+            * (0.5 + 0.5 * sin(5.0 * angle - phase * 0.73 - 0.9));
         contour *= saturate(gDynamicDropShapeStrength);
-        footprintScale = 1.0 - contour * smoothstep(0.0, 0.35, -local.x);
+        footprintScale = 1.0 - contour;
         r /= footprintScale;
         clip(1.0 - r);
     }

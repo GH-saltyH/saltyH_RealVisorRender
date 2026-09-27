@@ -4107,3 +4107,42 @@ Keep refraction at 16 shot pixels and leave the force-wave default off.
 Check whether the right outline reads clearly against clouds, trackside
 detail and dark surfaces, whether the seam is noticeable, and FPS. This
 tests silhouette visibility before attaching per-drop velocity or trails.
+
+### 115. Vary silhouettes and attach first optical trails (2026-09-28)
+
+The user confirms that the stronger contour is visible, but every drop has
+the same shape. Their CSP windscreen reference combines varied standing
+drops with refractive, elongated water behind flowing drops. Preserve the
+approved 16-pixel clean-scene refraction and disabled wave.
+
+Encode a stable shape seed in even Tex.x bands of each drop quad; decode it
+before local UV clipping in HLSL. Vary the angular phases and indentation
+amplitudes per seed. Retain circular image-left halves as references for
+this first variability check. Do not add a new texture, draw call or
+per-drop shader uniform; shader values from Lua remain injected without
+redeclaring them. Apply the varied contour to the complete drop now that
+the side-by-side indentation has been visually confirmed. Turning
+`RAIN_DYNAMIC_DROP_SHAPE_DEBUG` off restores circles for comparison.
+
+Reserve one more quad per drop in the same transport mesh. Use the
+asynchronously read GPU velocity and predicted position to place a narrow
+strip from the present drop back along its current travel direction, with
+a short length clamped to 0.45..5 drop radii and width tapered at its tail.
+`RAIN_DYNAMIC_DROP_TRAIL_ENABLED=true` and `RAIN_DYNAMIC_DROP_TRAIL_SECONDS=0.25`
+are the first test settings. Hide the strip for stationary, dead, or
+unmappable drops. The pixel shader uses the same independent scene shot
+with one additional refracted sample only where the strip covers pixels;
+the main drop's optical path stays separate. Measure the real FPS at 512
+drops against the prior build as well as the trail toggle off (the latter
+still reserves the extra vertices). Check the trail direction, seam and taper,
+especially at the visor edges. The current strip follows instantaneous
+velocity rather than storing deposited water, so it does not persist after
+a stop or turn. Persistent trails, merge/split events and conservation of
+drop mass need a subsequent GPU state pass and should be tested separately.
+
+Follow-up order after this visual/FPS gate: retain a sparse surface wetness
+history for deposited water, allowing turns and stops to leave a fading
+track; add neighbor lookup with fixed visor-UV cells before implementing
+merge/split (all-pairs checks would grow quadratically at 512 drops);
+then transfer water volume between merged drops and trail deposits. Keep
+the clean-scene shot shared and measure each new GPU pass separately.
