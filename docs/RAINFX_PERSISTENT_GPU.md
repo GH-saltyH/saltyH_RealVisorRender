@@ -3982,3 +3982,22 @@ appearance? Check seam, edge/sky color differences and FPS. If opacity alone
 cannot produce the intended natural refractive shape, adjust the displacement
 profile next, rather than hiding it with low alpha. Motion-driven ripple
 strength and trail compositing will be built on the chosen whole-drop profile.
+
+### 108. Adopt the preferred translucent optical profile for the whole drop (2026-09-27)
+
+The user confirms the left test half with center alpha 0.55 still conveys a
+convex lens, and appears a little more natural than the full-alpha right
+half. Remove the yellow separator and opaque candidate. Apply the same
+center-to-rim alpha profile to the entire drop, leaving 16px clean-shot
+refraction, optical accent, depth behavior, scene-ready shot and runtime
+flags unchanged. Judge the whole circular shape under movement and on
+bright/dark backgrounds before modifying force-dependent refraction.
+
+The bundled `lib.lua` exposes `ac.getCar(0).acceleration` in car-relative
+axes, but a global vehicle force alone cannot assign unique phase and
+amplitude to each drop. The persistent GPU/CPU state already tracks per-drop
+velocity; a follow-on force-wave stage must transport appropriate per-drop
+motion/acceleration information to the optical shader, or explicitly label
+a shared-force ripple as an initial prototype. Trails also require geometry
+or a mask and compositing rules. Keep these motion stages separate from this
+approved full-drop blend so their visual and FPS costs are measurable.
