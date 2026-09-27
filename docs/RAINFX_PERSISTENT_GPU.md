@@ -3441,3 +3441,17 @@ background landmark within a centered droplet and one near a screen edge.
 The test isolates coordinate mapping because the three candidate samples use
 the same texture, shader, gain and draw stage. If none align, inspect the
 screen scene's capture/projection stage rather than multiplying UV again.
+
+### 81. Restore last running shader after Stage 80 crash (2026-09-27)
+
+The user reports a game crash on Stage 80. The shader already had a single
+return at the end of the screen-UV diagnostic branch and an earlier UV-debug
+return; the Stage 80 change did not add an early return. It introduced a new
+`dynamic::screen` sample at `pin.ScreenPos` in the blue quadrant and a second
+screen sample at `PosH / windowSize` in the magenta quadrant. The crash cause
+is unknown without a game or GPU crash log. Restore those two quadrants to
+their Stage 79 behavior while retaining the previously running green screen
+sample at `PosH / renderTargetSize`, so the next run can confirm the regression
+was limited to the latest shader changes. Do not infer a `return` compiler
+problem from this crash. Investigate crash logs before reintroducing the
+projected-UV screen read.

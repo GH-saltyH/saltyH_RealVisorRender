@@ -91,25 +91,22 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: CSP-provided projected UV on the same screen source.
-            if (compareSnapshot)
-                sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, saturate(raw), 0.0).rgb * 8.0;
-            else
-                sampledColor = txDynamicSnapshot.SampleLevel(
-                    samLinearClamp,
-                    gDynamicDropGeometryShotDebug > 0.5
-                        ? sceneUVA : expandedUV,
-                    0.0).rgb;
-            if (!compareSnapshot && gDynamicDropGeometryShotDebug > 0.5)
+            // Lower-left: opaque-stage HDR copy at the same screen UV.
+            sampledColor = txDynamicSnapshot.SampleLevel(
+                samLinearClamp,
+                compareSnapshot ? windowUV
+                    : (gDynamicDropGeometryShotDebug > 0.5
+                        ? sceneUVA : expandedUV),
+                0.0).rgb;
+            if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor *= 8.0;
         }
         else
         {
-            // Lower-right: screen scene at the original window UV.
+            // Lower-right: target-size UV control (previously dark).
             if (compareSnapshot)
-                sampledColor = txDynamicScreen.SampleLevel(
-                    samLinearClamp, windowUV, 0.0).rgb * 8.0;
+                sampledColor = txDynamicScene.SampleLevel(
+                    samLinearClamp, pixelUV, 0.0).rgb;
             else if (gDynamicDropGeometryShotDebug > 0.5)
             {
                 if (gDynamicDropPixelUVDebug > 0.5)
