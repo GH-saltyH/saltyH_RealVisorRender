@@ -3846,3 +3846,29 @@ logged. Guard against tiny non-main targets before caching. Keep all shot
 features, UVs and shader unchanged. After the second rendered frame the
 expected logged shot size is 2161x1249, allowing an actual quality and FPS
 comparison against the half-window baseline.
+
+### 103. Compare independent-shot refraction at two pixel offsets (2026-09-27)
+
+The user confirms the scene-ready GeometryShot switches from 1620x936 on the
+first frame to 2161x1249 on the next frame, remains free of recursion, has
+sufficient image quality for a scene source, and causes no clearly measurable
+FPS change. Do not increase the shot resolution further.
+
+Keep the preset `RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG=true`,
+`RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG=true`,
+`RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG=false`,
+`RAIN_DYNAMIC_DROP_REFRACTION_DEBUG=false`, and
+`RAIN_DYNAMIC_DROP_REFRACTION_PIXELS=8.0`. Change only the screen-UV debug
+shader: image upper-left green shows independent shot without displacement;
+image lower-right blue uses a radial displacement up to 8 shot pixels; image
+lower-left magenta uses 24 shot pixels. Image upper-right red retains the
+live-HDR reference. All three independent-shot quadrants share the measured
+98% source UV correction, a single texture sample instruction and no
+brightness multiplier. Offset fades at the drop center and clipped edge.
+The inverse target size supplied by Lua converts shot-pixel offsets to UV;
+after the first frame the shot allocation matches the main target size.
+Observe whether blue/magenta bend stationary background features in the
+expected direction without introducing self-images, clipped edges or
+unexpected black areas. Measure FPS at the reference camera before selecting
+an optical strength. The green quarter is the exact undistorted control;
+other optical properties are intentionally unchanged for this test.

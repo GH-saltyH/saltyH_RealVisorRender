@@ -79,22 +79,29 @@ float4 main(PS_IN pin)
             }
             else
             {
-                // Compare a separately rendered scene without visor drops
-                // against the live screen at identical 98% screen UV.
+                // Compare undistorted and displaced samples from the same
+                // independent, nonrecursive scene shot.
                 float2 resolutionRatio = gDynamicDropInvRenderTargetSize
                     / gDynamicDropInvScreenSize;
-                float calibration = right
-                    ? (bottom ? 0.85 : 0.98)
-                    : 0.98;
-                float2 screenUV = saturate(windowUV
+                float2 sceneUV = windowUV
                     * lerp(float2(1.0, 1.0), resolutionRatio,
-                        calibration));
-                if (right && !bottom)
+                        0.98);
+                if (gDynamicDropGeometryShotDebug > 0.5)
+                {
+                    float boundaryFade = 1.0 - smoothstep(0.82, 1.0, r);
+                    float radialProfile = smoothstep(0.05, 0.75, r)
+                        * boundaryFade;
+                    float refractionPixels = !bottom ? 0.0
+                        : (right ? gDynamicDropRefractionPixels * 3.0
+                            : gDynamicDropRefractionPixels);
+                    sceneUV += local * radialProfile * refractionPixels
+                        * gDynamicDropInvRenderTargetSize;
                     sampledColor = txDynamicSnapshot.SampleLevel(
-                        samLinearClamp, screenUV, 0.0).rgb;
+                        samLinearClamp, saturate(sceneUV), 0.0).rgb;
+                }
                 else
                     sampledColor = txDynamicScreen.SampleLevel(
-                        samLinearClamp, screenUV, 0.0).rgb * 8.0;
+                        samLinearClamp, saturate(sceneUV), 0.0).rgb * 8.0;
             }
         }
         else if (!right && !bottom)
