@@ -4354,20 +4354,18 @@ the normal 16px offset and shape-dependent alpha.
 
 ### 124. Remove the unrefracted background from the lens blend (2026-09-28)
 
-The user confirms that the alpha comparison leaves the unbent base scene and
-the refracted scene visible together. The higher-alpha half is darker; the
-lower-alpha half is too blurred to resolve. FPS is unchanged. This matches
-the current `BlendAccurate` behavior: partial alpha places a sample of the
-scene over the still-visible original scene. Raising alpha darkens the LDR
-shot in the HDR pass while reducing, but not eliminating, that double image.
+The user confirms that opaque output removes the double image in both halves.
+The body remains very dark, like a sunglass tint that can hide the scene in
+low light. The color is intrinsic to the sampled/composited source rather
+than the original background bleeding through. FPS remains unchanged.
 
-Preset `RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG=true`. Output alpha
-is now 1.0 across both halves of the clipped droplet body. The visible left
-half (shader `local.x >= 0`) samples the full-size GeometryShot at 48px
-offset; visible right samples it at 0px. The amber center separator remains.
-This should fully replace the underlying scene within the circle and expose
-whether the sampled image itself bends at the offset. Check whether the
-double scene image disappears and whether the offset half now bends clearly;
-also note if raw GeometryShot color is still too dark. Keep Fog/Hurricane
-cameras fixed and compare FPS. Once this proves the opaque path, choose
-proper edge coverage and calibrate YEBIS-to-HDR colors separately.
+Keep opaque output and the 48px GeometryShot offset on both halves. Preset
+`RAIN_DYNAMIC_DROP_SHOT_GAIN_DEBUG=true`: the visible left half (`local.x >= 0`)
+multiplies sampled RGB by 2.5, while visible right displays raw RGB. Both
+retain the amber separator and alpha 1.0. Compare color and edge bend in
+bright fog/sky and dark track. If gain reveals the same scene colors without
+clipping, adjust the shot's YEBIS exposure using the documented
+`GeometryShot:setExposure()` control in the next test. If colors clip or hue
+remains wrong, the issue is color-space/tone mapping and uniform gain is
+unsuitable. Record FPS with matched conditions; this per-pixel multiply
+should have negligible cost.

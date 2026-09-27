@@ -288,12 +288,10 @@ float4 main(PS_IN pin)
                 / gDynamicDropInvScreenSize;
             float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
                 * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
-            // Compare displaced and undisplaced shot samples with opaque
-            // output, so the original background cannot bleed through.
-            // On the back-facing visor, visible image-left is local.x >= 0.
-            float refractionPixels =
-                gDynamicDropOpaqueRefractionSplitDebug > 0.5
-                ? (local.x >= 0.0 ? 48.0 : 0.0)
+            // Keep the same displaced shot sample on both halves. Opaque
+            // output prevents the original background bleeding through.
+            float refractionPixels = gDynamicDropOpaqueRefractionSplitDebug
+                > 0.5 ? 48.0 : gDynamicDropRefractionPixels;
                 : gDynamicDropRefractionPixels;
             float2 refractionOffset = dropNormal.xy * radialProfile
                 * refractionPixels
@@ -314,6 +312,10 @@ float4 main(PS_IN pin)
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
                 0.0).rgb;
+            // A diagnostic gain only: determine if the source signal exists
+            // but appears dark. Clipping means gain cannot fix the color path.
+            if (gDynamicDropShotGainDebug > 0.5 && local.x >= 0.0)
+                refractedScene *= 2.5;
             // Sky color test on the back-facing visor: image-left keeps
             // GeometryShot; image-right samples the final screen at the
             // identical normalized UV and displacement. Screen may contain

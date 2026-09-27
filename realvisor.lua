@@ -401,6 +401,9 @@ local cfg = scriptSettings:mapConfig({
         -- Compare 48px refraction against zero shift with opaque output,
         -- preventing the unrefracted background from bleeding through.
         RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = true,
+        -- Compare raw shot RGB (visible right) with a 2.5x diagnostic gain
+        -- (visible left), preserving the same opaque refraction sample.
+        RAIN_DYNAMIC_DROP_SHOT_GAIN_DEBUG = true,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Diagnose whether AC post-processing carries WeatherFX fog into a
@@ -6637,6 +6640,9 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropOpaqueRefractionSplitDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropShotGainDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_GAIN_DEBUG
                 and 1.0 or 0.0,
 
             gDynamicDropSceneSourceDebug =
