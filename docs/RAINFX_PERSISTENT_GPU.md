@@ -3659,3 +3659,43 @@ from a later shader/draw problem; the existing pre-draw and mesh-result logs
 cover the remaining steps. Keep the source, UV, and diagnostic flags from the
 known-running revision. Sky and other effects remain an independent capture
 quality question, separate from the now well-supported feedback diagnosis.
+
+### 94. CSP public RainFX reference: scene source, sky, and capture timing (2026-09-27)
+
+Inspected the public acc-shaders GitLab repository at revision
+`4f05cc0ba26f7c363886ebb406b35f67157139d0` (read-only checkout outside
+this project). Relevant paths:
+
+- `custom/rain/accRainDrops_ps.fx`: the fast color-buffer path samples the
+  engine-provided `txPrevFrame` at `pin.PosH.xy * extScreenSize.zw`, with an
+  alpha-dependent MIP bias. Without the color buffer it samples the
+  environment (`sampleEnv`). The detailed water path combines reflected and
+  refracted environment colors and optionally calls `calculateRefraction`.
+- `custom_objects/common/refraction.hlsl`: the refraction UV is built from
+  raster position (`posH.xy * extScreenSize.zw`) and a view/normal-dependent
+  offset. The final color also samples `txPrevFrame`, selecting a MIP level.
+- `custom_objects/common/rainUtils.hlsl`: `sampleEnv` reads the engine's
+  reflection/environment path (`SAMPLE_REFLECTION_FN`), which can provide a
+  sky response independently of direct scene-color sampling.
+- `custom/rain/accRainScreen_combine_ps.fx`: a screen-overlay composition
+  path reads a blurred scene texture (`txBlurred`) and a distinct water mask
+  (`txMask`), perturbs UV using mask gradients and outputs alpha. The public
+  pixel shader does not expose the engine-side capture order for `txBlurred`.
+
+These files show that CSP's rain uses engine-owned previous-frame/blurred
+color and environment inputs, not simply `dynamic::screen` fetched inside a
+transparent mesh draw. The public shader alone does not establish whether
+RainFX “Drops on Screen” specifically uses each listed variant or when its
+inputs are copied. The project's bundled `lib.lua` lists
+`dynamic::screen`, `dynamic::hdr` and `dynamic::depth` as the exposed Lua
+textures; it does not expose the rain shader's `txPrevFrame` by that name.
+In this project both live and opaque-stage `dynamic::screen` contained nested
+visor drops, while an independent GeometryShot did not.
+
+Next concrete options: capture a clean scene in a render stage before the
+visor effect using a documented engine surface, if Lua exposes one; or
+improve the independent GeometryShot by applying rendering options one at a
+time. The `lib.lua` documentation recommends `render.onSceneReady()` for
+scene-dependent GeometryShot updates, before main rendering; try moving the
+shot update there before re-testing sky/lighting options. Keep the working
+independent-shot variant as a fallback until the new capture is verified.
