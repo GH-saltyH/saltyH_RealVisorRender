@@ -227,17 +227,29 @@ float4 main(PS_IN pin)
         float boundaryFade = 1.0 - smoothstep(0.82, 1.0, r);
         float radialProfile = smoothstep(0.05, 0.75, r) * boundaryFade;
 
-        float2 refractionOffset =
-            dropNormal.xy
-            * radialProfile
-            * gDynamicDropRefractionPixels
-            * gDynamicDropInvScreenSize;
-
-        float3 refractedScene = txDynamicScene.SampleLevel(
-            samLinearClamp,
-            saturate(pin.ScreenPos + refractionOffset),
-            0.0
-        ).rgb;
+        float3 refractedScene;
+        if (gDynamicDropGeometryShotDebug > 0.5)
+        {
+            float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+                / gDynamicDropInvScreenSize;
+            float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
+                * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+            float2 refractionOffset = dropNormal.xy * radialProfile
+                * gDynamicDropRefractionPixels
+                * gDynamicDropInvRenderTargetSize;
+            refractedScene = txDynamicSnapshot.SampleLevel(
+                samLinearClamp, saturate(sceneUV + refractionOffset),
+                0.0).rgb;
+        }
+        else
+        {
+            float2 refractionOffset = dropNormal.xy * radialProfile
+                * gDynamicDropRefractionPixels * gDynamicDropInvScreenSize;
+            refractedScene = txDynamicScene.SampleLevel(
+                samLinearClamp,
+                saturate(pin.ScreenPos + refractionOffset),
+                0.0).rgb;
+        }
 
         // Keep the proven Stage 4B.0 rim/highlight at low strength so the
         // droplet boundary remains identifiable over smooth backgrounds.

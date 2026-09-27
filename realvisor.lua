@@ -396,15 +396,15 @@ local cfg = scriptSettings:mapConfig({
 
         -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
         -- copy debug disabled while testing this branch.
-        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = false,
-        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 8.0,
+        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
+        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
 
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
         RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = false,
 
         -- Stage 4B.2F: compare possible interpretations of mesh.fx ScreenPos.
-        RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = false,
         -- Test whether track-stage HDR works without the extra scene copy.
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.

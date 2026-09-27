@@ -3893,3 +3893,32 @@ look for a smooth transition, acceptable bending and no hard kink. Check
 FPS in the reference view. After choosing a visual range, express the
 strength relative to projected droplet size/camera geometry rather than
 assuming that a fixed pixel count is valid across resolutions and sizes.
+
+### 105. Test the full droplet optical profile with the clean 16px scene (2026-09-27)
+
+The user finds 16 shot pixels in the magenta quadrant more plausible than
+the gentler 8px or harsh 24px candidate; neither refraction comparison
+reintroduced nested droplets or measurable FPS cost. Preset
+`RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG=false`,
+`RAIN_DYNAMIC_DROP_REFRACTION_DEBUG=true`,
+`RAIN_DYNAMIC_DROP_REFRACTION_PIXELS=16.0`, and keep the independent
+GeometryShot enabled. This selects the full circular footprint, existing
+low-strength blue-white rim/highlight, and a clean scene sample shifted by
+the same radial profile that was validated in the quadrant experiment.
+
+For the shot path, start with the measured `PosH / windowSize` UV at 98% of
+the dynamic window/target ratio, then add the local drop normal times a
+16-shot-pixel offset converted by inverse target dimensions. Sample the
+independent `txDynamicSnapshot` once and return its RGB plus the accent at
+full alpha; the original live-HDR refraction branch remains available when
+the independent shot flag is off. No Lua-injected HLSL texture/value is
+redeclared. This remains an optical diagnostic: the exact independent-shot
+alignment at edges, full-alpha replacement and fixed pixel strength need
+assessment across sizes and DLSS modes before production integration.
+
+Test entire drops for plausible background bending and placement, rim and
+highlight strength, sky/grass/shadow fidelity, clipping/occlusion, absence
+of recursive imagery, and FPS at the same reference camera. If the apparent
+refraction changes disproportionately between small and large drops, next
+scale the displacement by the projected droplet radius rather than hardcoding
+16 pixels for every drop.
