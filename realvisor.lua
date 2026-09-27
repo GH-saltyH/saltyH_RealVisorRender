@@ -401,9 +401,9 @@ local cfg = scriptSettings:mapConfig({
         -- Compare 48px refraction against zero shift with opaque output,
         -- preventing the unrefracted background from bleeding through.
         RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = true,
-        -- Compare raw shot RGB (visible right) with a 2.5x diagnostic gain
-        -- (visible left), preserving the same opaque refraction sample.
-        RAIN_DYNAMIC_DROP_SHOT_GAIN_DEBUG = true,
+        -- Compare raw shot RGB (visible right) with scene white-reference
+        -- scaling (visible left), preserving the opaque refraction sample.
+        RAIN_DYNAMIC_DROP_SHOT_WHITE_REFERENCE_DEBUG = true,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Diagnose whether AC post-processing carries WeatherFX fog into a
@@ -6586,6 +6586,10 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
             .. ' pixelUV='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
+            .. ' whiteReferencePoint='
+            .. tostring(sim.whiteReferencePoint)
+            .. ' postProcessing='
+            .. tostring(sim.isPostProcessingActive)
             .. ' windowSize='
             .. tostring(sim.windowWidth) .. 'x' .. tostring(sim.windowHeight)
             .. ' targetSize='
@@ -6641,9 +6645,12 @@ float4 main(PS_IN pin)
             gDynamicDropOpaqueRefractionSplitDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG
                 and 1.0 or 0.0,
-            gDynamicDropShotGainDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_GAIN_DEBUG
+            gDynamicDropShotWhiteReferenceDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_WHITE_REFERENCE_DEBUG
                 and 1.0 or 0.0,
+            gDynamicDropShotWhiteReference =
+                math.max(0.25, math.min(64.0,
+                    sim.whiteReferencePoint or 1.0)),
 
             gDynamicDropSceneSourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG

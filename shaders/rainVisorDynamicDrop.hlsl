@@ -312,10 +312,12 @@ float4 main(PS_IN pin)
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
                 0.0).rgb;
-            // A diagnostic gain only: determine if the source signal exists
-            // but appears dark. Clipping means gain cannot fix the color path.
-            if (gDynamicDropShotGainDebug > 0.5 && local.x >= 0.0)
-                refractedScene *= 2.5;
+            // Compare the processed shot in the HDR main pass against its
+            // scene-dependent white reference. The visor back face mirrors
+            // local.x >= 0 into visible image-left.
+            if (gDynamicDropShotWhiteReferenceDebug > 0.5
+                && local.x >= 0.0)
+                refractedScene *= gDynamicDropShotWhiteReference;
             // Sky color test on the back-facing visor: image-left keeps
             // GeometryShot; image-right samples the final screen at the
             // identical normalized UV and displacement. Screen may contain

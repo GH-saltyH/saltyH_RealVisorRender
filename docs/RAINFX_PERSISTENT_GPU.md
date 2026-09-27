@@ -4369,3 +4369,28 @@ clipping, adjust the shot's YEBIS exposure using the documented
 remains wrong, the issue is color-space/tone mapping and uniform gain is
 unsuitable. Record FPS with matched conditions; this per-pixel multiply
 should have negligible cost.
+
+### 125. Diagnose processed-shot color using the scene white reference (2026-09-28)
+
+The 2.5x sample gain makes the visible left image a little clearer, but
+both halves remain too dark and the drop edge still looks like tinted glass.
+The foreground mesh is rendered at `main.track.transparent` into HDR; the
+YEBIS geometry shot has already been tone mapped into LDR. Post-processing
+later processes the drop a second time. The app's `render.on()` API lists
+3D scene events and a VR HUD hook, but does not provide a general final-LDR
+mesh pass. The WFX post-processing callback belongs to WeatherFX scripts,
+not to this app callback. Reusing its API in an app is not assumed valid.
+
+The bundled `lib.lua` exposes `ac.getSim().whiteReferencePoint` as the
+brightness of an object that appears white on screen. This is a runtime
+scene-dependent HDR reference and may be more relevant than a fixed 2.5x
+sample gain; it is not an inverse YEBIS tone mapping function. Keep alpha
+1.0 and 48px displacement in both halves. Preset
+`RAIN_DYNAMIC_DROP_SHOT_WHITE_REFERENCE_DEBUG=true`: visible image-left
+multiplies sampled RGB by the clamped white reference (0.25…64), visible
+image-right retains raw shot RGB. Log the actual reference and whether
+post-processing is enabled. Compare bright Fog/Hurricane features and dark
+track, including color matching and highlight clipping, at the same camera.
+If reference is close to 1 or both halves remain dark, full tone mapping
+inversion or a final-LDR composition stage remains necessary. This single
+multiplication should not affect measurable FPS.
