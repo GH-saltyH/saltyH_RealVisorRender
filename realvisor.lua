@@ -6135,6 +6135,60 @@ render.on('main.track.opaque', function()
     rainDynamicSceneCopyState.captureFrame = sim.frame
 end)
 
+-- Update the independent scene before the main render, as recommended by
+-- the CSP GeometryShot API. The transparent pass only reads this texture.
+render.onSceneReady(function()
+    if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG
+        or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
+        or not cfg.RUNTIME.RAIN_ENABLED
+    then
+        return
+    end
+
+    local sim = ac.getSim()
+    if not sim then return end
+    if not rainDynamicManualPreDrawLogged then
+        ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: starting frame='
+            .. tostring(sim.frame))
+    end
+    local shotWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5))
+    local shotHeight = math.max(1, math.floor((sim.windowHeight or 1) * 0.5))
+    if not rainDynamicSceneCopyState.geometryShot
+        or rainDynamicSceneCopyState.shotWidth ~= shotWidth
+        or rainDynamicSceneCopyState.shotHeight ~= shotHeight
+    then
+        if rainDynamicSceneCopyState.geometryShot then
+            rainDynamicSceneCopyState.geometryShot:dispose()
+        end
+        rainDynamicSceneCopyState.geometryShot = ac.GeometryShot(
+            ac.findNodes('sceneRoot:yes'),
+            vec2(shotWidth, shotHeight),
+            1,
+            false,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float
+        )
+        rainDynamicSceneCopyState.shotWidth = shotWidth
+        rainDynamicSceneCopyState.shotHeight = shotHeight
+    end
+    rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
+        sim.cameraClipNear,
+        sim.cameraClipFar
+    )
+    rainDynamicSceneCopyState.geometryShot:update(
+        sim.cameraPosition,
+        sim.cameraLook,
+        sim.cameraUp,
+        sim.cameraFOV
+    )
+    rainDynamicSceneCopyState.shotFrame = sim.frame
+    if not rainDynamicManualPreDrawLogged then
+        ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: updated '
+            .. tostring(shotWidth) .. 'x' .. tostring(shotHeight)
+            .. ' frame=' .. tostring(sim.frame))
+    end
+end)
+
 -- Stage 4A dynamic droplet final draw
 --
 -- Reference validation:
@@ -6234,44 +6288,13 @@ float4 main(PS_IN pin)
         return
     end
 
-    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG then
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG
+        and not rainDynamicSceneCopyState.geometryShot
+    then
         if not rainDynamicManualPreDrawLogged then
-            ac.log(appNameDebug .. ' Dynamic drop geometry shot: starting')
+            ac.log(appNameDebug .. ' Dynamic drop scene-ready shot unavailable')
         end
-        local shotWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5))
-        local shotHeight = math.max(1, math.floor((sim.windowHeight or 1) * 0.5))
-        if not rainDynamicSceneCopyState.geometryShot
-            or rainDynamicSceneCopyState.shotWidth ~= shotWidth
-            or rainDynamicSceneCopyState.shotHeight ~= shotHeight
-        then
-            if rainDynamicSceneCopyState.geometryShot then
-                rainDynamicSceneCopyState.geometryShot:dispose()
-            end
-            rainDynamicSceneCopyState.geometryShot = ac.GeometryShot(
-                ac.findNodes('sceneRoot:yes'),
-                vec2(shotWidth, shotHeight),
-                1,
-                false,
-                render.AntialiasingMode.None,
-                render.TextureFormat.R16G16B16A16.Float
-            )
-            rainDynamicSceneCopyState.shotWidth = shotWidth
-            rainDynamicSceneCopyState.shotHeight = shotHeight
-        end
-        rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
-            sim.cameraClipNear,
-            sim.cameraClipFar
-        )
-        rainDynamicSceneCopyState.geometryShot:update(
-            sim.cameraPosition,
-            sim.cameraLook,
-            sim.cameraUp,
-            sim.cameraFOV
-        )
-        if not rainDynamicManualPreDrawLogged then
-            ac.log(appNameDebug .. ' Dynamic drop geometry shot: updated '
-                .. tostring(shotWidth) .. 'x' .. tostring(shotHeight))
-        end
+        return
     end
 
     render.setBlendMode(
@@ -6336,6 +6359,8 @@ float4 main(PS_IN pin)
             .. tostring(rainDynamicSceneCopyState.height)
             .. ' earlyCaptureFrame='
             .. tostring(rainDynamicSceneCopyState.captureFrame)
+            .. ' shotFrame='
+            .. tostring(rainDynamicSceneCopyState.shotFrame)
             .. ' drawFrame='
             .. tostring(sim.frame)
             .. ' shaderBytes='

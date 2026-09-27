@@ -3699,3 +3699,27 @@ time. The `lib.lua` documentation recommends `render.onSceneReady()` for
 scene-dependent GeometryShot updates, before main rendering; try moving the
 shot update there before re-testing sky/lighting options. Keep the working
 independent-shot variant as a fallback until the new capture is verified.
+
+### 95. Move the unchanged independent shot to scene-ready timing (2026-09-27)
+
+The user authorizes the first step of the proposed `render.onSceneReady()`
+route, with performance monitoring. `lib.lua` explicitly recommends this
+callback for scene-dependent GeometryShot rendering, after shadow/reflection
+updates and before main rendering. Move creation, clipping-plane setup and
+`update()` from `main.track.transparent` to that callback. Preserve shot
+resolution (half window), one mip, `AntialiasingMode.None`, float texture,
+normal lighting defaults, and the current debug shader. The transparent
+callback consumes the latest shot but never re-renders it; it logs shotFrame
+alongside drawFrame and skips the draw if the shot does not yet exist. No new
+chunk-level Lua locals are introduced.
+
+Compare whether all drops still draw, whether the clean green scene changes,
+and FPS relative to the previous roughly 72 FPS at 512 drops. Do not enable
+`setSky`, YEBIS, original lighting, Main shaders, transparency or mipmaps
+until this timing-only test succeeds. The same camera parameters do not, on
+their own, prove that `pin.ScreenPos` is numerically identical between the
+shot and the DLSS-scaled main viewport; keep the empirical 98% candidate
+until alignment is remeasured. The current screen copy feedback suggests
+shared stale composited content, but public Lua API documentation does not
+guarantee that `dynamic::screen` is exactly a previous-frame final image in
+all stages.
