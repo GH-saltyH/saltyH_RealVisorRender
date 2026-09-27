@@ -12,10 +12,16 @@
         Stage 4B.0 transparent optical-profile test. This does not sample the
         scene yet; it validates low-alpha composition, a Fresnel-like rim and
         a compact directional highlight before refraction is introduced.
+
+    Stage 4B.1 contract:
+    - gDynamicDropHDRCopyDebug > 0.5:
+        after circular clipping, copy txDynamicScene at pin.ScreenPos without
+        an offset. Correct screen-space alignment makes the footprint nearly
+        disappear into the scene.
 */
 
-// gDynamicDropDebugUV is injected by render.mesh({ values = ... }).
-// Do not declare it again here.
+// txDynamicScene, gDynamicDropDebugUV and gDynamicDropHDRCopyDebug are
+// injected by render.mesh({ textures/values = ... }). Do not redeclare them.
 
 float4 main(PS_IN pin)
 {
@@ -31,6 +37,19 @@ float4 main(PS_IN pin)
     float r = length(local);
 
     clip(1.0 - r);
+
+    if (gDynamicDropHDRCopyDebug > 0.5)
+    {
+        // mesh.fx provides ScreenPos directly in normalized 0..1 screen
+        // coordinates. No Lua-side resolution or projection math is needed.
+        float3 sceneColor = txDynamicScene.SampleLevel(
+            samLinearClamp,
+            pin.ScreenPos,
+            0.0
+        ).rgb;
+
+        return float4(sceneColor, 1.0);
+    }
 
     // Reconstruct a hemisphere-like local normal from the circular footprint.
     // This is an optical profile only: the actual visor surface normal remains

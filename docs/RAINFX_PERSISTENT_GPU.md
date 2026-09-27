@@ -2673,3 +2673,36 @@ Expected result:
 - foreground depth occlusion and double-sided rendering remain unchanged
 
 If the footprint remains uniformly dark despite the low alpha, investigate render-stage color space/blend state before adding `dynamic::hdr` scene sampling. If the transparent rim/highlight profile is visible, proceed to Stage 4B.1 screen-UV and HDR scene-texture validation, then refraction.
+
+### 46. Stage 4B.0 confirmed + Stage 4B.1 HDR copy alignment test (2026-09-27)
+
+Confirmed Stage 4B.0 result:
+- droplet center is almost transparent
+- pale blue-white rim defines the footprint
+- compact highlight appears at the upper-left
+- foreground depth occlusion and double-sided rendering remain correct
+
+This validates `BlendAccurate` and the low-alpha optical profile. Stage 4B.1 now isolates the two prerequisites for refraction: HDR scene-color binding and normalized screen coordinates.
+
+Reference-confirmed shader inputs:
+- CSP's public `shader-templates/mesh.fx` defines `PS_IN.ScreenPos` as normalized `0..1` screen position intended for screen/depth sampling
+- CSP's Lua SDK defines `dynamic::hdr` as an HDR texture containing scene contents
+- `render.mesh()` accepts the same image sources in its `textures` table
+
+Implementation:
+- bind `txDynamicScene = 'dynamic::hdr'`
+- add `RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG`, enabled for this test
+- after circular clipping, sample `txDynamicScene` at `pin.ScreenPos` with no offset
+- return sampled HDR color with alpha `1.0`
+- texture and value names supplied by Lua are not redeclared in HLSL
+
+Validation settings:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`
+- `RAIN_DYNAMIC_DROP_UV_DEBUG = false`
+- `RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = true`
+
+Expected interpretation:
+- droplet circles nearly disappear into the background with no offset, flip, scale error or brightness seam: HDR binding and screen UV are correct; proceed to controlled radial refraction
+- content is recognizable but shifted, mirrored or scaled: diagnose screen-coordinate convention or render-target layout before refraction
+- circles are black or a flat color: `dynamic::hdr` is unavailable or bound at an incompatible stage
+- scene content aligns but brightness differs: investigate HDR color conversion/render-stage compatibility before introducing offsets

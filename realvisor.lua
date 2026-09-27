@@ -385,6 +385,12 @@ local cfg = scriptSettings:mapConfig({
         -- from the later droplet silhouette.
         RAIN_DYNAMIC_DROP_UV_DEBUG = true,
 
+        -- Stage 4B.1: copy the HDR scene at pin.ScreenPos into each clipped
+        -- droplet footprint without offset. A correct result should be nearly
+        -- invisible and proves scene-texture/screen-UV alignment before
+        -- refraction is introduced.
+        RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = true,
+
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
 
@@ -6131,9 +6137,17 @@ render.on('main.root.transparent', function()
     local dynamicDrawn = render.mesh({
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
+        textures = {
+            txDynamicScene = 'dynamic::hdr',
+        },
         values = {
             gDynamicDropDebugUV =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropHDRCopyDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG
                 and 1.0
                 or 0.0,
         },
