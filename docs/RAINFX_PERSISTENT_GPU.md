@@ -3066,3 +3066,20 @@ physics update. Its decoded center pixel is RGBA `(129, 8, 172, 255)`, so the
 green-rim interior (image upper-left) should show a distinctly purple/blue
 color if ordinary file-texture sampling works in the dynamic mesh draw. Keep
 the prepass, all other sources and preset flags unchanged.
+
+### 61. File-texture control passed; compare the draw stage (2026-09-27)
+
+The user observed purple inside the green rim. The static normal-map control
+therefore samples correctly in the same `render.mesh()` draw. Both HDR samples
+were black at the root transparent stage; this result narrows the issue to the
+HDR input or the stage at which it is sampled, without establishing either
+cause on its own.
+
+Preset `RAIN_DYNAMIC_DROP_DRAW_AT_TRACK=true` and register the existing manual
+draw callback on `main.track.transparent`. Keep the prepass, diagnostic shader,
+texture bindings, all other flags, and quadrant colors unchanged. The canonical
+track callback still returns when dynamic surface state is enabled. The draw
+logs its chosen stage. After a late Lua reload, check whether the image's
+upper-right red-rim and lower-right blue-rim interiors gain scene color; the
+upper-left green-rim control should remain purple. The image is horizontally
+reversed because the observer is looking at the back of the visor normal.

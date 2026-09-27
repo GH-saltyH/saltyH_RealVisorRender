@@ -407,6 +407,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = true,
         -- Repeat the copy prepass that preceded the last visible HDR result.
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = true,
+        -- Compare dynamic::hdr at the track transparent draw stage.
+        RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -6086,11 +6088,13 @@ end
 -- Stage 4A dynamic droplet final draw
 --
 -- Reference validation:
--- Draw the runtime droplet mesh at the root transparent stage. The vertices
+-- Draw the runtime droplet mesh at the selected transparent stage. The vertices
 -- are in the visor mesh's local coordinates; use the scene mesh's original
 -- transform when drawing it explicitly.
 --------------------------------------------------------
-render.on('main.root.transparent', function()
+render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
+    and 'main.track.transparent'
+    or 'main.root.transparent', function()
     if not cfg.RUNTIME.RAIN_ENABLED
         or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
     then
@@ -6210,6 +6214,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG)
             .. ' prepass='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS)
+            .. ' drawStage='
+            .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'track' or 'root')
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )
@@ -6266,7 +6272,9 @@ float4 main(PS_IN pin)
     if not rainDynamicManualDrawLogged then
         ac.log(
             appNameDebug
-            .. ' Dynamic drop Stage 4B.2 root draw: result='
+            .. ' Dynamic drop Stage 4B.2 '
+            .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'track' or 'root')
+            .. ' draw: result='
             .. tostring(dynamicDrawn)
             .. ' shaderBytes='
             .. tostring(
@@ -6381,10 +6389,8 @@ render.on('main.track.transparent', function()
     --------------------------------------------------------
 
     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
-        -- Stage 4A dynamic rendering is intentionally deferred to
-        -- main.root.transparent below. The previous main.track.transparent
-        -- draw could be overwritten later by the attached scene mesh pass,
-        -- making the fallback black quad visible instead of the custom shader.
+        -- The separate manual-draw callback handles the dynamic surface at
+        -- the stage selected by RAIN_DYNAMIC_DROP_DRAW_AT_TRACK.
         return
     end
 
