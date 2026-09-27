@@ -3509,3 +3509,25 @@ window UV. Preserve the original noncomparison diagnostic path and the
 existing shader returns. This attempts to preserve all three coordinate
 candidates while limiting the active screen texture sampling code to one
 site. Check crash status before interpreting the visual result.
+
+### 86. Calibrate the uniform screen offset at two measured resolution ratios (2026-09-27)
+
+The user confirms the single-screen-sample diagnostic no longer crashes.
+The window-normalized magenta scene appears about 8.8 units wide where the
+real object is 7.7, while the `pin.ScreenPos` blue scene is several times
+larger. The apparent offset follows the same pattern across droplet positions.
+This suggests testing a proportional correction anchored at screen UV zero;
+it does not yet prove the HDR or screen source covers the full target UV range.
+
+Continue using a single screen texture sample instruction per fragment. The
+magenta quadrant retains `PosH / windowSize` as the recognizable baseline.
+The blue quadrant uses 28% of the measured per-axis window/target ratio,
+which produces an approximate 1.14x UV scale for a measured ratio near 1.5.
+The green quadrant uses 55%, around 1.275x UV scale. Both factors adapt to
+current window and render target dimensions, so this tests geometry rather
+than assuming a particular DLSS quality setting. The red HDR baseline is
+unchanged. Viewed from behind the visor, blue is image lower-right, green
+upper-left, magenta lower-left, red upper-right. Compare landmark size and
+position against the real scene at a central and edge droplet; note any
+clamped/smeared region. These fractional calibration values are diagnostic,
+not yet a production optical correction.

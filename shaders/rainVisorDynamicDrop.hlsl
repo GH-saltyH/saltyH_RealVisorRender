@@ -80,11 +80,18 @@ float4 main(PS_IN pin)
             }
             else
             {
-                // One screen read per pixel: green=target UV,
-                // blue=CSP projection, magenta=window UV.
-                float2 screenUV = right
-                    ? (bottom ? windowUV : pixelUV)
-                    : saturate(raw);
+                // Calibrate toward the target-size mapping in two steps.
+                // The observed 8.8/7.7 size ratio suggests ~0.28 of the
+                // measured ~1.5 output/input resolution ratio as a first
+                // candidate. Both axes use the current render dimensions.
+                float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+                    / gDynamicDropInvScreenSize;
+                float calibration = right
+                    ? (bottom ? 0.0 : 0.55)
+                    : 0.28;
+                float2 screenUV = saturate(windowUV
+                    * lerp(float2(1.0, 1.0), resolutionRatio,
+                        calibration));
                 sampledColor = txDynamicScreen.SampleLevel(
                     samLinearClamp, screenUV, 0.0).rgb * 8.0;
             }
