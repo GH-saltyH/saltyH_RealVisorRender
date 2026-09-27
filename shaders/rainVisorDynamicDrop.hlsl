@@ -32,9 +32,8 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare direct HDR, an independent scene source at raw and expanded
-        UV, and a known file texture. The two expanded samples use the same
-        UV transform when gDynamicDropSnapshotDebug is enabled.
+        compare direct HDR at 8x with an independent scene at two candidate
+        UV scales, plus a known file texture.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -59,14 +58,17 @@ float4 main(PS_IN pin)
     {
         float2 raw = pin.ScreenPos.xy;
         float2 expandedUV = saturate((raw - 0.5) * 8.0 + 0.5);
+        float2 sceneUVA = saturate(
+            (raw - 0.5) * gDynamicDropGeometryUVScaleA + 0.5);
+        float2 sceneUVB = saturate(
+            (raw - 0.5) * gDynamicDropGeometryUVScaleB + 0.5);
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
 
         if (!right && !bottom)
         {
-            // Upper-left: direct HDR, using the same 8x mapping as the
-            // snapshot below while snapshot comparison is enabled.
+            // Upper-left: direct HDR at the previous 8x reference scale.
             sampledColor = txDynamicScene.SampleLevel(
                 samLinearClamp,
                 gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw,
@@ -81,20 +83,21 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: independently rendered scene when enabled, with
-            // the identical 8x UV mapping as direct HDR above.
+            // Lower-left: independent scene at the estimated 20x UV scale.
             sampledColor = txDynamicSnapshot.SampleLevel(
-                samLinearClamp, expandedUV, 0.0).rgb;
+                samLinearClamp,
+                gDynamicDropGeometryShotDebug > 0.5 ? sceneUVA : expandedUV,
+                0.0).rgb;
             if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor *= 8.0;
         }
         else
         {
-            // Lower-right: the same independent scene at unexpanded UV.
+            // Lower-right: independent scene at the nearby 24x UV scale.
             // Fall back to LDR if the geometry shot is disabled.
             if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor = txDynamicSnapshot.SampleLevel(
-                    samLinearClamp, raw, 0.0).rgb * 8.0;
+                    samLinearClamp, sceneUVB, 0.0).rgb * 8.0;
             else
                 sampledColor = txDynamicScreen.SampleLevel(
                     samLinearClamp, expandedUV, 0.0).rgb;

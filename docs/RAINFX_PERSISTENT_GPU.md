@@ -3230,3 +3230,24 @@ lower-right and magenta at lower-left. Check which shows a wider section of
 the same track feature and whether the geometry matches the location behind
 each circle. This factor of eight is diagnostic brightness only, not a final
 exposure or refraction setting.
+
+### 70. Estimate geometry-shot screen UV scale (2026-09-27)
+
+The user reports that the 8x geometry-shot sample is closer to real size than
+the unscaled sample, but objects on screen are about 40% of the size shown
+in the 8x quadrant. To reduce the sampled object's apparent size by roughly
+2.5x, the first estimate is `8 * 2.5 = 20x` screen UV expansion. This is a
+scale estimate only; its center and image orientation still need validation.
+
+Preset two candidates while retaining the 512-drop count, clean independent
+shot, 8x brightness adjustment, and other diagnostic flags:
+- shader lower-left blue rim (image lower-right): 20x scene UV
+- shader lower-right magenta rim (image lower-left): 24x scene UV
+- shader upper-left red rim (image upper-right): previous 8x live HDR reference
+- shader upper-right green rim (image upper-left): static normal-map control
+
+Inspect a recognizable stationary track feature in both scene-shot
+quadrants. Compare its apparent size and whether its position agrees with
+the background behind the same droplet. If the feature collapses to a
+uniform edge color, the expanded UV is clamping; this test alone does not
+establish an exact mapping.
