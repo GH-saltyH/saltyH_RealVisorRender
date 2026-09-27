@@ -4351,3 +4351,23 @@ If the 0.85 half matches the sky color and reveals clear bending, the
 original 0.55 alpha obscured an otherwise usable processed source.
 Record paired weather-specific FPS. Disable this debug flag to restore
 the normal 16px offset and shape-dependent alpha.
+
+### 124. Remove the unrefracted background from the lens blend (2026-09-28)
+
+The user confirms that the alpha comparison leaves the unbent base scene and
+the refracted scene visible together. The higher-alpha half is darker; the
+lower-alpha half is too blurred to resolve. FPS is unchanged. This matches
+the current `BlendAccurate` behavior: partial alpha places a sample of the
+scene over the still-visible original scene. Raising alpha darkens the LDR
+shot in the HDR pass while reducing, but not eliminating, that double image.
+
+Preset `RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG=true`. Output alpha
+is now 1.0 across both halves of the clipped droplet body. The visible left
+half (shader `local.x >= 0`) samples the full-size GeometryShot at 48px
+offset; visible right samples it at 0px. The amber center separator remains.
+This should fully replace the underlying scene within the circle and expose
+whether the sampled image itself bends at the offset. Check whether the
+double scene image disappears and whether the offset half now bends clearly;
+also note if raw GeometryShot color is still too dark. Keep Fog/Hurricane
+cameras fixed and compare FPS. Once this proves the opaque path, choose
+proper edge coverage and calibrate YEBIS-to-HDR colors separately.

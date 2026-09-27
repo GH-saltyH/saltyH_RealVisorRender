@@ -398,9 +398,9 @@ local cfg = scriptSettings:mapConfig({
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
-        -- On each drop keep 48px shift on both halves; compare transparent
-        -- (image-right) with opaque (image-left) HDR scene blending.
-        RAIN_DYNAMIC_DROP_ALPHA_SPLIT_DEBUG = true,
+        -- Compare 48px refraction against zero shift with opaque output,
+        -- preventing the unrefracted background from bleeding through.
+        RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = true,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Diagnose whether AC post-processing carries WeatherFX fog into a
@@ -6635,8 +6635,8 @@ float4 main(PS_IN pin)
             gDynamicDropSkySourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG
                 and 1.0 or 0.0,
-            gDynamicDropAlphaSplitDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ALPHA_SPLIT_DEBUG
+            gDynamicDropOpaqueRefractionSplitDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG
                 and 1.0 or 0.0,
 
             gDynamicDropSceneSourceDebug =
