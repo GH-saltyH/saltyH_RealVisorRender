@@ -2610,3 +2610,35 @@ Two concrete problems in the explicit path were addressed for the next in-game t
 2. Add `transform = 'original'` to the explicit `render.mesh()` call. The generated droplet vertices are in the target visor mesh's local coordinate system, and the CSP Lua SDK documents this option for using a scene mesh's original transform.
 
 Next in-game check: keep `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true` and `RAIN_DYNAMIC_DROP_UV_DEBUG = true`. Red/green gradient quads on both sides indicate the explicit path is visible. Black quads on one side mean it is still unproven; capture the CSP shader error and the `Dynamic drop root draw` log before selecting another geometry API. `ac.SimpleMesh` in the public SDK describes predefined car/collider/track geometry and has no documented constructor for a custom vertex buffer, so it is not a verified replacement for `createMesh()`/`alterVertices()`.
+
+### 44. Stage 4A — explicit dynamic draw confirmed and scene-fallback isolation test (2026-09-27)
+
+Confirmed runtime result after removing the duplicate Lua-value declaration and adding `transform = 'original'`:
+- each transport quad displays the expected red/green interpolated UV gradient
+- the explicit draw is double-sided with `CullMode.None`
+- `DepthMode.Off` makes the diagnostic visible through geometry in front of it, as intended for this diagnostic only
+
+This confirms the complete dynamic rendering chain:
+`GPU state -> async readback -> target-mesh UV lookup -> alterVertices() -> original scene transform -> render.mesh() -> custom HLSL -> pin.Tex`.
+
+The two code corrections validated by this result are:
+1. Values supplied through `render.mesh({ values = ... })` are injected by CSP's shader template and must not be declared again inside the supplied HLSL source.
+2. The generated droplet vertices use the visor mesh's local coordinate space, so the attached `SceneReference` must be explicitly rendered with `transform = 'original'`.
+
+Next isolation test:
+- create the attached dynamic transport mesh hidden so the ordinary scene pass cannot draw its black fallback material
+- in `main.root.transparent`, temporarily set it visible immediately before `render.mesh()`
+- restore it to hidden immediately after the explicit draw call
+- retain the current UV debug output, `CullMode.None`, and `DepthMode.Off` for an unambiguous result
+
+Expected interpretation:
+- double-sided RG gradient remains and black one-sided fallback disappears: manual draw can be visibility-gated synchronously; retain this ownership model
+- nothing is visible: the native draw checks SceneReference visibility after the Lua call returns; temporary visibility cannot isolate the paths
+- RG plus a black fallback remains: ordinary scene traversal occurs while the temporary visible state is active; another ownership/material strategy is required
+
+Settings persistence added alongside this test:
+- new `[MESH_VISIBILITY]` section follows `[PROFILE_2]`
+- keys are the existing `MATERIAL_EDITORS[*].meshName` values and values are `1` (visible) or `0` (hidden)
+- loading and saving each iterate the existing material-editor descriptors once; no per-frame name lookup is introduced
+- loading applies the saved state immediately to each resolved `targetMesh`
+- changing a KN5 visibility checkbox applies the state and saves `settings.ini` immediately

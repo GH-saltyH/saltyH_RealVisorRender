@@ -105,6 +105,12 @@ local appFolder =
     
     local settingsFile = 
     appFolder .. '/settings.ini'
+
+    local MESH_VISIBILITY_SECTION = 'MESH_VISIBILITY'
+
+    -- Forward declaration: profile persistence and KN5 setup share the same
+    -- mesh descriptors defined in the material-editor section below.
+    local MATERIAL_EDITORS
     
     
     --------------------------------------------------------
@@ -1739,6 +1745,26 @@ local function loadProfiles()
     -- (tonumber(enableMod.ENABLE) or 1) ~= 0
 
 
+    --------------------------------------------------------
+    -- Per-mesh visibility
+    --------------------------------------------------------
+
+    for _, editor in ipairs(MATERIAL_EDITORS or {}) do
+        local visibleValue = config:get(
+            MESH_VISIBILITY_SECTION,
+            editor.meshName,
+            editor.visible and 1 or 0
+        )
+
+        editor.visible = visibleValue ~= 0
+
+        if editor.targetMesh
+            and #editor.targetMesh > 0 then
+            editor.targetMesh:setVisible(editor.visible, false)
+        end
+    end
+
+
     ac.log(
         appNameDebug
         .. ' cfg.GENERAL.ENABLE = '
@@ -1751,6 +1777,20 @@ end
 local function saveProfiles()
     local p1 = cfg.PROFILE_1
     local p2 = cfg.PROFILE_2
+
+    local meshVisibilityLines = {}
+
+    for _, editor in ipairs(MATERIAL_EDITORS or {}) do
+        meshVisibilityLines[#meshVisibilityLines + 1] =
+            string.format(
+                '%s=%d',
+                editor.meshName,
+                editor.visible and 1 or 0
+            )
+    end
+
+    local meshVisibilityContent =
+        table.concat(meshVisibilityLines, '\n')
 
     local content = string.format([[
 [GENERAL]
@@ -1796,6 +1836,9 @@ MOTION_LIMIT_X=%.6f
 MOTION_LIMIT_Y=%.6f
 MOTION_LIMIT_Z=%.6f
 HIDE_DRIVER_HELMET=%d
+
+[MESH_VISIBILITY]
+%s
 ]],
         cfg.GENERAL.ACTIVE,
         cfg.GENERAL.ENABLE,
@@ -1836,7 +1879,9 @@ HIDE_DRIVER_HELMET=%d
         p2.MOTION_LIMIT_X,
         p2.MOTION_LIMIT_Y,
         p2.MOTION_LIMIT_Z,
-        p2.HIDE_DRIVER_HELMET
+        p2.HIDE_DRIVER_HELMET,
+
+        meshVisibilityContent
     )
 
     io.save(settingsFile, content)
@@ -3243,7 +3288,7 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
     ------------------------------------------------------------
     -- Material Definition
     ------------------------------------------------------------
-    local MATERIAL_EDITORS = {
+    MATERIAL_EDITORS = {
 
 
         ------------------------------------------------------------
@@ -5465,15 +5510,11 @@ local function initializeRainDynamicSurfaceTest()
         return false
     end
 
-    -- IMPORTANT: render.mesh() with an ac.SceneReference still respects the
-    -- SceneReference visibility flag on the target CSP build. Hiding this mesh
-    -- also suppresses the explicit custom-shader draw, so keep it visible.
-    --
-    -- This means the regular scene/material pass can also see the transport
-    -- geometry. Stage 4A diagnostics deliberately disambiguate the two paths:
-    -- the explicit render.mesh() draw uses DepthMode.Off + RG UV output while
-    -- RAIN_DYNAMIC_DROP_UV_DEBUG is enabled.
-    rainDynamicSurfaceMesh:setVisible(true, false)
+    -- Keep the attached transport mesh hidden from ordinary scene traversal.
+    -- The explicit draw callback temporarily enables it only for the duration
+    -- of render.mesh(), because that API also respects SceneReference
+    -- visibility on the target CSP build.
+    rainDynamicSurfaceMesh:setVisible(false, false)
 
     ac.log(
         appNameDebug
@@ -6077,6 +6118,12 @@ render.on('main.root.transparent', function()
         or render.DepthMode.ReadOnly
     )
 
+    -- Visibility-gated manual draw test:
+    -- keep the attached mesh hidden between callbacks so the ordinary scene
+    -- pass cannot render its black fallback material. Enable it only while
+    -- render.mesh() consumes the SceneReference, then hide it again.
+    rainDynamicSurfaceMesh:setVisible(true, false)
+
     local dynamicDrawn = render.mesh({
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
@@ -6088,6 +6135,8 @@ render.on('main.root.transparent', function()
         },
         shader = rainDynamicDropShader.HLSL
     })
+
+    rainDynamicSurfaceMesh:setVisible(false, false)
 
     if not rainDynamicManualDrawLogged then
         ac.log(
@@ -8238,8 +8287,10 @@ function windowMain(dt)
             if foundEditor.targetMesh
                 and #foundEditor.targetMesh > 0 then
 
-                foundEditor.targetMesh:setVisible(foundEditor.visible)
+                foundEditor.targetMesh:setVisible(foundEditor.visible, false)
             end
+
+            saveProfiles()
 
             ac.log(
                 appNameDebug .. ' ' .. foundEditor.meshName .. (foundEditor.visible and ': Show' or ': Hide')
