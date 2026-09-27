@@ -3581,3 +3581,29 @@ nested outlines while blue retains them, and compare scene detail/brightness.
 Log captureFrame, drawFrame and snapshotSize already emitted at first draw.
 If both contain recursion, the earlier screen stage is not a clean source;
 then use a truly independent capture or change render timing.
+
+### 90. Compare a clean independent scene shot with recursive screen color (2026-09-27)
+
+The user reports that both the opaque-stage `dynamic::screen` copy and the
+live screen contain repeated images of the droplet itself at the corrected
+coordinates. Thus the screen copy is not an independent clean scene source;
+its capture timing does not solve feedback. The user previously observed no
+nested drops in the independent `ac.GeometryShot` source, though that shot
+was dark and omitted some foliage and final effects.
+
+Enable the independent GeometryShot, disable the opaque screen snapshot, and
+preserve the single live `dynamic::screen` sample path. Configure the shot
+with `render.AntialiasingMode.YEBIS`, `setBestSceneShotQuality()`,
+`setShadersType(render.ShadersType.Main)`, dedicated grass and area shadows,
+following CSP's local OBS integration example. It uses the current camera
+position, look direction, up direction, FOV and clipping planes. Image
+upper-left green reads this independent scene shot at 98% correction; image
+lower-right blue reads the live screen at exactly the same UV; image
+lower-left magenta reads live screen at 85%; image upper-right red retains
+live HDR. The 8x gain on the independent shot is only for debugging.
+
+Inspect whether green remains free of recursive circles, and whether foliage,
+brightness and projection better match the main screen. Measure FPS because
+YEBIS and dedicated grass can make the extra scene shot expensive. If green
+still differs, diagnose capture quality separately from UV alignment before
+using it for the final optical shader.

@@ -413,10 +413,10 @@ local cfg = scriptSettings:mapConfig({
         -- whether HDR/LDR contains droplets from earlier frames.
         RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
         -- Compare live HDR with an opaque-pass copy if needed.
-        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = true,
+        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = false,
         -- Render the scene again without the hidden transport mesh to test
         -- a source that cannot contain previous droplet draws.
-        RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = false,
+        RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
         -- Keep the best empirical scale as a reference against projection.
         RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
         RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG = true,
@@ -6249,8 +6249,16 @@ float4 main(PS_IN pin)
                 vec2(shotWidth, shotHeight),
                 1,
                 false,
-                render.AntialiasingMode.None,
+                render.AntialiasingMode.YEBIS,
                 render.TextureFormat.R16G16B16A16.Float
+            )
+            rainDynamicSceneCopyState.geometryShot:setBestSceneShotQuality()
+            rainDynamicSceneCopyState.geometryShot:setShadersType(
+                render.ShadersType.Main
+            )
+            rainDynamicSceneCopyState.geometryShot:setGrass('dedicated')
+            rainDynamicSceneCopyState.geometryShot:setAlternativeShadowsSet(
+                'area'
             )
             rainDynamicSceneCopyState.shotWidth = shotWidth
             rainDynamicSceneCopyState.shotHeight = shotHeight

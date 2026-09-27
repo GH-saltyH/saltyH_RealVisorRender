@@ -64,8 +64,7 @@ float4 main(PS_IN pin)
             pin.PosH.xy * gDynamicDropInvScreenSize);
         float2 pixelUV = saturate(
             pin.PosH.xy * gDynamicDropInvRenderTargetSize);
-        bool compareSnapshot = gDynamicDropSnapshotDebug > 0.5
-            && gDynamicDropGeometryShotDebug < 0.5;
+        bool compareSnapshot = gDynamicDropSnapshotDebug > 0.5;
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
@@ -80,8 +79,8 @@ float4 main(PS_IN pin)
             }
             else
             {
-                // Compare an opaque-stage screen copy against the live
-                // screen at identical 98% UV; magenta retains 85% live.
+                // Compare a separately rendered scene without visor drops
+                // against the live screen at identical 98% screen UV.
                 float2 resolutionRatio = gDynamicDropInvRenderTargetSize
                     / gDynamicDropInvScreenSize;
                 float calibration = right
