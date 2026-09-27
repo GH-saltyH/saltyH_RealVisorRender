@@ -3772,3 +3772,21 @@ transparent draw. Check whether the drop still renders, whether the track
 material and its shadow are closer to the main view, whether the sky and
 CSP grass remain absent, and FPS at the reference camera. Main shaders may
 cost more; this test isolates shader selection from sky/grass/tonemapping.
+
+### 99. Add default GrassFX geometry to the clean Main-shader shot (2026-09-27)
+
+With original lighting and `render.ShadersType.Main` on the scene-ready shot,
+the user confirms drops remain visible and shadows now appear. Sky and added
+grass are still absent. At the reference camera FPS is about 67–69, compared
+with approximately 75 before switching to Main shaders (roughly 6–8 FPS
+below that reference, depending on measurement variation).
+
+`lib.lua` says GeometryShot omits grass by default and supports
+`shot:setGrass(true)` to enable it around the camera. Enable only this
+regular mode when constructing the shot. Do not use `'dedicated'`, which the
+API describes as an expensive alternative Grass FX spawn area. Keep Main
+shaders, original lighting, one-mip float format, no YEBIS, unchanged sky
+setting and scene-ready timing. Verify that drops continue to draw, whether
+CSP grass becomes visible in the green quadrant, and FPS at the same view.
+If grass remains absent, a separate Grass FX spawn area may be required;
+assess its cost before selecting it.
