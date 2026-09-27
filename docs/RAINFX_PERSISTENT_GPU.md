@@ -3755,3 +3755,20 @@ resolution or UV settings change. With antialiasing still set to None, this
 is a direct independent scene-color read without YEBIS tonemapping. Compare
 green brightness, sky, foliage, and visible detail at the reference camera;
 report FPS and whether the drop remains visible.
+
+### 98. Test Main shader type for independent-shot material and shadow fidelity (2026-09-27)
+
+After removing the debug 8x gain from the green independent scene, the user
+reports scene lighting close to the original at most positions and similar
+FPS. Some shadows, notably track surface shadows, remain absent. The sky is
+still dark, and CSP-added grass/particles are missing. `lib.lua` describes
+`render.ShadersType.Main` as the full shader set with lighting; it separately
+documents sky, grass, particles and alternative shadows options.
+
+Change only `GeometryShot:setShadersType(render.ShadersType.Main)` in the
+scene-ready shot setup. Keep `setOriginalLighting(true)`, antialiasing None,
+float texture, one-mip half-window capture, clean 98% UV and the unchanged
+transparent draw. Check whether the drop still renders, whether the track
+material and its shadow are closer to the main view, whether the sky and
+CSP grass remain absent, and FPS at the reference camera. Main shaders may
+cost more; this test isolates shader selection from sky/grass/tonemapping.
