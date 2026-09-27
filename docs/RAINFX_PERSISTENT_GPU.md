@@ -3808,3 +3808,21 @@ still draws and whether `scene-ready shot: updated` and `pre-draw` logs
 appear, then inspect sky in the green quadrant and FPS. If the drop
 vanishes again, the trigger is not solely the mid-frame capture timing;
 restore the previous working shot before further changes.
+
+### 101. Measure scene-shot detail and cost at active render-target size (2026-09-27)
+
+The user confirms that the scene-ready independent GeometryShot now shows
+sky, shadows, Grass FX and no recursive drops after enabling original
+lighting, Main shaders, regular grass and sky individually. The update frame
+and transparent draw frame both equal 626617; FPS did not measurably change
+when the sky was enabled. The shot is still 1620x936, half the 3240x1872
+window, so fine scene details remain visibly low resolution.
+
+Change only the shot allocation size to `render.getRenderTargetSize()` during
+`onSceneReady`, falling back to half-window size if no active target size is
+reported. At the measured DLSS mode the main target was 2161x1249, roughly
+1.78 times as many pixels as the old shot. Preserve the original camera,
+quality and diagnostic shader including sky, grass and shadows. Log the shot
+size and compare fine scene detail, UV alignment, no-recursion behavior and
+FPS at the reference view. This is a deliberate cost test; revert to the
+half-window source if the quality gain does not justify its frame cost.

@@ -6151,8 +6151,13 @@ render.onSceneReady(function()
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: starting frame='
             .. tostring(sim.frame))
     end
-    local shotWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5))
-    local shotHeight = math.max(1, math.floor((sim.windowHeight or 1) * 0.5))
+    local shotTargetSize = render.getRenderTargetSize()
+    local shotWidth = math.max(1, math.floor(
+        shotTargetSize.x > 0 and shotTargetSize.x
+            or (sim.windowWidth or 1) * 0.5))
+    local shotHeight = math.max(1, math.floor(
+        shotTargetSize.y > 0 and shotTargetSize.y
+            or (sim.windowHeight or 1) * 0.5))
     if not rainDynamicSceneCopyState.geometryShot
         or rainDynamicSceneCopyState.shotWidth ~= shotWidth
         or rainDynamicSceneCopyState.shotHeight ~= shotHeight
