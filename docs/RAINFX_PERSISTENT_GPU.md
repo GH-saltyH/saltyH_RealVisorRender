@@ -3962,3 +3962,23 @@ Follow-on motion work, after the compositing choice:
    separate geometry/mask update cost and GPU draw cost at 512 drops.
 
 These are design directions, not implementations delivered by this commit.
+
+### 107. Compare a stronger translucent drop against the preferred opaque reference (2026-09-27)
+
+The user reports that the fully replaced image-right half clearly reads as
+a convex sphere reflecting/distorting the environment, with strong
+refraction and good droplet visibility. The previously blended image-left
+half shows a difference mainly at its outline; its interior is too close to
+the unmodified scene to identify as a water drop. Keep the preferred opaque
+right half as the reference while raising only the left half's alpha from
+0.12 at the center to 0.55. Reduce the extra Fresnel, highlight and outer
+rim alpha contributions so the left half remains below full opacity (about
+0.9–0.98 at strongly lit edges). Preserve the 16px scene displacement,
+scene source, rim/highlight RGB, depth, separator and camera setup.
+
+Compare the two halves over the same textured and flat backgrounds: does the
+new left interior show enough curvature without the right half's strong orb
+appearance? Check seam, edge/sky color differences and FPS. If opacity alone
+cannot produce the intended natural refractive shape, adjust the displacement
+profile next, rather than hiding it with low alpha. Motion-driven ripple
+strength and trail compositing will be built on the chosen whole-drop profile.
