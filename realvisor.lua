@@ -329,7 +329,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 256,
+        RAIN_GPU_STATE_COUNT = 512,
 
         -- Persistent state:
         -- 0 = disabled
@@ -6354,6 +6354,11 @@ float4 main(PS_IN pin)
             gDynamicDropSnapshotDebug =
                 (cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
                     or cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
+                and 1.0
+                or 0.0,
+
+            gDynamicDropGeometryShotDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG
                 and 1.0
                 or 0.0,
 

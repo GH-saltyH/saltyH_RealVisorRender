@@ -3211,3 +3211,22 @@ and magenta LDR controls stay unchanged. Check whether the blue quadrant
 contains track scene and whether it has nested droplet images. This is a
 diagnostic with an additional scene render every frame; visual alignment and
 GPU cost must be measured before considering it as an optical source.
+
+### 69. Independent shot avoids observed nested drops; expose its scene (2026-09-27)
+
+The user reports unchanged performance at about 81 FPS. The independent
+blue-rim shot is too dark for easy inspection, but no nested droplet image
+was found even after increasing the count to 512. This supports the shot as
+a clean source in the tested scene and does not yet establish that its camera
+projection or brightness matches the main render.
+
+Preset `RAIN_GPU_STATE_COUNT=512` to reproduce the denser observation.
+Keep the independent `GeometryShot` and brighten only its diagnostic samples
+by 8x. The blue-rim shader lower-left quadrant uses the shot at the expanded
+8x `ScreenPos` coordinates; the magenta-rim shader lower-right quadrant uses
+the same shot at raw `ScreenPos`. The red-rim direct HDR and green-rim normal
+map remain as controls. In the user's back-side view, compare blue at image
+lower-right and magenta at lower-left. Check which shows a wider section of
+the same track feature and whether the geometry matches the location behind
+each circle. This factor of eight is diagnostic brightness only, not a final
+exposure or refraction setting.

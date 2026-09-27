@@ -32,9 +32,9 @@
 
     Stage 4B.2F contract:
     - gDynamicDropScreenUVDebug > 0.5:
-        compare direct HDR, an independent scene source, a known file texture,
-        and LDR. The scene samples use the same center-expanded UV when
-        gDynamicDropSnapshotDebug is enabled.
+        compare direct HDR, an independent scene source at raw and expanded
+        UV, and a known file texture. The two expanded samples use the same
+        UV transform when gDynamicDropSnapshotDebug is enabled.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -85,13 +85,19 @@ float4 main(PS_IN pin)
             // the identical 8x UV mapping as direct HDR above.
             sampledColor = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, expandedUV, 0.0).rgb;
+            if (gDynamicDropGeometryShotDebug > 0.5)
+                sampledColor *= 8.0;
         }
         else
         {
-            // Lower-right: LDR scene with the identical expanded UV used by
-            // lower-left HDR. Compare nested drops without UV differences.
-            sampledColor = txDynamicScreen.SampleLevel(
-                samLinearClamp, expandedUV, 0.0).rgb;
+            // Lower-right: the same independent scene at unexpanded UV.
+            // Fall back to LDR if the geometry shot is disabled.
+            if (gDynamicDropGeometryShotDebug > 0.5)
+                sampledColor = txDynamicSnapshot.SampleLevel(
+                    samLinearClamp, raw, 0.0).rgb * 8.0;
+            else
+                sampledColor = txDynamicScreen.SampleLevel(
+                    samLinearClamp, expandedUV, 0.0).rgb;
         }
         float3 marker = !right
             ? (bottom ? float3(0.2, 0.5, 1.0) : float3(1.0, 0.15, 0.15))
