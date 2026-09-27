@@ -3298,11 +3298,28 @@ first projective-division attempt failed shader compilation with X3018 and was
 removed before further testing. The template defines `PS_IN.PosH` as
 `float4 : SV_POSITION`, which contains the pixel-shader raster position.
 
-Use `pixelUV = PosH.xy * gDynamicDropInvScreenSize` as a mathematically
-grounded candidate for sampling the current viewport. The shader now compares
-this direct HDR pixel sample in the magenta-rim quadrant against the blue-rim
+Use the raster pixel position and actual HDR texture dimensions to construct
+`pixelUV = PosH.xy / float2(hdrWidth, hdrHeight)`. The shader compares this
+direct HDR pixel sample in the magenta-rim quadrant against the blue-rim
 20.5x independent-shot sample. Red remains the prior live HDR scale test and
 green remains the file-texture control. This does not solve the current-HDR
-self-image issue, but isolates whether screen-position interpolation caused
+self-image issue, but isolates whether viewport-to-texture resolution caused
 the edge-dependent alignment error. The GeometryShot still lacks some live
 post-processing and foliage appearance.
+
+### 74. Pixel-addressed HDR has final foliage but a large offset (2026-09-27)
+
+The user confirms the direct pixel-addressed sample includes foliage and
+appears to preserve the final scene image without brightness adjustment. The
+sample is close in size, slightly enlarged, but its content is substantially
+offset even for a droplet near viewport center. This means the simple
+`PosH.xy * inverse window size` mapping is not aligned to the source texture;
+screen/window dimensions and the HDR texture's own dimensions can differ.
+
+The next shader revision computes pixel UV from `PosH.xy` divided by the
+dimensions returned by `txDynamicScene.GetDimensions()`, rather than using
+`sim.windowWidth/Height`. Keep the no-brightness direct-HDR pixel candidate
+and the 20.5x GeometryShot candidate side by side. Compare a center droplet
+over a stationary background landmark first, then one near an edge. If the
+large center offset remains, inspect the source's viewport subrect or texture
+origin; dimensions alone are not sufficient.
