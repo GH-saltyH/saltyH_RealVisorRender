@@ -3826,3 +3826,23 @@ quality and diagnostic shader including sky, grass and shadows. Log the shot
 size and compare fine scene detail, UV alignment, no-recursion behavior and
 FPS at the reference view. This is a deliberate cost test; revert to the
 half-window source if the quality gain does not justify its frame cost.
+
+### 102. Cache main-pass target size instead of scene-ready auxiliary target (2026-09-27)
+
+The user reports a tiny, unusable scene shot after Stage 101; the logs show
+`scene-ready shot: updated 64x64` while the later transparent pass reports
+`targetSize=2161x1249` and `windowSize=3240x1872`. At scene-ready timing,
+`render.getRenderTargetSize()` refers to a 64x64 auxiliary target, not the
+main render target. No inference about the correct shot size can be drawn
+from it at that callback.
+
+Read `render.getRenderTargetSize()` in the known main track transparent draw,
+where the previous diagnostics measured 2161x1249, and cache width/height in
+the existing scene-copy state for the next scene-ready shot. Until the first
+main draw, initialize at the previously working half-window resolution
+(1620x936). Reallocate the shot when the cached main target dimensions
+change; log shot update on resize even if the first draw has already been
+logged. Guard against tiny non-main targets before caching. Keep all shot
+features, UVs and shader unchanged. After the second rendered frame the
+expected logged shot size is 2161x1249, allowing an actual quality and FPS
+comparison against the half-window baseline.

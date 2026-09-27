@@ -6151,17 +6151,16 @@ render.onSceneReady(function()
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: starting frame='
             .. tostring(sim.frame))
     end
-    local shotTargetSize = render.getRenderTargetSize()
     local shotWidth = math.max(1, math.floor(
-        shotTargetSize.x > 0 and shotTargetSize.x
+        rainDynamicSceneCopyState.mainTargetWidth
             or (sim.windowWidth or 1) * 0.5))
     local shotHeight = math.max(1, math.floor(
-        shotTargetSize.y > 0 and shotTargetSize.y
+        rainDynamicSceneCopyState.mainTargetHeight
             or (sim.windowHeight or 1) * 0.5))
-    if not rainDynamicSceneCopyState.geometryShot
+    local shotResized = not rainDynamicSceneCopyState.geometryShot
         or rainDynamicSceneCopyState.shotWidth ~= shotWidth
         or rainDynamicSceneCopyState.shotHeight ~= shotHeight
-    then
+    if shotResized then
         if rainDynamicSceneCopyState.geometryShot then
             rainDynamicSceneCopyState.geometryShot:dispose()
         end
@@ -6193,7 +6192,7 @@ render.onSceneReady(function()
         sim.cameraFOV
     )
     rainDynamicSceneCopyState.shotFrame = sim.frame
-    if not rainDynamicManualPreDrawLogged then
+    if not rainDynamicManualPreDrawLogged or shotResized then
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: updated '
             .. tostring(shotWidth) .. 'x' .. tostring(shotHeight)
             .. ' frame=' .. tostring(sim.frame))
@@ -6326,6 +6325,12 @@ float4 main(PS_IN pin)
     )
 
     local dynamicRenderTargetSize = render.getRenderTargetSize()
+    if dynamicRenderTargetSize.x > 64 and dynamicRenderTargetSize.y > 64 then
+        rainDynamicSceneCopyState.mainTargetWidth =
+            math.floor(dynamicRenderTargetSize.x)
+        rainDynamicSceneCopyState.mainTargetHeight =
+            math.floor(dynamicRenderTargetSize.y)
+    end
 
     -- Visibility-gated manual draw test:
     -- keep the attached mesh hidden between callbacks so the ordinary scene
