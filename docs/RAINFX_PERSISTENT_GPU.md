@@ -3625,3 +3625,21 @@ blue on live screen at the identical UV, and magenta on live screen at 85%.
 First confirm the circles render and whether green avoids recursive drops.
 Then add processing features back one at a time, using the default texture
 format when antialiasing is enabled, per the bundled `lib.lua` API contract.
+
+### 92. Restore sky in the clean scene shot without changing rendering mode (2026-09-27)
+
+The user confirms the independent GeometryShot draws the correct scene at
+nearly the right position, with no repeated drops even at the screen edges.
+The remaining edge offset is small. The shot is low-quality and excludes sky,
+but runs at about 72 FPS with 512 drops, compared with an earlier YEBIS
+attempt at about 50 FPS and no visible droplets.
+
+The bundled `lib.lua` API explicitly states that GeometryShot sky is disabled
+by default and provides `shot:setSky(true)`. Add that one option when the shot
+is created. Keep `AntialiasingMode.None`, the existing float texture format,
+the same camera, 98% diagnostic UV and 8x diagnostic gain. Check whether the
+sky now appears in green while live-screen blue still shows recursion, and
+compare FPS. If the sky remains absent, CSP's alternative sky may not be
+included by the GeometryShot sky pass. Future quality work can test original
+lighting and Main shaders separately; do not enable YEBIS until texture
+format compatibility and draw behavior are established.

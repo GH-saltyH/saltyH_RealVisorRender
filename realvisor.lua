@@ -6252,6 +6252,7 @@ float4 main(PS_IN pin)
                 render.AntialiasingMode.None,
                 render.TextureFormat.R16G16B16A16.Float
             )
+            rainDynamicSceneCopyState.geometryShot:setSky(true)
             rainDynamicSceneCopyState.shotWidth = shotWidth
             rainDynamicSceneCopyState.shotHeight = shotHeight
         end
