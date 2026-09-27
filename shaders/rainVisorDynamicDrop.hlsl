@@ -9,7 +9,9 @@
         Expected result per quad: horizontal red gradient, vertical green
         gradient, opaque output.
     - otherwise:
-        render the physical-radius quad as a circular diagnostic droplet.
+        Stage 4B.0 transparent optical-profile test. This does not sample the
+        scene yet; it validates low-alpha composition, a Fresnel-like rim and
+        a compact directional highlight before refraction is introduced.
 */
 
 // gDynamicDropDebugUV is injected by render.mesh({ values = ... }).
@@ -30,13 +32,33 @@ float4 main(PS_IN pin)
 
     clip(1.0 - r);
 
-    float edge = smoothstep(0.72, 0.98, r);
-    float center = 1.0 - smoothstep(0.0, 0.65, r);
+    // Reconstruct a hemisphere-like local normal from the circular footprint.
+    // This is an optical profile only: the actual visor surface normal remains
+    // owned by the transport mesh and the target-surface lookup.
+    float z = sqrt(saturate(1.0 - r * r));
+    float3 dropNormal = normalize(float3(local.x, local.y, z));
 
-    float3 innerColor = float3(0.78, 0.90, 1.00);
-    float3 edgeColor = float3(0.25, 0.55, 1.00);
-    float3 color = lerp(innerColor, edgeColor, edge);
-    float alpha = 0.82 + center * 0.12;
+    float fresnel = pow(saturate(1.0 - z), 2.4);
+
+    float3 lightDirection = normalize(float3(-0.45, -0.55, 0.70));
+    float highlight = pow(
+        saturate(dot(dropNormal, lightDirection)),
+        28.0
+    );
+
+    // Keep the center almost transparent. The rim and small highlight are the
+    // only strong contributions in this pre-refraction validation stage.
+    float alpha = saturate(
+        0.035
+        + fresnel * 0.26
+        + highlight * 0.18
+    );
+
+    float3 color = lerp(
+        float3(0.72, 0.86, 1.00),
+        float3(0.92, 0.98, 1.00),
+        saturate(fresnel + highlight)
+    );
 
     return float4(color, alpha);
 }

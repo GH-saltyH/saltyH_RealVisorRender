@@ -6105,7 +6105,11 @@ render.on('main.root.transparent', function()
     requestRainDynamicStateReadback()
     applyRainDynamicStateToSurfaceMesh()
 
-    render.setBlendMode(render.BlendMode.AlphaBlend)
+    render.setBlendMode(
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+        and render.BlendMode.AlphaBlend
+        or render.BlendMode.BlendAccurate
+    )
     render.setCullMode(render.CullMode.None)
 
     -- Diagnostic contract:

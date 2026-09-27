@@ -2643,3 +2643,33 @@ Settings persistence added alongside this test:
 - loading and saving each iterate the existing material-editor descriptors once; no per-frame name lookup is introduced
 - loading applies the saved state immediately to each resolved `targetMesh`
 - changing a KN5 visibility checkbox applies the state and saves `settings.ini` immediately
+
+### 45. Stage 4A complete + Stage 4B.0 transparent optical-profile test (2026-09-27)
+
+Confirmed runtime result with `RAIN_DYNAMIC_DROP_UV_DEBUG=false` and dynamic surface state enabled:
+- the attached-scene black square fallback is gone
+- only the custom shader's circular footprint remains
+- foreground geometry correctly depth-occludes the droplets (`DepthMode.ReadOnly`)
+- droplets remain visible from both surface-normal directions (`CullMode.None`)
+- per-mesh visibility saving/loading also works correctly
+
+This completes the Stage 4A renderer-ownership validation. Temporarily enabling the attached SceneReference only around the synchronous `render.mesh()` call is sufficient on the target CSP build; hiding it again after the call prevents ordinary scene traversal from drawing the fallback material.
+
+The remaining very dark blue disc is not a geometry failure. The Stage 4A diagnostic shader used alpha `0.82..0.94`, so it deliberately replaced most of the background with a nearly opaque fixed color.
+
+Stage 4B.0 change:
+- UV debug keeps the existing opaque RG output with `AlphaBlend`
+- the normal non-debug path switches to `BlendAccurate`
+- replace the opaque filled disc with a hemisphere-derived optical profile
+- center alpha is approximately `0.035`
+- a Fresnel-like rim contributes up to `0.26`
+- a compact directional highlight contributes up to `0.18`
+- no scene-color texture or refraction is introduced yet, keeping blend/profile validation isolated from screen-space sampling
+
+Expected result:
+- background remains clearly visible through the droplet center
+- the circular boundary is carried mostly by a pale blue/white rim
+- a small brighter highlight appears toward one side
+- foreground depth occlusion and double-sided rendering remain unchanged
+
+If the footprint remains uniformly dark despite the low alpha, investigate render-stage color space/blend state before adding `dynamic::hdr` scene sampling. If the transparent rim/highlight profile is visible, proceed to Stage 4B.1 screen-UV and HDR scene-texture validation, then refraction.
