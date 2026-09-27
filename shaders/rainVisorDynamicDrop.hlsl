@@ -62,16 +62,21 @@ float4 main(PS_IN pin)
             (raw - 0.5) * gDynamicDropGeometryUVScaleA + 0.5);
         float2 pixelUV = saturate(
             pin.PosH.xy * gDynamicDropInvRenderTargetSize);
+        float2 windowUV = saturate(
+            pin.PosH.xy * gDynamicDropInvScreenSize);
+        bool compareSnapshot = gDynamicDropSnapshotDebug > 0.5
+            && gDynamicDropGeometryShotDebug < 0.5;
         bool right = local.x >= 0.0;
         bool bottom = local.y >= 0.0;
         float3 sampledColor;
 
         if (!right && !bottom)
         {
-            // Upper-left: direct HDR at the previous 8x reference scale.
+            // Upper-left: live HDR at the exact raster pixel.
             sampledColor = txDynamicScene.SampleLevel(
                 samLinearClamp,
-                gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw,
+                compareSnapshot ? pixelUV
+                    : (gDynamicDropSnapshotDebug > 0.5 ? expandedUV : raw),
                 0.0).rgb;
         }
         else if (right && !bottom)
@@ -83,18 +88,23 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: independent scene at the first candidate UV scale.
+            // Lower-left: opaque-stage HDR copy at the same raster pixel.
             sampledColor = txDynamicSnapshot.SampleLevel(
                 samLinearClamp,
-                gDynamicDropGeometryShotDebug > 0.5 ? sceneUVA : expandedUV,
+                compareSnapshot ? pixelUV
+                    : (gDynamicDropGeometryShotDebug > 0.5
+                        ? sceneUVA : expandedUV),
                 0.0).rgb;
             if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor *= 8.0;
         }
         else
         {
-            // Lower-right: current raster pixel in normalized viewport UV.
-            if (gDynamicDropGeometryShotDebug > 0.5)
+            // Lower-right: window-space live HDR reference.
+            if (compareSnapshot)
+                sampledColor = txDynamicScene.SampleLevel(
+                    samLinearClamp, windowUV, 0.0).rgb;
+            else if (gDynamicDropGeometryShotDebug > 0.5)
             {
                 if (gDynamicDropPixelUVDebug > 0.5)
                     sampledColor = txDynamicScene.SampleLevel(

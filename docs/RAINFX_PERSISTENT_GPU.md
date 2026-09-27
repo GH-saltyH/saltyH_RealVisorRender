@@ -3341,3 +3341,19 @@ without adding more shader assumptions. The direct HDR sample has no
 brightness multiplier. If magenta still shows an offset, the next candidate
 is a viewport origin/subrect or source timing difference, not a constant
 droplet UV scale.
+
+### 76. Compare live HDR and opaque-stage copy at identical pixel UV (2026-09-27)
+
+The render target and HDR texture are both 2161x1249, while the window is
+3240x1872. Their matching dimensions rule out a target-to-texture size
+mismatch as the explanation for the nearly black, smeared magenta sample.
+Read/write feedback or capture timing remains a hypothesis.
+
+Preset the opaque-stage HDR snapshot and disable GeometryShot. Size the copy
+canvas to `ui.imageSize('dynamic::hdr')`, falling back to the target size.
+Viewed from behind the visor, image upper-right (red rim) reads live HDR at
+`PosH / renderTargetSize`; image lower-right (blue rim) reads the earlier copy
+at the identical UV. Image lower-left (magenta rim) reads live HDR at the
+previous `PosH / windowSize` UV, which previously showed offset scene detail.
+Image upper-left (green rim) remains a known file-texture control. Log copy
+size and capture frame; test after the late Lua file reload.

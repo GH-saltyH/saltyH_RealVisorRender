@@ -413,10 +413,10 @@ local cfg = scriptSettings:mapConfig({
         -- whether HDR/LDR contains droplets from earlier frames.
         RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
         -- Compare live HDR with an opaque-pass copy if needed.
-        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = false,
+        RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG = true,
         -- Render the scene again without the hidden transport mesh to test
         -- a source that cannot contain previous droplet draws.
-        RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
+        RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = false,
         -- Keep the best empirical scale as a reference against projection.
         RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
         RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG = true,
@@ -6109,8 +6109,12 @@ render.on('main.track.opaque', function()
     local sim = ac.getSim()
     if not sim then return end
 
-    local captureWidth = math.max(1, sim.windowWidth or 1)
-    local captureHeight = math.max(1, sim.windowHeight or 1)
+    local captureSize = ui.imageSize('dynamic::hdr')
+    if captureSize.x < 1 or captureSize.y < 1 then
+        captureSize = render.getRenderTargetSize()
+    end
+    local captureWidth = math.max(1, math.floor(captureSize.x))
+    local captureHeight = math.max(1, math.floor(captureSize.y))
     if not rainDynamicSceneCopyState.canvas
         or rainDynamicSceneCopyState.width ~= captureWidth
         or rainDynamicSceneCopyState.height ~= captureHeight
@@ -6320,6 +6324,9 @@ float4 main(PS_IN pin)
             .. ' hdrSize='
             .. tostring(dynamicHDRSize.x) .. 'x'
             .. tostring(dynamicHDRSize.y)
+            .. ' snapshotSize='
+            .. tostring(rainDynamicSceneCopyState.width) .. 'x'
+            .. tostring(rainDynamicSceneCopyState.height)
             .. ' earlyCaptureFrame='
             .. tostring(rainDynamicSceneCopyState.captureFrame)
             .. ' drawFrame='
