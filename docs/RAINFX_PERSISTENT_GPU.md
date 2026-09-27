@@ -4264,3 +4264,23 @@ weather/fog color here rather than selecting final optical quality. If
 Fog still differs, do not tune an arbitrary sky tint: determine whether a
 final-screen source can be captured before rendering the drops, or move
 the compositing stage while preserving occlusion and avoiding self-feedback.
+
+### 120. Restore shot resolution to assess YEBIS refraction (2026-09-28)
+
+At the same Fog camera, the user reports 52 FPS before and after the
+half-resolution YEBIS shot. In Fog and several other weather presets the
+underlying sunset clouds no longer show through the drops, which supports
+the YEBIS path for weather consistency. In the supplied image the droplets
+are dark and almost flat against the fog sky, so refraction itself cannot
+yet be accepted. Hurricane weather gives a different FPS baseline (62),
+confirming that future performance comparisons must use matched weather.
+
+At half-size the existing normalized 16-target-pixel displacement spans
+only about eight shot texels. Keep the same single YEBIS shot, mesh, alpha
+and no-trail source, but expose `RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE` and
+default it to 1.0 for a full-main-target-size image. A setting of 0.5
+restores the preceding cheaper probe. Test near distinct scene edges as
+well as Fog sky: whether the inside actually refracts, whether the body
+color still diverges from adjacent sky, and matched Fog FPS. A full-size
+processed shot can be more expensive; this is a measurement, not a final
+quality selection.

@@ -401,8 +401,10 @@ local cfg = scriptSettings:mapConfig({
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Diagnose whether AC post-processing carries WeatherFX fog into a
-        -- half-resolution independent shot. Disable after the comparison.
+        -- processed independent shot. Disable after the comparison.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = true,
+        -- Full-size YEBIS verifies refraction after the half-size fog test.
+        RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
         RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
         -- Compare an uneven right-half outline with the circular left half.
@@ -6261,7 +6263,8 @@ render.onSceneReady(function()
             .. tostring(sim.frame))
     end
     local yebisShot = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
-    local shotScale = yebisShot and 0.5 or 1.0
+    local shotScale = yebisShot and math.max(0.5, math.min(1.0,
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE)) or 1.0
     local shotWidth = math.max(1, math.floor(shotScale * (
         rainDynamicSceneCopyState.mainTargetWidth
             or (sim.windowWidth or 1) * 0.5)))
