@@ -372,6 +372,13 @@ local cfg = scriptSettings:mapConfig({
         -- Stage 3: render the actual persistent GPU droplet positions through
         -- the validated KN5 UV -> 3D mapping using asynchronous readback.
         RAIN_DYNAMIC_SURFACE_STATE_ENABLED = false,
+
+        -- Temporary Stage 4A transport diagnostic:
+        -- when true, dynamic-drop shader shows quad UV directly and bypasses
+        -- circular clipping. This isolates shader binding/UV interpolation
+        -- from the later droplet silhouette.
+        RAIN_DYNAMIC_DROP_UV_DEBUG = true,
+
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
 
@@ -6127,6 +6134,12 @@ render.on('main.track.transparent', function()
 
         local dynamicDrawn = render.mesh({
             mesh = rainDynamicSurfaceMesh,
+            values = {
+                gDynamicDropDebugUV =
+                    cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+                    and 1.0
+                    or 0.0,
+            },
             shader = rainDynamicDropShader.HLSL
         })
 
