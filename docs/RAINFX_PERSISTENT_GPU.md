@@ -4190,3 +4190,29 @@ Count fragments against the same 512 state slots, check the surface mask,
 conserve an approximate volume budget and cap the event rate. First prove
 age-based stationary replenishment; then test single impact, fragment
 directions, lifetime and GPU/FPS costs before enabling many splashes.
+
+### 117. Isolate and reduce the first trail FPS regression (2026-09-28)
+
+The user sees trails on large and small drops and reports 50 FPS; the
+previous reference ranged around 69–75 FPS but was not a controlled paired
+measurement at exactly the same camera/time. Keep the verified trail
+visibility and improved dark-scene edge. The extra per-drop
+`rainDynamicSurfaceSample()` reads three vertices and rebuilds a tangent
+frame for the tail, on top of the body lookup and doubled vertex updates.
+
+Default `RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE=true` projects the tail from
+the body's already-sampled tangent frame, reusing its normal and tangent
+vectors; check the signed visor-UV domain first. Setting it false restores
+the exact second surface lookup for an image/FPS comparison. A long strip
+near a curved visor edge or mask hole can float or cross the border in
+fast mode, so inspect visor edges before adopting this approximation.
+
+Default `RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED=true` can be set false to
+keep the same trail CPU lookup, geometry and vertex upload while discarding
+trail fragments in the shader. For a paired test at one camera and weather:
+record FPS (A) both true, (B) fast true/pixel false, (C) trail false, then
+(D) fast false/pixel true only if visual curvature needs comparison. Each
+case still reserves two quads per drop. The differences indicate whether
+fragment work, CPU trail work or the shared geometry allocation is the
+largest factor; the main clean scene shot remains the same. Do not
+interpret an unpaired 50 vs 69 FPS observation as an isolated GPU cost.

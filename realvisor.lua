@@ -405,6 +405,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = true,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.25,
+        -- Compare single-sample tangent projection with a second surface lookup.
+        RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE = true,
+        -- Keep CPU trail geometry while suppressing only trail pixels for FPS A/B.
+        RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED = true,
 
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
@@ -6101,6 +6105,7 @@ local function applyRainDynamicStateToSurfaceMesh()
         end
 
         local trailSample = nil
+        local tailPosition = nil
         local trailSpeed = 0.0
         local trailU = rainDynamicStateVelocityU[i + 1] or 0.0
         local trailV = rainDynamicStateVelocityV[i + 1] or 0.0
@@ -6114,18 +6119,33 @@ local function applyRainDynamicStateToSurfaceMesh()
                 local tailLength = math.min(radiusUV * 6.0,
                     radiusUV + math.max(radiusUV * 1.2,
                         trailSpeed * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS))
-                trailSample = rainDynamicSurfaceSample(
-                    rainDynamicSurfaceLookup,
-                    rainDynamicSurfaceVertices,
-                    vec2(uv.x - trailU / trailSpeed * tailLength,
-                        uv.y - trailV / trailSpeed * tailLength)
-                )
+                local tailU = uv.x - trailU / trailSpeed * tailLength
+                local tailV = uv.y - trailV / trailSpeed * tailLength
+                if tailU >= 0.0 and tailU <= 1.0
+                    and tailV >= -1.0 and tailV <= 0.0
+                then
+                    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE then
+                        tailPosition = sample.position
+                            - sample.tangentU * (trailU / trailSpeed
+                                * tailLength * sample.metersPerUVU)
+                            - sample.tangentV * (trailV / trailSpeed
+                                * tailLength * sample.metersPerUVV)
+                        trailSample = sample
+                    else
+                        trailSample = rainDynamicSurfaceSample(
+                            rainDynamicSurfaceLookup,
+                            rainDynamicSurfaceVertices,
+                            vec2(tailU, tailV)
+                        )
+                        tailPosition = trailSample and trailSample.position
+                    end
+                end
             end
         end
         if trailSample then
             local perpU, perpV = -trailV / trailSpeed, trailU / trailSpeed
             local headCenter = sample.position + sample.normal * surfaceOffset
-            local tailCenter = trailSample.position
+            local tailCenter = tailPosition
                 + trailSample.normal * surfaceOffset
             local headWidth = sample.tangentU
                     * (perpU * radiusUV * 0.38 * sample.metersPerUVU)
@@ -6640,7 +6660,9 @@ float4 main(PS_IN pin)
             gDynamicDropShapeStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
             gDynamicDropTrailEnabled =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED and 1.0 or 0.0,
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
+                and 1.0 or 0.0,
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,
