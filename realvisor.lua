@@ -399,7 +399,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
         -- Compare the clean GeometryShot against the final screen on sky.
-        RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
+        -- Diagnose whether AC post-processing carries WeatherFX fog into a
+        -- half-resolution independent shot. Disable after the comparison.
+        RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = true,
         -- Retain force-driven wave code for later optical tuning.
         RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
         -- Compare an uneven right-half outline with the circular left half.
@@ -6257,15 +6260,18 @@ render.onSceneReady(function()
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: starting frame='
             .. tostring(sim.frame))
     end
-    local shotWidth = math.max(1, math.floor(
+    local yebisShot = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
+    local shotScale = yebisShot and 0.5 or 1.0
+    local shotWidth = math.max(1, math.floor(shotScale * (
         rainDynamicSceneCopyState.mainTargetWidth
-            or (sim.windowWidth or 1) * 0.5))
-    local shotHeight = math.max(1, math.floor(
+            or (sim.windowWidth or 1) * 0.5)))
+    local shotHeight = math.max(1, math.floor(shotScale * (
         rainDynamicSceneCopyState.mainTargetHeight
-            or (sim.windowHeight or 1) * 0.5))
+            or (sim.windowHeight or 1) * 0.5)))
     local shotResized = not rainDynamicSceneCopyState.geometryShot
         or rainDynamicSceneCopyState.shotWidth ~= shotWidth
         or rainDynamicSceneCopyState.shotHeight ~= shotHeight
+        or rainDynamicSceneCopyState.shotYebis ~= yebisShot
     if shotResized then
         if rainDynamicSceneCopyState.geometryShot then
             rainDynamicSceneCopyState.geometryShot:dispose()
@@ -6275,8 +6281,10 @@ render.onSceneReady(function()
             vec2(shotWidth, shotHeight),
             1,
             false,
-            render.AntialiasingMode.None,
-            render.TextureFormat.R16G16B16A16.Float
+            yebisShot and render.AntialiasingMode.YEBIS
+                or render.AntialiasingMode.None,
+            yebisShot and render.TextureFormat.R8G8B8A8.UNorm
+                or render.TextureFormat.R16G16B16A16.Float
         )
         rainDynamicSceneCopyState.geometryShot:setOriginalLighting(true)
         rainDynamicSceneCopyState.geometryShot:setShadersType(
@@ -6286,6 +6294,7 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.geometryShot:setSky(true)
         rainDynamicSceneCopyState.shotWidth = shotWidth
         rainDynamicSceneCopyState.shotHeight = shotHeight
+        rainDynamicSceneCopyState.shotYebis = yebisShot
     end
     rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
         sim.cameraClipNear,
@@ -6301,6 +6310,7 @@ render.onSceneReady(function()
     if not rainDynamicManualPreDrawLogged or shotResized then
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: updated '
             .. tostring(shotWidth) .. 'x' .. tostring(shotHeight)
+            .. ' yebis=' .. tostring(yebisShot)
             .. ' frame=' .. tostring(sim.frame))
     end
 end)

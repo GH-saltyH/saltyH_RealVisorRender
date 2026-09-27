@@ -4238,3 +4238,29 @@ and alpha. Previous-frame screen content may recursively show other drops
 and is not a production refraction source; disable this diagnostic after
 the comparison. Inspect the fixed camera with both sky and geometry and
 measure FPS only after restoring the final optical choice.
+
+### 119. Probe WeatherFX fog in a processed independent shot (2026-09-28)
+
+The user reports that neither half in stage 118 matches the final Fog sky:
+the nonrecursive GeometryShot reveals the underlying sunset clouds, while
+`dynamic::screen` is too dark. Clear and normally cloudy weather did not
+show this failure. Thus using the screen texture as a production source is
+not justified; the shot's sky appears to lack at least some WeatherFX fog
+composition. This is an observation, not proof of exactly which pass
+applies the fog. The bundled `lib.lua` documents distinct scene callbacks
+and a YEBIS GeometryShot mode that performs main post-processing HDR→LDR.
+
+Disable stage-118 half comparison. Enable
+`RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG=true`, keep trails off, and create the
+existing single scene-ready shot at half the main target resolution with
+`render.AntialiasingMode.YEBIS` and the required default
+`R8G8B8A8.UNorm` format. The regular path remains one-mip full-resolution
+float/None; switching either mode or resolution recreates the shot. Log
+shot size and YEBIS flag. A single shot avoids doubling scene rendering.
+At the same fixed camera, compare Fog sky colors, body visibility and FPS
+with the prior None shot. A first-time YEBIS size can pause for compilation.
+Half-resolution can blur/reduce the apparent 16-pixel refraction, so judge
+weather/fog color here rather than selecting final optical quality. If
+Fog still differs, do not tune an arbitrary sky tint: determine whether a
+final-screen source can be captured before rendering the drops, or move
+the compositing stage while preserving occlusion and avoiding self-feedback.
