@@ -4001,3 +4001,31 @@ motion/acceleration information to the optical shader, or explicitly label
 a shared-force ripple as an initial prototype. Trails also require geometry
 or a mask and compositing rules. Keep these motion stages separate from this
 approved full-drop blend so their visual and FPS costs are measurable.
+
+### 109. Prototype decaying force-driven ripple against stable refraction (2026-09-27)
+
+The user accepts the unified translucent 16px refraction as a natural curve.
+The next motion effect is an interior ripple when the car receives force;
+trails and merging still require a separate geometry/mask stage.
+
+Use `ac.getCar(0).acceleration` (the bundled `lib.lua` declares G units,
+car-relative X lateral and Z longitudinal) in the transparent draw callback.
+Ignore the vertical component. Store a wave envelope/phase and previous
+force in the existing scene-copy state table, with no new chunk-level Lua
+locals. Raise the envelope when planar acceleration exceeds 0.25 G or grows
+suddenly; decay it at approximately four inverse seconds, advancing phase
+using bounded `sim.dt`. Pass the normalized planar direction, envelope and
+phase as Lua shader values. Do not redeclare those uniforms inside HLSL.
+
+In the geometry-shot refraction branch, add at most 2.5 shot pixels of
+sinusoidal displacement along that direction, tapered toward both center
+and outer edge. Only the back-facing visor's image-right half receives the
+wave; image-left keeps the approved refraction and alpha. Both halves share
+the clean scene sample and one sampling instruction. Inspect during a
+stationary car, braking, acceleration, direction changes and sustained
+cornering. The pattern currently responds to *vehicle-wide* force, not each
+droplet's own acceleration; its orientation is a provisional mapping from
+car X/Z to the droplet's local UV and needs visual validation. Measure FPS
+at the reference camera with 512 drops. A later iteration should encode
+per-drop motion or force into data accessible by the optical shader before
+claiming individually responsive ripples.

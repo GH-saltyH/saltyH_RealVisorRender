@@ -6336,6 +6336,31 @@ float4 main(PS_IN pin)
     -- keep the attached mesh hidden between callbacks so the ordinary scene
     -- pass cannot render its black fallback material. Enable it only while
     -- render.mesh() consumes the SceneReference, then hide it again.
+    local waveState = rainDynamicSceneCopyState.waveState
+    if not waveState then
+        waveState = { envelope = 0.0, previousForce = 0.0, phase = 0.0 }
+        rainDynamicSceneCopyState.waveState = waveState
+    end
+    local car = ac.getCar(0)
+    local forceX = car and car.acceleration and car.acceleration.x or 0.0
+    local forceY = car and car.acceleration and car.acceleration.z or 0.0
+    local forceMagnitude = math.sqrt(forceX * forceX + forceY * forceY)
+    local waveDT = math.min(math.max(sim.dt or 0.0, 0.0), 0.1)
+    local waveDrive = math.min(1.0, math.max(0.0,
+        (forceMagnitude - 0.25) * 0.5))
+    local waveImpulse = math.min(1.0, math.max(0.0,
+        (forceMagnitude - waveState.previousForce) * 1.8))
+    waveState.envelope = math.max(
+        waveState.envelope * math.exp(-4.0 * waveDT),
+        waveDrive,
+        waveImpulse
+    )
+    waveState.previousForce = forceMagnitude
+    waveState.phase = (waveState.phase + waveDT * 9.0) % (math.pi * 2.0)
+    local waveDirection = vec2(
+        forceX / math.max(forceMagnitude, 0.001),
+        forceY / math.max(forceMagnitude, 0.001)
+    )
     rainDynamicSurfaceMesh:setVisible(true, false)
 
     if not rainDynamicManualPreDrawLogged then
@@ -6452,6 +6477,9 @@ float4 main(PS_IN pin)
 
             gDynamicDropRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
+            gDynamicDropWaveDirection = waveDirection,
+            gDynamicDropWaveEnvelope = waveState.envelope,
+            gDynamicDropWavePhase = waveState.phase,
         },
         shader = rainDynamicDropShader.HLSL
     })
