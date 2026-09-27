@@ -254,16 +254,17 @@ float4 main(PS_IN pin)
                 * gDynamicDropInvRenderTargetSize;
             // On the back-facing visor, only the image-right half receives
             // the force-driven prototype; the left retains proven optics.
-            float waveProfile = smoothstep(0.10, 0.45, r)
-                * (1.0 - smoothstep(0.75, 1.0, r));
-            float waveFront = dot(local, gDynamicDropWaveDirection) * 12.0
-                - gDynamicDropWavePhase;
-            float wavePixels = local.x < 0.0
-                ? sin(waveFront) * waveProfile
-                    * gDynamicDropWaveEnvelope * 6.0
-                : 0.0;
-            refractionOffset += gDynamicDropWaveDirection * wavePixels
-                * gDynamicDropInvRenderTargetSize;
+            if (gDynamicDropWaveEnvelope > 0.0 && local.x < 0.0)
+            {
+                float waveProfile = smoothstep(0.10, 0.45, r)
+                    * (1.0 - smoothstep(0.75, 1.0, r));
+                float waveFront = dot(local, gDynamicDropWaveDirection) * 12.0
+                    - gDynamicDropWavePhase;
+                float wavePixels = sin(waveFront) * waveProfile
+                    * gDynamicDropWaveEnvelope * 6.0;
+                refractionOffset += gDynamicDropWaveDirection * wavePixels
+                    * gDynamicDropInvRenderTargetSize;
+            }
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
                 0.0).rgb;

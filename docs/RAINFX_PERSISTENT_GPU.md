@@ -4081,3 +4081,15 @@ sample or geometry is added. Compare whether the irregular right half reads
 as a water drop on bright and dark backgrounds, whether the center seam is
 visible, and FPS at 512 drops. This is a shared fixed shape preview, not
 individual droplet deformation, trailing or merging yet.
+
+### 113. Skip disabled wave computation (2026-09-27)
+
+The zero envelope from stage 112 disabled visible wave displacement but
+still ran vehicle force, airflow, envelope and direction calculations in
+Lua, plus the HLSL sinusoid. When `RAIN_DYNAMIC_DROP_WAVE_ENABLED=false`,
+send zero direction, envelope and phase without entering the Lua wave
+calculation. In the optical shader, enter the wave profile and sinusoid
+only for a nonzero envelope on the affected half. Keep the clean-shot
+refraction sample and existing circular/irregular shape comparison intact.
+The screenshot with trackside objects also shows only a subtle difference
+between contour halves, so do not treat this silhouette preview as chosen.

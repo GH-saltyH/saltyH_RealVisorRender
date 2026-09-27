@@ -6340,6 +6340,11 @@ float4 main(PS_IN pin)
     -- keep the attached mesh hidden between callbacks so the ordinary scene
     -- pass cannot render its black fallback material. Enable it only while
     -- render.mesh() consumes the SceneReference, then hide it again.
+    local waveDirection = vec2(0.0, 0.0)
+    local waveEnvelope = 0.0
+    local wavePhase = 0.0
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_WAVE_ENABLED then
+    -- Scope the complete diagnostic force pipeline to the enabled case.
     local waveState = rainDynamicSceneCopyState.waveState
     if not waveState then
         waveState = { envelope = 0.0, previousForce = 0.0, phase = 0.0 }
@@ -6427,10 +6432,13 @@ float4 main(PS_IN pin)
             .. ' envelope=' .. string.format('%.3f', waveState.envelope))
         waveState.triggerLogged = true
     end
-    local waveDirection = vec2(
+    waveDirection = vec2(
         forceX / math.max(forceMagnitude, 0.001),
         forceY / math.max(forceMagnitude, 0.001)
     )
+    waveEnvelope = waveState.envelope
+    wavePhase = waveState.phase
+    end
     rainDynamicSurfaceMesh:setVisible(true, false)
 
     if not rainDynamicManualPreDrawLogged then
@@ -6550,10 +6558,8 @@ float4 main(PS_IN pin)
             gDynamicDropShapeDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_DEBUG and 1.0 or 0.0,
             gDynamicDropWaveDirection = waveDirection,
-            gDynamicDropWaveEnvelope =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WAVE_ENABLED
-                and waveState.envelope or 0.0,
-            gDynamicDropWavePhase = waveState.phase,
+            gDynamicDropWaveEnvelope = waveEnvelope,
+            gDynamicDropWavePhase = wavePhase,
         },
         shader = rainDynamicDropShader.HLSL
     })
