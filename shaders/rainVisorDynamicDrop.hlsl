@@ -80,13 +80,13 @@ float4 main(PS_IN pin)
             }
             else
             {
-                // Compare 55%, 70%, and 85% of the measured output/input
+                // Compare 85%, 92%, and 98% of the measured output/input
                 // resolution correction on the same scene source.
                 float2 resolutionRatio = gDynamicDropInvRenderTargetSize
                     / gDynamicDropInvScreenSize;
                 float calibration = right
-                    ? (bottom ? 0.55 : 0.85)
-                    : 0.70;
+                    ? (bottom ? 0.85 : 0.98)
+                    : 0.92;
                 float2 screenUV = saturate(windowUV
                     * lerp(float2(1.0, 1.0), resolutionRatio,
                         calibration));

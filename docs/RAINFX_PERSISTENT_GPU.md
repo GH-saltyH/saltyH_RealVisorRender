@@ -3545,3 +3545,16 @@ screen sample instruction, 8x debug gain and red HDR reference. If size
 converges but positional offset does not, size and offset need separate
 calibration rather than one scalar. Near UV=1, clipping may return a constant
 edge color; report that separately from normal scene image.
+
+### 88. Compare near-full resolution correction (2026-09-27)
+
+With the same 1.55 cm original landmark, the user measures blue at 1.70 cm
+for 70% correction (about 9.7% large) and green at 1.63 cm for 85% correction
+(about 5.2% large). Measurement is approximate. The trend is toward correct
+size near a full window/target correction. Test 85% in the magenta quadrant
+as a reference, 92% in blue, and 98% in green. Continue one screen sampling
+site with the same 8x diagnostic brightness; read the per-axis resolution
+ratio from current Lua values. Compare a stationary landmark's size and
+position separately. Near-full correction may clamp UV at a screen edge and
+smear; record which quadrant and where. The earlier full correction smearing
+is not disproved by an acceptable central measurement.
