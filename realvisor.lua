@@ -6249,16 +6249,8 @@ float4 main(PS_IN pin)
                 vec2(shotWidth, shotHeight),
                 1,
                 false,
-                render.AntialiasingMode.YEBIS,
+                render.AntialiasingMode.None,
                 render.TextureFormat.R16G16B16A16.Float
-            )
-            rainDynamicSceneCopyState.geometryShot:setBestSceneShotQuality()
-            rainDynamicSceneCopyState.geometryShot:setShadersType(
-                render.ShadersType.Main
-            )
-            rainDynamicSceneCopyState.geometryShot:setGrass('dedicated')
-            rainDynamicSceneCopyState.geometryShot:setAlternativeShadowsSet(
-                'area'
             )
             rainDynamicSceneCopyState.shotWidth = shotWidth
             rainDynamicSceneCopyState.shotHeight = shotHeight

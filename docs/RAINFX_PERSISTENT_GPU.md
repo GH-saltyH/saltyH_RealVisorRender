@@ -3607,3 +3607,21 @@ brightness and projection better match the main screen. Measure FPS because
 YEBIS and dedicated grass can make the extra scene shot expensive. If green
 still differs, diagnose capture quality separately from UV alignment before
 using it for the final optical shader.
+
+### 91. Restore the visible independent shot before trying postprocessing (2026-09-27)
+
+The user reports that the entire droplet disappears when Stage 90 enables
+YEBIS and additional shot quality methods. The repository's `lib.lua`
+GeometryShot constructor documentation says antialiasing expects the default
+texture format, while that revision used `render.AntialiasingMode.YEBIS`
+with `render.TextureFormat.R16G16B16A16.Float`. A Lua callback error or
+incompatible shot resource could prevent the later mesh draw; the exact
+cause is unconfirmed without an error log.
+
+Restore the previously used `AntialiasingMode.None` with the float texture,
+and remove the new best-quality, Main shader, dedicated grass and shadow
+calls. Keep GeometryShot enabled and keep green on the independent 98% shot,
+blue on live screen at the identical UV, and magenta on live screen at 85%.
+First confirm the circles render and whether green avoids recursive drops.
+Then add processing features back one at a time, using the default texture
+format when antialiasing is enabled, per the bundled `lib.lua` API contract.
