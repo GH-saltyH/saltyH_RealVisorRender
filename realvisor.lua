@@ -405,8 +405,8 @@ local cfg = scriptSettings:mapConfig({
 
         -- Stage 4B.2F: compare possible interpretations of mesh.fx ScreenPos.
         RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = true,
-        -- Repeat the copy prepass that preceded the last visible HDR result.
-        RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = true,
+        -- Test whether track-stage HDR works without the extra scene copy.
+        RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
         RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
 

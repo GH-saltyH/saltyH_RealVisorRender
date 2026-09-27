@@ -3101,3 +3101,20 @@ the red upper-right and blue lower-right interiors while moving the camera:
 whether the blue region shows a wider piece of the scene, becomes smaller in
 scale, or clamps to edge colors will constrain the coordinate scale. The
 green upper-left still tests the ordinary file texture.
+
+### 63. Expanded scene sample includes other droplets (2026-09-27)
+
+The next screenshot shows a broader scene region within the blue-rim
+quadrants; the letter `D` in the track-side banner is visibly smaller than
+with the raw sample. The user also observes other droplet images inside the
+sampled scene. This confirms that an 8x UV expansion changes the magnification
+in the expected direction, but does not prove the right factor or screen
+center. The nested droplets suggest that the sampled HDR might include an
+earlier dynamic-drop draw; the capture timing needs a separate test.
+
+Preset `RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS=false`, leaving track-stage draw,
+raw-vs-8x comparison, texture controls, and all other flags unchanged. After
+late Lua reload, compare whether either HDR quadrant still contains scene
+color, and whether nested droplets remain. If the HDR becomes black, the
+prepass is necessary for that source at this stage; if color remains, the
+prepass can be removed from this diagnostic path.
