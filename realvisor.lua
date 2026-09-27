@@ -60,6 +60,10 @@ local appFolder =
     local rainDynamicSurfaceInitialized = false
     local rainDynamicSurfaceMeshVertices = nil
     local rainDynamicSurfaceMeshCount = 0
+    local rainDynamicSceneCopy = nil
+    local rainDynamicSceneCopyWidth = 0
+    local rainDynamicSceneCopyHeight = 0
+    local rainDynamicSceneCopyReadyLogged = false
 
     -- Stage 3: persistent GPU state -> async CPU readback -> dynamic vertices.
     local rainDynamicStateReadbackSlots = {}
@@ -400,7 +404,12 @@ local cfg = scriptSettings:mapConfig({
 
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
-        RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = false,
+
+        -- Stage 4B.2E: compare direct dynamic::hdr sampling against a safe
+        -- offscreen copy made while ExtraCanvas is the active render target.
+        RAIN_DYNAMIC_DROP_SCENE_COPY_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SCENE_COPY_SCALE = 0.5,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,
@@ -4995,6 +5004,70 @@ float4 main(PS_IN pin)
 }
 ]]
 
+local RAIN_DYNAMIC_SCENE_COPY_HLSL = [[
+float4 main(PS_IN pin)
+{
+    return txInput.SampleLevel(samLinearClamp, pin.Tex, 0.0);
+}
+]]
+
+local function updateRainDynamicSceneCopy(sim)
+    local scale = math.clamp(
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_COPY_SCALE,
+        0.25,
+        1.0
+    )
+    local width = math.max(
+        1,
+        math.floor((sim.windowWidth or 1) * scale + 0.5)
+    )
+    local height = math.max(
+        1,
+        math.floor((sim.windowHeight or 1) * scale + 0.5)
+    )
+
+    if not rainDynamicSceneCopy
+        or rainDynamicSceneCopyWidth ~= width
+        or rainDynamicSceneCopyHeight ~= height
+    then
+        if rainDynamicSceneCopy then
+            rainDynamicSceneCopy:dispose()
+        end
+
+        rainDynamicSceneCopy = ui.ExtraCanvas(
+            vec2(width, height),
+            1,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float
+        )
+        rainDynamicSceneCopy:setName('RealVisor dynamic HDR copy')
+        rainDynamicSceneCopyWidth = width
+        rainDynamicSceneCopyHeight = height
+        rainDynamicSceneCopyReadyLogged = false
+    end
+
+    local copied = rainDynamicSceneCopy:updateSceneWithShader({
+        async = true,
+        textures = {
+            txInput = 'dynamic::hdr',
+        },
+        shader = RAIN_DYNAMIC_SCENE_COPY_HLSL,
+    })
+
+    if copied and not rainDynamicSceneCopyReadyLogged then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic HDR offscreen copy ready: '
+            .. tostring(width)
+            .. 'x'
+            .. tostring(height)
+        )
+        rainDynamicSceneCopyReadyLogged = true
+    end
+
+    return copied
+end
+
 local function rainDynamicSurfaceFrac(x)
     return x - math.floor(x)
 end
@@ -6130,6 +6203,10 @@ render.on('main.root.transparent', function()
     requestRainDynamicStateReadback()
     applyRainDynamicStateToSurfaceMesh()
 
+    if not updateRainDynamicSceneCopy(sim) then
+        return
+    end
+
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
         and render.BlendMode.AlphaBlend
@@ -6162,6 +6239,8 @@ render.on('main.root.transparent', function()
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG)
             .. ' sceneSourceDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG)
+            .. ' sceneCopyDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_COPY_DEBUG)
             .. ' shaderBytes='
             .. tostring(#rainDynamicDropShader.HLSL)
         )
@@ -6174,6 +6253,7 @@ render.on('main.root.transparent', function()
         textures = {
             txDynamicScene = 'dynamic::hdr',
             txDynamicScreen = 'dynamic::screen',
+            txDynamicSceneCopy = rainDynamicSceneCopy,
         },
         values = {
             gDynamicDropDebugUV =
@@ -6193,6 +6273,11 @@ render.on('main.root.transparent', function()
 
             gDynamicDropSceneSourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG
+                and 1.0
+                or 0.0,
+
+            gDynamicDropSceneCopyDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_COPY_DEBUG
                 and 1.0
                 or 0.0,
 

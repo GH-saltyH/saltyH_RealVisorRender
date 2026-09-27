@@ -2929,3 +2929,37 @@ Interpretation after the late Lua reload:
   available to this callback/path
 - all quadrants show scene content: restore refraction and focus on coordinate
   offset math or texture/shader cache timing
+
+### 55. HDR is live but unstable + offscreen-copy hazard test (2026-09-27)
+
+Observed after the late reload with the four-quadrant source discriminator:
+- the footprint is predominantly black or dark gray
+- quadrants remain distinct and change color rapidly while driving
+- the HDR quadrants on the left change frequently
+- LDR quadrants on the right change only occasionally
+- occasional dark blue and dark yellow values appear
+
+Conclusions:
+- `dynamic::hdr` is bound and contains changing data; it is not a permanently
+  zero texture
+- `dynamic::screen` is stale or unsuitable at this render stage
+- fixed-center HDR changing with the scene is expected, but the dark, unstable
+  tiled appearance is consistent with sampling a render target while it is
+  simultaneously being written
+- brightness compensation is therefore premature; first remove the possible
+  read/write hazard
+
+Stage 4B.2E uses `ui.ExtraCanvas:updateSceneWithShader()`, which the SDK marks
+as suitable for use during scene rendering and for preparing an offscreen
+buffer. While that canvas is the active target, it copies `dynamic::hdr` into a
+half-resolution `R16G16B16A16.Float` texture. The mesh diagnostic then compares:
+- upper-left: direct HDR at `pin.ScreenPos`
+- upper-right: copied HDR at `pin.ScreenPos`
+- lower-left: direct HDR at fixed center UV
+- lower-right: copied HDR at fixed center UV
+
+The source flags are preset with scene-copy debug enabled and the previous
+source/refraction diagnostics disabled. A yellow cross remains as the geometry
+marker. If the right side becomes stable and scene-like while the left remains
+dark or erratic, refraction must sample the offscreen copy rather than
+`dynamic::hdr` directly.

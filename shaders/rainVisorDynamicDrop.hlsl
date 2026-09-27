@@ -29,6 +29,11 @@
     - gDynamicDropSceneSourceDebug > 0.5:
         split each circle into HDR/LDR and ScreenPos/fixed-center quadrants to
         distinguish a black texture binding from invalid screen coordinates.
+
+    Stage 4B.2E contract:
+    - gDynamicDropSceneCopyDebug > 0.5:
+        compare direct dynamic::hdr sampling on the left against an offscreen
+        ExtraCanvas copy on the right. Top uses ScreenPos, bottom fixed center.
 */
 
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
@@ -48,6 +53,39 @@ float4 main(PS_IN pin)
     float r = length(local);
 
     clip(1.0 - r);
+
+    if (gDynamicDropSceneCopyDebug > 0.5)
+    {
+        // Left: direct dynamic::hdr. Right: separate offscreen copy.
+        // Top: pin.ScreenPos. Bottom: fixed screen center.
+        bool useCopy = local.x >= 0.0;
+        bool useScreenPos = local.y < 0.0;
+        float2 sampleUV = useScreenPos
+            ? pin.ScreenPos
+            : float2(0.5, 0.5);
+
+        float3 directColor = txDynamicScene.SampleLevel(
+            samLinearClamp,
+            sampleUV,
+            0.0
+        ).rgb;
+        float3 copiedColor = txDynamicSceneCopy.SampleLevel(
+            samLinearClamp,
+            sampleUV,
+            0.0
+        ).rgb;
+        float3 sampledColor = useCopy ? copiedColor : directColor;
+
+        float separator = saturate(
+            1.0
+            - smoothstep(0.0, 0.035, min(abs(local.x), abs(local.y)))
+        );
+
+        return float4(
+            lerp(sampledColor, float3(1.0, 0.75, 0.0), separator),
+            1.0
+        );
+    }
 
     if (gDynamicDropSceneSourceDebug > 0.5)
     {
