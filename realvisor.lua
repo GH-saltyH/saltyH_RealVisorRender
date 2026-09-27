@@ -402,6 +402,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
 
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
@@ -6557,6 +6558,8 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
             gDynamicDropShapeDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_DEBUG and 1.0 or 0.0,
+            gDynamicDropShapeStrength =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,

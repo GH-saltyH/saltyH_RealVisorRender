@@ -4093,3 +4093,17 @@ only for a nonzero envelope on the affected half. Keep the clean-shot
 refraction sample and existing circular/irregular shape comparison intact.
 The screenshot with trackside objects also shows only a subtle difference
 between contour halves, so do not treat this silhouette preview as chosen.
+
+### 114. Make the silhouette comparison readable (2026-09-28)
+
+The second screenshot contains trackside detail, yet the first 11% contour
+indent is still hard to distinguish. Keep the left half circular and the
+right half angularly indented, but raise the maximum right indentation to
+24%. Expose `RAIN_DYNAMIC_DROP_SHAPE_STRENGTH` (default 1.0) as a Lua shader
+value to tune this visual test later; HLSL consumes the injected value
+without declaring it again. Raise the same pale rim contribution from
+0.08 to 0.16 on both halves, so contour comparison has equal rim treatment.
+Keep refraction at 16 shot pixels and leave the force-wave default off.
+Check whether the right outline reads clearly against clouds, trackside
+detail and dark surfaces, whether the seam is noticeable, and FPS. This
+tests silhouette visibility before attaching per-drop velocity or trails.

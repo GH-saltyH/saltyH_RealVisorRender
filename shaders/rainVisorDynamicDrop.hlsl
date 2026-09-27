@@ -214,8 +214,9 @@ float4 main(PS_IN pin)
     if (gDynamicDropShapeDebug > 0.5)
     {
         float angle = atan2(local.y, local.x);
-        float contour = 0.065 * (0.5 + 0.5 * sin(3.0 * angle + 0.7))
-            + 0.045 * (0.5 + 0.5 * sin(5.0 * angle - 0.9));
+        float contour = 0.14 * (0.5 + 0.5 * sin(3.0 * angle + 0.7))
+            + 0.10 * (0.5 + 0.5 * sin(5.0 * angle - 0.9));
+        contour *= saturate(gDynamicDropShapeStrength);
         footprintScale = 1.0 - contour * smoothstep(0.0, 0.35, -local.x);
         r /= footprintScale;
         clip(1.0 - r);
@@ -282,7 +283,7 @@ float4 main(PS_IN pin)
         // Keep the proven Stage 4B.0 rim/highlight at low strength so the
         // droplet boundary remains identifiable over smooth backgrounds.
         float3 opticalAccent =
-            float3(0.72, 0.86, 1.00) * fresnel * 0.08
+            float3(0.72, 0.86, 1.00) * fresnel * 0.16
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
 
         // The translucent candidate was preferred over full replacement:
