@@ -6235,6 +6235,9 @@ float4 main(PS_IN pin)
     end
 
     if cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG then
+        if not rainDynamicManualPreDrawLogged then
+            ac.log(appNameDebug .. ' Dynamic drop geometry shot: starting')
+        end
         local shotWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5))
         local shotHeight = math.max(1, math.floor((sim.windowHeight or 1) * 0.5))
         if not rainDynamicSceneCopyState.geometryShot
@@ -6252,7 +6255,6 @@ float4 main(PS_IN pin)
                 render.AntialiasingMode.None,
                 render.TextureFormat.R16G16B16A16.Float
             )
-            rainDynamicSceneCopyState.geometryShot:setSky(true)
             rainDynamicSceneCopyState.shotWidth = shotWidth
             rainDynamicSceneCopyState.shotHeight = shotHeight
         end
@@ -6266,6 +6268,10 @@ float4 main(PS_IN pin)
             sim.cameraUp,
             sim.cameraFOV
         )
+        if not rainDynamicManualPreDrawLogged then
+            ac.log(appNameDebug .. ' Dynamic drop geometry shot: updated '
+                .. tostring(shotWidth) .. 'x' .. tostring(shotHeight))
+        end
     end
 
     render.setBlendMode(

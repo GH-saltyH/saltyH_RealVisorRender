@@ -3643,3 +3643,19 @@ compare FPS. If the sky remains absent, CSP's alternative sky may not be
 included by the GeometryShot sky pass. Future quality work can test original
 lighting and Main shaders separately; do not enable YEBIS until texture
 format compatibility and draw behavior are established.
+
+### 93. Remove sky call that suppresses droplet draw (2026-09-27)
+
+The user reports the entire droplet disappears again when `shot:setSky(true)`
+is added to the previously working float-format, no-antialiasing GeometryShot.
+Although `lib.lua` declares that method, this test shows that calling it at
+this capture stage prevents the current diagnostic draw. The root cause is
+not known from a missing image alone; avoid calling it in the active path.
+
+Remove only the sky call to restore the previously observed clean scene shot.
+Add first-draw logs immediately before GeometryShot setup and after `update()`
+so a future missing-output test can distinguish an interrupted shot setup
+from a later shader/draw problem; the existing pre-draw and mesh-result logs
+cover the remaining steps. Keep the source, UV, and diagnostic flags from the
+known-running revision. Sky and other effects remain an independent capture
+quality question, separate from the now well-supported feedback diagnosis.
