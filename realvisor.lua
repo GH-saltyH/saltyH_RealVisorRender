@@ -419,7 +419,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
         -- 20x nearly matches track geometry; refine without shifting center.
         RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
-        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B = 21.0,
+        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B = 22.0,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,

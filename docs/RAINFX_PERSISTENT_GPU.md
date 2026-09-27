@@ -3267,3 +3267,19 @@ magenta rim). Keep the independent shot, diagnostic 8x brightness, 512
 droplets, and the other diagnostic flags unchanged. Compare the red/yellow
 graphic's size and how its edge diverges from the actual background; select
 the closest scale before assessing any residual constant screen offset.
+
+### 72. Use peripheral landmarks to tune screen expansion (2026-09-27)
+
+The user reports that both candidate scales diverge more near the image edges,
+while droplets near viewport center are too similar to distinguish. This is
+expected for a center-anchored scale test: `sampleUV = 0.5 + (raw - 0.5) * s`,
+so changing `s` has almost no effect where `raw ≈ 0.5` and produces its
+largest displacement near viewport boundaries.
+
+For the next comparison, retain candidate A at 20.5x and widen candidate B to
+22x. Judge a recognizable fixed feature near the left or right edge and
+another near the top or bottom edge. Check whether both sides of each axis
+move toward alignment; this helps distinguish a scale error from a constant
+center offset. Keep the center-only droplets as a sanity check, not the main
+scale criterion. The render remains a screen-scene mapping diagnostic, with
+no droplet-surface refraction applied yet.
