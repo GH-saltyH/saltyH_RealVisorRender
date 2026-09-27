@@ -2629,12 +2629,13 @@ Next isolation test:
 - create the attached dynamic transport mesh hidden so the ordinary scene pass cannot draw its black fallback material
 - in `main.root.transparent`, temporarily set it visible immediately before `render.mesh()`
 - restore it to hidden immediately after the explicit draw call
-- retain the current UV debug output, `CullMode.None`, and `DepthMode.Off` for an unambiguous result
+- set `RAIN_DYNAMIC_SURFACE_STATE_ENABLED=true` and `RAIN_DYNAMIC_DROP_UV_DEBUG=false`
+- the custom shader then clips the quad to its circular footprint, uses `CullMode.None`, and returns to `DepthMode.ReadOnly`; any surviving ordinary scene fallback remains an unclipped black square and is easy to distinguish
 
 Expected interpretation:
-- double-sided RG gradient remains and black one-sided fallback disappears: manual draw can be visibility-gated synchronously; retain this ownership model
+- only double-sided circular blue diagnostic droplets remain: manual draw can be visibility-gated synchronously and the black scene fallback is removed; retain this ownership model
 - nothing is visible: the native draw checks SceneReference visibility after the Lua call returns; temporary visibility cannot isolate the paths
-- RG plus a black fallback remains: ordinary scene traversal occurs while the temporary visible state is active; another ownership/material strategy is required
+- a one-sided black square remains around/without the circular custom output: ordinary scene traversal still sees the temporary visible state; another ownership/material strategy is required
 
 Settings persistence added alongside this test:
 - new `[MESH_VISIBILITY]` section follows `[PROFILE_2]`
