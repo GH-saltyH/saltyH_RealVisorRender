@@ -417,9 +417,9 @@ local cfg = scriptSettings:mapConfig({
         -- Render the scene again without the hidden transport mesh to test
         -- a source that cannot contain previous droplet draws.
         RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
-        -- 8x still displayed track features ~2.5x too large.
-        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.0,
-        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B = 24.0,
+        -- 20x nearly matches track geometry; refine without shifting center.
+        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
+        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B = 21.0,
 
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.35,

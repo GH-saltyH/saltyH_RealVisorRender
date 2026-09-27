@@ -3251,3 +3251,19 @@ quadrants. Compare its apparent size and whether its position agrees with
 the background behind the same droplet. If the feature collapses to a
 uniform edge color, the expanded UV is clamping; this test alone does not
 establish an exact mapping.
+
+### 71. Geometry-shot 20x projection nearly aligned (2026-09-27)
+
+The attached image and user observation show that the 20x blue-rim scene
+sample is close to the background's apparent size. It is still slightly
+larger; the offset grows along a recognizable red/yellow trackside graphic.
+This suggests a residual scale mismatch. A center offset is not established
+from this image alone, so keep the center at `(0.5, 0.5)` for a controlled
+scale comparison.
+
+Preset `RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A=20.5` (image lower-right,
+blue rim) and `RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_B=21.0` (image lower-left,
+magenta rim). Keep the independent shot, diagnostic 8x brightness, 512
+droplets, and the other diagnostic flags unchanged. Compare the red/yellow
+graphic's size and how its edge diverges from the actual background; select
+the closest scale before assessing any residual constant screen offset.

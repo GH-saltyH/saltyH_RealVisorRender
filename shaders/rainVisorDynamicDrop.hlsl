@@ -83,7 +83,7 @@ float4 main(PS_IN pin)
         }
         else if (!right && bottom)
         {
-            // Lower-left: independent scene at the estimated 20x UV scale.
+            // Lower-left: independent scene at the first candidate UV scale.
             sampledColor = txDynamicSnapshot.SampleLevel(
                 samLinearClamp,
                 gDynamicDropGeometryShotDebug > 0.5 ? sceneUVA : expandedUV,
@@ -93,7 +93,7 @@ float4 main(PS_IN pin)
         }
         else
         {
-            // Lower-right: independent scene at the nearby 24x UV scale.
+            // Lower-right: independent scene at the second candidate scale.
             // Fall back to LDR if the geometry shot is disabled.
             if (gDynamicDropGeometryShotDebug > 0.5)
                 sampledColor = txDynamicSnapshot.SampleLevel(
