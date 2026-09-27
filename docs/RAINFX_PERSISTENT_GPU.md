@@ -3790,3 +3790,21 @@ setting and scene-ready timing. Verify that drops continue to draw, whether
 CSP grass becomes visible in the green quadrant, and FPS at the same view.
 If grass remains absent, a separate Grass FX spawn area may be required;
 assess its cost before selecting it.
+
+### 100. Retest the sky pass at scene-ready timing (2026-09-27)
+
+The user confirms ordinary `GeometryShot:setGrass(true)` includes CSP grass,
+retains the Main-shader shadows, and runs at roughly 69–71 FPS at the same
+camera. The 67–69 FPS preceding observation overlaps ordinary scene/perf
+variation; do not attribute a precise FPS change to one option.
+
+Sky remains the major missing feature. `shot:setSky(true)` previously caused
+the drops to disappear when the shot was updated inside
+`main.track.transparent`, before it was moved to the API-recommended
+`render.onSceneReady()` stage. Add only `setSky(true)` during scene-ready shot
+creation now; preserve Main shaders, original lighting, regular grass, half
+window shot, float format and antialiasing None. Check first whether the drop
+still draws and whether `scene-ready shot: updated` and `pre-draw` logs
+appear, then inspect sky in the green quadrant and FPS. If the drop
+vanishes again, the trigger is not solely the mid-frame capture timing;
+restore the previous working shot before further changes.

@@ -6173,6 +6173,7 @@ render.onSceneReady(function()
             render.ShadersType.Main
         )
         rainDynamicSceneCopyState.geometryShot:setGrass(true)
+        rainDynamicSceneCopyState.geometryShot:setSky(true)
         rainDynamicSceneCopyState.shotWidth = shotWidth
         rainDynamicSceneCopyState.shotHeight = shotHeight
     end
