@@ -2546,3 +2546,53 @@ Important separation:
 
 Commit:
 - visibility correction + render-path discriminator: faf9658742c64c6fbbffa8eda806070c077c2208
+
+
+### 42. Stage 4A — root transparent render-path test (2026-09-27)
+
+User observation after restoring dynamic mesh visibility:
+- square droplet transport geometry became visible again
+- it was black
+- it was visible only from the side opposite the mesh normal
+- the earlier working diagnostic had been visible from both normal directions
+
+Interpretation:
+- the visible black square is consistent with the attached scene/material path, not the intended custom `render.mesh()` path
+- the one-sided visibility indicates ordinary mesh winding/culling behavior
+- this conflicts with the custom path settings (`render.CullMode.None`) and UV-debug RG shader, so the custom draw is not the final visible contribution
+- `DepthMode.Off` in the previous track-transparent diagnostic still failed to make RG output visible, which points to render-pass ordering/overdraw rather than only depth rejection
+
+Reference check:
+- CSP's own debug tooling uses `render.on('main.root.transparent', ...)` together with `render.mesh()`, `render.CullMode.None`, and explicit depth modes for mesh diagnostics
+- therefore `main.root.transparent` is a validated candidate for the final manual dynamic-mesh draw stage
+
+Code change:
+1. Keep the canonical full-surface RainFX renderer on `main.track.transparent`.
+2. When `RAIN_DYNAMIC_SURFACE_STATE_ENABLED=true`, the track-transparent branch now exits before drawing the dynamic mesh.
+3. A separate `main.root.transparent` callback now:
+   - frame-guards/updates persistent GPU state
+   - initializes the dynamic surface mesh if needed
+   - issues async state readback
+   - applies the latest snapshot through `alterVertices()`
+   - renders `rainDynamicSurfaceMesh` with `rainVisorDynamicDrop.hlsl`
+4. UV debug remains:
+   - `CullMode.None`
+   - `DepthMode.Off`
+   - RG output from `pin.Tex`
+
+Validation settings:
+- `RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true`
+- `RAIN_DYNAMIC_DROP_UV_DEBUG = true`
+
+Expected result:
+- RG gradient square visible from both sides:
+  root-transparent manual draw is now the final visible path; UV transport and interpolation are confirmed
+- black square still only on the reverse-normal side:
+  attached scene fallback still wins and the manual SceneReference draw is not surviving; next step must stop using an attached SceneReference as the final transport primitive
+- RG plus black overlap/artifact:
+  both paths are visible; solve scene-pass suppression separately after confirming custom draw
+- no geometry:
+  root-transparent SceneReference draw is also suppressed and the design should switch to a detached/manual mesh representation
+
+Commit:
+- root-transparent dynamic draw test: aa114078e2cff776ece7f98315ad2c2c690c9c7a
