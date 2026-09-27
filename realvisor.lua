@@ -6018,6 +6018,95 @@ end
 --------------------------------------------------------
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
+--------------------------------------------------------
+-- Stage 4A dynamic droplet final draw
+--
+-- Reference validation:
+-- CSP's own debug tooling uses main.root.transparent for render.mesh()
+-- diagnostics. Keep the original full-surface RainFX path on
+-- main.track.transparent, but draw the runtime droplet transport mesh here so
+-- it occurs at the root transparent stage instead of being obscured by a later
+-- attached-scene pass.
+--------------------------------------------------------
+render.on('main.root.transparent', function()
+    if not cfg.RUNTIME.RAIN_ENABLED
+        or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
+    then
+        return
+    end
+
+    local sim = ac.getSim()
+    if not sim then
+        return
+    end
+
+    -- Safe even if the track callback already updated physics this frame:
+    -- updateRainGPUState() is frame-guarded internally.
+    updateRainGPUState(sim)
+
+    if not initializeRainDynamicSurfaceTest() then
+        return
+    end
+
+    local rainDynamicDropShader = nil
+    for _, shader in ipairs(shaders) do
+        if shader.ID == 'RAINFXDYNAMICDROP'
+            and shader.LOADED then
+            rainDynamicDropShader = shader
+            break
+        end
+    end
+
+    if not rainDynamicDropShader then
+        ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
+        return
+    end
+
+    updateRainDynamicStateRenderClock(sim)
+    requestRainDynamicStateReadback()
+    applyRainDynamicStateToSurfaceMesh()
+
+    render.setBlendMode(render.BlendMode.AlphaBlend)
+    render.setCullMode(render.CullMode.None)
+
+    -- Diagnostic contract:
+    -- With UV debug enabled this draw ignores scene depth and must show the
+    -- RG quad-UV gradient from both normal directions if this callback is the
+    -- final visible custom-shader path.
+    render.setDepthMode(
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+        and render.DepthMode.Off
+        or render.DepthMode.ReadOnly
+    )
+
+    local dynamicDrawn = render.mesh({
+        mesh = rainDynamicSurfaceMesh,
+        values = {
+            gDynamicDropDebugUV =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+                and 1.0
+                or 0.0,
+        },
+        shader = rainDynamicDropShader.HLSL
+    })
+
+    if not rainDynamicManualDrawLogged then
+        ac.log(
+            appNameDebug
+            .. ' Dynamic drop root draw: result='
+            .. tostring(dynamicDrawn)
+            .. ' shaderBytes='
+            .. tostring(
+                rainDynamicDropShader.HLSL
+                and #rainDynamicDropShader.HLSL
+                or 0
+            )
+        )
+        rainDynamicManualDrawLogged = true
+    end
+end)
+
+
 render.on('main.track.transparent', function()
     -- ac.log('[RealVisor] ENTER main.track.transparent')
     
@@ -6119,60 +6208,10 @@ render.on('main.track.transparent', function()
     --------------------------------------------------------
 
     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
-
-        if not initializeRainDynamicSurfaceTest() then
-            return
-        end
-
-        if not rainDynamicDropShader then
-            ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
-            return
-        end
-
-        updateRainDynamicStateRenderClock(sim)
-        requestRainDynamicStateReadback()
-        applyRainDynamicStateToSurfaceMesh()
-
-        render.setBlendMode(render.BlendMode.AlphaBlend)
-        render.setCullMode(render.CullMode.None)
-
-        -- Stage 4A render-path discriminator:
-        -- UV debug must be visible even if the scene pass draws the same
-        -- transport mesh with its fallback material at identical depth.
-        -- If this path is actually executing, the RG UV gradient should
-        -- overwrite the fallback square and be unmistakable.
-        render.setDepthMode(
-            cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
-            and render.DepthMode.Off
-            or render.DepthMode.ReadOnly
-        )
-
-        local dynamicDrawn = render.mesh({
-            mesh = rainDynamicSurfaceMesh,
-            values = {
-                gDynamicDropDebugUV =
-                    cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
-                    and 1.0
-                    or 0.0,
-            },
-            shader = rainDynamicDropShader.HLSL
-        })
-
-        if not rainDynamicManualDrawLogged then
-            ac.log(
-                appNameDebug
-                .. ' Dynamic drop manual draw: result='
-                .. tostring(dynamicDrawn)
-                .. ' shaderBytes='
-                .. tostring(
-                    rainDynamicDropShader.HLSL
-                    and #rainDynamicDropShader.HLSL
-                    or 0
-                )
-            )
-            rainDynamicManualDrawLogged = true
-        end
-
+        -- Stage 4A dynamic rendering is intentionally deferred to
+        -- main.root.transparent below. The previous main.track.transparent
+        -- draw could be overwritten later by the attached scene mesh pass,
+        -- making the fallback black quad visible instead of the custom shader.
         return
     end
 
