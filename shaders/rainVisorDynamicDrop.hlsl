@@ -257,7 +257,16 @@ float4 main(PS_IN pin)
             float3(0.72, 0.86, 1.00) * fresnel * 0.08
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
 
-        return float4(refractedScene + opticalAccent, 1.0);
+        // Split one droplet into two compositing candidates. On the
+        // back-facing visor, the left image half is the transparent test.
+        float blendedAlpha = saturate(
+            0.12 + fresnel * 0.45 + highlight * 0.20
+            + smoothstep(0.75, 0.98, r) * 0.15);
+        float resultAlpha = local.x >= 0.0 ? blendedAlpha : 1.0;
+        float separator = 1.0 - smoothstep(0.0, 0.025, abs(local.x));
+        float3 resultColor = lerp(refractedScene + opticalAccent,
+            float3(1.0, 0.75, 0.0), separator);
+        return float4(resultColor, lerp(resultAlpha, 1.0, separator));
     }
 
     // Keep the center almost transparent. The rim and small highlight are the

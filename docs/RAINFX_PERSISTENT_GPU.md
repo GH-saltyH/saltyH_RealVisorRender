@@ -3922,3 +3922,43 @@ of recursive imagery, and FPS at the same reference camera. If the apparent
 refraction changes disproportionately between small and large drops, next
 scale the displacement by the projected droplet radius rather than hardcoding
 16 pixels for every drop.
+
+### 106. Compare full replacement against translucent refracted composition (2026-09-27)
+
+The user accepts the 16-shot-pixel refraction strength without noticeable
+extra cost, and asks to include force-driven internal waves and trail/merge
+visuals in the optical work. Preserve the clean GeometryShot, 16px offset,
+existing blue-white rim and directional highlight. Split each full circular
+drop with a thin yellow vertical seam: on the back-facing visor the image
+right half replaces the background with refracted shot color at alpha 1,
+while the image left half alpha-blends the same color over the current
+framebuffer. The translucent candidate starts at alpha 0.12 in the center,
+increases with Fresnel-like rim, highlight and the outer radial band, and
+can approach 0.7 near the edge. Both sides use the same single clean scene
+sample. No settings or other sources change. Inspect center clarity,
+refraction visibility, edge/sky color discontinuity, seam, foreground depth
+and FPS across dark and bright backgrounds. Then choose or adjust a unified
+compositing profile; the split is diagnostic only.
+
+Follow-on motion work, after the compositing choice:
+
+1. Drive a small decaying oscillation of the local normal/refraction offset
+   when the visor force or droplet velocity changes. Start with a uniform
+   force pulse to validate amplitude, damping and direction. For realistic
+   per-drop response, provide the corresponding acceleration/velocity data
+   to the pixel shader explicitly; currently `ac.MeshVertex` exposes only
+   position, normal and local UV and the visible shader does not receive
+   per-drop velocity. Do not claim per-drop force response from a global
+   value alone.
+2. Represent trails as surface-aligned geometry or a separate persistent
+   mask that carries radius, thickness, alpha and a normal/flow profile.
+   Reuse the clean scene shot for their refraction and draw them after the
+   main scene with visor depth testing. Match the parent droplet's motion
+   direction and damp trail contrast downstream.
+3. Define a merge rule on the persistent state: conserve approximate water
+   area/volume when drops or trails overlap, update the surviving drop's
+   position and velocity, and remove stale trail segments smoothly. Verify
+   the visuals at speed reversals and intersections, then measure the
+   separate geometry/mask update cost and GPU draw cost at 512 drops.
+
+These are design directions, not implementations delivered by this commit.
