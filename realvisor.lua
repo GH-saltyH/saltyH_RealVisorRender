@@ -6118,8 +6118,14 @@ render.on('main.root.transparent', function()
     requestRainDynamicStateReadback()
     applyRainDynamicStateToSurfaceMesh()
 
+    local dynamicDropShaderMode =
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG and 1
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG and 2
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG and 3
+        or 0
+
     render.setBlendMode(
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+        (dynamicDropShaderMode == 1 or dynamicDropShaderMode == 3)
         and render.BlendMode.AlphaBlend
         or render.BlendMode.BlendAccurate
     )
@@ -6130,7 +6136,7 @@ render.on('main.root.transparent', function()
     -- RG quad-UV gradient from both normal directions if this callback is the
     -- final visible custom-shader path.
     render.setDepthMode(
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+        (dynamicDropShaderMode == 1 or dynamicDropShaderMode == 3)
         and render.DepthMode.Off
         or render.DepthMode.ReadOnly
     )
@@ -6141,22 +6147,17 @@ render.on('main.root.transparent', function()
     -- render.mesh() consumes the SceneReference, then hide it again.
     rainDynamicSurfaceMesh:setVisible(true, false)
 
-    -- Select exactly one shader path at compile time. Runtime scalar mode
-    -- selection remained stuck on the HDR-copy branch on the target CSP build
-    -- even after a full restart, so do not use injected cbuffer values for
-    -- mutually exclusive diagnostic modes.
-    local dynamicDropShaderMode =
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG and 1
-        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG and 2
-        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG and 3
-        or 0
+    -- Put the mode define into the actual shader source string. This avoids
+    -- relying on CSP's separate define/cache path for the discriminator test.
+    local dynamicDropShaderSource =
+        '#define RAIN_DYNAMIC_DROP_MODE '
+        .. tostring(dynamicDropShaderMode)
+        .. '\n'
+        .. rainDynamicDropShader.HLSL
 
     local dynamicDrawn = render.mesh({
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
-        defines = {
-            RAIN_DYNAMIC_DROP_MODE = dynamicDropShaderMode,
-        },
         textures = {
             txDynamicScene = 'dynamic::hdr',
         },
@@ -6169,7 +6170,7 @@ render.on('main.root.transparent', function()
             gDynamicDropRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
         },
-        shader = rainDynamicDropShader.HLSL
+        shader = dynamicDropShaderSource
     })
 
     rainDynamicSurfaceMesh:setVisible(false, false)
@@ -6179,10 +6180,12 @@ render.on('main.root.transparent', function()
             appNameDebug
             .. ' Dynamic drop root draw: result='
             .. tostring(dynamicDrawn)
+            .. ' mode='
+            .. tostring(dynamicDropShaderMode)
             .. ' shaderBytes='
             .. tostring(
-                rainDynamicDropShader.HLSL
-                and #rainDynamicDropShader.HLSL
+                dynamicDropShaderSource
+                and #dynamicDropShaderSource
                 or 0
             )
         )

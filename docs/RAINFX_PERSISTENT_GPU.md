@@ -2793,3 +2793,23 @@ Validation settings remain the Stage 4B.2A settings and require a full game rest
 - cyan ring visible: compile-time refraction path is selected
 - cyan ring plus bent background: screen-space refraction is working
 - no cyan ring: investigate define compilation/caching or whether a different shader/file is being executed; runtime scalar ambiguity has been removed
+
+### 50. Stage 4B.2A define result absent + Stage 4B.2B absolute shader-source discriminator (2026-09-27)
+
+Observed after full restart with mode-3 settings:
+- still no cyan ring or identifiable footprint
+
+The test is reduced further to remove all remaining optical dependencies:
+- stop passing the mode through `render.mesh().defines`
+- prepend `#define RAIN_DYNAMIC_DROP_MODE <mode>` directly to the external HLSL text, making the mode part of the actual shader source/cache string
+- mode 3 no longer samples `dynamic::hdr`
+- mode 3 no longer uses inverse screen size or refraction pixels
+- mode 3 returns only opaque magenta after circular clipping
+- mode 3 temporarily uses `AlphaBlend` and `DepthMode.Off` for maximum visibility
+- the one-time `Dynamic drop root draw` log now includes the Lua-selected mode and final shader-source byte count
+
+With the existing test settings, an opaque double-sided magenta circle is mandatory if the current dynamic mesh and mode-3 shader source are being executed. Interpretation:
+- magenta circles visible: shader-source mode selection works; restore the HDR refraction math inside this proven branch
+- no magenta circles but log reports `mode=3` and `result=true`: investigate CSP shader-source caching or a different visible/draw pass
+- log reports a mode other than 3: configuration selection is wrong before shader compilation
+- `result=false` or missing root-draw log: investigate callback/shader readiness/draw execution rather than refraction

@@ -7,7 +7,7 @@
     - 0: Stage 4B.0 transparent optical profile
     - 1: quad-local UV gradient
     - 2: unshifted HDR scene copy
-    - 3: exaggerated radial refraction + cyan branch marker
+    - 3: Stage 4B.2B opaque magenta absolute branch discriminator
 
     Mode 1:
         bypass circular clipping and display interpolated quad UV directly.
@@ -26,9 +26,8 @@
 
     Stage 4B.2 contract:
     - mode 3:
-        sample the same HDR scene with a controlled radial pixel offset. This
-        validates lens direction and screen-space stability before tuning the
-        final water optical model.
+        currently returns a solid magenta clipped circle without HDR sampling.
+        This proves the actual shader source/mode before refraction is restored.
 */
 
 // txDynamicScene, gDynamicDropInvScreenSize and
@@ -76,37 +75,10 @@ float4 main(PS_IN pin)
     );
 
 #if RAIN_DYNAMIC_DROP_MODE == 3
-    // Fade the displacement back near the clipped boundary to avoid a harsh
-    // discontinuity while retaining an obvious radial lens test.
-    float boundaryFade = 1.0 - smoothstep(0.82, 1.0, r);
-    float radialProfile = smoothstep(0.05, 0.75, r) * boundaryFade;
-
-    float2 refractionOffset =
-        dropNormal.xy
-        * radialProfile
-        * gDynamicDropRefractionPixels
-        * gDynamicDropInvScreenSize;
-
-    float3 refractedScene = txDynamicScene.SampleLevel(
-        samLinearClamp,
-        saturate(pin.ScreenPos + refractionOffset),
-        0.0
-    ).rgb;
-
-    // Stage 4B.2A branch marker: an intentionally obvious cyan ring. It
-    // separates "the refraction branch did not run" from "the sampled
-    // background was too smooth for the offset to be noticeable".
-    float diagnosticRing =
-        smoothstep(0.68, 0.76, r)
-        * (1.0 - smoothstep(0.90, 0.98, r));
-
-    // Keep the proven Stage 4B.0 directional highlight as a secondary
-    // orientation marker.
-    float3 opticalAccent =
-        float3(0.08, 0.85, 1.00) * diagnosticRing * 0.55
-        + float3(0.92, 0.98, 1.00) * highlight * 0.24;
-
-    return float4(refractedScene + opticalAccent, 1.0);
+    // Stage 4B.2B absolute discriminator. Do not sample the scene and do not
+    // depend on injected numerical values. If mode 3 is the shader being
+    // executed, an opaque magenta circle must be visible.
+    return float4(1.0, 0.0, 1.0, 1.0);
 #else
 
     // Keep the center almost transparent. The rim and small highlight are the
