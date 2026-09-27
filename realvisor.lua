@@ -6168,6 +6168,7 @@ render.onSceneReady(function()
             render.AntialiasingMode.None,
             render.TextureFormat.R16G16B16A16.Float
         )
+        rainDynamicSceneCopyState.geometryShot:setOriginalLighting(true)
         rainDynamicSceneCopyState.shotWidth = shotWidth
         rainDynamicSceneCopyState.shotHeight = shotHeight
     end

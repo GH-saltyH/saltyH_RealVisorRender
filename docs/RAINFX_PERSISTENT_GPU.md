@@ -3723,3 +3723,22 @@ until alignment is remeasured. The current screen copy feedback suggests
 shared stale composited content, but public Lua API documentation does not
 guarantee that `dynamic::screen` is exactly a previous-frame final image in
 all stages.
+
+### 96. Test original scene lighting in the working scene-ready shot (2026-09-27)
+
+The user confirms that moving GeometryShot updates to `render.onSceneReady()`
+retains all drops and the nearly aligned, low-resolution clean scene. At the
+chosen reference camera view FPS is 75. First shot update and transparent
+mesh draw both occurred at frame 498630; the scene-ready shot is 1620x936,
+the window is 3240x1872, and the main render target is 2161x1249.
+
+The bundled `lib.lua` says GeometryShot uses neutral lighting by default;
+`setOriginalLighting(true)` enables original scene lighting. Set this one
+option when creating the independent shot. Keep sky disabled, no YEBIS, the
+same float format, shot resolution, camera, 98% scene UV, and shader debug
+brightness. Compare the green quadrant against the previous baseline for
+brightness, color, visibility, continued absence of recursive drops and FPS
+at the same reference view. A changed result does not by itself demonstrate
+HDR-to-LDR tonemapping; `AntialiasingMode.None` remains in effect. If drops
+vanish, check for `scene-ready shot: starting/updated` and first pre-draw
+logs to localize the failing shot operation.
