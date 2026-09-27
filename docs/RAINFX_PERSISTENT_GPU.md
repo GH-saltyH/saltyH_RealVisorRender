@@ -3742,3 +3742,16 @@ at the same reference view. A changed result does not by itself demonstrate
 HDR-to-LDR tonemapping; `AntialiasingMode.None` remains in effect. If drops
 vanish, check for `scene-ready shot: starting/updated` and first pre-draw
 logs to localize the failing shot operation.
+
+### 97. Inspect independently lit scene without debug gain (2026-09-27)
+
+With `setOriginalLighting(true)` on the scene-ready GeometryShot, the user
+reports brighter green scene color, visible drops, no recursive self-image,
+and FPS in roughly the same range as the 75 FPS reference. Remove only the
+8x RGB multiplier from the green quadrant's independent shot so its true
+color and exposure can be evaluated. Blue and magenta live-screen diagnostics
+retain 8x gain as comparative references, and no shot quality, sky,
+resolution or UV settings change. With antialiasing still set to None, this
+is a direct independent scene-color read without YEBIS tonemapping. Compare
+green brightness, sky, foliage, and visible detail at the reference camera;
+report FPS and whether the drop remains visible.

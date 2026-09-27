@@ -91,7 +91,7 @@ float4 main(PS_IN pin)
                         calibration));
                 if (right && !bottom)
                     sampledColor = txDynamicSnapshot.SampleLevel(
-                        samLinearClamp, screenUV, 0.0).rgb * 8.0;
+                        samLinearClamp, screenUV, 0.0).rgb;
                 else
                     sampledColor = txDynamicScreen.SampleLevel(
                         samLinearClamp, screenUV, 0.0).rgb * 8.0;
