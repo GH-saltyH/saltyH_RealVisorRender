@@ -77,12 +77,13 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroRain - 0.001);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
             samLinearClamp, patternUV, 0.0);
-        // Alpha is zero on the whole topmost disk rim and on gaps.
+        // Alpha is zero on the topmost disk rim and on gaps. Its nonzero
+        // value is constant across the selected disk's entire interior.
         clip(pattern.a - 0.005);
         if (gDynamicDropMicroRain < 0.999)
         {
-            // Sample the exact mask texel for removal. Interpolating its
-            // threshold used to leave surviving slivers around erased disks.
+            // Sample the exact mask texel for whole-disk selection.
+            // Linear threshold interpolation would leave rim fragments.
             int lastTexel = max((int)gDynamicDropMicroPatternSize - 1, 0);
             int2 maskPixel = min(int2(patternUV
                 * gDynamicDropMicroPatternSize),
