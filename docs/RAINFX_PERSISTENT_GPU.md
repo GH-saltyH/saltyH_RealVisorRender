@@ -5648,3 +5648,29 @@ Follow-up ordering: validate this base field and its budget; then add a small
 bounded pool of transient detached satellite beads for qualifying impacts;
 then implement true GPU mass coalescence with deterministic survivor writes.
 Blend these layers only after each can be isolated in matched FPS tests.
+
+### Micro-layer visibility and overlap follow-up
+
+The first 4096-dot layer was not visible at rain override 1.0. Its prior
+0.16–0.36 mm diameter corresponded to only ~0.00047–0.00105 visor UV,
+while the center had almost no opacity; projected dots could be subpixel and
+blend into the scene. This diagnosis is provisional until the mapping log and
+high-opacity diagnostic are observed in game.
+
+For this probe, `RAIN_DYNAMIC_MICRO_LAYER_DEBUG=true` draws opaque-looking
+round cyan-edged disks. Diameters are now 0.42–0.85 mm. Three micro disks
+share each area-stratified anchor, with small independent UV jitter, so they
+overlap instead of spreading evenly with large gaps. Later circles draw over
+and substantially attenuate earlier edges. The normal optical branch also
+uses a stronger body alpha (default `RAIN_DYNAMIC_MICRO_LAYER_OPACITY=0.78`)
+that fades at the physical boundary. Neither branch modifies the foreground
+physics slots or adds another draw call.
+
+On Lua load, check the line `Micro layer mesh: mapped=X/4096 clusters=1366`
+for a nonzero mapped count. With debug true, confirm complete round disks,
+position across the visor, grouped overlaps and FPS. Next set
+`RAIN_DYNAMIC_MICRO_LAYER_DEBUG=false` to evaluate the actual low-resolution
+scene/refraction material at the same camera. If mapped is nonzero but no
+circles appear with debug true, investigate UV encoding, vertex index range,
+visibility and depth before tuning optics further. Toggle
+`RAIN_DYNAMIC_MICRO_LAYER_ENABLED=false` for total-layer FPS comparison.
