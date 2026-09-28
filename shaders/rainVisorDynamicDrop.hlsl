@@ -43,6 +43,10 @@ float4 main(PS_IN pin)
 {
     float shapeSeed = floor(pin.Tex.x * 0.5);
     float2 quadTex = pin.Tex - float2(shapeSeed * 2.0, 0.0);
+    // Head quads encode three brief impact-age bands in whole UV steps.
+    // Trail quads use 2..3 and therefore have no impact band.
+    float impactBand = floor(quadTex.y * 0.25);
+    quadTex.y -= impactBand * 4.0;
     bool trailQuad = quadTex.y > 1.5;
     if (trailQuad)
         quadTex.y -= 2.0;
@@ -266,6 +270,11 @@ float4 main(PS_IN pin)
             * (broadLobe * broadLobe - 0.25);
         contour += (family > 0.32 && family <= 0.67 ? 0.09 : 0.0)
             * cos(2.0 * angle + phase);
+        // Only freshly born, sufficiently large drops carry this pulse.
+        // Its asymmetric fingers shrink as the age band falls from 3 to 1.
+        float impactPulse = saturate(impactBand / 3.0);
+        contour += impactPulse * (0.10 * sin(7.0 * angle + phase)
+            + 0.10 * max(0.0, cos(3.0 * angle - phase)));
         footprintScale = 0.88 + strength * contour;
         r /= footprintScale;
         clip(1.0 - r);
@@ -436,7 +445,7 @@ float4 main(PS_IN pin)
                 // local UV only under a fading rim to avoid a visible fold.
                 sampleUV = lerp(lerp(sampleUV, sceneUV, orbMode),
                     wideUV, wideWeight);
-                float orbMIP = lerp(gDynamicDropWideOrbCenterMip,
+                float orbMIP = lerp(4.5,
                     gDynamicDropWideOrbEdgeMip,
                     smoothstep(0.38, 0.82, r));
                 lensMIP = lerp(lensMIP, orbMIP, orbMode);
