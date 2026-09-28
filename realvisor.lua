@@ -6036,7 +6036,7 @@ local function initializeRainDynamicSurfaceTest()
     for i = 0, count - 1 do
         -- Encode a stable per-drop shape seed in whole, even Tex.x bands.
         -- HLSL removes the band before reconstructing 0..1 quad UV.
-        local shapeBand = ((i * 73) % 61) * 2
+        local shapeBand = ((i * 73) % 1021) * 2
         -- Stage 2 visual validation should measure surface mapping, not the
         -- occupancy of a rectangular UV bounding box. Select each diagnostic
         -- UV directly from valid triangles, weighted by triangle UV area.
@@ -6649,7 +6649,11 @@ local function applyRainDynamicStateToSurfaceMesh()
 
     for i = 0, meshCount - 1 do
         local vertexIndex = i * 8 + 1
-        local shapeBand = ((i * 73) % 61) * 2
+        -- Keep the silhouette stable during a life, but change it on rebirth.
+        -- A prime-sized band avoids the former 61-slot repeating pattern.
+        local shapeBand = ((i * 73
+            + (rainDynamicSceneCopyState.generation[i + 1] or 0) * 131)
+            % 1021) * 2
         local active =
             i < stateCount
             and (rainDynamicStateAlive[i + 1] or 0.0) > 0.5
