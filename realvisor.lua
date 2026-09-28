@@ -397,10 +397,10 @@ local cfg = scriptSettings:mapConfig({
         -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
-        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
-        -- Opaque lens output prevents unshifted background bleed-through;
-        -- the visible left retains the 48px radial optics.
-        RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = true,
+        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 48.0,
+        -- Retire the opaque diagnostic and its bright center seam; 48px
+        -- above preserves the established left-hand lens displacement.
+        RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = false,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Keep the shot in HDR until the same final post-process as the frame.
@@ -416,6 +416,8 @@ local cfg = scriptSettings:mapConfig({
         -- Keep the former inverted source available as a disabled control.
         RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = false,
         RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG = true,
+        -- Fade the right-hand lens toward the real scene at the edge.
+        RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG = true,
         -- The screen copy did not fix the rain overlay or tone mismatch;
         -- disable its per-frame allocation/copy/mips before testing stages.
         RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
@@ -6680,6 +6682,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
             .. ' concaveLensDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG)
+            .. ' softCompositeDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG)
             .. ' screenSourceCompareDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
             .. ' weatherScreenFrame='
@@ -6793,6 +6797,9 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropConcaveLensDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropSoftCompositeDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropScreenSourceCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
