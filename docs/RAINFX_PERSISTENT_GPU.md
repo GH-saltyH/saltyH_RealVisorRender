@@ -5483,3 +5483,35 @@ and 2.5. Watch whether drops move outward *and down*, whether central
 drops move down, and whether top-of-visor exits, bottom exits, alive
 count and FPS change. With Airflow OFF the new mode must have no effect.
 Other forces can be isolated with their existing toggles/sliders.
+
+## Next phase: silhouette, impact, merging, surface film and trails
+
+The current birth/death cycle and settled-water force direction are accepted
+as the baseline. First morphology experiment: use the already enabled shape
+switch and optical radius. Change its former 61 repeating slot seeds to 1021
+bands, incorporating each slot's GPU birth generation. A small set of round,
+elliptical and asymmetric broad-lobe profiles now varies the silhouette while
+sharing the same clipping, lens and rim radius. This changes no GPU physics,
+texture allocation or geometry count. Compare at fixed camera, rain and speed;
+check repeating shapes, overlap, FPS and whether the silhouette remains stable
+until rebirth. Turn `RAIN_DYNAMIC_DROP_SHAPE_DEBUG=false` for circular A/B.
+
+Next impact experiment: a short age-limited splash layer on only a fraction of
+new large births; vary satellite direction/size using the generation seed and
+reuse the existing inactive trail quad before introducing more geometry. Keep
+the accepted birth glide separate. Test visual timing and FPS at rain 0.03,
+0.5 and 1.0 before adding persistent satellite state.
+
+Next merge experiment: compute overlap against one immutable GPU state frame,
+choose a deterministic lower-index survivor, then resolve size, mass, position
+and loser death together into the next frame. Limit candidate checks spatially
+and verify conservation, no repeated absorption or slot race, birth count and
+FPS at 512 drops. Do not implement a visual-only union as if mass had merged.
+
+After merging, test an external thin-water-film mask with noise and temporal
+clearing. Start with a compact deterministic procedural pattern; use baked
+texture only if it improves appearance or runtime cost in a direct comparison.
+Then add a separate dense, tiny, low-resolution optical background layer with
+its own occupancy and draw budget. Finally use timed, position-history trail
+segments, clearing the background film where a moving drop passed. Keep each
+layer independently switchable for matched FPS and visual comparisons.
