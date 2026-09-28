@@ -114,7 +114,24 @@ float4 main(PS_IN pin)
         // Mirror only horizontally: each nearly round disk keeps a
         // recognizable, low-resolution view from directly in front of it.
         float2 centerDelta = sceneUV - centerSceneUV;
-        float2 refractionUV = centerSceneUV
+        // The object-space visor normal determines which part of the
+        // independently rendered camera view this disk faces. The same
+        // normal map and mesh transform drive the existing rain physics.
+        float3 objectNormal = txDynamicControl.SampleLevel(
+            samLinearClamp, float2(patternUV.x, patternUV.y - 1.0),
+            0.0).rgb * 2.0 - 1.0;
+        float3 worldNormal = normalize(mul(normalize(objectNormal),
+            (float3x3)gDynamicDropObjectToWorld));
+        float3 cameraNormal = float3(
+            dot(worldNormal, gDynamicDropCameraSide),
+            -dot(worldNormal, gDynamicDropCameraUp),
+            dot(worldNormal, gDynamicDropCameraLook));
+        if (cameraNormal.z < 0.0)
+            cameraNormal *= -1.0;
+        float2 normalSceneShift = clamp(cameraNormal.xy
+            / max(cameraNormal.z, 0.35)
+            * gDynamicDropMicroNormalGain, -0.20, 0.20);
+        float2 refractionUV = centerSceneUV + normalSceneShift
             + centerDelta * float2(-gDynamicDropMicroImageScale,
                 gDynamicDropMicroImageScale);
         float3 sceneColor = txDynamicSnapshot.SampleLevel(
