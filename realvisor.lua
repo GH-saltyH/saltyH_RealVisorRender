@@ -504,7 +504,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 8.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 8.0,
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
-        RAIN_DYNAMIC_MICRO_PATTERN_ERASER_GRID_RATIO = 0.13,
+        -- Eraser diameter: (2 * 0.68 / ratio) / (2 * 0.56) = 1.25.
+        RAIN_DYNAMIC_MICRO_PATTERN_ERASER_GRID_RATIO = 0.9714,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 1.0,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
@@ -6241,6 +6242,7 @@ local function initializeRainDynamicSurfaceTest()
             end)
             if canvasOk and canvas then
                 patternSize = size
+                rainDynamicSceneCopyState.microPatternSize = size
                 rainDynamicSceneCopyState.microPatternCanvas = canvas
                     :setName('RainFX static micro pattern')
                 break
@@ -7789,6 +7791,8 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
             gDynamicDropMicroPatternGrid =
                 rainDynamicSceneCopyState.microPatternGrid or 1,
+            gDynamicDropMicroPatternSize =
+                rainDynamicSceneCopyState.microPatternSize or 1,
             gDynamicDropMicroImageScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
             gDynamicDropMicroNormalGain =
