@@ -288,13 +288,43 @@ float4 main(PS_IN pin)
                 / gDynamicDropInvScreenSize;
             float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
                 * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
-            // Keep the same displaced shot sample on both halves. Opaque
-            // output prevents the original background bleeding through.
+            // The left half retains the 48px radial lens. Opaque output
+            // prevents the original background bleeding through.
             float refractionPixels = gDynamicDropOpaqueRefractionSplitDebug
                 > 0.5 ? 48.0 : gDynamicDropRefractionPixels;
             float2 refractionOffset = dropNormal.xy * radialProfile
                 * refractionPixels
                 * gDynamicDropInvRenderTargetSize;
+            // Evaluate derivatives for both halves before the per-pixel
+            // split; derivatives inside a divergent branch are undefined.
+            float2 localDx = ddx(local);
+            float2 localDy = ddy(local);
+            if (gDynamicDropInvertedFootprintDebug > 0.5
+                && local.x < 0.0)
+            {
+                // Reconstruct the projected quad radius from the mesh UV
+                // Jacobian. This works for each droplet's own screen size
+                // and visor curvature, without a fixed pixel-radius guess.
+                float jacobian = localDx.x * localDy.y
+                    - localDy.x * localDx.y;
+                if (abs(jacobian) > 1e-6)
+                {
+                    float2 fromCenterPixels = float2(
+                        localDy.y * local.x - localDy.x * local.y,
+                        localDx.x * local.y - localDx.y * local.x
+                    ) / jacobian;
+                    fromCenterPixels = clamp(fromCenterPixels,
+                        float2(-96.0, -96.0), float2(96.0, 96.0));
+                    float footprintFade = 1.0
+                        - smoothstep(0.72, 0.98, r);
+                    float2 shotUVPerWindowPixel = gDynamicDropInvScreenSize
+                        * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+                    // Subtracting 3x the projected center displacement
+                    // produces a 2x inverted scene image in the interior.
+                    refractionOffset = -3.0 * fromCenterPixels
+                        * footprintFade * shotUVPerWindowPixel;
+                }
+            }
             // On the back-facing visor, only the image-right half receives
             // the force-driven prototype; the left retains proven optics.
             if (gDynamicDropWaveEnvelope > 0.0 && local.x < 0.0)
@@ -313,8 +343,7 @@ float4 main(PS_IN pin)
                 0.0).rgb;
             // Visible right half: inspect shot depth at exactly the same
             // refracted UV. Magenta indicates a far/sky pixel; cyan indicates
-            // geometry or a missing/invalid depth signal. The other half
-            // remains the unaltered HDR shot for visual comparison.
+            // geometry or a missing/invalid depth signal.
             if (gDynamicDropSkyDepthDebug > 0.5 && local.x < 0.0)
             {
                 float shotDepth = txDynamicShotDepth.SampleLevel(
@@ -324,12 +353,11 @@ float4 main(PS_IN pin)
                     ? float3(0.95, 0.12, 0.72)
                     : float3(0.05, 0.55, 0.70);
             }
-            // The depth test was verified with Hurricane sky and geometry.
-            // Replace only the visible-right sky with the live fog color to
-            // test its brightness and hue against the unmodified left sky.
-            // Ground/buildings retain their original refracted HDR color.
+            // Both halves use the same sky correction while the inverted
+            // footprint comparison is enabled, isolating the optical shape.
             else if (gDynamicDropSkyFogColorDebug > 0.5
-                && local.x < 0.0)
+                && (local.x < 0.0
+                    || gDynamicDropInvertedFootprintDebug > 0.5))
             {
                 float shotDepth = txDynamicShotDepth.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
