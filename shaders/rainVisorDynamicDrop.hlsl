@@ -75,7 +75,10 @@ float4 main(PS_IN pin)
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
         float4 pattern = txDynamicMicroPattern.SampleLevel(
             samLinearClamp, patternUV, 0.0);
-        clip(pattern.a - 0.5);
+        // Alpha contains the static clearing order for valid pixels;
+        // gaps and the top disk's rim remain zero at every rain level.
+        clip(pattern.a - 0.005);
+        clip(gDynamicDropMicroRain - pattern.a);
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(pattern.z);
         // The winning disk owns the pixel; its outer ring also marks
