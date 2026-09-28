@@ -5198,3 +5198,25 @@ centerFallback and FPS, and verify that high rainfall predominantly
 produces moderate drops with only isolated 5–6 mm impacts. A rise in
 birth frequency increases the number of candidate checks, so compare
 FPS at the shortest tested lifetime before increasing the probe budget.
+
+### 151. Eliminate concentrated center fallback (2026-09-28)
+
+At rain 1.00 and a 2–4 second test lifetime, the user measured 483–493
+alive drops, only 129–149 occupied 64×32 UV cells, 25–36 live drops
+exactly at `(0.5, -0.5)`, and 433–437 births per logging interval.
+FPS remained similar. An attached crop shows droplets stacked at a
+recognizable point. The boundary DDS has about 21% usable texels, so
+checking only 16 uniformly scattered candidates can fail and return
+the same center position for multiple simultaneously alive droplets.
+
+Keep sampling the existing visor mask and inspect up to 128 candidates,
+stopping after eight *valid* candidates on a respawn; initialization
+returns the first valid one. If a respawn cannot find any valid point
+but the slot's previous position remains valid, reuse that position
+instead of teleporting to the center. The bounded loop runs on births
+only. Recheck `centerFallback`, `maxCell`, UV cell coverage and FPS with
+the same camera, rain 1.00 and 2–4 second lifetimes. With 21% usable
+area, no center fallback should remain after the preexisting droplets
+expire. If UV cell coverage remains low even with zero center fallback,
+investigate clustered mask coordinates or coarse GPU hash precision
+separately rather than increasing slot count.
