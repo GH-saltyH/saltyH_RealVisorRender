@@ -301,6 +301,9 @@ local cfg = scriptSettings:mapConfig({
         -- share this compact surface-force conversion.
         -- This preserves the previously validated gravity calibration.
         RAIN_PHYSICS_ACCEL_SCALE = 0.03567788,
+        RAIN_FORCE_GRAVITY_GAIN = 1.0,
+        RAIN_FORCE_INERTIA_GAIN = 1.0,
+        RAIN_FORCE_AIRFLOW_GAIN = 1.0,
 
         -- Air model constants (SI).
         RAIN_AIR_DENSITY = 1.20,
@@ -365,9 +368,13 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER = 4.0,
         RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER = 24.0,
         RAIN_GPU_STATE_MOBILE_DRAG = 1.59,
+        RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION = 0.08,
+        RAIN_GPU_STATE_MOVING_FORCE_GAIN = 16.0,
+        RAIN_GPU_STATE_MOBILE_THRESHOLD_UV = 0.015,
         -- Duration of reduced drag after impact; ordinary drag returns
         -- smoothly afterward. Zero disables the glide.
         RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = 0.08,
+        RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS = 0.12,
         RAIN_GPU_STATE_LIFECYCLE_LOG = true,
         RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
@@ -768,6 +775,9 @@ local rainStateUpdateParams = {
         gRainAcceleration = vec3(0.0, 0.0, 0.0),
         gRainForceMask = 0.0,
         gRainPhysicsAccelScale = cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE,
+        gRainGravityGain = cfg.RUNTIME.RAIN_FORCE_GRAVITY_GAIN,
+        gRainInertiaGain = cfg.RUNTIME.RAIN_FORCE_INERTIA_GAIN,
+        gRainAirflowGain = cfg.RUNTIME.RAIN_FORCE_AIRFLOW_GAIN,
         gRainAirVelocityWorld = vec3(0.0, 0.0, 0.0),
         gRainAirDensity = cfg.RUNTIME.RAIN_AIR_DENSITY,
         gRainAirDragCoeff = cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
@@ -799,9 +809,17 @@ local rainStateUpdateParams = {
             cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER,
         gRainStateBirthGlideSeconds =
             cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS,
+        gRainStateBirthSettleSeconds =
+            cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS,
         gRainStateMobileSpeedMultiplier =
             cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER,
         gRainStateMobileDrag = cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG,
+        gRainStateKineticAdhesionFraction =
+            cfg.RUNTIME.RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION,
+        gRainStateMovingForceGain =
+            cfg.RUNTIME.RAIN_GPU_STATE_MOVING_FORCE_GAIN,
+        gRainStateMobileThresholdUV =
+            cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_THRESHOLD_UV,
         gRainStateTravelMix = 0.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
@@ -1217,12 +1235,12 @@ local rainStateUpdateParams = {
             if (fmod(floor(gRainForceMask), 2.0) >= 0.5)
                 forceWorld +=
                     float3(0.0, -gRainStateGravity, 0.0)
-                    * gRainPhysicsAccelScale;
+                    * gRainPhysicsAccelScale * gRainGravityGain;
 
             if (fmod(floor(gRainForceMask / 2.0), 2.0) >= 0.5)
                 forceWorld +=
                     gRainAcceleration
-                    * gRainPhysicsAccelScale;
+                    * gRainPhysicsAccelScale * gRainInertiaGain;
 
             if (fmod(floor(gRainForceMask / 4.0), 2.0) >= 0.5)
                 forceWorld +=
@@ -1230,7 +1248,7 @@ local rainStateUpdateParams = {
                         normalWorld,
                         radius
                     )
-                    * gRainPhysicsAccelScale;
+                    * gRainPhysicsAccelScale * gRainAirflowGain;
 
             return forceWorld;
         }
@@ -1264,7 +1282,7 @@ local rainStateUpdateParams = {
                 // airflow free to respond to their actual directions.
                 float2 gravity = rainStateProjectForce(
                     float3(0.0, -gRainStateGravity, 0.0)
-                        * gRainPhysicsAccelScale,
+                        * gRainPhysicsAccelScale * gRainGravityGain,
                     normalWorld);
                 tangentForce.y += abs(gravity.y) - gravity.y;
             }
@@ -1466,13 +1484,33 @@ local rainStateUpdateParams = {
             {
                 if (age < gRainStateBirthGlideSeconds)
                 {
-                    velocity *= exp(-2.0 * dt
+                    float elapsed = saturate(age
                         / gRainStateBirthGlideSeconds);
-                    return float4(position + velocity * dt, velocity);
+                    float nextElapsed = saturate((age + dt)
+                        / gRainStateBirthGlideSeconds);
+                    // Recover the unchanged launch vector from the
+                    // exponentially decaying stored velocity. Integrate
+                    // a fixed stroke over normalized age, so a glide
+                    // shorter than one frame still moves downward.
+                    float2 launch = velocity * exp(2.0 * elapsed);
+                    float diameterMM = radius * 2.0
+                        / max(gRainStatePhysicalDiameterUVPerMM, 0.000001);
+                    float mobileFraction = smoothstep(0.65, 1.40,
+                        diameterMM);
+                    float distance = max(length(launch) * 0.068,
+                        radius * 3.0 * mobileFraction);
+                    float2 stroke = length(launch) > 0.000001
+                        ? launch / length(launch) * distance
+                        : float2(0.0, 0.0);
+                    float step = smoothstep(0.0, 1.0, nextElapsed)
+                        - smoothstep(0.0, 1.0, elapsed);
+                    return float4(position + stroke * step,
+                        launch * exp(-2.0 * nextElapsed));
                 }
-                if (age < gRainStateBirthGlideSeconds + dt * 1.5)
+                if (age < gRainStateBirthGlideSeconds
+                    + max(gRainStateBirthSettleSeconds, dt))
                 {
-                    velocity = float2(0.0, 0.0);
+                    return float4(position, 0.0, 0.0);
                 }
             }
 
@@ -1494,9 +1532,12 @@ local rainStateUpdateParams = {
             // Motion overcomes static pinning: rolling water sees a much
             // smaller resistance until it actually slows to a stop.
             float mobile = gRainStateLifecycle > 0.5
-                ? smoothstep(0.001, 0.015, length(velocity)) : 0.0;
+                ? smoothstep(0.001,
+                    max(gRainStateMobileThresholdUV, 0.0011),
+                    length(velocity)) : 0.0;
             float movingAdhesion = lerp(adhesion,
-                adhesion * 0.08, mobile);
+                adhesion * saturate(gRainStateKineticAdhesionFraction),
+                mobile);
             float movingForce = forceMagnitude;
 
             velocity +=
@@ -1505,7 +1546,8 @@ local rainStateUpdateParams = {
                     movingForce,
                     movingAdhesion,
                     dt
-                ) * lerp(1.0, 16.0, mobile);
+                ) * lerp(1.0,
+                    max(gRainStateMovingForceGain, 0.0), mobile);
 
             velocity =
                 rainStateApplyDrag(
@@ -5101,6 +5143,12 @@ local function updateRainGPUState(sim)
     rainStateUpdateParams.values.gRainForceMask = forceMask
     rainStateUpdateParams.values.gRainPhysicsAccelScale =
         cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
+    rainStateUpdateParams.values.gRainGravityGain =
+        cfg.RUNTIME.RAIN_FORCE_GRAVITY_GAIN
+    rainStateUpdateParams.values.gRainInertiaGain =
+        cfg.RUNTIME.RAIN_FORCE_INERTIA_GAIN
+    rainStateUpdateParams.values.gRainAirflowGain =
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_GAIN
     rainStateUpdateParams.values.gRainAirVelocityWorld:set(
         -ac.getCar(0).velocity.x,
         -ac.getCar(0).velocity.y,
@@ -5120,10 +5168,20 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER
     rainStateUpdateParams.values.gRainStateBirthGlideSeconds =
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS
+    rainStateUpdateParams.values.gRainStateBirthSettleSeconds =
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS
     rainStateUpdateParams.values.gRainStateMobileSpeedMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER
     rainStateUpdateParams.values.gRainStateMobileDrag =
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG
+    rainStateUpdateParams.values.gRainStateKineticAdhesionFraction =
+        cfg.RUNTIME.RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION
+    rainStateUpdateParams.values.gRainStateMovingForceGain =
+        cfg.RUNTIME.RAIN_GPU_STATE_MOVING_FORCE_GAIN
+    rainStateUpdateParams.values.gRainStateMobileThresholdUV =
+        cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_THRESHOLD_UV
+    rainStateUpdateParams.values.gRainStatePhysicalMaxSpeed1MM =
+        cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM
     rainStateUpdateParams.values.gRainStateGravity =
         math.abs(
             ac.getSim()
@@ -9828,6 +9886,14 @@ function windowMain(dt)
     if birthGlideChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = birthGlide
     end
+    local settleTime, settleChanged = ui.slider(
+        'New drop settle (seconds)',
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS,
+        0.0, 0.30, '%.3f'
+    )
+    if settleChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS = settleTime
+    end
     ui.text('Driving blend: stopped below 2 m/s; full at 18 m/s.')
 
     ui.separator()
@@ -9922,6 +9988,40 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED and 'ON' or 'OFF'
     ))
     ui.text('All enabled sources are summed in WORLD m/s^2, then projected once onto the visor surface.')
+
+    ui.separator()
+    ui.text('Settled-water physics tuning (temporary)')
+    ui.text('Changes apply live. Set one source at a time before mixing forces.')
+    for _, control in ipairs({
+        {'Base force conversion', 'RAIN_PHYSICS_ACCEL_SCALE', 0.0, 0.20, '%.5f'},
+        {'Gravity gain', 'RAIN_FORCE_GRAVITY_GAIN', 0.0, 4.0, '%.2f'},
+        {'Inertia gain', 'RAIN_FORCE_INERTIA_GAIN', 0.0, 4.0, '%.2f'},
+        {'Airflow gain', 'RAIN_FORCE_AIRFLOW_GAIN', 0.0, 2.0, '%.3f'},
+        {'Static adhesion minimum', 'RAIN_ADHESION_MIN', 0.0, 4.0, '%.3f'},
+        {'Static adhesion maximum', 'RAIN_ADHESION_MAX', 0.0, 4.0, '%.3f'},
+        {'Kinetic adhesion / static', 'RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION', 0.0, 1.0, '%.3f'},
+        {'Flow acceleration', 'RAIN_FLOW_ACCELERATION', 0.0, 0.30, '%.4f'},
+        {'Flow force gain in motion', 'RAIN_GPU_STATE_MOVING_FORCE_GAIN', 0.0, 40.0, '%.2f'},
+        {'Flow speed scale', 'RAIN_FLOW_SPEED_SCALE', 0.0, 8.0, '%.2f'},
+        {'Flow drag when pinned', 'RAIN_FLOW_DRAG', 0.0, 20.0, '%.2f'},
+        {'Movement threshold (UV/s)', 'RAIN_GPU_STATE_MOBILE_THRESHOLD_UV', 0.0011, 0.050, '%.4f'},
+        {'Surface speed 1 mm (UV/s)', 'RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM', 0.001, 0.10, '%.4f'},
+    }) do
+        local value, sliderChanged = ui.slider(
+            control[1], cfg.RUNTIME[control[2]],
+            control[3], control[4], control[5]
+        )
+        if sliderChanged then
+            cfg.RUNTIME[control[2]] = value
+            if control[2] == 'RAIN_ADHESION_MIN' then
+                cfg.RUNTIME.RAIN_ADHESION_MAX = math.max(
+                    value, cfg.RUNTIME.RAIN_ADHESION_MAX)
+            elseif control[2] == 'RAIN_ADHESION_MAX' then
+                cfg.RUNTIME.RAIN_ADHESION_MIN = math.min(
+                    value, cfg.RUNTIME.RAIN_ADHESION_MIN)
+            end
+        end
+    end
 
     --------------------------------------------------------
     -- Phase A validation
