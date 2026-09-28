@@ -428,6 +428,8 @@ local cfg = scriptSettings:mapConfig({
         -- retain a small stable per-drop residual angle in radians.
         RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG = true,
         RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS = 0.45,
+        -- Right-only orb probe: broad forward image with low-detail mips.
+        RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
         -- The screen copy did not fix the rain overlay or tone mismatch;
         -- disable its per-frame allocation/copy/mips before testing stages.
         RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
@@ -6702,6 +6704,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS)
             .. ' wideSurfaceRotationDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG)
+            .. ' wideOrbDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG)
             .. ' screenSourceCompareDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
             .. ' weatherScreenFrame='
@@ -6829,6 +6833,9 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS,
             gDynamicDropWideSurfaceRotationDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropWideOrbDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropScreenSourceCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
