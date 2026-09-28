@@ -5073,3 +5073,46 @@ teleporting streaks across rebirth, no invalid UV or size, and measure
 app-on/off FPS at matched Hurricane rain/camera. The UI remains until
 the user selects behavior and numeric lifetime values; it can then be
 removed or converted into a deliberate product setting.
+
+### 148. Prevent absorbing dead slots and populate light rain (2026-09-28)
+
+In-game checks exposed a structural error in section 147's admission:
+at Light Rain around rain=0.03 no drops persisted, Rain around 0.08
+started at 12 and rapidly decayed to zero, and Heavy Rain around 0.49
+started at 217 but fell through 20 to zero over tens of seconds.
+Previously, each dead slot sampled a hash tied to its current birth
+generation. Failure left the generation unchanged, so that slot never
+became eligible again at a steady rain value. After repeated exits or
+age deaths, the mobile pool was irreversibly depleted.
+
+Now eligibility is a stable hash of slot index alone, evaluated against
+a rain-responsive target occupancy. At default density scale 1.0 the
+eligible fraction is `0.05 + 0.90*sqrt(rain)` when rain exceeds 0.001,
+clamped to 1. Approximate capacity at 512 slots: rain 0.03 → 105,
+rain 0.08 → 156, rain 0.50 → 351. Live counts can be lower while
+eligible slots wait for respawn or briefly exit the mask. Every eligible
+dead slot is guaranteed another attempt after its randomized 0.15–0.75
+s gap multiplied by `lerp(3, 0.5, sqrt(rain))`; generation still
+increments only at a successful birth. The RainFX tab temporarily
+exposes `Moving drop density` (0.5..2.0) to tune these counts.
+
+The source rain signal sometimes momentarily reads zero while the
+weather still shows visible rain. In live-weather mode, use fast attack
+and a five-second release filter on `sim.rainIntensity` before birth
+and dry-off decisions. The explicit slider override (0, 0.03, 0.08,
+0.50, 1) bypasses filtering, so reproducible density tests remain
+possible and override 0 still stops births. A new small-biased mobile
+birth size is `lerp(0.35 mm, lerp(1.4 mm, 6 mm,
+sqrt(saturate(2*rain))), hash²)`; diagnostic modes 4/10 retain their
+existing 0.5–6 mm physical distribution and calibrated UV conversion.
+This is provisional until stationary background drops are implemented.
+
+Log the smoothed rain and target fraction beside alive, waiting,
+pending and accumulated births. At fixed Hurricane camera and equal
+rain, compare FPS with the previous build and test rain override 0,
+0.03, 0.08 and 0.50 at least 30 seconds each. Counts should approach
+a stable range and births continue with unchanged rain; the smallest
+sizes should dominate Light Rain. Then return override to -1 and test
+real Light Rain/Rain/Heavy Rain transitions. Observe if fading all
+drops upon a real weather stop happens too quickly; tune the dry-off
+rule separately rather than hiding continued births when truly dry.
