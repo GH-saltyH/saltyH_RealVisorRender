@@ -4703,3 +4703,40 @@ creates halos on sky/geometry boundaries, whether sharp falling rain stays
 excluded by the smoke stage, and whether FPS changes within comparable
 rain intensity. A source tone mismatch still requires a separate fix; blur
 can only mask a small difference, not reproduce the missing weather pass.
+
+### 138. Remove diagnostic cutout before comparing with CSP droplets (2026-09-28)
+
+The supplied screenshot (`image(2).png`, 851×359) shows three conspicuous
+circular project drops with a bright vertical debug divider and different
+scene colors inside; the CSP rain formations nearby have softer, irregular
+contours that blend into the background. The user reports that the weak
+mip blur itself is acceptable but the projected image still does not belong
+to the same scene. These are two separate issues: debug compositing and
+independent GeometryShot/WeatherFX mismatch. Do not infer that more blur or
+a new lens curve can repair the underlying source colors.
+
+Preset `RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG=false` to remove
+the amber divider and alpha=1 diagnostic output. Set
+`RAIN_DYNAMIC_DROP_REFRACTION_PIXELS=48` to retain the left half's 48px
+control, which the debug switch previously hardcoded. Preset
+`RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG=true`: the visible-right concave
+lens uses 0.38 center opacity, a small Fresnel/highlight contribution,
+and fades from r=0.72 to transparent at its outline. The left half keeps
+the earlier translucent 0.55+ profile with no debug separator. Geometry,
+depth, weather sky adjustment, subtle mip blur and verified `main.smoke`
+render stage remain active. This directly tests whether the hard circle
+comes chiefly from the debug opaque output. The independent scene still
+does not match the current weather/road color: partial blending can hide a
+small difference but can also create a double image. Compare recognizable
+stationary edges at the same Hurricane camera and note whether the right
+side still bends them visibly, whether a second unshifted image appears,
+whether the outer ring is softer, and whether drop visibility becomes too
+weak. Look for raindrops that remain stronger than surrounding scene and
+confirm that sharp falling rain stays excluded.
+
+If soft compositing helps but cannot correct the road/sky tone, the next
+source investigation must target access to a clean, weather-composited
+scene at the correct color stage. Independently vary droplet outline,
+orientation, merging and trail widths after a visually stable composition
+is chosen. CSP's irregular forms are a visual reference, not evidence that
+its private capture/occlusion pipeline is reproducible from the Lua app.
