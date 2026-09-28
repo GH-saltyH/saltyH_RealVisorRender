@@ -4941,3 +4941,88 @@ weather and rain intensity, compare FPS with pixels on versus off
 while leaving geometry enabled, then whole trails on versus off. The
 current strip does not clear underlying stationary droplets or leave
 streaks after the head passes; those are separate next stages.
+
+### 146. Lifecycle and layered-rain architecture before real trails (2026-09-28)
+
+The user accepts the orb image and asks to replace a head-attached
+speed-to-length strip with recorded trajectories that expire by age.
+They also ask to establish birth/death and separate a dense resting
+layer from rarer new/falling/flowing water, with rain-dependent sizes.
+Put the accepted orb on the whole image by presetting
+`RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG=false`. Preserve the switch for
+later controlled optical comparisons; expect a possible cost change
+because the broader sampling profile now covers the former control
+half. Disable the provisional head-attached trail by default, retaining
+its calibration UI for later tests rather than accepting its current
+numeric values as lifetime parameters.
+
+Existing state audit: 512 GPU state texels each hold UV position and
+velocity, while a second texture holds radius, mass, an accumulated
+timer, and an alive/dead/respawn enum. Initialization chooses a uniform
+deterministic 0.5–6.0 mm diameter. Ordinary `RAIN_GPU_STATE_MODE=3`
+sets `gRainStateLifecycle=0` despite `RAIN_GPU_STATE_LIFECYCLE=true`;
+mode 6 switches on boundary-death and a fixed 0.15–0.75 s respawn gap.
+There is no finite age while a droplet stays on the visor, no sustained
+rain-dependent birth rate, no impact burst, no generation ID, no merge
+and no historical trajectory. The asynchronous CPU readback exports UV,
+velocity, radius and alive flag only. A stationary full field can thus
+remain unchanged indefinitely. `ac.getConditionsSet().rainIntensity`
+is available in the bundled SDK; weather labels alone are insufficient
+to set drop density. Current trails map the current head backward from
+instantaneous speed and do not store past positions.
+
+Proposed visual layers, from back to front:
+
+| Layer | Purpose and initial size proposal | Birth/death and interaction |
+| --- | --- | --- |
+| Residual film and fine beads | Thin low-contrast surface field, about 0.2–1.0 mm bead diameters; density driven by rain and evaporation, not full-opacity fog. | Remains behind other water. Flow clears it locally; it recovers gradually if rain continues. |
+| Resting attached drops | Predominantly about 0.5–1.5 mm, with rarer 1.5–2.5 mm beads; overlapping shapes create nonuniform outlines. | Rain-dependent arrivals plus bounded age/evaporation keep even stationary coverage renewing. A nearby flow can absorb or hide them without a per-pair search. |
+| Moving and impact drops | Flowing drops mainly about 0.8–3.5 mm; rare 3.5–6 mm direct impacts make a brief spread/satellite burst. | Explicit birth, active, settling/flow, exit or expiration, cooldown, and new generation. The burst is capped and tied to impact energy and rain exposure. |
+| Deposited trail | Speed and radius set deposition width and movement, while time since deposit controls fade. | A swept area locally suppresses resting beads and thin film; suppression recovers after the trail fades, starting at the oldest point. |
+
+These are proposed size bands in the already calibrated physical-mm
+scale, not approved values. Avoid allocating every resting bead as a
+CPU-updated quad: maintain a bounded GPU density/coverage mask in visor
+UV for the background, preserve the existing GPU state and mesh for the
+sparser moving drops, and represent trail age and clearing as a bounded
+visor-UV history/coverage field. A clear mask modulates resting beads
+instead of destroying and respawning every bead. Assign each mobile
+slot a generation on rebirth so trail samples cannot connect the old
+and new positions. Record positions at a bounded spatial/temporal rate,
+stamp continuous segments between samples, and decay according to
+stored age; avoid a screen-wide per-pixel loop over all 512 drops.
+Validate the actual CSP Lua canvas/render route and cost before
+committing to a history texture or CPU-side batches. Never introduce
+another full-resolution GeometryShot for these layers.
+
+Implementation order and acceptance gates:
+
+1. Keep the full-screen accepted orb as baseline and measure FPS in a
+   fixed camera/rain condition. Add lifecycle diagnostics for alive,
+   waiting and newly born counts plus generation; verify birth/death
+   while parked and when rain starts/stops before altering appearance.
+2. Add bounded, rain-intensity-driven arrivals and age/evaporation to
+   moving slots. Preserve U 0..1, V -1..0 and the measured mm-to-UV
+   scale. Check population and birth sizes at zero, medium and heavy
+   rain and the sparse readback's generation behavior.
+3. Add the low-cost attached background field with a configurable
+   density/diameter distribution and an optical appearance separately
+   from mobile drops. Use temporary sliders for density, size mixture
+   and opacity; compare stationary rain, dry-off and FPS, then let the
+   user select settings before removing sliders.
+4. Prototype trajectory stamping and a time-based clearing mask with
+   bounded resources. Test a single moving head and then many heads:
+   oldest-to-newest fade, no bridge across respawns, held-out drops
+   suppressed inside the trail and recovery afterward. Calibrate
+   persistence, width and fading with temporary UI. Compare rendering
+   and whole-app FPS under fixed rain intensity.
+5. Add short impact bursts and size/velocity distributions, then
+   constrained merging/splitting and spray conditions only after the
+   preceding population and trail tests pass. Use the same cap and
+   generation scheme for all mobile effects, and gate heavy effects on
+   actual exposure, distance and speed rather than duplicating the
+   stationary layer.
+
+Keep the unresolved all-sky black/tone mismatch and the transparent KN5
+visor rain-overlay artifact as separate source/render-stage issues;
+neither requires changing particle birth logic.
