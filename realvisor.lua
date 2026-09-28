@@ -494,13 +494,16 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_IMPACT_FAST_TRAVEL_MIX = 0.75,
         -- Static micro droplets share the main mesh and scene shot.
         RAIN_DYNAMIC_MICRO_LAYER_ENABLED = true,
+        RAIN_DYNAMIC_MICRO_PATTERN_ENABLED = true,
+        RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.65,
+        RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 2048,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.42,
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.85,
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = true,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 2.0,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
-        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.78,
+        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.45,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -6042,11 +6045,18 @@ local function initializeRainDynamicSurfaceTest()
     rainDynamicSurfaceParent = parent
 
     local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
+    local useMicroPattern = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
+        and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
     local microCount = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
+        and not useMicroPattern
         and math.max(0, math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_COUNT))
         or 0
-    local meshVertices = ac.VertexBuffer(count * 8 + microCount * 4)
-    local meshIndices = ac.IndicesBuffer(count * 12 + microCount * 6)
+    local patternVertexCount = useMicroPattern and #vertices or 0
+    local patternIndexCount = useMicroPattern and #indices or 0
+    local meshVertices = ac.VertexBuffer(
+        count * 8 + microCount * 4 + patternVertexCount)
+    local meshIndices = ac.IndicesBuffer(
+        count * 12 + microCount * 6 + patternIndexCount)
     rainDynamicSurfaceMeshVertices = meshVertices
     rainDynamicSurfaceMeshCount = count
 
@@ -6056,7 +6066,8 @@ local function initializeRainDynamicSurfaceTest()
     local radiusUV = diameterUV * 0.5
     local surfaceOffset = cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
 
-    local vertexIndex, indexIndex = 1, microCount * 6 + 1
+    local vertexIndex, indexIndex = 1,
+        microCount * 6 + patternIndexCount + 1
     local hitCount, missCount = 0, 0
 
     for i = 0, count - 1 do
@@ -6183,13 +6194,101 @@ local function initializeRainDynamicSurfaceTest()
         meshIndices:set(indexBase + 5, microBase + 3)
         microVertexIndex = microVertexIndex + 4
     end
-    ac.log(appNameDebug .. ' Micro layer mesh: mapped='
-        .. tostring(microMapped) .. '/' .. tostring(microCount)
-        .. ' clusters=' .. tostring(microClusters)
-        .. ' diameterMM='
-        .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
-        .. '..'
-        .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM))
+    if not useMicroPattern then
+        ac.log(appNameDebug .. ' Micro layer mesh: mapped='
+            .. tostring(microMapped) .. '/' .. tostring(microCount)
+            .. ' clusters=' .. tostring(microClusters)
+            .. ' diameterMM='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
+            .. '..'
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM))
+    end
+
+    if useMicroPattern then
+        local baseVertex = count * 8 + microCount * 4
+        for i = 1, patternVertexCount do
+            local source = vertices:get(i)
+            meshVertices:set(baseVertex + i, ac.MeshVertex.new(
+                source.pos
+                    + source.normal * cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M,
+                source.normal,
+                vec2(source.uv.x - 4.0, source.uv.y)))
+        end
+        for i = 1, patternIndexCount do
+            meshIndices:set(microCount * 6 + i,
+                baseVertex + indices:get(i))
+        end
+
+        local patternSize = math.max(256,
+            math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE))
+        local patternGrid = math.max(4, math.floor(
+            1.80 / math.max(0.01,
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM)
+                / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+                + 0.5))
+        rainDynamicSceneCopyState.microPatternCanvas = ui.ExtraCanvas(
+            vec2(patternSize, patternSize), 1,
+            render.TextureFormat.R8G8B8A8.UNorm
+        ):setName('RainFX static micro pattern')
+        if rainDynamicSceneCopyState.microPatternCanvas then
+            local maskOk, maskResult = pcall(function()
+                return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
+                    values = { gMicroPatternGrid = patternGrid },
+                    shader = [[
+                        float3 hashMicroCell(float2 cell)
+                        {
+                            float3 p = frac(float3(cell.x, cell.y, cell.x)
+                                * 0.1031);
+                            p += dot(p, p.yzx + 33.33);
+                            return frac((p.xxy + p.yzz) * p.zyx);
+                        }
+                        float4 main(PS_IN pin)
+                        {
+                            float2 p = pin.Tex * gMicroPatternGrid;
+                            float2 baseCell = floor(p);
+                            float best = -1.0;
+                            float2 chosen = float2(0.0, 0.0);
+                            [unroll] for (int y = -1; y <= 1; ++y)
+                            {
+                                [unroll] for (int x = -1; x <= 1; ++x)
+                                {
+                                    float2 cell = baseCell
+                                        + float2((float)x, (float)y);
+                                    float3 h = hashMicroCell(cell);
+                                    float2 center = cell + 0.5
+                                        + (h.xy - 0.5) * 0.12;
+                                    float2 local = (p - center) / 0.90;
+                                    if (dot(local, local) < 1.0 && h.z > best)
+                                    {
+                                        best = h.z;
+                                        chosen = local;
+                                    }
+                                }
+                            }
+                            return float4(chosen * 0.5 + 0.5,
+                                saturate(length(chosen)),
+                                best >= 0.0 ? 1.0 : 0.0);
+                        }
+                    ]]
+                })
+            end)
+            rainDynamicSceneCopyState.microPatternReady =
+                maskOk and maskResult ~= false
+            if not maskOk then
+                ac.warn(appNameDebug .. ' Micro pattern shader: '
+                    .. tostring(maskResult))
+            end
+        else
+            rainDynamicSceneCopyState.microPatternReady = false
+        end
+        ac.log(appNameDebug .. ' Micro pattern: '
+            .. tostring(patternSize) .. 'x' .. tostring(patternSize)
+            .. ' grid=' .. tostring(patternGrid)
+            .. ' surfaceVertices=' .. tostring(patternVertexCount)
+            .. ' triangles=' .. tostring(math.floor(patternIndexCount / 3))
+            .. ' ready='
+            .. tostring(rainDynamicSceneCopyState.microPatternReady))
+    end
 
     rainDynamicSurfaceMesh = rainDynamicSurfaceParent:createMesh(
         RAIN_DYNAMIC_SURFACE_MESH_NAME,
@@ -7474,6 +7573,8 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.weatherScreenCanvas
                 or 'dynamic::screen',
             txDynamicControl = textureRainSurfaceNormal,
+            txDynamicMicroPattern =
+                rainDynamicSceneCopyState.microPatternCanvas or false,
         },
         values = {
             gDynamicDropDebugUV =
@@ -7598,6 +7699,10 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
             gDynamicDropMicroLayerEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and 1.0 or 0.0,
+            gDynamicDropMicroPatternEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
+                and rainDynamicSceneCopyState.microPatternReady
+                and 1.0 or 0.0,
             gDynamicDropMicroDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_DEBUG and 1.0 or 0.0,
             gDynamicDropMicroRefractionPixels =
