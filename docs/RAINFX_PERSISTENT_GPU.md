@@ -4477,3 +4477,25 @@ the next step is a sky-only blend with edge-aware transitions and a test
 against clearer weather. A second geometry shot and global color gain are
 not part of this experiment. Record FPS to isolate the extra sky-depth
 sample cost within the same weather.
+
+### 129. Restore cloud brightness structure without its sunset hue (2026-09-28)
+
+The user reports that in Hurricane the right-hand solid `sim.fogColor`
+closely matches the real cloud tone and FPS stays near the previous
+72–74 baseline, but the solid fill loses the cloud shape. Keep the same
+HDR GeometryShot, depth classification, fixed 48px refraction, opaque split
+and amber seam. Preset `RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG=true`
+with `RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG=true`, depth debug disabled.
+The visible left half remains raw HDR. On visible-right sky only, multiply
+the weather fog color by the ratio of the original sky luminance to its
+broad, level-9 mip luminance, clamped to 0.6–1.4. This carries some local
+cloud contrast without copying the stale sunset hue; geometry stays raw.
+Allocate ten mips on the existing shot and call `mipsUpdate()` after its
+scene-ready update. This adds no second geometry render, but generates mips
+once per frame and samples an additional texture per sky pixel. Check
+whether clouds are visible and whether the unwanted sunset-cloud silhouette
+persists. Broad mips may include nearby geometry and create halos at the
+horizon; watch sky/building boundaries. Compare FPS at the same Hurricane
+camera against 72–74, and compare both halves for brightness and contrast.
+If the old cloud silhouette is visibly wrong even in luminance, a source
+from the actual WeatherFX composition is required for faithful clouds.

@@ -335,7 +335,28 @@ float4 main(PS_IN pin)
                     samLinearClamp, saturate(sceneUV + refractionOffset),
                     0.0).r;
                 if (shotDepth > 0.99999)
-                    refractedScene = gDynamicDropWeatherFogColor;
+                {
+                    if (gDynamicDropSkyCloudDetailDebug > 0.5)
+                    {
+                        // Transfer only cloud luminance contrast onto the
+                        // weather-matched sky color. A broad mip of the
+                        // same shot supplies a local exposure reference;
+                        // do not reintroduce the old sunset cloud hue.
+                        float3 broadSky = txDynamicSnapshot.SampleLevel(
+                            samLinearClamp,
+                            saturate(sceneUV + refractionOffset), 9.0).rgb;
+                        float skyLuma = dot(refractedScene,
+                            float3(0.2126, 0.7152, 0.0722));
+                        float broadLuma = dot(broadSky,
+                            float3(0.2126, 0.7152, 0.0722));
+                        float cloudContrast = clamp(skyLuma
+                            / max(broadLuma, 0.02), 0.6, 1.4);
+                        refractedScene = gDynamicDropWeatherFogColor
+                            * cloudContrast;
+                    }
+                    else
+                        refractedScene = gDynamicDropWeatherFogColor;
+                }
             }
             // Sky color test on the back-facing visor: image-left keeps
             // GeometryShot; image-right samples the final screen at the

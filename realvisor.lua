@@ -411,6 +411,9 @@ local cfg = scriptSettings:mapConfig({
         -- With verified shot depth, compare raw HDR sky (visible left)
         -- against the current fog color on sky pixels (visible right).
         RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG = true,
+        -- Compare fog-colored sky with the original shot's cloud brightness
+        -- restored (visible right), while visible left remains untouched.
+        RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6273,6 +6276,9 @@ render.onSceneReady(function()
     local yebisShot = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
     local shotWithDepth = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
         or cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
+    local shotMips = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
+        and 10 or 1
     local shotScale = yebisShot and math.max(0.5, math.min(1.0,
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE)) or 1.0
     local shotWidth = math.max(1, math.floor(shotScale * (
@@ -6286,6 +6292,7 @@ render.onSceneReady(function()
         or rainDynamicSceneCopyState.shotHeight ~= shotHeight
         or rainDynamicSceneCopyState.shotYebis ~= yebisShot
         or rainDynamicSceneCopyState.shotWithDepth ~= shotWithDepth
+        or rainDynamicSceneCopyState.shotMips ~= shotMips
     if shotResized then
         if rainDynamicSceneCopyState.geometryShot then
             rainDynamicSceneCopyState.geometryShot:dispose()
@@ -6293,7 +6300,7 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.geometryShot = ac.GeometryShot(
             ac.findNodes('sceneRoot:yes'),
             vec2(shotWidth, shotHeight),
-            1,
+            shotMips,
             shotWithDepth,
             yebisShot and render.AntialiasingMode.YEBIS
                 or render.AntialiasingMode.None,
@@ -6310,6 +6317,7 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.shotHeight = shotHeight
         rainDynamicSceneCopyState.shotYebis = yebisShot
         rainDynamicSceneCopyState.shotWithDepth = shotWithDepth
+        rainDynamicSceneCopyState.shotMips = shotMips
     end
     rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
         sim.cameraClipNear,
@@ -6321,12 +6329,16 @@ render.onSceneReady(function()
         sim.cameraUp,
         sim.cameraFOV
     )
+    if shotMips > 1 then
+        rainDynamicSceneCopyState.geometryShot:mipsUpdate()
+    end
     rainDynamicSceneCopyState.shotFrame = sim.frame
     if not rainDynamicManualPreDrawLogged or shotResized then
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: updated '
             .. tostring(shotWidth) .. 'x' .. tostring(shotHeight)
             .. ' yebis=' .. tostring(yebisShot)
             .. ' depth=' .. tostring(shotWithDepth)
+            .. ' mips=' .. tostring(shotMips)
             .. ' frame=' .. tostring(sim.frame))
     end
 end)
@@ -6597,6 +6609,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG)
             .. ' skyFogColorDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG)
+            .. ' skyCloudDetailDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG)
             .. ' fogColor='
             .. tostring(sim.fogColor)
             .. ' pixelUV='
@@ -6692,6 +6706,10 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropSkyFogColorDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
+            gDynamicDropSkyCloudDetailDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
                 and rainDynamicSceneCopyState.shotWithDepth
                 and 1.0 or 0.0,
             gDynamicDropWeatherFogColor = sim.fogColor,
