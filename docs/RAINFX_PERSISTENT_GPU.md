@@ -5290,3 +5290,42 @@ state position in Debug 51 if screen orientation remains confusing.
 During driving, check whether lateral lean responds to speed and
 direction. Later pop-in/splashing should use a separate bounded number
 of large-impact child drops rather than unbounded per-drop fragments.
+
+### 154. Continue movement after impact; scramble recurring spawn regions (2026-09-28)
+
+User test: drops travel only around four diameters in one second, then
+seem to return toward their old trajectory. Edge births lean outward;
+car speed makes little visible difference. Recurring birth spots remain.
+The impact used +V for falling, while continuous world gravity could
+project toward -V. At glide expiry the old speed limit, 7/s drag and
+static adhesion also abruptly dominated the remaining motion.
+
+In lifecycle mode only, orient continuous gravity toward increasing V;
+vehicle inertia retains its signed direction. Already moving drops
+smoothly transition to 8% of their old static adhesion, 16 times the
+calibrated surface speed ceiling and drag 0.8/s. Attachment returns as
+they actually slow down. Their force acceleration increases while
+moving, and car-relative tangent airflow now drives them independently
+of the global airflow test switch. Increase impact transfer from 0.006
+to 0.020 of incoming tangent speed. Temporary sliders expose the
+mobile speed ceiling, moving drag and mobile airflow gain (defaults
+16, 0.8 and 0.012). Initial momentum and impact glide remain tunable.
+
+The spawn hash now confines values to a small modular range, avoiding
+float precision loss from large sine outputs. Every slot/generation
+rotates a low-discrepancy anchor, jitters candidates around it, and
+expands the search radius every 16 attempts. Eight valid candidates
+still compete on clearance to living neighbors. Offline sampling of
+512 mixed generations against the supplied mask found no fallback,
+around 58 attempts per birth, and 299 occupied 64×32 cells before
+scoring. The running game's visual spacing and cost remain to test.
+
+With a fixed camera, 2–4 second life and matched rain, compare motion
+at birth and after one second, both stopped and driving. At visor
+center, a gravity-driven birth should keep increasing V after glide;
+on the edges it may head outward. Record alive, births, uvCells64x32,
+maxCell, centerFallback and FPS. Compare mobile speed cap 8 versus 16,
+and car airflow 0 versus 0.012. A 1 mm drop's *upper bound* is now
+0.256 UV/s at mobile cap 16; actual travel can be shorter due to
+projection, drag, and early mask exits. If fast exits lower alive count,
+investigate the boundary lifecycle separately.
