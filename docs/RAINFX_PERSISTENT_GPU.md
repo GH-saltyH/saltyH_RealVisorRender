@@ -5567,3 +5567,38 @@ At the user's 2161x1249 shot size, mip 6 represents roughly 34x20 source
 texels and mip 5 roughly 68x39; sampling interpolates between levels.
 Compare center/edge 4.5/3.5 against 6/5 at fixed weather and camera, checking
 recognizable scene structure, neighboring orb diversity, boundaries, and FPS.
+
+### RainFX video reference and first impact prototype
+
+The supplied six-second 2560x1440/60 FPS RainFX recording shows a dense,
+relatively persistent fine-drop field underneath intermittent larger mobile
+streaks. The visual alone cannot establish whether CSP uses animated textures,
+procedural masks, simulation, or a combination; do not claim its source code
+or exact implementation from this recording. For this visor, retain our
+accepted 512-slot GPU lifecycle/forces as the mobile foreground, add a
+separately budgeted dense background later, and let moving heads temporarily
+clear that background as timed trails are introduced. This preserves the
+layer distinction visible in the clip without forcing thousands of new
+physical slots.
+
+First experiment now encodes an age band on the head quad's existing Tex.y
+without adding draw calls or textures. CPU readback tracks generation changes;
+large new births (diameter >= 1.4 mm) gain a brief asymmetric seven-lobe
+contour for 0.14 seconds. The pulse steps from three bands to zero and leaves
+all accepted velocities, mass, lifetime and settled-water force unchanged.
+`RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED=true` is the A/B flag; false restores
+existing silhouettes. This is a birth silhouette test, not actual detached
+satellites or physical water fragmentation. Check large-drop pop-ins in heavy
+rain, whether a spike is visible, its disappearance without a jump, repeated
+shapes and app ON/OFF FPS. The prior orb blur experiment and temporary blur
+sliders are removed; source sampling returns to existing center/edge mip
+4.5/3.5. Preserve any user-adjusted orb radius and directional flags.
+
+For true coalescence, next add a bounded neighbor selection on the immutable
+previous GPU state, with deterministic slot ownership. A collision resolves
+once into the ping-pong destination: winner gains loser volume/mass and
+volume-weighted velocity/position, loser becomes inactive with its own
+respawn gap. The state and meta passes must agree on the same ownership rule;
+no in-place writes or per-pixel unbounded scan. Establish a collision budget
+and instrument merged pairs, alive count and frame cost at 512 slots before
+turning it on by default. A drawn overlap alone does not count as merged mass.
