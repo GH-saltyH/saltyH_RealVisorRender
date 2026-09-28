@@ -4617,3 +4617,33 @@ varies. Compare upper/lower sky against actual cloudy regions and inspect
 bright falling rain both over sky and asphalt. If the screenshot copy is
 black or unavailable, check `weatherScreenFrame` and the logged canvas
 size before attributing a missing image to the fog tint.
+
+### 135. Test whether rain overlay ordering causes particle contrast (2026-09-28)
+
+The user corrects the interpretation of the rain streak artifact. Sharp
+falling-rain particles are rendered separately from the visor droplets;
+their shapes are not refracted inside the droplets. Only while passing
+through the visor-drop area do the particle colors become conspicuously
+inverted or highlighted, producing tearing/noise. CSP's own visor droplets
+do not show that sharp streak crossing their interiors. Filtering particle
+colors out of a refraction texture and calling `setParticles(false)` on
+the GeometryShot do not address a separately composited overlay. The new
+weather-screen right-lower sky and the independent-shot upper sky were
+similar in tone and both still contrasted with the actual scene.
+
+Disable `RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG` to stop allocating,
+copying and generating mips for the ineffective extra screen canvas. Leave
+the one HDR GeometryShot and the same broad inverted lens. Preset
+`RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG=true`, moving the single manual
+mesh draw from `main.track.transparent` to the documented `main.smoke`
+event. This tests whether that pass places visor water after the sharp
+rain particles and therefore masks their visual contrast inside drops.
+Keep depth read-only and cull disabled as in the previous draw. If the
+smoke event is not called in the current scene, drops can disappear; the
+regular transparent callback logs if no smoke-stage drop draw completes
+after 120 frames. Restore the flag to false to return to the proven track
+stage. Record whether water remains visible and depth-correct, whether
+falling rain still crosses/highlights inside drop regions, and FPS within
+comparable Hurricane precipitation intensity. If the noise persists with
+visible drops at smoke stage, a later screen/weather composition is likely,
+and this app callback does not establish a means to mask that engine pass.
