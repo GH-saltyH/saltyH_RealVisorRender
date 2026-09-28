@@ -80,8 +80,7 @@ float4 main(PS_IN pin)
         float lensRadius = saturate(pattern.z);
         // The winning disk owns the pixel; its outer ring also marks
         // boundaries where a newer disk hides an older one.
-        float rim = smoothstep(0.72, 0.88, lensRadius)
-            * (1.0 - smoothstep(0.96, 1.0, lensRadius));
+        float rim = smoothstep(0.65, 0.79, lensRadius);
         if (gDynamicDropMicroDebug > 0.5)
         {
             float3 diagnostic = lerp(float3(0.13, 0.22, 0.28),
@@ -133,11 +132,10 @@ float4 main(PS_IN pin)
             * (glint * 0.15 + rim * gDynamicDropMicroRimStrength);
         // Each winning disk carries its complete scene image. Uncovered
         // pattern texels are clipped above and reveal the live scene.
-        // Blend back to the live scene only at the winner disk's edge.
-        // This also reveals the boundary of an older overlapping disk.
-        float edgeReveal = smoothstep(0.74, 0.98, lensRadius);
+        // The baked mask clips the topmost disk's entire thin rim, so
+        // underlying scene appears even when another disk lies below it.
         return float4(sceneColor + lightAccent,
-            saturate(gDynamicDropMicroOpacity * (1.0 - edgeReveal)));
+            saturate(gDynamicDropMicroOpacity));
     }
 
     if (microLayer)
