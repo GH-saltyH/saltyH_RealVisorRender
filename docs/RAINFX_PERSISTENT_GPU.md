@@ -5116,3 +5116,54 @@ sizes should dominate Light Rain. Then return override to -1 and test
 real Light Rain/Rain/Heavy Rain transitions. Observe if fading all
 drops upon a real weather stop happens too quickly; tune the dry-off
 rule separately rather than hiding continued births when truly dry.
+
+### 149. Increase rain presence without increasing GPU slot count (2026-09-28)
+
+User tests confirm stable long-run alive counts and real-weather input
+tracking. With the vehicle stopped and density scale 1, reported
+rain/target/alive/births-per-log are: 0.03/0.21/111/21,
+0.08/0.30/152/20, 0.31/0.55/268/72, 0.50/0.69/347/79,
+0.70/0.80/414/88. Light Rain at 0.03 looks appropriate; the user
+wants around twice as many in Rain at 0.08 and stronger presence at
+higher values. About 100 distinguishable drops out of up to 480 alive
+suggests overlapping projected footprints, but cannot establish from
+appearance alone whether the UV positions themselves cluster or simply
+share the same narrow visor area.
+
+Keep the 512 persistent slots and the accepted 0.03 profile. New
+stationary eligible fractions are piecewise continuous at rain
+0.03 → ~0.21, 0.08 → 0.60, 0.31 → 0.85, 0.50 → 0.95, and
+0.70 → 1.0 (before dead-slot gaps or the existing density slider).
+Do not increase GPU count yet: more state pixels, async readback
+scalars, CPU vertex writes and drop pixels might significantly affect
+FPS. Existing eligibility remains stable per slot and repeat births
+continue; this curve does not reintroduce the absorbing-dead-slot bug.
+
+For driving exposure, compute vehicle velocity magnitude in m/s.
+Multiply the eligible fraction by `1 + min(speed/40, 2)*gain`, capped
+at 1, and shorten waiting times by the same factor. Preset gain 1.0
+with a temporary 0..2 RainFX slider. This changes arrivals and the
+number exposed, not the physical surface-force acceleration or the
+configured lifetime. When already at 512 eligible slots, speed can
+only shorten gaps; additional impact particles require a separate
+bounded layer. Compare 0 versus about 40–60 m/s at the same rain.
+
+At rain above 0.03, reduce the typical newly born drop's maximum size
+gradually toward 4.1 mm at rain 0.50, while retaining a small,
+rain-dependent fraction of larger drops with the old 6 mm ceiling.
+The 0.03 distribution is unchanged. This reduces large-body overlap
+while retaining visual variety. Preserve the mm-to-UV calibration and
+keep the 0.5–6 mm diagnostic mode distribution unchanged. Increase
+the spawn mask rejection limit from 24 to 32 to further discourage
+multiple failed spawns at the same fixed fallback center.
+
+Every 180 accepted readbacks the existing lifecycle log now also
+reports `exposure`, occupied 64×32 visor-UV cells, the largest per-cell
+count and how many live drops are exactly at the fallback center. This
+low-cost snapshot distinguishes crowded UV placement from large
+optical footprints, but it is not a pixel-accurate overlap metric.
+At fixed camera/rain, compare rain 0.03, 0.08, 0.31, 0.50, 0.70;
+record alive, UV cells, center fallback, visually distinct drops and
+FPS. If 64×32 occupancy stays nearly fixed while alive rises, the next
+stage should allocate genuinely separated valid spawn locations,
+using a bounded spatial occupancy structure rather than more slots.
