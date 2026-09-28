@@ -4585,3 +4585,35 @@ claim. If screen content matches the real weather but the colors remain
 dark, the limiting problem is transferring composed LDR content into this
 HDR draw stage, not the optical offset; avoid applying a uniform gain as a
 production fix without verified tone mapping and exposure.
+
+### 134. Transfer weather cloud structure without rain streak colors (2026-09-28)
+
+The user confirms the direct LDR screen half reflects the Hurricane cloud
+cover correctly: it does not show the clear underlying sunset clouds that
+the clean GeometryShot shows. Its darkness makes direct tone comparison
+unreliable, and refracted rain particles appear too bright. Keep the 4.5x
+inverted right lens, clean HDR geometry pixels, matched sky fog color and
+opaque comparison. The right-upper sky continues using the independent
+shot's cloud luminance; right-lower sky uses the actual weather-screen
+cloud structure after filtering. The asphalt on both halves remains the
+independent HDR shot: this test does not solve the separate asphalt color
+mismatch.
+
+Explicitly disable particles in the independent GeometryShot, whose API
+defaults to excluding them, to document and preserve that source behavior.
+At `main.track.opaque` copy the available `dynamic::screen` LDR source once
+per frame to a half-size R8G8B8A8 canvas with nine mips and generate its
+mips. At the same inverted UV sample level 4 for clouds and level 8 as a
+broad brightness reference. In the visible-right lower sky only, transfer
+their bounded luminance ratio (0.82–1.18) onto `sim.fogColor`. Depth masks
+out all geometry; the direct LDR sample and rain streak chroma are omitted.
+Level 4 averages narrow bright rain streaks and small prior droplets but
+can soften fine cloud detail. If a rain streak or large previous droplet
+survives that blur, reduce its influence or use a more robust filter.
+The half-size canvas costs about 8 MB at 3240×1872 with its mip chain,
+plus a copy and mip generation each frame. Track Hurricane FPS at similar
+rain intensity; do not call differences an optimization when precipitation
+varies. Compare upper/lower sky against actual cloudy regions and inspect
+bright falling rain both over sky and asphalt. If the screenshot copy is
+black or unavailable, check `weatherScreenFrame` and the logged canvas
+size before attributing a missing image to the fog tint.
