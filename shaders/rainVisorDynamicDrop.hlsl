@@ -349,8 +349,14 @@ float4 main(PS_IN pin)
                             float3(0.2126, 0.7152, 0.0722));
                         float broadLuma = dot(broadSky,
                             float3(0.2126, 0.7152, 0.0722));
-                        float cloudContrast = clamp(skyLuma
-                            / max(broadLuma, 0.02), 0.6, 1.4);
+                        // The broad reference darkened every tested sky
+                        // region in Hurricane. Keep the matched fog tone as
+                        // the anchor and transfer only restrained contrast.
+                        float rawContrast = skyLuma
+                            / max(broadLuma, 0.02);
+                        float cloudContrast = clamp(
+                            1.0 + (rawContrast - 1.0) * 0.25,
+                            0.95, 1.12);
                         refractedScene = gDynamicDropWeatherFogColor
                             * cloudContrast;
                     }
