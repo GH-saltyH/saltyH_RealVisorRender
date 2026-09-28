@@ -503,9 +503,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 8.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 8.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.06,
+        RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
+        RAIN_DYNAMIC_MICRO_PATTERN_ERASER_GRID_RATIO = 0.13,
+        RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 1.0,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
-        RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
+        RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 1.0,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
@@ -6247,7 +6249,11 @@ local function initializeRainDynamicSurfaceTest()
         if rainDynamicSceneCopyState.microPatternCanvas then
             local maskOk, maskResult = pcall(function()
                 return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
-                    values = { gMicroPatternGrid = patternGrid },
+                    values = {
+                        gMicroPatternGrid = patternGrid,
+                        gMicroEraserGridRatio =
+                            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ERASER_GRID_RATIO,
+                    },
                     shader = [[
                         float3 hashMicroCell(float2 cell)
                         {
@@ -6262,6 +6268,7 @@ local function initializeRainDynamicSurfaceTest()
                             float2 baseCell = floor(p);
                             float best = -1.0;
                             float2 chosen = float2(0.0, 0.0);
+                            float baseGate = 0.5;
                             // Two independently seeded, sparse strata avoid
                             // a visible grid; later disks always win overlaps.
                             [unroll] for (int layer = 0; layer < 2; ++layer)
@@ -6290,6 +6297,8 @@ local function initializeRainDynamicSurfaceTest()
                                         {
                                             best = priority;
                                             chosen = local;
+                                            baseGate = frac(h.x * 3.19
+                                                + h.y * 7.83 + h.z * 11.71);
                                         }
                                     }
                                 }
@@ -6299,8 +6308,38 @@ local function initializeRainDynamicSurfaceTest()
                             // Do not reveal an older disk beneath that rim.
                             float interior = best >= 0.0
                                 && radius < 0.81 ? 1.0 : 0.0;
+                            // Bake independent circular clearings into the
+                            // alpha channel. All pixels in one clearing share
+                            // a removal threshold; no second runtime texture.
+                            float2 eraseP = p * gMicroEraserGridRatio;
+                            float2 eraseCell = floor(eraseP);
+                            float eraseBest = -1.0;
+                            float eraseGate = baseGate;
+                            [unroll] for (int ey = -1; ey <= 1; ++ey)
+                            {
+                                [unroll] for (int ex = -1; ex <= 1; ++ex)
+                                {
+                                    float2 ec = eraseCell
+                                        + float2((float)ex, (float)ey);
+                                    float3 eh = hashMicroCell(ec
+                                        + float2(891.61, 246.37));
+                                    float2 eraseCenter = ec + 0.5
+                                        + (eh.xy - 0.5) * 0.45;
+                                    float2 delta = eraseP - eraseCenter;
+                                    if (dot(delta, delta) < 0.68 * 0.68
+                                        && eh.z > eraseBest)
+                                    {
+                                        eraseBest = eh.z;
+                                        eraseGate = frac(eh.x * 17.91
+                                            + eh.y * 5.73 + eh.z * 23.17);
+                                    }
+                                }
+                            }
+                            // Zero still denotes a transparent rim or gap.
+                            // Nonzero alpha stores the clearing order.
+                            float gate = 0.01 + 0.98 * eraseGate;
                             return float4(chosen * 0.5 + 0.5,
-                                radius, interior);
+                                radius, interior * gate);
                         }
                     ]]
                 })
@@ -6317,6 +6356,8 @@ local function initializeRainDynamicSurfaceTest()
         ac.log(appNameDebug .. ' Micro pattern: '
             .. tostring(patternSize) .. 'x' .. tostring(patternSize)
             .. ' grid=' .. tostring(patternGrid)
+            .. ' eraserRatio='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ERASER_GRID_RATIO)
             .. ' surfaceVertices=' .. tostring(patternVertexCount)
             .. ' triangles=' .. tostring(math.floor(patternIndexCount / 3))
             .. ' ready='
@@ -7739,6 +7780,11 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropMicroDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_DEBUG and 1.0 or 0.0,
+            gDynamicDropMicroRain = math.max(0.0, math.min(1.0,
+                cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0
+                    and cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+                    or sim.rainIntensity or 0.0))
+                ^ cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER,
             gDynamicDropMicroRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
             gDynamicDropMicroPatternGrid =
@@ -10294,6 +10340,15 @@ function windowMain(dt)
     )
     if microNormalChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = microNormalGain
+    end
+
+    local microRainPower, microRainPowerChanged = ui.slider(
+        'Micro clearing / rain curve',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER,
+        0.40, 3.00, '%.2f'
+    )
+    if microRainPowerChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = microRainPower
     end
 
     --------------------------------------------------------
