@@ -5364,3 +5364,39 @@ after glide and any readback snap. Record FPS, `travelMix`, effective
 `birthSpeed`, alive, `uvCells64x32` and `centerFallback`. If mobile
 drops flow too long after stopping, tune the transition/speed profile
 instead of reintroducing static adhesion for drops still in motion.
+
+### 156. Separate the birth stroke from settled-water forces (2026-09-28)
+
+The user reports the asynchronous-readback snap is now barely visible:
+retain the shortened prediction window. With `RAIN_FORCE_AIRFLOW_ENABLED`
+the observed V-shaped path is too strong. A newborn should briefly
+scratch downward across the visor and settle; subsequent gravity,
+inertia and optional external airflow are a separate physics decision.
+
+In lifecycle mode, for the configured 0.03–0.10 second birth interval
+(default 0.08), integrate only the downward birth velocity, attenuating
+it continuously; do not add continuous gravity, adhesion or airflow
+during the impact stroke. As the interval ends, clear that velocity
+once and resume the existing ordinary physics from rest. Thus the
+impact does not leak into the rolling-water speed/drag model after
+its lifespan. Supplying glide 0 disables the birth impulse. Existing
+physics diagnostic modes remain on their regular path.
+
+Remove the independent car-relative momentum from the birth direction
+and remove the added mobile-air drive altogether. Keep the existing
+`RAIN_FORCE_AIRFLOW_ENABLED` force pipeline separate for later tuning;
+it can still produce a V-shaped settled flow if enabled, which must
+be measured independently. Births retain the stopped/driving speed
+profile already calibrated, but their direction is predominantly +V
+at either speed. Reduce the outward edge component and sideways jitter
+to allow only a small curvature-dependent lean. Remove the obsolete
+mobile-air UI control. The transient effect's eventual trail/pop-in
+will be independent from the separate settled-water flow model.
+
+Test stopped and driving at equal rain with external airflow OFF first:
+watch the initial 0.08 seconds and the subsequent settled position.
+Then turn the external airflow ON; any remaining V shape after the
+birth interval belongs to the old airflow force path. Compare FPS,
+alive and boundary exits with the preceding build. Watch for a visual
+snap as the short impact velocity expires; the capped CPU prediction
+should keep that snap small.
