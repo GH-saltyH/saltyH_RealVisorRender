@@ -476,8 +476,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG = false,
         -- Keep the low-detail center; make its visible edge about half as
         -- blurred using the same existing GeometryShot mip chain.
-        RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP = 6.0,
-        RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 5.0,
+        RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 3.5,
         -- The screen copy did not fix the rain overlay or tone mismatch;
         -- disable its per-frame allocation/copy/mips before testing stages.
         RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
@@ -488,6 +487,8 @@ local cfg = scriptSettings:mapConfig({
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
+        RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED = true,
+        RAIN_DYNAMIC_DROP_IMPACT_SHAPE_SECONDS = 0.14,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -6222,6 +6223,7 @@ local function initializeRainDynamicStateReadback()
     rainDynamicStateHasSnapshot = false
     rainDynamicStateSnapshotTime = 0.0
     rainDynamicSceneCopyState.generation = {}
+    rainDynamicSceneCopyState.birthSeenAt = {}
     rainDynamicSceneCopyState.birthsSinceLog = 0
 
     for slotIndex = 1, ringSize do
@@ -6491,6 +6493,8 @@ local function requestRainDynamicStateReadback()
                 and rainDynamicSceneCopyState.generation[dst]
                     ~= generation then
                 births = births + 1
+                rainDynamicSceneCopyState.birthSeenAt[dst] =
+                    rainDynamicStateRenderClock
             end
             rainDynamicSceneCopyState.generation[dst] = generation
             local status = packedStatus % 4
@@ -6690,6 +6694,20 @@ local function applyRainDynamicStateToSurfaceMesh()
 
         if sample and radiusUV > 0.0 then
             mappedAlive = mappedAlive + 1
+            local impactBand = 0
+            local birthAt = rainDynamicSceneCopyState.birthSeenAt[i + 1]
+            local impactSeconds = cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_SHAPE_SECONDS
+            if cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED
+                and birthAt and impactSeconds > 0.0
+                and radiusUV >= cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.7
+            then
+                local impactAge = rainDynamicStateRenderClock - birthAt
+                if impactAge >= 0.0 and impactAge < impactSeconds then
+                    impactBand = math.min(3, math.ceil(
+                        (1.0 - impactAge / impactSeconds) * 3.0))
+                end
+            end
+            local impactUV = impactBand * 4.0
 
             local center =
                 sample.position + sample.normal * surfaceOffset
@@ -6703,7 +6721,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center - uOffset - vOffset,
                     sample.normal,
-                    vec2(shapeBand, 0)
+                    vec2(shapeBand, impactUV)
                 )
             )
             rainDynamicSurfaceMeshVertices:set(
@@ -6711,7 +6729,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center + uOffset - vOffset,
                     sample.normal,
-                    vec2(shapeBand + 1, 0)
+                    vec2(shapeBand + 1, impactUV)
                 )
             )
             rainDynamicSurfaceMeshVertices:set(
@@ -6719,7 +6737,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center + uOffset + vOffset,
                     sample.normal,
-                    vec2(shapeBand + 1, 1)
+                    vec2(shapeBand + 1, impactUV + 1)
                 )
             )
             rainDynamicSurfaceMeshVertices:set(
@@ -6727,7 +6745,7 @@ local function applyRainDynamicStateToSurfaceMesh()
                 ac.MeshVertex.new(
                     center - uOffset + vOffset,
                     sample.normal,
-                    vec2(shapeBand, 1)
+                    vec2(shapeBand, impactUV + 1)
                 )
             )
         else
@@ -7463,8 +7481,6 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropWideOrbEdgeMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
-            gDynamicDropWideOrbCenterMip =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP,
             gDynamicDropScreenSourceCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
                 and 1.0 or 0.0,
@@ -9968,24 +9984,6 @@ function windowMain(dt)
     end
     ui.text('Driving blend: stopped below 2 m/s; full at 18 m/s.')
 
-    ui.separator()
-    ui.text('Orb scene blur (existing shot mip chain)')
-    local orbCenterMip, orbCenterMipChanged = ui.slider(
-        'Orb center blur mip',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP,
-        0.0, 8.0, '%.1f'
-    )
-    if orbCenterMipChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP = orbCenterMip
-    end
-    local orbEdgeMip, orbEdgeMipChanged = ui.slider(
-        'Orb edge blur mip',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
-        0.0, 8.0, '%.1f'
-    )
-    if orbEdgeMipChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = orbEdgeMip
-    end
     ui.separator()
     ui.text('Dynamic drop trail calibration (temporary)')
     ui.text('Moving head only; history/clearing stationary drops is a later stage.')
