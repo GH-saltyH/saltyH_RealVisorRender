@@ -877,13 +877,17 @@ local rainStateUpdateParams = {
         */
         float2 rainStateFindValidPosition(
             float stateIndex,
-            float cycleSeed
+            float cycleSeed,
+            float2 previousPosition
         )
         {
             float2 best = float2(0.5, -0.5);
             float bestClearance = -1.0;
-            int candidateCount = gRainStateInit > 0.5 ? 32 : 16;
-            for (int attempt = 0; attempt < candidateCount; ++attempt)
+            int validCount = 0;
+            // Only about a fifth of the boundary texture is usable visor.
+            // Stop after eight valid choices; a hard cap also handles an
+            // absent or malformed mask without an unbounded shader loop.
+            for (int attempt = 0; attempt < 128; ++attempt)
             {
                 float seed =
                     stateIndex
@@ -906,6 +910,7 @@ local rainStateUpdateParams = {
                 {
                     return candidate;
                 }
+                validCount += 1;
 
                 float clearance = 1.0;
                 float count = max(gRainStateCount, 1.0);
@@ -935,9 +940,20 @@ local rainStateUpdateParams = {
                     best = candidate;
                     bestClearance = clearance;
                 }
+                if (validCount >= 8)
+                {
+                    break;
+                }
             }
 
-            return best;
+            if (validCount > 0)
+            {
+                return best;
+            }
+            // A transient failed search should never turn a previously
+            // valid drop into a new birth at the fixed visor center.
+            return rainStateBoundaryMask(previousPosition) >= 0.5
+                ? previousPosition : best;
         }
 
         /*
@@ -1337,12 +1353,14 @@ local rainStateUpdateParams = {
 
         float2 rainStateRespawnPosition(
             float stateIndex,
-            float respawnCycle
+            float respawnCycle,
+            float2 previousPosition
         )
         {
             return rainStateFindValidPosition(
                 stateIndex,
-                respawnCycle
+                respawnCycle,
+                previousPosition
             );
         }
 
@@ -1450,7 +1468,8 @@ local rainStateUpdateParams = {
                 float2 p =
                     rainStateFindValidPosition(
                         index,
-                        0.0
+                        0.0,
+                        float2(0.5, -0.5)
                     );
 
                 return float4(p, 0.0, 0.0);
@@ -1511,7 +1530,8 @@ local rainStateUpdateParams = {
                     float2 respawn =
                         rainStateRespawnPosition(
                             index,
-                            generation + 1.0
+                            generation + 1.0,
+                            p
                         );
 
                     return float4(
