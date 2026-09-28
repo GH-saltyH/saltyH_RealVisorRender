@@ -4499,3 +4499,19 @@ horizon; watch sky/building boundaries. Compare FPS at the same Hurricane
 camera against 72–74, and compare both halves for brightness and contrast.
 If the old cloud silhouette is visibly wrong even in luminance, a source
 from the actual WeatherFX composition is required for faithful clouds.
+
+### 130. Remove systematic cloud darkening before stronger optics (2026-09-28)
+
+At the matched Hurricane camera the mip experiment ran at 73–75 FPS,
+identical to its 73–75 FPS reference. Cloud structure became visible, but
+all sky pixels previously classified magenta looked slightly darker than
+the actual sky. Stronger refraction and a larger scene footprint could make
+that mismatch more visible, so keep both halves' existing 48px optics for
+this isolation step. Anchor the visible-right sky on the previously matched
+`fogColor` and transfer only 25% of the original shot's local brightness
+ratio, clamped to 0.95–1.12. Geometry and the visible-left HDR comparison
+remain unchanged. Check at the same Hurricane camera whether the overall
+right-hand sky darkness is gone, whether cloud relief remains visible,
+whether boundaries show dark halos, and whether FPS stays near 73–75.
+If successful, test a larger/inverted right-hand optical footprint in a
+separate experiment; stronger optics will amplify any residual sky mismatch.
