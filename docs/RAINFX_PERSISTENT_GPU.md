@@ -5400,3 +5400,48 @@ birth interval belongs to the old airflow force path. Compare FPS,
 alive and boundary exits with the preceding build. Watch for a visual
 snap as the short impact velocity expires; the capped CPU prediction
 should keep that snap small.
+
+### 157. Duration-independent short impact and settled force UI (2026-09-28)
+
+The user reports that very short glide settings appear to move upward;
+around 0.12 seconds the motion cancels, then a longer glide (0.157 s
+and impact transfer 0.048) looks downward. The previous birth pass
+attenuated velocity with exp(-2×dt/glide) *before* integrating it.
+When glide is shorter than one or two GPU ticks, this removes the
+downward contribution before it becomes visible, while ordinary forces
+later continue on their own path.
+
+For live births, store the original downward launch vector implicitly
+in the exponentially decaying velocity. Each update recovers it from
+age and evaluates the next fraction of a fixed stroke via a smooth
+0→1 progress curve. The stroke length is at least 1.5 diameters for
+mobile-size impacts, or the former 0.068-second integrated impact
+distance if that is greater. The *distance* no longer vanishes when
+glide shrinks; only its speed rises. After completing the stroke,
+hold the position for a configurable 0.12 seconds, clear the impulse,
+then resume the independent settled-water model. This isolates the
+observed initial direction without changing its later gravity/inertia
+or optional external-airflow force. Glide 0 still disables the birth
+stroke. A small 60 FPS arithmetic check at 0.005, 0.03, 0.08 and
+0.157 seconds gives the same positive UV displacement for an equal
+launch vector; the game shader/render path requires user validation.
+
+Temporary RainFX UI sliders now expose independent gravity, vehicle
+inertia and airflow gains above the shared world-force conversion;
+static adhesion minimum/maximum, kinetic/static adhesion fraction,
+acceleration after overcoming adhesion, extra force gain once moving,
+the movement threshold, ordinary flow speed scale and drag, and the
+calibrated 1 mm surface-speed cap. All update the GPU each frame. The
+old per-mode source checkboxes still allow one-source-at-a-time tests.
+Defaults preserve the last tested settled physics. Min/max adhesion
+sliders keep their ordering, and diagnostics 4/7/10 retain their
+calibrated behavior except when the tester explicitly changes shared
+physical sliders.
+
+Test near-zero glide, 0.03, 0.08, and fallback 0.157 at equal transfer,
+fixed rain and camera, measuring birth direction and displacement
+separately from later settled flow. Tune forces in order: gravity only,
+adhesion and speed/drag; inertia only; airflow only; then combinations.
+Log FPS, alive and mask exits if a lower attachment threshold makes
+many drops leave the surface prematurely. Keep the shortened CPU
+prediction window that previously reduced visible rebound.
