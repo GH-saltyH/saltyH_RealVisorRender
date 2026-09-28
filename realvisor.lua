@@ -412,9 +412,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG = true,
         -- Recover restrained cloud brightness using the shot's broad mip.
         RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG = true,
-        -- Both halves share weather-corrected sky; right half inverts a
-        -- wider projected scene footprint for an optics-only comparison.
-        RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = true,
+        -- Right half tests a monotonic concave lens with a softer rim.
+        -- Keep the former inverted source available as a disabled control.
+        RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = false,
+        RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG = true,
         -- The screen copy did not fix the rain overlay or tone mismatch;
         -- disable its per-frame allocation/copy/mips before testing stages.
         RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
@@ -6677,6 +6678,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG)
             .. ' invertedFootprintDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
+            .. ' concaveLensDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG)
             .. ' screenSourceCompareDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
             .. ' weatherScreenFrame='
@@ -6787,6 +6790,9 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropInvertedFootprintDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropConcaveLensDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropScreenSourceCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
