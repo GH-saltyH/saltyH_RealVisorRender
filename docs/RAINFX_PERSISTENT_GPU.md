@@ -5715,3 +5715,5 @@ small scene, directional highlight and the actual performance. Compare with
 If the mask shader fails, its update is caught and logs `Micro pattern shader:`;
 foreground dynamic drops remain drawable. Fine rain-intensity-dependent
 lifecycle and clearing beneath mobile trails follow after this stage.
+
+Default micro source displacement is 8 screen pixels along the negative lens-local axis. For the nominal ~0.65 mm disk this aims to make the tiny forward view invert across its center; the projected pixel radius changes with visor angle, so verify the direction in game before treating it as calibrated optics.
