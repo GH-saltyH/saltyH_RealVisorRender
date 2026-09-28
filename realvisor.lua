@@ -464,7 +464,7 @@ local cfg = scriptSettings:mapConfig({
         -- Right-only orb probe: broad forward image with low-detail mips.
         RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
         -- Orb field radius in screen UV: lower values show a closer scene.
-        RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS = 0.98,
+        RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS = 0.48,
         -- Flip both projected surface axes for a 180-degree lens image test.
         RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE = false,
         -- Source direction follows the projected drop position on the visor.
