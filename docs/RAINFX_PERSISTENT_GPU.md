@@ -5676,3 +5676,42 @@ visibility and depth before tuning optics further. Toggle
 `RAIN_DYNAMIC_MICRO_LAYER_ENABLED=false` for total-layer FPS comparison.
 
 For this micro-layer isolation build, `RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED=false`; the earlier impact prototype remains available for later work.
+
+
+### Fixed-size full-visor micro pattern
+
+User confirmed the 4096 static droplets map to the visor and their visible
+size is appropriate, but the area remains sparse. The new default
+`RAIN_DYNAMIC_MICRO_PATTERN_ENABLED=true` changes the background to a single
+visor-surface draw inside the existing combined mesh. A 2048² RGBA8 mask is
+computed once at initialization. Each mask texel checks nine neighboring
+jittered equal-size disk cells and stores only the highest-priority covering
+disk's local lens coordinates. Thus disks overlap while the later disk erases
+the preceding disk's edge; no variable-size disks, physical merges, or
+per-frame 9-cell search. Disk diameter is fixed at 0.65 mm via the established
+0.0029296875 visor UV per mm, with a nominal grid near 945x945 and radius
+0.9 grid cells. Jitter is bounded so every UV location has at least one disk.
+The canvas resolution intentionally quantizes this field to a low-detail
+surface pattern.
+
+Original visor vertices and indices are appended to the dynamic mesh and
+placed before the 512 mobile drop indices. Their U coordinate is offset by
+-4 to identify the surface field without losing small UV precision. Runtime
+shader samples the baked mask once and the already existing independent shot
+once, using a small inverted local lens offset and a position-dependent
+highlight. Per-frame physical droplet count and draw-call count stay the same.
+Initialization now creates the 2048² mask and vertex copy once; possible cost
+is the one-time generation plus full-visor fragment sampling, which must be
+measured. Previous 4096 physical-quad background remains as a disabled
+fallback when `RAIN_DYNAMIC_MICRO_PATTERN_ENABLED=false`.
+
+Debug is enabled for this validation build:
+`RAIN_DYNAMIC_MICRO_LAYER_DEBUG=true`. Inspect log line
+`Micro pattern: 2048x2048 grid=... surfaceVertices=... triangles=... ready=true`.
+Confirm complete visor coverage, regular disk size, overlap edge ownership and
+FPS at the same weather/camera. Then set debug false to evaluate tone, inverted
+small scene, directional highlight and the actual performance. Compare with
+`RAIN_DYNAMIC_MICRO_LAYER_ENABLED=false` at the same camera to isolate cost.
+If the mask shader fails, its update is caught and logs `Micro pattern shader:`;
+foreground dynamic drops remain drawable. Fine rain-intensity-dependent
+lifecycle and clearing beneath mobile trails follow after this stage.
