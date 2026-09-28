@@ -492,6 +492,14 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_IMPACT_LARGE_DIAMETER_MM = 3.0,
         RAIN_DYNAMIC_DROP_IMPACT_FAST_MIN_DIAMETER_MM = 1.4,
         RAIN_DYNAMIC_DROP_IMPACT_FAST_TRAVEL_MIX = 0.75,
+        -- Static micro droplets share the main mesh and scene shot.
+        RAIN_DYNAMIC_MICRO_LAYER_ENABLED = true,
+        RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
+        RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.16,
+        RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.36,
+        RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 2.0,
+        RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
+        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.16,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -6033,8 +6041,11 @@ local function initializeRainDynamicSurfaceTest()
     rainDynamicSurfaceParent = parent
 
     local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
-    local meshVertices = ac.VertexBuffer(count * 8)
-    local meshIndices = ac.IndicesBuffer(count * 12)
+    local microCount = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
+        and math.max(0, math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_COUNT))
+        or 0
+    local meshVertices = ac.VertexBuffer(count * 8 + microCount * 4)
+    local meshIndices = ac.IndicesBuffer(count * 12 + microCount * 6)
     rainDynamicSurfaceMeshVertices = meshVertices
     rainDynamicSurfaceMeshCount = count
 
@@ -6044,7 +6055,7 @@ local function initializeRainDynamicSurfaceTest()
     local radiusUV = diameterUV * 0.5
     local surfaceOffset = cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
 
-    local vertexIndex, indexIndex = 1, 1
+    local vertexIndex, indexIndex = 1, microCount * 6 + 1
     local hitCount, missCount = 0, 0
 
     for i = 0, count - 1 do
@@ -6114,6 +6125,48 @@ local function initializeRainDynamicSurfaceTest()
 
         vertexIndex = vertexIndex + 8
         indexIndex = indexIndex + 12
+    end
+
+    -- A fixed, area-stratified micro-droplet field uses the same visor lookup.
+    -- Its indices are first so moving drops composite over this base layer.
+    local microVertexIndex = count * 8 + 1
+    for i = 0, microCount - 1 do
+        local uv = rainDynamicSurfaceAreaWeightedUV(
+            rainDynamicSurfaceLookup, i, microCount)
+        local sample = uv and rainDynamicSurfaceSample(
+            rainDynamicSurfaceLookup, vertices, uv) or nil
+        local seed = 2048 + (i % 1021)
+        local diameterMM = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM
+            + rainDynamicSurfaceFrac((i + 0.5) * 0.61803398875)
+                * (cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM
+                    - cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
+        local microRadiusUV = diameterMM
+            * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.5
+        local indexBase = (i + 1) * 6 - 5
+        local center = sample and sample.position
+            + sample.normal * cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
+            or vec3(0, 0, 0)
+        local normal = sample and sample.normal or vec3(0, 0, 1)
+        local uOffset = sample and sample.tangentU
+            * (microRadiusUV * sample.metersPerUVU) or vec3(0, 0, 0)
+        local vOffset = sample and sample.tangentV
+            * (microRadiusUV * sample.metersPerUVV) or vec3(0, 0, 0)
+        meshVertices:set(microVertexIndex, ac.MeshVertex.new(
+            center - uOffset - vOffset, normal, vec2(seed * 2, 0)))
+        meshVertices:set(microVertexIndex + 1, ac.MeshVertex.new(
+            center + uOffset - vOffset, normal, vec2(seed * 2 + 1, 0)))
+        meshVertices:set(microVertexIndex + 2, ac.MeshVertex.new(
+            center + uOffset + vOffset, normal, vec2(seed * 2 + 1, 1)))
+        meshVertices:set(microVertexIndex + 3, ac.MeshVertex.new(
+            center - uOffset + vOffset, normal, vec2(seed * 2, 1)))
+        local microBase = count * 8 + i * 4
+        meshIndices:set(indexBase, microBase)
+        meshIndices:set(indexBase + 1, microBase + 1)
+        meshIndices:set(indexBase + 2, microBase + 2)
+        meshIndices:set(indexBase + 3, microBase)
+        meshIndices:set(indexBase + 4, microBase + 2)
+        meshIndices:set(indexBase + 5, microBase + 3)
+        microVertexIndex = microVertexIndex + 4
     end
 
     rainDynamicSurfaceMesh = rainDynamicSurfaceParent:createMesh(
@@ -7521,6 +7574,14 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_DEBUG and 1.0 or 0.0,
             gDynamicDropShapeStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
+            gDynamicDropMicroLayerEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and 1.0 or 0.0,
+            gDynamicDropMicroRefractionPixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
+            gDynamicDropMicroSceneMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
+            gDynamicDropMicroOpacity =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
             gDynamicDropTrailEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
