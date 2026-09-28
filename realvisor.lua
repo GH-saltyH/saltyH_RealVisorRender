@@ -495,14 +495,15 @@ local cfg = scriptSettings:mapConfig({
         -- Static micro droplets share the main mesh and scene shot.
         RAIN_DYNAMIC_MICRO_LAYER_ENABLED = true,
         RAIN_DYNAMIC_MICRO_PATTERN_ENABLED = true,
-        RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.65,
-        RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 4096,
+        RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.7,
+        RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 12288,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
-        RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.42,
-        RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.85,
+        RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.035,
+        RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.25,
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 8.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 3.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 8.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.06,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 1.0,
@@ -6229,10 +6230,20 @@ local function initializeRainDynamicSurfaceTest()
                 / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
                 + 0.5))
         rainDynamicSceneCopyState.microPatternGrid = patternGrid
-        rainDynamicSceneCopyState.microPatternCanvas = ui.ExtraCanvas(
-            vec2(patternSize, patternSize), 1,
-            render.TextureFormat.R8G8B8A8.UNorm
-        ):setName('RainFX static micro pattern')
+        -- A threefold linear increase uses nine times the texture memory.
+        -- Fall back if a large allocation is unavailable on the active GPU.
+        for _, size in ipairs({ patternSize, 8192, 4096 }) do
+            local canvasOk, canvas = pcall(function()
+                return ui.ExtraCanvas(vec2(size, size), 1,
+                    render.TextureFormat.R8G8B8A8.UNorm)
+            end)
+            if canvasOk and canvas then
+                patternSize = size
+                rainDynamicSceneCopyState.microPatternCanvas = canvas
+                    :setName('RainFX static micro pattern')
+                break
+            end
+        end
         if rainDynamicSceneCopyState.microPatternCanvas then
             local maskOk, maskResult = pcall(function()
                 return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
@@ -7177,7 +7188,8 @@ render.onSceneReady(function()
     local shotWithDepth = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
         or cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG
         or cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
-    local shotMips = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
+    local shotMips = (cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
+        or cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED)
         and 10 or 1
     local shotScale = yebisShot and math.max(0.5, math.min(1.0,
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE)) or 1.0
@@ -7733,6 +7745,13 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.microPatternGrid or 1,
             gDynamicDropMicroImageScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
+            gDynamicDropMicroNormalGain =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
+            gDynamicDropObjectToWorld =
+                rainDynamicSurfaceParent:getWorldTransformationRaw(),
+            gDynamicDropCameraSide = sim.cameraSide,
+            gDynamicDropCameraUp = sim.cameraUp,
+            gDynamicDropCameraLook = sim.cameraLook,
             gDynamicDropMicroRimStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
             gDynamicDropMicroSceneMip =
@@ -10256,6 +10275,25 @@ function windowMain(dt)
     )
     if trailOpacityChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY = trailOpacity
+    end
+
+    ui.separator()
+    ui.text('Micro droplets: scene optics')
+    local microBlur, microBlurChanged = ui.slider(
+        'Micro scene blur / mip level',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
+        0.0, 6.0, '%.1f'
+    )
+    if microBlurChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = microBlur
+    end
+    local microNormalGain, microNormalChanged = ui.slider(
+        'Micro scene shift / visor normal',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
+        0.0, 0.20, '%.3f'
+    )
+    if microNormalChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = microNormalGain
     end
 
     --------------------------------------------------------
