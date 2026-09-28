@@ -366,12 +366,18 @@ float4 main(PS_IN pin)
             {
                 // Roughly one third of the viewport crosses the diameter
                 // of each drop. Keep a slightly position-dependent center
-                // and rotate each image by a stable small per-drop angle.
+                // and rotate the mapped image per drop. The center and
+                // orientation stay fixed as the droplet moves on the visor.
                 float2 centerUV = lerp(sceneUV - local * 0.01,
                     float2(0.5, 0.5), 0.70);
-                float twist = (frac(shapeSeed * 0.6180339) - 0.5) * 0.45;
-                float2 direction = float2(local.x + twist * local.y,
-                    local.y - twist * local.x);
+                float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
+                    * gDynamicDropWideRotationRadians;
+                angle += dot(centerUV - 0.5, float2(0.4, 0.2));
+                float rotationSin, rotationCos;
+                sincos(angle, rotationSin, rotationCos);
+                float2 direction = float2(
+                    rotationCos * local.x - rotationSin * local.y,
+                    rotationSin * local.x + rotationCos * local.y);
                 float2 wideUV = centerUV + direction * 0.17;
                 float wideWeight = 0.92
                     * (1.0 - smoothstep(0.58, 0.94, r));
