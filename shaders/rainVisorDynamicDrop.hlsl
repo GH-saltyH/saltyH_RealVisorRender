@@ -384,7 +384,7 @@ float4 main(PS_IN pin)
                 float orbMode = gDynamicDropWideOrbDebug > 0.5
                     ? 1.0 : 0.0;
                 float2 centerUV = lerp(sceneUV - local * 0.01,
-                    float2(0.5, 0.5), lerp(0.70, 0.90, orbMode));
+                    float2(0.5, 0.5), lerp(0.70, 0.72, orbMode));
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
                 float rotationSin, rotationCos;
@@ -407,8 +407,16 @@ float4 main(PS_IN pin)
                         + surfaceAxis.x * rotationSin);
                 float2 direction = rotatedAxis * local.x
                     + float2(-rotatedAxis.y, rotatedAxis.x) * local.y;
+                // Invert both image axes together: a 180-degree image,
+                // never a single-axis mirror. Keep the surface U rotation.
+                direction *= lerp(1.0, -1.0,
+                    saturate(gDynamicDropOrbInvertImage) * orbMode);
+                // A mild convex profile maps the center smoothly and
+                // compresses the edge without a repeated sharp rim image.
+                float convex = 1.0 - 0.16 * saturate(r * r);
                 float2 wideUV = centerUV + direction
-                    * lerp(0.17, 0.70, orbMode);
+                    * lerp(0.17, gDynamicDropOrbFieldRadius, orbMode)
+                    * lerp(1.0, convex, orbMode);
                 // Spread the wide-to-local transition across most of the
                 // footprint: a narrow outer transition bent hard edges.
                 float wideWeight = lerp(
