@@ -5674,3 +5674,5 @@ scene/refraction material at the same camera. If mapped is nonzero but no
 circles appear with debug true, investigate UV encoding, vertex index range,
 visibility and depth before tuning optics further. Toggle
 `RAIN_DYNAMIC_MICRO_LAYER_ENABLED=false` for total-layer FPS comparison.
+
+For this micro-layer isolation build, `RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED=false`; the earlier impact prototype remains available for later work.
