@@ -299,7 +299,8 @@ float4 main(PS_IN pin)
             // split; derivatives inside a divergent branch are undefined.
             float2 localDx = ddx(local);
             float2 localDy = ddy(local);
-            if (gDynamicDropInvertedFootprintDebug > 0.5
+            if ((gDynamicDropInvertedFootprintDebug > 0.5
+                || gDynamicDropConcaveLensDebug > 0.5)
                 && local.x < 0.0)
             {
                 // Reconstruct the projected quad radius from the mesh UV
@@ -315,14 +316,34 @@ float4 main(PS_IN pin)
                     ) / jacobian;
                     fromCenterPixels = clamp(fromCenterPixels,
                         float2(-96.0, -96.0), float2(96.0, 96.0));
-                    float footprintFade = 1.0
-                        - smoothstep(0.72, 0.98, r);
                     float2 shotUVPerWindowPixel = gDynamicDropInvScreenSize
                         * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
-                    // Subtracting 4.5x the projected center displacement
-                    // produces a 3.5x inverted scene image in the interior.
-                    refractionOffset = -4.5 * fromCenterPixels
-                        * footprintFade * shotUVPerWindowPixel;
+                    if (gDynamicDropConcaveLensDebug > 0.5)
+                    {
+                        // At the rim both displacement and its radial slope
+                        // reach zero. This removes the fold/caustic band
+                        // needed by the previous inverted-to-normal map.
+                        float edgeFade = 1.0 - saturate(r);
+                        edgeFade *= edgeFade;
+                        float strengthSeed = frac(shapeSeed * 0.7548777);
+                        float axisSeed = frac(shapeSeed * 0.5698403);
+                        float screenDistance = saturate(length(
+                            (sceneUV - 0.5) * 1.4142136));
+                        float strength = lerp(1.65, 2.20, strengthSeed)
+                            * (1.0 + 0.10 * screenDistance);
+                        float2 anisotropy = float2(
+                            lerp(0.92, 1.08, axisSeed),
+                            lerp(1.08, 0.92, axisSeed));
+                        refractionOffset = fromCenterPixels * anisotropy
+                            * strength * edgeFade * shotUVPerWindowPixel;
+                    }
+                    else
+                    {
+                        float footprintFade = 1.0
+                            - smoothstep(0.72, 0.98, r);
+                        refractionOffset = -4.5 * fromCenterPixels
+                            * footprintFade * shotUVPerWindowPixel;
+                    }
                 }
             }
             // On the back-facing visor, only the image-right half receives
@@ -338,9 +359,11 @@ float4 main(PS_IN pin)
                 refractionOffset += gDynamicDropWaveDirection * wavePixels
                     * gDynamicDropInvRenderTargetSize;
             }
+            float lensMIP = gDynamicDropConcaveLensDebug > 0.5
+                && local.x < 0.0 ? lerp(1.4, 1.9, saturate(r)) : 0.0;
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
-                0.0).rgb;
+                lensMIP).rgb;
             // Visible right half: inspect shot depth at exactly the same
             // refracted UV. Magenta indicates a far/sky pixel; cyan indicates
             // geometry or a missing/invalid depth signal.
@@ -353,11 +376,12 @@ float4 main(PS_IN pin)
                     ? float3(0.95, 0.12, 0.72)
                     : float3(0.05, 0.55, 0.70);
             }
-            // Both halves use the same sky correction while the inverted
-            // footprint comparison is enabled, isolating the optical shape.
+            // Both halves use the same sky correction while the new lens
+            // comparison is enabled, isolating the optical shape.
             else if (gDynamicDropSkyFogColorDebug > 0.5
                 && (local.x < 0.0
-                    || gDynamicDropInvertedFootprintDebug > 0.5))
+                    || gDynamicDropInvertedFootprintDebug > 0.5
+                    || gDynamicDropConcaveLensDebug > 0.5))
             {
                 float shotDepth = txDynamicShotDepth.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
@@ -439,6 +463,9 @@ float4 main(PS_IN pin)
             float3(0.72, 0.86, 1.00) * fresnel
                 * lerp(0.035, 0.16, saturate(sceneLuma))
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
+        if (gDynamicDropConcaveLensDebug > 0.5
+            && local.x < 0.0)
+            opticalAccent *= 0.55;
         if (gDynamicDropGeometryShotDebug > 0.5
             && gDynamicDropOpaqueRefractionSplitDebug > 0.5)
             opticalAccent += float3(0.95, 0.68, 0.08)
