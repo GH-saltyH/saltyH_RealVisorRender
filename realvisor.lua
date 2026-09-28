@@ -6217,7 +6217,7 @@ local function initializeRainDynamicSurfaceTest()
                 source.pos
                     + source.normal * cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M,
                 source.normal,
-                vec2(source.uv.x - 16.0, source.uv.y)))
+                vec2(source.uv.x - 4.0, source.uv.y)))
         end
         for i = 1, patternIndexCount do
             meshIndices:set(microCount * 6 + i,
@@ -6231,16 +6231,7 @@ local function initializeRainDynamicSurfaceTest()
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM)
                 / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
                 + 0.5))
-        local spanU = math.max(1e-5,
-            rainDynamicSurfaceLookup.maxU - rainDynamicSurfaceLookup.minU)
-        local spanV = math.max(1e-5,
-            rainDynamicSurfaceLookup.maxV - rainDynamicSurfaceLookup.minV)
-        rainDynamicSceneCopyState.microPatternGridUV =
-            vec2(patternGrid * spanU, patternGrid * spanV)
-        rainDynamicSceneCopyState.microPatternUVMin =
-            vec2(rainDynamicSurfaceLookup.minU, rainDynamicSurfaceLookup.minV)
-        rainDynamicSceneCopyState.microPatternUVInvRange =
-            vec2(1.0 / spanU, 1.0 / spanV)
+        rainDynamicSceneCopyState.microPatternGrid = patternGrid
         -- A threefold linear increase uses nine times the texture memory.
         -- Fall back if a large allocation is unavailable on the active GPU.
         for _, size in ipairs({ patternSize, 8192, 4096 }) do
@@ -6250,7 +6241,6 @@ local function initializeRainDynamicSurfaceTest()
             end)
             if canvasOk and canvas then
                 patternSize = size
-                rainDynamicSceneCopyState.microPatternSize = size
                 rainDynamicSceneCopyState.microPatternCanvas = canvas
                     :setName('RainFX static micro pattern')
                 break
@@ -6259,10 +6249,7 @@ local function initializeRainDynamicSurfaceTest()
         if rainDynamicSceneCopyState.microPatternCanvas then
             local maskOk, maskResult = pcall(function()
                 return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
-                    values = {
-                        gMicroPatternGrid =
-                            rainDynamicSceneCopyState.microPatternGridUV,
-                    },
+                    values = { gMicroPatternGrid = patternGrid },
                     shader = [[
                         float3 hashMicroCell(float2 cell)
                         {
@@ -7774,17 +7761,8 @@ float4 main(PS_IN pin)
                 ^ cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER,
             gDynamicDropMicroRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
-            gDynamicDropMicroPatternGridUV =
-                rainDynamicSceneCopyState.microPatternGridUV
-                    or vec2(1.0, 1.0),
-            gDynamicDropMicroUVMin =
-                rainDynamicSceneCopyState.microPatternUVMin
-                    or vec2(0.0, -1.0),
-            gDynamicDropMicroUVInvRange =
-                rainDynamicSceneCopyState.microPatternUVInvRange
-                    or vec2(1.0, 1.0),
-            gDynamicDropMicroPatternSize =
-                rainDynamicSceneCopyState.microPatternSize or 1,
+            gDynamicDropMicroPatternGrid =
+                rainDynamicSceneCopyState.microPatternGrid or 1,
             gDynamicDropMicroImageScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
             gDynamicDropMicroNormalGain =
