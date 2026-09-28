@@ -6222,10 +6222,21 @@ end
 -- 3.6.0 TESTING: Custom Shader Render - RainDrops
 --------------------------------------------------------
 --------------------------------------------------------
--- Capture the screen scene before the track transparent droplet draw to
--- compare it with a live screen sample at exactly the same UV.
+-- Capture the available screen scene before the track transparent droplet
+-- draw. The weather diagnostic uses a low-resolution mip chain to keep
+-- broad fog/cloud structure while suppressing small bright rain streaks.
 render.on('main.track.opaque', function()
+    if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
+        and rainDynamicSceneCopyState.weatherScreenCanvas
+    then
+        rainDynamicSceneCopyState.weatherScreenCanvas:dispose()
+        rainDynamicSceneCopyState.weatherScreenCanvas = nil
+        rainDynamicSceneCopyState.weatherWidth = nil
+        rainDynamicSceneCopyState.weatherHeight = nil
+        rainDynamicSceneCopyState.weatherFrame = nil
+    end
     if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
+        and not cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
         or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
         or not cfg.RUNTIME.RAIN_ENABLED
     then
@@ -6234,6 +6245,40 @@ render.on('main.track.opaque', function()
 
     local sim = ac.getSim()
     if not sim then return end
+
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG then
+        local screenSize = ui.imageSize('dynamic::screen')
+        if screenSize.x < 1 or screenSize.y < 1 then
+            screenSize = vec2(sim.windowWidth or 1, sim.windowHeight or 1)
+        end
+        local weatherWidth = math.max(64,
+            math.floor(screenSize.x * 0.5))
+        local weatherHeight = math.max(64,
+            math.floor(screenSize.y * 0.5))
+        if not rainDynamicSceneCopyState.weatherScreenCanvas
+            or rainDynamicSceneCopyState.weatherWidth ~= weatherWidth
+            or rainDynamicSceneCopyState.weatherHeight ~= weatherHeight
+        then
+            if rainDynamicSceneCopyState.weatherScreenCanvas then
+                rainDynamicSceneCopyState.weatherScreenCanvas:dispose()
+            end
+            rainDynamicSceneCopyState.weatherScreenCanvas = ui.ExtraCanvas(
+                vec2(weatherWidth, weatherHeight), 9,
+                render.AntialiasingMode.None,
+                render.TextureFormat.R8G8B8A8.UNorm
+            )
+            rainDynamicSceneCopyState.weatherWidth = weatherWidth
+            rainDynamicSceneCopyState.weatherHeight = weatherHeight
+            ac.log(appNameDebug .. ' Dynamic drop weather-screen source: '
+                .. tostring(weatherWidth) .. 'x' .. tostring(weatherHeight)
+                .. ' mips=9')
+        end
+        rainDynamicSceneCopyState.weatherScreenCanvas:copyFrom(
+            'dynamic::screen')
+        rainDynamicSceneCopyState.weatherScreenCanvas:mipsUpdate()
+        rainDynamicSceneCopyState.weatherFrame = sim.frame
+    end
+    if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG then return end
 
     local captureSize = ui.imageSize('dynamic::screen')
     if captureSize.x < 1 or captureSize.y < 1 then
@@ -6317,6 +6362,8 @@ render.onSceneReady(function()
         )
         rainDynamicSceneCopyState.geometryShot:setGrass(true)
         rainDynamicSceneCopyState.geometryShot:setSky(true)
+        -- Keep streaks out of the independently rendered drop source.
+        rainDynamicSceneCopyState.geometryShot:setParticles(false)
         rainDynamicSceneCopyState.shotWidth = shotWidth
         rainDynamicSceneCopyState.shotHeight = shotHeight
         rainDynamicSceneCopyState.shotYebis = yebisShot
@@ -6619,6 +6666,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
             .. ' screenSourceCompareDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
+            .. ' weatherScreenFrame='
+            .. tostring(rainDynamicSceneCopyState.weatherFrame)
             .. ' fogColor='
             .. tostring(sim.fogColor)
             .. ' pixelUV='
@@ -6664,6 +6713,9 @@ float4 main(PS_IN pin)
                 and rainDynamicSceneCopyState.geometryShot:depth()
                 or false,
             txDynamicScreen = 'dynamic::screen',
+            txDynamicWeatherScreen =
+                rainDynamicSceneCopyState.weatherScreenCanvas
+                or 'dynamic::screen',
             txDynamicControl = textureRainSurfaceNormal,
         },
         values = {
