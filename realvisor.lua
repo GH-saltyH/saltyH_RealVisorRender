@@ -443,8 +443,12 @@ local cfg = scriptSettings:mapConfig({
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
-        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
-        RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.25,
+        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = true,
+        RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
+        -- Temporary live trail calibration controls; remove the UI after
+        -- the visual values have been selected in the game.
+        RAIN_DYNAMIC_DROP_TRAIL_WIDTH = 0.38,
+        RAIN_DYNAMIC_DROP_TRAIL_OPACITY = 0.35,
         -- Compare single-sample tangent projection with a second surface lookup.
         RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE = true,
         -- Keep CPU trail geometry while suppressing only trail pixels for FPS A/B.
@@ -6192,13 +6196,21 @@ local function applyRainDynamicStateToSurfaceMesh()
             local tailCenter = tailPosition
                 + trailSample.normal * surfaceOffset
             local headWidth = sample.tangentU
-                    * (perpU * radiusUV * 0.38 * sample.metersPerUVU)
+                    * (perpU * radiusUV
+                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
+                        * sample.metersPerUVU)
                 + sample.tangentV
-                    * (perpV * radiusUV * 0.38 * sample.metersPerUVV)
+                    * (perpV * radiusUV
+                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
+                        * sample.metersPerUVV)
             local tailWidth = trailSample.tangentU
-                    * (perpU * radiusUV * 0.22 * trailSample.metersPerUVU)
+                    * (perpU * radiusUV
+                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
+                        * 0.58 * trailSample.metersPerUVU)
                 + trailSample.tangentV
-                    * (perpV * radiusUV * 0.22 * trailSample.metersPerUVV)
+                    * (perpV * radiusUV
+                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
+                        * 0.58 * trailSample.metersPerUVV)
             rainDynamicSurfaceMeshVertices:set(vertexIndex + 4,
                 ac.MeshVertex.new(tailCenter - tailWidth, trailSample.normal,
                     vec2(shapeBand, 2)))
@@ -6876,6 +6888,8 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
                 and 1.0 or 0.0,
+            gDynamicDropTrailOpacity =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY,
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,
@@ -9238,6 +9252,50 @@ function windowMain(dt)
     end
 
     ui.text('Canonical physical RainFX state: physical droplet profile + unified external forces.')
+
+    ui.separator()
+    ui.text('Dynamic drop trail calibration (temporary)')
+    ui.text('Moving head only; history/clearing stationary drops is a later stage.')
+    local trailToggleChanged, _ = ui.checkbox(
+        'Draw dynamic trails',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
+    )
+    if trailToggleChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED =
+            not cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
+    end
+    local trailPixelChanged, _ = ui.checkbox(
+        'Draw trail pixels (keep mesh for FPS A/B)',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
+    )
+    if trailPixelChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED =
+            not cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
+    end
+    local trailWidth, trailWidthChanged = ui.slider(
+        'Trail width / drop radius',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH,
+        0.08, 0.90, '%.2f'
+    )
+    if trailWidthChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH = trailWidth
+    end
+    local trailSeconds, trailSecondsChanged = ui.slider(
+        'Trail length / current speed (seconds)',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS,
+        0.08, 1.20, '%.2f'
+    )
+    if trailSecondsChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS = trailSeconds
+    end
+    local trailOpacity, trailOpacityChanged = ui.slider(
+        'Trail opacity',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY,
+        0.05, 0.70, '%.2f'
+    )
+    if trailOpacityChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY = trailOpacity
+    end
 
     --------------------------------------------------------
     -- Unified external-force source controls (Phase A)
