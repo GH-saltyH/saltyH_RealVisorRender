@@ -463,6 +463,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS = 0.45,
         -- Right-only orb probe: broad forward image with low-detail mips.
         RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
+        -- Orb field radius in screen UV: lower values show a closer scene.
+        RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS = 0.48,
+        -- Flip both projected surface axes for a 180-degree lens image test.
+        RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE = true,
         -- Keep the accepted wide orb on both sides while scene tone is
         -- investigated. Re-enable only for explicit optical A/B tests.
         RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG = false,
@@ -7437,6 +7441,11 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropWideOrbDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropOrbFieldRadius =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS,
+            gDynamicDropOrbInvertImage =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE
                 and 1.0 or 0.0,
             gDynamicDropSplitCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG
