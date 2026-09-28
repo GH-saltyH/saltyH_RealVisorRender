@@ -4885,3 +4885,25 @@ landmarks and orientation, amount of blur, sky/road tone mismatch,
 rim seams/clamps and paired FPS on the same Hurricane camera and rain
 intensity. If the user likes the broad view, separate image footprint,
 rotation, mip and opacity controls for later tuning.
+
+### 144. Halve orb blur footprint toward the rim (2026-09-28)
+
+The broad low-detail orb is markedly more readable to the user.
+Sampling foreground scenery inside sky-positioned drops often avoids a
+single mismatched sky color; asphalt-positioned drops no longer have a
+noticeable source tone boundary in ordinary views. When aimed at only
+sky, the captured sky can still appear black and the tone mismatch is
+visible. The user estimates about a 1 FPS increase; treat that as an
+observation, not a measured performance improvement, because the scene
+and precipitation vary.
+
+Keep the central color sample at mip 4.5 and preset
+`RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP=3.5`. Smoothly move toward that
+level over r=0.38..0.82, reducing the sample footprint by about half
+near the visible outline: each one-level mip decrease doubles spatial
+detail, rather than halving the mip number. The broad UV map, surface
+orientation, sky/depth logic, alpha and shot generation are unchanged.
+Check whether the edge becomes crisper without restoring a hard seam,
+and whether coarse central objects still look cohesive at a fixed
+Hurricane camera. Record paired FPS in similar rain. The black all-sky
+case needs a separate scene source investigation.
