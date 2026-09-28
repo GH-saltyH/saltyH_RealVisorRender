@@ -495,11 +495,12 @@ local cfg = scriptSettings:mapConfig({
         -- Static micro droplets share the main mesh and scene shot.
         RAIN_DYNAMIC_MICRO_LAYER_ENABLED = true,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
-        RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.16,
-        RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.36,
+        RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.42,
+        RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.85,
+        RAIN_DYNAMIC_MICRO_LAYER_DEBUG = true,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 2.0,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
-        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.16,
+        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.78,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -6130,16 +6131,30 @@ local function initializeRainDynamicSurfaceTest()
     -- A fixed, area-stratified micro-droplet field uses the same visor lookup.
     -- Its indices are first so moving drops composite over this base layer.
     local microVertexIndex = count * 8 + 1
+    local microMapped = 0
+    local microClusters = math.max(1, math.ceil(microCount / 3))
     for i = 0, microCount - 1 do
-        local uv = rainDynamicSurfaceAreaWeightedUV(
-            rainDynamicSurfaceLookup, i, microCount)
-        local sample = uv and rainDynamicSurfaceSample(
-            rainDynamicSurfaceLookup, vertices, uv) or nil
-        local seed = 2048 + (i % 1021)
+        local cluster = math.floor(i / 3)
+        local anchor = rainDynamicSurfaceAreaWeightedUV(
+            rainDynamicSurfaceLookup, cluster, microClusters)
         local diameterMM = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM
             + rainDynamicSurfaceFrac((i + 0.5) * 0.61803398875)
                 * (cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM
                     - cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
+        local spreadUV = diameterMM
+            * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.90
+        local uv = anchor and vec2(
+            anchor.x + (rainDynamicSurfaceFrac((i + 0.5) * 0.7548776662) - 0.5) * spreadUV,
+            anchor.y + (rainDynamicSurfaceFrac((i + 0.5) * 0.5698402911) - 0.5) * spreadUV)
+            or nil
+        local sample = uv and rainDynamicSurfaceSample(
+            rainDynamicSurfaceLookup, vertices, uv) or nil
+        if not sample and anchor then
+            sample = rainDynamicSurfaceSample(
+                rainDynamicSurfaceLookup, vertices, anchor)
+        end
+        if sample then microMapped = microMapped + 1 end
+        local seed = 2048 + (i % 1021)
         local microRadiusUV = diameterMM
             * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.5
         local indexBase = (i + 1) * 6 - 5
@@ -6168,6 +6183,13 @@ local function initializeRainDynamicSurfaceTest()
         meshIndices:set(indexBase + 5, microBase + 3)
         microVertexIndex = microVertexIndex + 4
     end
+    ac.log(appNameDebug .. ' Micro layer mesh: mapped='
+        .. tostring(microMapped) .. '/' .. tostring(microCount)
+        .. ' clusters=' .. tostring(microClusters)
+        .. ' diameterMM='
+        .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
+        .. '..'
+        .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM))
 
     rainDynamicSurfaceMesh = rainDynamicSurfaceParent:createMesh(
         RAIN_DYNAMIC_SURFACE_MESH_NAME,
@@ -7576,6 +7598,8 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
             gDynamicDropMicroLayerEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and 1.0 or 0.0,
+            gDynamicDropMicroDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_DEBUG and 1.0 or 0.0,
             gDynamicDropMicroRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
             gDynamicDropMicroSceneMip =
