@@ -407,7 +407,10 @@ float4 main(PS_IN pin)
                 // local UV only under a fading rim to avoid a visible fold.
                 sampleUV = lerp(lerp(sampleUV, sceneUV, orbMode),
                     wideUV, wideWeight);
-                lensMIP = lerp(lensMIP, 4.5, orbMode);
+                float orbMIP = lerp(4.5,
+                    gDynamicDropWideOrbEdgeMip,
+                    smoothstep(0.38, 0.82, r));
+                lensMIP = lerp(lensMIP, orbMIP, orbMode);
             }
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sampleUV),
