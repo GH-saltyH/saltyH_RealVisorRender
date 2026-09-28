@@ -4668,3 +4668,38 @@ against the smoke-stage water, and investigate a visor-wide ordering or
 mask solution that preserves transparency and depth. Do not treat the
 successful droplet-stage move as proof that the whole KN5 visor is fixed.
 This work remains pending; no other KN5 material is altered in this test.
+
+### 137. Compare a soft concave lens with the inverted lens (2026-09-28)
+
+The user proposes that identical inverted refraction across evenly spaced
+drops and a compressed image band at their boundaries contribute to a
+repetitive, hard-edged appearance. Keep the verified `main.smoke` draw stage
+so the separately rendered sharp rain streaks remain excluded from drop
+footprints. Preset `RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG=false` and
+`RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG=true`. The image-left half retains
+the former 48px radial control, and the image-right half uses the new
+monotonic concave lens, sharing the same fog/depth sky correction.
+
+The projected per-drop quad Jacobian still maps each local drop coordinate
+to screen pixels. The new image-right extra sample displacement is along
+that projected radius with a `(1-r)^2` fade. It and its first radial slope
+are zero at the edge, so the sample joins the original scene coordinate
+without the inverted lens's folded transition. A per-drop stable hash
+varies strength from 1.65–2.20 and the two screen axes from 0.92–1.08;
+strength rises by up to another 10% toward the viewport edge. The maximum
+radial coefficient is below 3 even after anisotropy, keeping radial image
+mapping monotonic for this profile. Sample the existing full-resolution
+GeometryShot at roughly mip 1.4 in the inner region through 1.9 near the
+rim for a mild blur without allocating another source texture. Reduce the
+image-right optical highlight/rim contribution to 55% of its former value.
+This is a visual probe, not a claim that concave optics model a water
+droplet physically; compare readability and naturalness against the left
+and the previous inverted variant.
+
+At the same Hurricane camera inspect whether large and small drops show
+different bending, whether image edges still crowd at the drop rim, whether
+the shot/actual scene tone difference is less conspicuous, whether blur
+creates halos on sky/geometry boundaries, whether sharp falling rain stays
+excluded by the smoke stage, and whether FPS changes within comparable
+rain intensity. A source tone mismatch still requires a separate fix; blur
+can only mask a small difference, not reproduce the missing weather pass.
