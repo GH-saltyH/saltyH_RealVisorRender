@@ -430,6 +430,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS = 0.45,
         -- Right-only orb probe: broad forward image with low-detail mips.
         RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
+        -- Keep the low-detail center; make its visible edge about half as
+        -- blurred using the same existing GeometryShot mip chain.
+        RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 3.5,
         -- The screen copy did not fix the rain overlay or tone mismatch;
         -- disable its per-frame allocation/copy/mips before testing stages.
         RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
@@ -6706,6 +6709,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG)
             .. ' wideOrbDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG)
+            .. ' wideOrbEdgeMip='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP)
             .. ' screenSourceCompareDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
             .. ' weatherScreenFrame='
@@ -6837,6 +6842,8 @@ float4 main(PS_IN pin)
             gDynamicDropWideOrbDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG
                 and 1.0 or 0.0,
+            gDynamicDropWideOrbEdgeMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
             gDynamicDropScreenSourceCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
                 and 1.0 or 0.0,
