@@ -361,8 +361,24 @@ float4 main(PS_IN pin)
             }
             float lensMIP = gDynamicDropConcaveLensDebug > 0.5
                 && local.x < 0.0 ? lerp(1.4, 1.9, saturate(r)) : 0.0;
+            float2 sampleUV = sceneUV + refractionOffset;
+            if (gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
+            {
+                // Roughly one third of the viewport crosses the diameter
+                // of each drop. Keep a slightly position-dependent center
+                // and rotate each image by a stable small per-drop angle.
+                float2 centerUV = lerp(sceneUV - local * 0.01,
+                    float2(0.5, 0.5), 0.70);
+                float twist = (frac(shapeSeed * 0.6180339) - 0.5) * 0.45;
+                float2 direction = float2(local.x + twist * local.y,
+                    local.y - twist * local.x);
+                float2 wideUV = centerUV + direction * 0.17;
+                float wideWeight = 0.92
+                    * (1.0 - smoothstep(0.58, 0.94, r));
+                sampleUV = lerp(sampleUV, wideUV, wideWeight);
+            }
             refractedScene = txDynamicSnapshot.SampleLevel(
-                samLinearClamp, saturate(sceneUV + refractionOffset),
+                samLinearClamp, saturate(sampleUV),
                 lensMIP).rgb;
             // Visible right half: inspect shot depth at exactly the same
             // refracted UV. Magenta indicates a far/sky pixel; cyan indicates
@@ -370,7 +386,7 @@ float4 main(PS_IN pin)
             if (gDynamicDropSkyDepthDebug > 0.5 && local.x < 0.0)
             {
                 float shotDepth = txDynamicShotDepth.SampleLevel(
-                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    samLinearClamp, saturate(sampleUV),
                     0.0).r;
                 refractedScene = shotDepth > 0.99999
                     ? float3(0.95, 0.12, 0.72)
@@ -384,7 +400,7 @@ float4 main(PS_IN pin)
                     || gDynamicDropConcaveLensDebug > 0.5))
             {
                 float shotDepth = txDynamicShotDepth.SampleLevel(
-                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    samLinearClamp, saturate(sampleUV),
                     0.0).r;
                 if (shotDepth > 0.99999)
                 {
@@ -396,8 +412,7 @@ float4 main(PS_IN pin)
                         // level 8 supplies a broad local cloud reference.
                         // Carry only relative luminance into the already
                         // verified fog tone, never the LDR scene color.
-                        float2 weatherUV = saturate(
-                            sceneUV + refractionOffset);
+                        float2 weatherUV = saturate(sampleUV);
                         float3 weatherCloud = txDynamicWeatherScreen.SampleLevel(
                             samLinearClamp, weatherUV, 4.0).rgb;
                         float3 weatherBroad = txDynamicWeatherScreen.SampleLevel(
@@ -419,7 +434,7 @@ float4 main(PS_IN pin)
                         // do not reintroduce the old sunset cloud hue.
                         float3 broadSky = txDynamicSnapshot.SampleLevel(
                             samLinearClamp,
-                            saturate(sceneUV + refractionOffset), 9.0).rgb;
+                            saturate(sampleUV), 9.0).rgb;
                         float skyLuma = dot(refractedScene,
                             float3(0.2126, 0.7152, 0.0722));
                         float broadLuma = dot(broadSky,
@@ -442,7 +457,7 @@ float4 main(PS_IN pin)
             // Legacy direct LDR source probe, disabled in the current test.
             if (gDynamicDropSkySourceDebug > 0.5 && local.x < 0.0)
                 refractedScene = txDynamicScreen.SampleLevel(
-                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    samLinearClamp, saturate(sampleUV),
                     0.0).rgb;
         }
         else
@@ -521,6 +536,9 @@ float4 main(PS_IN pin)
             && local.x < 0.0)
             alpha = (0.38 + fresnel * 0.08 + highlight * 0.04)
                 * (1.0 - smoothstep(0.72, 1.0, r));
+        if (gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
+            alpha = (0.72 + fresnel * 0.08)
+                * (1.0 - smoothstep(0.62, 0.98, r));
         return float4(refractedScene + opticalAccent, alpha);
     }
 
