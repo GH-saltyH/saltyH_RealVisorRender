@@ -4560,3 +4560,28 @@ prior 73–75. If the live HDR half matches geometry/sky but shows feedback,
 the remaining issue is access to a clean main composition, not the lens
 strength. If both differ from the actual asphalt, investigate their shared
 HDR draw stage, exposure or compositing before adding trails and spray.
+
+### 133. Recover from unavailable live HDR and compare screen content (2026-09-28)
+
+The user reports the right-lower `dynamic::hdr` diagnostic is black. It
+cannot be used to judge source color in this transparent callback. The FPS
+readout reached around 78, including over 75 during stronger Hurricane
+rainfall, but variable rain intensity prevents a paired conclusion; no
+large performance regression is apparent. Do not interpret the black HDR
+sample as evidence that the game scene itself is black or that a scene
+color fix worked.
+
+Replace the right-lower HDR sample with the already observed nonblack
+`dynamic::screen` source, keeping right-upper clean GeometryShot, the same
+4.5x inverted refraction and amber horizontal divider. Reuse the existing
+single screen sampling site because two independently compiled screen reads
+previously crashed in stage 84. `dynamic::screen` is LDR, while the drops
+are drawn into HDR before post-processing, so its RGB is expected to be
+darkened again; it may contain previous droplets. Compare silhouettes,
+cloud composition, asphalt detail and coordinate alignment before
+interpreting its brightness. At the same Hurricane camera record both rain
+strength and FPS; one unpaired 78 FPS observation is not an optimization
+claim. If screen content matches the real weather but the colors remain
+dark, the limiting problem is transferring composed LDR content into this
+HDR draw stage, not the optical offset; avoid applying a uniform gain as a
+production fix without verified tone mapping and exposure.
