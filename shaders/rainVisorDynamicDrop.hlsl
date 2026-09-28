@@ -69,6 +69,14 @@ float4 main(PS_IN pin)
     {
         clip(gDynamicDropMicroLayerEnabled - 0.5);
         clip(1.0 - r);
+        if (gDynamicDropMicroDebug > 0.5)
+        {
+            float debugRim = smoothstep(0.60, 0.88, r);
+            float3 debugColor = lerp(float3(0.17, 0.26, 0.31),
+                float3(0.82, 0.94, 1.0), debugRim);
+            return float4(debugColor,
+                0.90 * (1.0 - smoothstep(0.92, 1.0, r)));
+        }
         float zMicro = sqrt(saturate(1.0 - r * r));
         float2 microResolutionRatio = gDynamicDropInvRenderTargetSize
             / gDynamicDropInvScreenSize;
@@ -87,7 +95,10 @@ float4 main(PS_IN pin)
         float3 microNormal = normalize(float3(local, zMicro));
         float microGlint = saturate((dot(microNormal,
             normalize(float3(-0.45, -0.55, 0.70))) - 0.88) * 8.0);
-        float microAlpha = microRim * gDynamicDropMicroOpacity
+        // A newer disk covers most of an older disk's rim at overlaps.
+        float microAlpha = gDynamicDropMicroOpacity
+            * (0.88 + 0.12 * microRim)
+            * (1.0 - smoothstep(0.84, 1.0, r))
             + microGlint * 0.08;
         return float4(microScene
             + float3(0.78, 0.90, 1.0) * microGlint * 0.18,
