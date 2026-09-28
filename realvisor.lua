@@ -467,6 +467,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS = 0.48,
         -- Flip both projected surface axes for a 180-degree lens image test.
         RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE = true,
+        -- Source direction follows the projected drop position on the visor.
+        RAIN_DYNAMIC_DROP_ORB_POSITION_BEND = 0.72,
+        RAIN_DYNAMIC_DROP_ORB_SIDE_UPSHIFT = 0.22,
+        RAIN_DYNAMIC_DROP_ORB_GLOW = 0.12,
         -- Keep the accepted wide orb on both sides while scene tone is
         -- investigated. Re-enable only for explicit optical A/B tests.
         RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG = false,
@@ -7447,6 +7451,12 @@ float4 main(PS_IN pin)
             gDynamicDropOrbInvertImage =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE
                 and 1.0 or 0.0,
+            gDynamicDropOrbPositionBend =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_POSITION_BEND,
+            gDynamicDropOrbSideUpshift =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_SIDE_UPSHIFT,
+            gDynamicDropOrbGlow =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_GLOW,
             gDynamicDropSplitCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG
                 and 1.0 or 0.0,
