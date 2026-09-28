@@ -86,7 +86,8 @@ float4 main(PS_IN pin)
         float rim = smoothstep(0.72, 1.0, trailEdge);
         float trailLuma = dot(trailScene, float3(0.2126, 0.7152, 0.0722));
         return float4(trailScene + float3(0.72, 0.86, 1.0)
-            * rim * lerp(0.025, 0.10, saturate(trailLuma)), 0.50 * fade);
+            * rim * lerp(0.025, 0.10, saturate(trailLuma)),
+            gDynamicDropTrailOpacity * fade);
     }
 
     clip(1.0 - r);
