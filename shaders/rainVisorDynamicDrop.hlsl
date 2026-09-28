@@ -478,14 +478,20 @@ float4 main(PS_IN pin)
                 * (1.0 - smoothstep(0.005, 0.025, abs(local.y)))
                 * 0.55;
 
-        // The translucent candidate was preferred over full replacement:
-        // retain a visible convex lens while preserving the live scene.
+        // The translucent candidate retains the actual scene beneath the
+        // independent shot. The right-hand probe fades opacity to zero at
+        // the physical outline to remove the circular color cutout.
         float alpha = saturate(
             0.55 + fresnel * 0.25 + highlight * 0.10
             + smoothstep(0.75, 0.98, r) * 0.08);
         if (gDynamicDropGeometryShotDebug > 0.5
             && gDynamicDropOpaqueRefractionSplitDebug > 0.5)
             alpha = 1.0;
+        if (gDynamicDropSoftCompositeDebug > 0.5
+            && gDynamicDropConcaveLensDebug > 0.5
+            && local.x < 0.0)
+            alpha = (0.38 + fresnel * 0.08 + highlight * 0.04)
+                * (1.0 - smoothstep(0.72, 1.0, r));
         return float4(refractedScene + opticalAccent, alpha);
     }
 
