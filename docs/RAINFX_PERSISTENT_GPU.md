@@ -4801,3 +4801,26 @@ source before implementing independent stationary, falling, trail and
 diffuse underlayers. A later trail should clear the stationary layer in
 its swept region, with recovery over time; layering and screen coverage
 need separate performance budgets.
+
+### 141. Rotate the wide scene image per droplet (2026-09-28)
+
+The user reports that the section 140 wide-image right side reads well
+at varied locations, and proposes a substantially rotated scene image
+to represent differing water surface orientations. Preserve the wide
+one-third-viewport scene footprint, rim blend, alpha profile, source,
+shot resolution and left-side control. Preset
+`RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS=1.8`: the stable droplet seed
+assigns an angle in approximately ±103 degrees, with a smaller screen
+position contribution. Rotate the interior sample direction using a
+proper sine/cosine basis, avoiding the previous small shear. The shader
+uses the same rotated UV for color and depth/sky correction and allocates
+no additional pass or texture. Do not interpret the seed angle as a
+measured physical surface normal: this tests readability and diversity.
+
+At the same Hurricane camera and comparable rain, inspect whether
+scene features demonstrably rotate differently within neighboring
+drops, whether the wide image remains recognizable and whether folded
+or abruptly changing content appears near the soft rim. Compare FPS to
+section 140 under equal conditions. A good result would motivate a
+later orientation driven by actual drop shape, motion and surface normal;
+the current seed is a controlled visual proxy.
