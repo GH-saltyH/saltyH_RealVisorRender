@@ -392,21 +392,16 @@ float4 main(PS_IN pin)
                         refractedScene = gDynamicDropWeatherFogColor;
                 }
             }
-            // Sky color test on the back-facing visor: image-left keeps
-            // GeometryShot; image-right samples the final screen at the
-            // identical normalized UV and displacement. Screen may contain
-            // earlier drops, so this branch is diagnostic only.
-            if (gDynamicDropSkySourceDebug > 0.5 && local.x < 0.0)
+            // Right-upper keeps the clean shot. Right-lower samples the
+            // documented LDR screen source at the same inverted UV. Reuse
+            // the existing single screen sampling site: previous tests
+            // crashed when two such sites were compiled together. The LDR
+            // color can darken after this HDR pass's post-processing and
+            // may contain previous drops, so judge scene structure first.
+            if (local.x < 0.0 && (gDynamicDropSkySourceDebug > 0.5
+                || (gDynamicDropScreenSourceCompareDebug > 0.5
+                    && local.y > 0.0)))
                 refractedScene = txDynamicScreen.SampleLevel(
-                    samLinearClamp, saturate(sceneUV + refractionOffset),
-                    0.0).rgb;
-            // Right-lower: live HDR at the exact same inverted lens UV;
-            // right-upper: independent shot with weather sky correction.
-            // This isolates source color on sky and asphalt. The live HDR
-            // may contain earlier drops, so it is a diagnostic only.
-            if (gDynamicDropLiveHDRCompareDebug > 0.5
-                && local.x < 0.0 && local.y > 0.0)
-                refractedScene = txDynamicScene.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
                     0.0).rgb;
         }
@@ -434,7 +429,7 @@ float4 main(PS_IN pin)
                 * (1.0 - smoothstep(0.005, 0.025, abs(local.x)))
                 * 0.55;
         if (gDynamicDropGeometryShotDebug > 0.5
-            && gDynamicDropLiveHDRCompareDebug > 0.5
+            && gDynamicDropScreenSourceCompareDebug > 0.5
             && local.x < 0.0)
             opticalAccent += float3(0.95, 0.68, 0.08)
                 * (1.0 - smoothstep(0.005, 0.025, abs(local.y)))
