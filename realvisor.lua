@@ -489,6 +489,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED = true,
         RAIN_DYNAMIC_DROP_IMPACT_SHAPE_SECONDS = 0.14,
+        RAIN_DYNAMIC_DROP_IMPACT_LARGE_DIAMETER_MM = 3.0,
+        RAIN_DYNAMIC_DROP_IMPACT_FAST_MIN_DIAMETER_MM = 1.4,
+        RAIN_DYNAMIC_DROP_IMPACT_FAST_TRAVEL_MIX = 0.75,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -5289,6 +5292,7 @@ local function updateRainGPUState(sim)
     local activeVelocity = activeCar and activeCar.velocity
     local travelMix = rainDynamicSceneCopyState.lifecycleTravelMix(
         activeVelocity)
+    rainDynamicSceneCopyState.currentTravelMix = travelMix
     rainStateUpdateParams.values.gRainStateTravelMix = travelMix
     rainStateUpdateParams.values.gRainStateBirthSpeedFraction =
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION
@@ -6224,6 +6228,7 @@ local function initializeRainDynamicStateReadback()
     rainDynamicStateSnapshotTime = 0.0
     rainDynamicSceneCopyState.generation = {}
     rainDynamicSceneCopyState.birthSeenAt = {}
+    rainDynamicSceneCopyState.birthImpactEligible = {}
     rainDynamicSceneCopyState.birthsSinceLog = 0
 
     for slotIndex = 1, ringSize do
@@ -6495,6 +6500,13 @@ local function requestRainDynamicStateReadback()
                 births = births + 1
                 rainDynamicSceneCopyState.birthSeenAt[dst] =
                     rainDynamicStateRenderClock
+                local diameterMM = rainDynamicStateRadius[dst] * 2.0
+                    / math.max(cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM, 0.000001)
+                local travelMix = rainDynamicSceneCopyState.currentTravelMix or 0.0
+                rainDynamicSceneCopyState.birthImpactEligible[dst] =
+                    diameterMM >= cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_LARGE_DIAMETER_MM
+                    or (diameterMM >= cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_FAST_MIN_DIAMETER_MM
+                        and travelMix >= cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_FAST_TRAVEL_MIX)
             end
             rainDynamicSceneCopyState.generation[dst] = generation
             local status = packedStatus % 4
@@ -6698,8 +6710,8 @@ local function applyRainDynamicStateToSurfaceMesh()
             local birthAt = rainDynamicSceneCopyState.birthSeenAt[i + 1]
             local impactSeconds = cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_SHAPE_SECONDS
             if cfg.RUNTIME.RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED
+                and rainDynamicSceneCopyState.birthImpactEligible[i + 1]
                 and birthAt and impactSeconds > 0.0
-                and radiusUV >= cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.7
             then
                 local impactAge = rainDynamicStateRenderClock - birthAt
                 if impactAge >= 0.0 and impactAge < impactSeconds then
