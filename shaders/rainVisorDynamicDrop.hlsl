@@ -94,6 +94,9 @@ float4 main(PS_IN pin)
         }
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(length(lensLocal));
+        // The baked circle ends at radius 0.81. Move its inner edge
+        // inward at runtime without reallocating or redrawing the mask.
+        clip(0.81 - gDynamicDropMicroExtraRimWidth - lensRadius);
         // The winning disk owns the pixel; its outer ring also marks
         // boundaries where a newer disk hides an older one.
         float rim = smoothstep(0.65, 0.79, lensRadius);
