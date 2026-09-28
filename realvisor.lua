@@ -356,9 +356,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,
         RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
         RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
-        -- Initial momentum at each mobile birth, as a fraction of the
-        -- calibrated size-dependent maximum speed (0 disables the burst).
+        -- Fraction of the calibrated free-fall/relative-air impact
+        -- momentum transferred to initial surface motion.
         RAIN_GPU_STATE_BIRTH_SPEED_FRACTION = 0.85,
+        -- Temporary surface-speed allowance for fresh impacts; ordinary
+        -- calibrated speed limit returns as the impact glide expires.
+        RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER = 4.0,
         -- Duration of reduced drag after impact; ordinary drag returns
         -- smoothly afterward. Zero disables the glide.
         RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = 0.45,
@@ -789,6 +792,8 @@ local rainStateUpdateParams = {
         gRainStateRainIntensity = 0.0,
         gRainStateBirthSpeedFraction =
             cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION,
+        gRainStateBirthSpeedCapMultiplier =
+            cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER,
         gRainStateBirthGlideSeconds =
             cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS,
         gRainStateAgeMin = 8.0,
@@ -1303,6 +1308,13 @@ local rainStateUpdateParams = {
                 * dt;
         }
 
+        float rainStateBirthGlide(float age)
+        {
+            float seconds = max(gRainStateBirthGlideSeconds, 0.0);
+            return gRainStateLifecycle > 0.5 && seconds > 0.0001
+                ? saturate((seconds - age) / seconds) : 0.0;
+        }
+
         float2 rainStateApplyDrag(
             float2 velocity,
             float forceMagnitude,
@@ -1316,12 +1328,8 @@ local rainStateUpdateParams = {
                 below adhesion the droplet receives the stronger
                 attachment damping, then the normal flow drag is applied.
             */
-            float glideSeconds = max(gRainStateBirthGlideSeconds, 0.0);
-            float glide = gRainStateLifecycle > 0.5
-                && glideSeconds > 0.0001
-                ? saturate((glideSeconds - age) / glideSeconds)
-                : 0.0;
-            float dragScale = lerp(1.0, 0.25, glide);
+            float glide = rainStateBirthGlide(age);
+            float dragScale = lerp(1.0, 0.12, glide);
 
             if (forceMagnitude <= adhesion)
             {
@@ -1329,7 +1337,7 @@ local rainStateUpdateParams = {
                     exp(
                         -gRainStateFlowDrag
                         * 2.0
-                        * dragScale
+                        * (1.0 - glide)
                         * dt
                     );
             }
@@ -1349,14 +1357,18 @@ local rainStateUpdateParams = {
 
         float2 rainStateClampSpeed(
             float2 velocity,
-            float radius
+            float radius,
+            float age
         )
         {
             float speed =
                 length(velocity);
 
             float maxSpeed =
-                rainStateMaxSpeedValue(radius);
+                rainStateMaxSpeedValue(radius)
+                * lerp(1.0,
+                    max(gRainStateBirthSpeedCapMultiplier, 1.0),
+                    rainStateBirthGlide(age));
 
             if (
                 speed
@@ -1447,7 +1459,8 @@ local rainStateUpdateParams = {
             velocity =
                 rainStateClampSpeed(
                     velocity,
-                    radius
+                    radius,
+                    age
                 );
 
             position =
@@ -1583,28 +1596,53 @@ local rainStateUpdateParams = {
                     float birthRadius = diameterMM
                         * gRainStatePhysicalDiameterUVPerMM * 0.5;
                     float3 normalWorld = rainStateNormalWorld(respawn);
-                    float2 down = rainStateProjectForce(
-                        float3(0.0, -1.0, 0.0), normalWorld);
-                    float2 impulseDirection = length(down) > 0.0001
-                        ? normalize(down) : float2(0.0, 1.0);
-                    // Keep a slight per-birth lateral variation without
-                    // erasing the measured gravity-facing tangent.
+                    // Free-fall speed is the PRE-impact world speed, not a
+                    // speed to copy directly onto the surface. Transfer a
+                    // small calibrated part of the tangent component.
+                    float terminalMS = 3.778
+                        * pow(max(diameterMM, 0.5), 0.67);
+                    float2 fall = rainStateProjectForce(
+                        float3(0.0, -terminalMS, 0.0), normalWorld);
+                    float2 relativeCar = rainStateProjectForce(
+                        gRainAirVelocityWorld * 0.12, normalWorld);
+                    float edge = smoothstep(0.16, 0.46,
+                        abs(respawn.x - 0.5));
+                    float outward = (respawn.x < 0.5 ? -1.0 : 1.0)
+                        * terminalMS * 0.55 * edge;
+                    // Signed visor V: -1 top, 0 bottom. Correct the
+                    // gravity projection's orientation at impact so a
+                    // stationary vehicle cannot launch a drop upward.
+                    float2 surfaceImpact = float2(
+                        fall.x + outward + relativeCar.x,
+                        abs(fall.y) * lerp(1.0, 0.55, edge)
+                            + relativeCar.y);
+                    surfaceImpact.y = max(surfaceImpact.y, 0.0);
+                    // Small drops can remain pinned after contact; large
+                    // impacts transfer more momentum on the waterproof face.
+                    float mobileFraction = smoothstep(0.65, 1.40,
+                        diameterMM);
                     float lateral = (rainStateHash(index
-                        + generation * 19.17 + 823.0) - 0.5) * 0.28;
-                    impulseDirection = normalize(impulseDirection
-                        + float2(-impulseDirection.y,
-                            impulseDirection.x) * lateral);
-                    float sizeFactor = lerp(0.65, 1.0,
-                        saturate((diameterMM - 0.35) / 4.0));
-                    float rainFactor = lerp(0.75, 1.0,
-                        sqrt(saturate(gRainStateRainIntensity)));
-                    float birthSpeed = rainStateMaxSpeedValue(birthRadius)
-                        * saturate(gRainStateBirthSpeedFraction)
-                        * sizeFactor * rainFactor;
+                        + generation * 19.17 + 823.0) - 0.5) * 0.10;
+                    surfaceImpact.x += lateral * terminalMS;
+                    // 1 mm -> 0.0029296875 UV, so UV per metre = 1000
+                    // times the calibrated UV per millimetre. 0.006 is a
+                    // tunable impact-transfer fraction, not free-fall motion.
+                    float2 initialVelocity = surfaceImpact
+                        * (gRainStatePhysicalDiameterUVPerMM * 1000.0)
+                        * 0.006 * saturate(gRainStateBirthSpeedFraction)
+                        * mobileFraction;
+                    float impactLimit = rainStateMaxSpeedValue(birthRadius)
+                        * max(gRainStateBirthSpeedCapMultiplier, 1.0);
+                    float impactSpeed = length(initialVelocity);
+                    if (impactSpeed > impactLimit)
+                    {
+                        initialVelocity *= impactLimit
+                            / max(impactSpeed, 0.000001);
+                    }
 
                     return float4(
                         respawn,
-                        impulseDirection * birthSpeed
+                        initialVelocity
                     );
                 }
 
@@ -4999,6 +5037,8 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_FLOW_DRAG
     rainStateUpdateParams.values.gRainStateBirthSpeedFraction =
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION
+    rainStateUpdateParams.values.gRainStateBirthSpeedCapMultiplier =
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER
     rainStateUpdateParams.values.gRainStateBirthGlideSeconds =
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS
     rainStateUpdateParams.values.gRainStateGravity =
@@ -6307,6 +6347,8 @@ local function requestRainDynamicStateReadback()
                 .. ' centerFallback=' .. tostring(centerFallback)
                 .. ' birthSpeed=' .. string.format('%.2f',
                     cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION)
+                .. ' impactCap=' .. string.format('%.1f',
+                    cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER)
                 .. ' glide=' .. string.format('%.2f',
                     cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS)
                 .. ' birthsSinceLog='
@@ -9637,12 +9679,20 @@ function windowMain(dt)
     ui.text('Boundary exits remain active; age sliders change live GPU state.')
 
     local birthSpeed, birthSpeedChanged = ui.slider(
-        'New drop initial speed / max speed',
+        'Impact momentum transfer',
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION,
         0.0, 1.0, '%.2f'
     )
     if birthSpeedChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION = birthSpeed
+    end
+    local impactCap, impactCapChanged = ui.slider(
+        'Impact speed cap / surface speed',
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER,
+        1.0, 8.0, '%.1f'
+    )
+    if impactCapChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER = impactCap
     end
     local birthGlide, birthGlideChanged = ui.slider(
         'New drop glide (seconds)',
@@ -9652,7 +9702,7 @@ function windowMain(dt)
     if birthGlideChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = birthGlide
     end
-    ui.text('Newborn momentum only; normal flow and speed limits remain active.')
+    ui.text('Impact speed limit fades to the calibrated surface limit.')
 
     ui.separator()
     ui.text('Dynamic drop trail calibration (temporary)')
