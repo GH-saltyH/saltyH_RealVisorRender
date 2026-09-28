@@ -80,8 +80,8 @@ float4 main(PS_IN pin)
         float microRim = smoothstep(0.42, 0.96, r)
             * (1.0 - smoothstep(0.94, 1.0, r));
         float3 microNormal = normalize(float3(local, zMicro));
-        float microGlint = pow(saturate(dot(microNormal,
-            normalize(float3(-0.45, -0.55, 0.70)))), 48.0);
+        float microGlint = saturate((dot(microNormal,
+            normalize(float3(-0.45, -0.55, 0.70))) - 0.88) * 8.0);
         float microAlpha = microRim * gDynamicDropMicroOpacity
             + microGlint * 0.08;
         return float4(microScene
