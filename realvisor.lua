@@ -502,7 +502,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.85,
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 8.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 64.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 3.0,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 1.0,
@@ -6224,7 +6224,7 @@ local function initializeRainDynamicSurfaceTest()
         local patternSize = math.max(256,
             math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE))
         local patternGrid = math.max(4, math.floor(
-            1.80 / math.max(0.01,
+            1.12 / math.max(0.01,
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM)
                 / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
                 + 0.5))
@@ -6259,8 +6259,8 @@ local function initializeRainDynamicSurfaceTest()
                                         + float2((float)x, (float)y);
                                     float3 h = hashMicroCell(cell);
                                     float2 center = cell + 0.5
-                                        + (h.xy - 0.5) * 0.12;
-                                    float2 local = (p - center) / 0.90;
+                                        + (h.xy - 0.5) * 0.30;
+                                    float2 local = (p - center) / 0.56;
                                     if (dot(local, local) < 1.0 && h.z > best)
                                     {
                                         best = h.z;
