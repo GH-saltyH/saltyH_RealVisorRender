@@ -430,6 +430,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS = 0.45,
         -- Right-only orb probe: broad forward image with low-detail mips.
         RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
+        -- Keep the accepted wide orb on both sides while scene tone is
+        -- investigated. Re-enable only for explicit optical A/B tests.
+        RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG = false,
         -- Keep the low-detail center; make its visible edge about half as
         -- blurred using the same existing GeometryShot mip chain.
         RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 3.5,
@@ -443,7 +446,7 @@ local cfg = scriptSettings:mapConfig({
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
-        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = true,
+        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
         -- the visual values have been selected in the game.
@@ -6721,6 +6724,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG)
             .. ' wideOrbDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG)
+            .. ' splitCompareDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG)
             .. ' wideOrbEdgeMip='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP)
             .. ' screenSourceCompareDebug='
@@ -6853,6 +6858,9 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropWideOrbDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropSplitCompareDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropWideOrbEdgeMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
