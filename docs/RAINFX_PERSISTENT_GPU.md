@@ -5167,3 +5167,34 @@ record alive, UV cells, center fallback, visually distinct drops and
 FPS. If 64×32 occupancy stays nearly fixed while alive rises, the next
 stage should allocate genuinely separated valid spawn locations,
 using a bounded spatial occupancy structure rather than more slots.
+
+### 150. Spread births and shift sizes with rainfall (2026-09-28)
+
+With a manually selected 2–4 second lifetime, users observe successive
+births streaming from a few recognizable visor points. Each previous
+birth used the first of up to 32 mask-valid independent hashes for its
+slot and generation; it did not consider other living positions. Initial
+placement now tries a low-discrepancy UV point before the random mask
+fallback. A respawn checks 16 mask-valid candidates against 16 sampled
+living slots per candidate and chooses the largest minimum squared
+clearance. The bounded lookup runs only on a birth, not on each frame
+for all 512 droplets. The existing mask still decides which raw visor
+UV coordinates are valid. `centerFallback` in the lifecycle log exposes
+cases where no valid candidate is found.
+
+Normal birth diameters now start at 0.35 mm for light rain and increase
+the floor to 1.15 mm by intensity 0.70, while the ordinary upper limit
+reaches 4.1 mm at intensity 0.50. A separate approximately 0.1–0.8%
+birth chance at increasing rain creates a 5–6 mm impact. Modes 4/10
+retain their full physical calibration range. Existing droplets keep
+their born size until they expire. The temporary lifetime sliders can
+be set to 2 and 4 seconds for comparison; no hardcoded lifetime change
+is required.
+
+At a fixed Hurricane camera and rain override 0.08, 0.50 and 0.70,
+compare 2–4 second lifetimes against the preceding build. Look for
+repeated birth points, record alive/uvCells64x32/maxCell/
+centerFallback and FPS, and verify that high rainfall predominantly
+produces moderate drops with only isolated 5–6 mm impacts. A rise in
+birth frequency increases the number of candidate checks, so compare
+FPS at the shortest tested lifetime before increasing the probe budget.
