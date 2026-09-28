@@ -5618,3 +5618,33 @@ visible pop-ins. The current pulse only shapes the parent drop and its optical
 highlight; detached satellite droplets require a small separately budgeted
 GPU pool or reuse of currently reserved trail geometry and are the next
 visual step if this pulse reads too much like simple morphing.
+
+
+## Static micro-droplet base layer experiment
+
+The large-drop impact test did not produce a visible change at heavy rain and
+high speed, so impact breakup is deferred. The new base layer adds 4096 tiny
+(0.16–0.36 mm) area-stratified surface beads to unused tail capacity in the
+existing visor mesh. They are fixed for the app session, do not occupy GPU
+physics slots and do not run per-frame CPU position updates. Their triangles
+are ordered before the 512 mobile heads, so foreground drops render over them.
+One mesh draw and the already-current GeometryShot are shared. Each covered
+micro pixel performs one low-mip scene lookup, a 2px-scale refraction and a
+small rim/glint blend. There is no extra render pass, shot or texture. Shader
+branch `gDynamicDropMicroLayerEnabled` can hide the layer without rebuilding;
+count/diameter changes require Lua reload because geometry is built once.
+
+Defaults in `realvisor.lua`:
+`RAIN_DYNAMIC_MICRO_LAYER_ENABLED=true`, count 4096, diameter 0.16–0.36 mm,
+refraction 2 px, scene mip 2, opacity 0.16. Compare enabled/disabled at the
+same camera and weather; report whether the small texture reads as beads,
+competes with foreground optics, clips at visor boundaries, and the app FPS
+before/after. If overdraw costs too much, reduce count to 2048 first; if dots
+are individually obvious, lower max diameter or opacity. This layer is static
+and independent of rain intensity in this first experiment. Later animation
+can clear/fade it under moving-drop trails without adding physical simulation.
+
+Follow-up ordering: validate this base field and its budget; then add a small
+bounded pool of transient detached satellite beads for qualifying impacts;
+then implement true GPU mass coalescence with deterministic survivor writes.
+Blend these layers only after each can be isolated in matched FPS tests.
