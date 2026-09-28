@@ -500,10 +500,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.42,
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.85,
-        RAIN_DYNAMIC_MICRO_LAYER_DEBUG = true,
+        RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 8.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 1.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 2.0,
-        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.45,
+        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.16,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -6226,6 +6228,7 @@ local function initializeRainDynamicSurfaceTest()
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM)
                 / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
                 + 0.5))
+        rainDynamicSceneCopyState.microPatternGrid = patternGrid
         rainDynamicSceneCopyState.microPatternCanvas = ui.ExtraCanvas(
             vec2(patternSize, patternSize), 1,
             render.TextureFormat.R8G8B8A8.UNorm
@@ -7707,6 +7710,12 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_DEBUG and 1.0 or 0.0,
             gDynamicDropMicroRefractionPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
+            gDynamicDropMicroPatternGrid =
+                rainDynamicSceneCopyState.microPatternGrid or 1,
+            gDynamicDropMicroImageScale =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
+            gDynamicDropMicroRimStrength =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
