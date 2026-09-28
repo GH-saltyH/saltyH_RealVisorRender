@@ -5026,3 +5026,50 @@ Implementation order and acceptance gates:
 Keep the unresolved all-sky black/tone mismatch and the transparent KN5
 visor rain-overlay artifact as separate source/render-stage issues;
 neither requires changing particle birth logic.
+
+### 147. Activate age and rain-driven rebirth in the canonical GPU state (2026-09-28)
+
+Extend the already validated boundary exit and deferred respawn machine,
+now also active in the normal mode 3 when `RAIN_GPU_STATE_LIFECYCLE=true`.
+The existing mode 6 continues to exercise the same transition path.
+Both GPU passes read the prior state's Meta.A, so a waiting slot first
+enters pending status 2; on the following update the state pass moves it
+to a newly selected valid UV with zero velocity while the meta pass
+resets age, radius and mass and marks it alive. Keep Meta.R/G as radius
+and mass and Meta.B as accumulated alive/waiting seconds. Encode
+Meta.A as `generation*4 + status`: 0 waiting, 1 alive, 2 pending. A
+4096-generation wrap keeps the value exactly representable. The
+display shader and existing 6-scalar asynchronous readback decode the
+status, and the readback retains the generation in an existing Lua
+state table for later trail continuity checks. No extra state canvas,
+capture, render pass or readback channel is added.
+
+The bundled SDK exposes `sim.rainIntensity` (0..1). Use this live value
+unless `RAIN_GPU_STATE_RAIN_OVERRIDE` is 0..1; -1 uses the weather.
+Initial live occupancy and subsequent admission are gated by a stable
+per-slot hash against current rain intensity. Waiting time scales with
+the existing 0.15–0.75 s randomized respawn gap divided by rain (at
+least 0.05); zero rain prevents births. Alive slots now expire after
+an index/generation-dependent 8–18 s even when parked, in addition to
+the established boundary test. When rain falls to zero, cap their
+remaining lifetime by a two-second age limit to clear the moving layer.
+New generations select new valid visor positions and a new member of
+the existing deterministic 0.5–6 mm distribution. Weather-dependent
+size mixture, attached stationary beads, impact bursts and deposited
+trail history remain separate stages; this cycle is for the present
+mobile pool only.
+
+The RainFX tab offers temporary `Lifecycle rain override` (-1..1)
+and moving-drop minimum/maximum age sliders for dry/medium/heavy and
+lifespan tests without changing weather or restarting. These live UI
+values are not saved, and the age range is kept in ascending order.
+Once every 180 accepted async snapshots, log live,
+waiting and pending counts and births since the last log. Check in
+order: at override 0, formerly live moving drops vanish and no new
+ones appear; at 0.5, a parked visor steadily replaces some drops and
+the counts remain bounded; at 1.0, greater occupancy and continuing
+births; and at -1, transitions follow actual weather. Confirm no
+teleporting streaks across rebirth, no invalid UV or size, and measure
+app-on/off FPS at matched Hurricane rain/camera. The UI remains until
+the user selects behavior and numeric lifetime values; it can then be
+removed or converted into a deliberate product setting.
