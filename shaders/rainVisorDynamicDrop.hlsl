@@ -77,8 +77,8 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroRain - 0.001);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
             samLinearClamp, patternUV, 0.0);
-        // Alpha is zero on the topmost disk rim and on gaps. Its nonzero
-        // value is constant across the selected disk's entire interior.
+        // Alpha stores only the disk silhouette, independent of rain.
+        // The selection threshold lives in the blue channel.
         clip(pattern.a - 0.005);
         if (gDynamicDropMicroRain < 0.999)
         {
@@ -89,12 +89,11 @@ float4 main(PS_IN pin)
                 * gDynamicDropMicroPatternSize),
                 int2(lastTexel, lastTexel));
             float maskGate = txDynamicMicroPattern.Load(
-                int3(maskPixel, 0)).a;
-            clip(maskGate - 0.005);
+                int3(maskPixel, 0)).b;
             clip(gDynamicDropMicroRain - maskGate);
         }
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
-        float lensRadius = saturate(pattern.z);
+        float lensRadius = saturate(length(lensLocal));
         // The winning disk owns the pixel; its outer ring also marks
         // boundaries where a newer disk hides an older one.
         float rim = smoothstep(0.65, 0.79, lensRadius);
