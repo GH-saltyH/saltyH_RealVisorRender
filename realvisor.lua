@@ -398,8 +398,8 @@ local cfg = scriptSettings:mapConfig({
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
-        -- Compare HDR scene color without the original background bleeding
-        -- through: opaque output and identical 48px optics on both halves.
+        -- Opaque lens output prevents unshifted background bleed-through;
+        -- the visible left retains the 48px radial optics.
         RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = true,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
@@ -415,6 +415,9 @@ local cfg = scriptSettings:mapConfig({
         -- Both halves share weather-corrected sky; right half inverts a
         -- wider projected scene footprint for an optics-only comparison.
         RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = true,
+        -- Within the wider right-hand lens, compare HDR main-scene color
+        -- against the clean shot using the same displaced UV.
+        RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6614,6 +6617,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG)
             .. ' invertedFootprintDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
+            .. ' liveHDRCompareDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG)
             .. ' fogColor='
             .. tostring(sim.fogColor)
             .. ' pixelUV='
@@ -6717,6 +6722,9 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropInvertedFootprintDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG
+                and 1.0 or 0.0,
+            gDynamicDropLiveHDRCompareDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropWeatherFogColor = sim.fogColor,
 
