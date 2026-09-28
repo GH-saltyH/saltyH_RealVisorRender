@@ -366,21 +366,39 @@ float4 main(PS_IN pin)
             {
                 // Roughly one third of the viewport crosses the diameter
                 // of each drop. Keep a slightly position-dependent center
-                // and rotate the mapped image per drop. The center and
-                // orientation stay fixed as the droplet moves on the visor.
+                // and align the mapped image to the projected visor U axis.
+                // The CPU already constructs this quad using surface
+                // tangents and normal; its on-screen derivatives encode
+                // the surface-dependent rotation and possible axis flip.
                 float2 centerUV = lerp(sceneUV - local * 0.01,
                     float2(0.5, 0.5), 0.70);
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
-                angle += dot(centerUV - 0.5, float2(0.4, 0.2));
                 float rotationSin, rotationCos;
                 sincos(angle, rotationSin, rotationCos);
-                float2 direction = float2(
-                    rotationCos * local.x - rotationSin * local.y,
-                    rotationSin * local.x + rotationCos * local.y);
+                float2 surfaceAxis = float2(1.0, 0.0);
+                float surfaceJacobian = localDx.x * localDy.y
+                    - localDy.x * localDx.y;
+                if (gDynamicDropWideSurfaceRotationDebug > 0.5
+                    && abs(surfaceJacobian) > 1e-6)
+                {
+                    float2 projectedU = float2(localDy.y,
+                        -localDx.y) / surfaceJacobian;
+                    if (dot(projectedU, projectedU) > 1e-4)
+                        surfaceAxis = normalize(projectedU);
+                }
+                float2 rotatedAxis = float2(
+                    surfaceAxis.x * rotationCos
+                        - surfaceAxis.y * rotationSin,
+                    surfaceAxis.y * rotationCos
+                        + surfaceAxis.x * rotationSin);
+                float2 direction = rotatedAxis * local.x
+                    + float2(-rotatedAxis.y, rotatedAxis.x) * local.y;
                 float2 wideUV = centerUV + direction * 0.17;
+                // Spread the wide-to-local transition across most of the
+                // footprint: a narrow outer transition bent hard edges.
                 float wideWeight = 0.92
-                    * (1.0 - smoothstep(0.58, 0.94, r));
+                    * (1.0 - smoothstep(0.15, 0.96, r));
                 sampleUV = lerp(sampleUV, wideUV, wideWeight);
             }
             refractedScene = txDynamicSnapshot.SampleLevel(
@@ -544,7 +562,7 @@ float4 main(PS_IN pin)
                 * (1.0 - smoothstep(0.72, 1.0, r));
         if (gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
             alpha = (0.72 + fresnel * 0.08)
-                * (1.0 - smoothstep(0.62, 0.98, r));
+                * (1.0 - smoothstep(0.42, 0.98, r));
         return float4(refractedScene + opticalAccent, alpha);
     }
 
