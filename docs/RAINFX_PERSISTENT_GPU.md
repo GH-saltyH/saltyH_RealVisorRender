@@ -4907,3 +4907,37 @@ Check whether the edge becomes crisper without restoring a hard seam,
 and whether coarse central objects still look cohesive at a fixed
 Hurricane camera. Record paired FPS in similar rain. The black all-sky
 case needs a separate scene source investigation.
+
+### 145. Calibrate moving-head trail geometry with live UI (2026-09-28)
+
+The user accepts the new broad orb and sharpened rim, and asks for the
+next playable test with live sliders wherever numeric fine tuning is
+needed. Preserve the current orb controls and use the existing dynamic
+mesh trail strip for a first motion test. This is a strip attached to
+the current drop, not a persistent history, stationary-drop erasure or
+time-delayed clearing. In particular, the `seconds` setting converts
+instantaneous speed to trail length; it does not specify how many
+seconds a deposited streak survives. Those systems follow after the
+strip's shape and cost have been judged.
+
+Preset `RAIN_DYNAMIC_DROP_TRAIL_ENABLED=true`,
+`RAIN_DYNAMIC_DROP_TRAIL_SECONDS=0.30`,
+`RAIN_DYNAMIC_DROP_TRAIL_WIDTH=0.38` times the head radius, and
+`RAIN_DYNAMIC_DROP_TRAIL_OPACITY=0.35`; the tail remains about 58% of
+the head strip width. Add temporary controls in the existing RainFX tab
+for trail on/off, a pixels-only switch that retains CPU geometry for
+FPS A/B, width 0.08..0.90, speed-to-length time 0.08..1.20 s, and
+opacity 0.05..0.70. UI changes mutate the current cfg.RUNTIME values;
+the geometry picks up the width and length on the next mesh update and
+the shader receives opacity and pixel toggles at draw time. Once the
+user selects values, remove this calibration UI and keep the chosen
+settings in code.
+
+Compare a stationary camera with falling rain and a moving-car segment:
+does a trail appear only behind a moving drop, is its width appropriate
+for small and large drops, is it visible without a bright/tinted sky
+artifact, and does it follow curvature and speed? At matched camera,
+weather and rain intensity, compare FPS with pixels on versus off
+while leaving geometry enabled, then whole trails on versus off. The
+current strip does not clear underlying stationary droplets or leave
+streaks after the head passes; those are separate next stages.
