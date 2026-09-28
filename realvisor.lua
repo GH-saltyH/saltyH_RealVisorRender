@@ -365,7 +365,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER = 4.0,
         RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER = 24.0,
         RAIN_GPU_STATE_MOBILE_DRAG = 1.59,
-        RAIN_GPU_STATE_MOBILE_AIR_GAIN = 0.012,
         -- Duration of reduced drag after impact; ordinary drag returns
         -- smoothly afterward. Zero disables the glide.
         RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = 0.08,
@@ -803,7 +802,6 @@ local rainStateUpdateParams = {
         gRainStateMobileSpeedMultiplier =
             cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER,
         gRainStateMobileDrag = cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG,
-        gRainStateMobileAirGain = cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_AIR_GAIN,
         gRainStateTravelMix = 0.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
@@ -1460,6 +1458,24 @@ local rainStateUpdateParams = {
             float age
         )
         {
+            // Birth is a brief surface impact, independent of the forces
+            // governing settled water. Stop its stored momentum at the end
+            // of the glide; regular physics begins from rest afterward.
+            if (gRainStateLifecycle > 0.5
+                && gRainStateBirthGlideSeconds > 0.0001)
+            {
+                if (age < gRainStateBirthGlideSeconds)
+                {
+                    velocity *= exp(-2.0 * dt
+                        / gRainStateBirthGlideSeconds);
+                    return float4(position + velocity * dt, velocity);
+                }
+                if (age < gRainStateBirthGlideSeconds + dt * 1.5)
+                {
+                    velocity = float2(0.0, 0.0);
+                }
+            }
+
             float forceMagnitude = 0.0;
 
             float2 tangentForce =
@@ -1490,18 +1506,6 @@ local rainStateUpdateParams = {
                     movingAdhesion,
                     dt
                 ) * lerp(1.0, 16.0, mobile);
-
-            if (mobile > 0.0)
-            {
-                float2 air = rainStateProjectForce(
-                    gRainAirVelocityWorld,
-                    rainStateNormalWorld(position));
-                // The visor's signed V convention is opposite to this
-                // projected vehicle-air component on the active mesh.
-                air.y = -air.y;
-                velocity += air * max(gRainStateMobileAirGain, 0.0)
-                    * mobile * gRainStateTravelMix * dt;
-            }
 
             velocity =
                 rainStateApplyDrag(
@@ -1661,27 +1665,23 @@ local rainStateUpdateParams = {
                         * pow(max(diameterMM, 0.5), 0.67);
                     float2 fall = rainStateProjectForce(
                         float3(0.0, -terminalMS, 0.0), normalWorld);
-                    float2 relativeCar = rainStateProjectForce(
-                        gRainAirVelocityWorld * 0.12, normalWorld);
-                    relativeCar.y = -relativeCar.y;
                     float edge = smoothstep(0.16, 0.46,
                         abs(respawn.x - 0.5));
                     float outward = (respawn.x < 0.5 ? -1.0 : 1.0)
-                        * terminalMS * 0.55 * edge;
+                        * terminalMS * 0.14 * edge;
                     // Signed visor V: -1 top, 0 bottom. Correct the
                     // gravity projection's orientation at impact so a
                     // stationary vehicle cannot launch a drop upward.
                     float2 surfaceImpact = float2(
-                        fall.x + outward + relativeCar.x,
-                        abs(fall.y) * lerp(1.0, 0.55, edge)
-                            + relativeCar.y);
-                    surfaceImpact.y = max(surfaceImpact.y, 0.0);
+                        fall.x * 0.15 + outward,
+                        max(abs(fall.y), terminalMS * 0.35)
+                            * lerp(1.0, 0.85, edge));
                     // Small drops can remain pinned after contact; large
                     // impacts transfer more momentum on the waterproof face.
                     float mobileFraction = smoothstep(0.65, 1.40,
                         diameterMM);
                     float lateral = (rainStateHash(index
-                        + generation * 19.17 + 823.0) - 0.5) * 0.10;
+                        + generation * 19.17 + 823.0) - 0.5) * 0.03;
                     surfaceImpact.x += lateral * terminalMS;
                     // 1 mm -> 0.0029296875 UV, so UV per metre = 1000
                     // times the calibrated UV per millimetre. 0.020 is a
@@ -1690,6 +1690,10 @@ local rainStateUpdateParams = {
                         * (gRainStatePhysicalDiameterUVPerMM * 1000.0)
                         * 0.020 * saturate(gRainStateBirthSpeedFraction)
                         * mobileFraction;
+                    if (gRainStateBirthGlideSeconds <= 0.0001)
+                    {
+                        initialVelocity = float2(0.0, 0.0);
+                    }
                     float impactLimit = rainStateMaxSpeedValue(birthRadius)
                         * lerp(1.0,
                             max(gRainStateMobileSpeedMultiplier, 1.0),
@@ -5120,8 +5124,6 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER
     rainStateUpdateParams.values.gRainStateMobileDrag =
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG
-    rainStateUpdateParams.values.gRainStateMobileAirGain =
-        cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_AIR_GAIN
     rainStateUpdateParams.values.gRainStateGravity =
         math.abs(
             ac.getSim()
@@ -9817,14 +9819,6 @@ function windowMain(dt)
     )
     if movingDragChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG = movingDrag
-    end
-    local movingAir, movingAirChanged = ui.slider(
-        'Moving drop car airflow',
-        cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_AIR_GAIN,
-        0.0, 0.04, '%.3f'
-    )
-    if movingAirChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_AIR_GAIN = movingAir
     end
     local birthGlide, birthGlideChanged = ui.slider(
         'New drop glide (seconds)',
