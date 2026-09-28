@@ -306,6 +306,7 @@ float4 main(PS_IN pin)
             float2 refractionOffset = dropNormal.xy * radialProfile
                 * refractionPixels
                 * gDynamicDropInvRenderTargetSize;
+            float2 orbDropCenter = sceneUV;
             // Evaluate derivatives for both halves before the per-pixel
             // split; derivatives inside a divergent branch are undefined.
             float2 localDx = ddx(local);
@@ -325,10 +326,12 @@ float4 main(PS_IN pin)
                         localDy.y * local.x - localDy.x * local.y,
                         localDx.x * local.y - localDx.y * local.x
                     ) / jacobian;
-                    fromCenterPixels = clamp(fromCenterPixels,
-                        float2(-96.0, -96.0), float2(96.0, 96.0));
                     float2 shotUVPerWindowPixel = gDynamicDropInvScreenSize
                         * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+                    orbDropCenter = sceneUV
+                        - fromCenterPixels * shotUVPerWindowPixel;
+                    fromCenterPixels = clamp(fromCenterPixels,
+                        float2(-96.0, -96.0), float2(96.0, 96.0));
                     if (gDynamicDropConcaveLensDebug > 0.5)
                     {
                         // At the rim both displacement and its radial slope
@@ -383,8 +386,15 @@ float4 main(PS_IN pin)
                 // the surface-dependent rotation and possible axis flip.
                 float orbMode = gDynamicDropWideOrbDebug > 0.5
                     ? 1.0 : 0.0;
+                float2 dropOffset = orbDropCenter - 0.5;
+                // Below center -> upper source; above -> lower. Side drops
+                // retain their side and also pick up a little upper scene.
+                float2 bentCenter = 0.5 + float2(
+                    dropOffset.x * gDynamicDropOrbPositionBend,
+                    -dropOffset.y * gDynamicDropOrbPositionBend
+                        -abs(dropOffset.x) * gDynamicDropOrbSideUpshift);
                 float2 centerUV = lerp(sceneUV - local * 0.01,
-                    float2(0.5, 0.5), lerp(0.70, 0.72, orbMode));
+                    clamp(bentCenter, 0.12, 0.88), orbMode);
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
                 float rotationSin, rotationCos;
@@ -535,6 +545,16 @@ float4 main(PS_IN pin)
         if (gDynamicDropConcaveLensDebug > 0.5
             && wideSide)
             opticalAccent *= 0.55;
+        if (gDynamicDropWideOrbDebug > 0.5
+            && gDynamicDropWideSceneDebug > 0.5 && wideSide)
+        {
+            // Reuse the refracted scene luminance; no extra scene lookup.
+            // The curved face catches light while the rim stays restrained.
+            float faceGlow = saturate((sceneLuma - 0.30) * 0.55)
+                * highlight * (1.0 - smoothstep(0.62, 0.94, r));
+            opticalAccent += float3(0.87, 0.94, 1.0)
+                * faceGlow * gDynamicDropOrbGlow;
+        }
         if (gDynamicDropWideGlintDebug > 0.5
             && gDynamicDropConcaveLensDebug > 0.5
             && wideSide)
