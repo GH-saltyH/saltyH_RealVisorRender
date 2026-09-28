@@ -352,6 +352,8 @@ local cfg = scriptSettings:mapConfig({
         -- At r=0.03 / 0.08 / 0.50, approximate eligible fractions are
         -- 0.21 / 0.30 / 0.69 before the optional density multiplier.
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
+        -- Add encounters from vehicle speed without changing surface flow.
+        RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,
         RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
         RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
         RAIN_GPU_STATE_LIFECYCLE_LOG = true,
@@ -877,7 +879,7 @@ local rainStateUpdateParams = {
             float cycleSeed
         )
         {
-            for (int attempt = 0; attempt < 24; ++attempt)
+            for (int attempt = 0; attempt < 32; ++attempt)
             {
                 float seed =
                     stateIndex
@@ -1529,6 +1531,7 @@ local rainStateMetaUpdateParams = {
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
         gRainStateTargetOccupancy = 0.0,
+        gRainStateExposure = 1.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
         gRainStateSingleDropTest = 0.0,
@@ -1571,7 +1574,17 @@ local rainStateMetaUpdateParams = {
         float rainStateBirthDiameterMM(float index, float rain)
         {
             float sizeReach = saturate(sqrt(saturate(rain) * 2.0));
-            float maximum = lerp(1.4, 6.0, sizeReach);
+            float physicalMaximum = lerp(1.4, 6.0, sizeReach);
+            // Preserve the approved 0.03 profile, but at higher densities
+            // keep most bodies small enough to remain individually legible.
+            float visualMaximum = rain <= 0.03
+                ? physicalMaximum
+                : lerp(2.53, 4.1,
+                    saturate((rain - 0.03) / 0.47));
+            float rareLarge = rainStateHash(index + 307.0);
+            float maximum = rareLarge
+                    > 1.0 - lerp(0.01, 0.07, saturate(rain))
+                ? physicalMaximum : visualMaximum;
             float randomSize = rainStateHash(index + 101.0);
             return lerp(0.35, maximum, randomSize * randomSize);
         }
@@ -1693,7 +1706,8 @@ local rainStateMetaUpdateParams = {
                     // admission for each generation, rejected slots could
                     // never retry and the alive count converged to zero.
                     float admission = rainStateHash(index + 419.0);
-                    float gapScale = lerp(3.0, 0.5, sqrt(rain));
+                    float gapScale = lerp(3.0, 0.5, sqrt(rain))
+                        / max(gRainStateExposure, 1.0);
                     if (rain > 0.001
                         && admission < gRainStateTargetOccupancy
                         && meta.b >= respawnGap * gapScale)
@@ -4595,6 +4609,31 @@ local function rainStateCountForMode()
     )
 end
 
+-- A low-rain anchor keeps the user's accepted 0.03 population while
+-- filling the existing 512 slots more rapidly at higher rain rates.
+-- Store helpers on the existing state table to avoid Lua's chunk-local cap.
+rainDynamicSceneCopyState.lifecycleTargetForRain = function(rain)
+    if rain <= 0.001 then return 0.0 end
+    if rain <= 0.03 then
+        return 0.05 + 0.90 * math.sqrt(rain)
+    elseif rain <= 0.08 then
+        return 0.206 + (0.60 - 0.206) * (rain - 0.03) / 0.05
+    elseif rain <= 0.31 then
+        return 0.60 + (0.85 - 0.60) * (rain - 0.08) / 0.23
+    elseif rain <= 0.50 then
+        return 0.85 + (0.95 - 0.85) * (rain - 0.31) / 0.19
+    end
+    return math.min(1.0, 0.95 + 0.05 * (rain - 0.50) / 0.20)
+end
+
+rainDynamicSceneCopyState.lifecycleExposureForVelocity = function(velocity)
+    if not velocity then return 1.0 end
+    local speed = math.sqrt(velocity.x * velocity.x
+        + velocity.y * velocity.y + velocity.z * velocity.z)
+    return 1.0 + math.min(speed / 40.0, 2.0)
+        * cfg.RUNTIME.RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN
+end
+
 local function initializeRainGPUState()
     if rainStateA and rainStateB and rainStateMetaA and rainStateMetaB then
         return true
@@ -4682,12 +4721,18 @@ local function initializeRainGPUState()
     end
     initialRain = math.max(0.0, math.min(1.0, initialRain or 0.0))
     rainDynamicSceneCopyState.lifecycleRainSmoothed = initialRain
+    local initialCar = ac.getCar(0)
+    local initialExposure =
+        rainDynamicSceneCopyState.lifecycleExposureForVelocity(
+            initialCar and initialCar.velocity)
     rainStateUpdateParams.values.gRainStateRainIntensity = initialRain
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = initialRain
+    rainStateMetaUpdateParams.values.gRainStateExposure = initialExposure
     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
-        initialRain > 0.001 and math.min(1.0,
-            (0.05 + 0.90 * math.sqrt(initialRain))
-                * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE) or 0.0
+        math.min(1.0,
+            rainDynamicSceneCopyState.lifecycleTargetForRain(initialRain)
+                * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE
+                * initialExposure)
     rainStateMetaUpdateParams.values.gRainStateAgeMin =
         cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
     rainStateMetaUpdateParams.values.gRainStateAgeMax =
@@ -4883,12 +4928,17 @@ local function updateRainGPUState(sim)
         rainDynamicSceneCopyState.lifecycleRainSmoothed = liveRain
     end
     liveRain = math.max(0.0, math.min(1.0, liveRain))
+    local activeCar = ac.getCar(0)
+    local activeVelocity = activeCar and activeCar.velocity
+    local exposure = rainDynamicSceneCopyState.lifecycleExposureForVelocity(
+        activeVelocity)
     rainStateUpdateParams.values.gRainStateRainIntensity = liveRain
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = liveRain
+    rainStateMetaUpdateParams.values.gRainStateExposure = exposure
     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
-        liveRain > 0.001 and math.min(1.0,
-            (0.05 + 0.90 * math.sqrt(liveRain))
-                * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE) or 0.0
+        math.min(1.0,
+            rainDynamicSceneCopyState.lifecycleTargetForRain(liveRain)
+                * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE * exposure)
     rainStateMetaUpdateParams.values.gRainStateAgeMin =
         cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
     rainStateMetaUpdateParams.values.gRainStateAgeMax =
@@ -6096,15 +6146,39 @@ local function requestRainDynamicStateReadback()
             (rainDynamicSceneCopyState.birthsSinceLog or 0) + births
         if cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE_LOG
             and rainDynamicStateCallbackCount % 180 == 0 then
+            local cells, uniqueCells, largestCell, centerFallback = {}, 0, 0, 0
+            for i = 1, count do
+                if (rainDynamicStateAlive[i] or 0) > 0.5 then
+                    local u = rainDynamicStateU[i] or 0
+                    local v = rainDynamicStateV[i] or -1
+                    local x = math.max(0, math.min(63, math.floor(u * 64)))
+                    local y = math.max(0, math.min(31,
+                        math.floor((v + 1) * 32)))
+                    local cell = x + y * 64
+                    if not cells[cell] then uniqueCells = uniqueCells + 1 end
+                    cells[cell] = (cells[cell] or 0) + 1
+                    largestCell = math.max(largestCell, cells[cell])
+                    if math.abs(u - 0.5) < 0.00001
+                        and math.abs(v + 0.5) < 0.00001 then
+                        centerFallback = centerFallback + 1
+                    end
+                end
+            end
             ac.log(appNameDebug .. ' Rain lifecycle: rain='
                 .. string.format('%.2f',
                     rainStateMetaUpdateParams.values.gRainStateRainIntensity)
                 .. ' target='
                 .. string.format('%.2f',
                     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy)
+                .. ' exposure='
+                .. string.format('%.2f',
+                    rainStateMetaUpdateParams.values.gRainStateExposure)
                 .. ' alive=' .. tostring(aliveCount)
                 .. ' waiting=' .. tostring(waitingCount)
                 .. ' pending=' .. tostring(pendingCount)
+                .. ' uvCells64x32=' .. tostring(uniqueCells)
+                .. ' maxCell=' .. tostring(largestCell)
+                .. ' centerFallback=' .. tostring(centerFallback)
                 .. ' birthsSinceLog='
                 .. tostring(rainDynamicSceneCopyState.birthsSinceLog))
             rainDynamicSceneCopyState.birthsSinceLog = 0
@@ -9401,6 +9475,14 @@ function windowMain(dt)
     )
     if densityChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE = densityScale
+    end
+    local exposureGain, exposureChanged = ui.slider(
+        'Driving rain exposure gain',
+        cfg.RUNTIME.RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN,
+        0.0, 2.0, '%.2f'
+    )
+    if exposureChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = exposureGain
     end
     local minimumAge, minimumAgeChanged = ui.slider(
         'Moving drop minimum age (seconds)',
