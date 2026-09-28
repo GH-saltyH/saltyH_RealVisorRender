@@ -349,6 +349,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_LIFECYCLE = true,
         -- -1: live CSP rain intensity. 0..1: deterministic test weather.
         RAIN_GPU_STATE_RAIN_OVERRIDE = -1.0,
+        -- At r=0.03 / 0.08 / 0.50, approximate eligible fractions are
+        -- 0.21 / 0.30 / 0.69 before the optional density multiplier.
+        RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
         RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
         RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
         RAIN_GPU_STATE_LIFECYCLE_LOG = true,
@@ -1525,6 +1528,7 @@ local rainStateMetaUpdateParams = {
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
+        gRainStateTargetOccupancy = 0.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
         gRainStateSingleDropTest = 0.0,
@@ -1551,9 +1555,9 @@ local rainStateMetaUpdateParams = {
 
         /*
             Final physical droplet model.
-            This pass uses exactly the same deterministic 0.5–6.0 mm
-            distribution as the persistent state initialization/update pass.
-            Future rain profiles may replace only this distribution.
+            This pass retains the deterministic 0.5–6.0 mm distribution
+            for diagnostic modes; weather-driven mobile births use the
+            smaller-biased distribution below.
         */
         float rainStatePhysicalDiameterMM(float index)
         {
@@ -1562,6 +1566,14 @@ local rainStateMetaUpdateParams = {
                 6.0,
                 rainStateHash(index + 101.0)
             );
+        }
+
+        float rainStateBirthDiameterMM(float index, float rain)
+        {
+            float sizeReach = saturate(sqrt(saturate(rain) * 2.0));
+            float maximum = lerp(1.4, 6.0, sizeReach);
+            float randomSize = rainStateHash(index + 101.0);
+            return lerp(0.35, maximum, randomSize * randomSize);
         }
 
         float rainStatePhysicalMassProfile(float diameterMM)
@@ -1624,13 +1636,16 @@ local rainStateMetaUpdateParams = {
                 }
 
 
-                float diameterMM = rainStatePhysicalDiameterMM(index);
+                float diameterMM = gRainStateLifecycle > 0.5
+                    ? rainStateBirthDiameterMM(index,
+                        gRainStateRainIntensity)
+                    : rainStatePhysicalDiameterMM(index);
                 float radius = diameterMM * 0.00146484375;
                 float mass = rainStatePhysicalMassProfile(diameterMM);
 
                 // Rain-dependent initial population prevents a dry startup
                 // from filling every slot with permanent visible drops.
-                float occupancy = saturate(gRainStateRainIntensity);
+                float occupancy = gRainStateTargetOccupancy;
                 float allowed = rainStateHash(index + 419.0);
                 float initialStatus = gRainStateLifecycle > 0.5
                     && allowed >= occupancy ? 0.0 : 1.0;
@@ -1656,10 +1671,8 @@ local rainStateMetaUpdateParams = {
                     meta.a = nextGeneration * 4.0 + 1.0;
                     meta.b = 0.0;
 
-                    float diameterMM =
-                        rainStatePhysicalDiameterMM(
-                            index + nextGeneration * 17.123
-                        );
+                    float diameterMM = rainStateBirthDiameterMM(
+                        index + nextGeneration * 17.123, rain);
 
                     meta.r = diameterMM * 0.00146484375;
                     meta.g = rainStatePhysicalMassProfile(diameterMM);
@@ -1676,13 +1689,14 @@ local rainStateMetaUpdateParams = {
                     float respawnGap = lerp(
                         gRainStateRespawnGapMin,
                         gRainStateRespawnGapMax, gap01);
-                    // A newly born slot must be admitted by current rain.
-                    // Zero rain keeps waiting indefinitely; lower rain
-                    // occupies fewer of the fixed-size GPU slots.
-                    float admission = rainStateHash(index
-                        + generation * 11.73 + 419.0);
-                    if (rain > 0.001 && admission < rain
-                        && meta.b >= respawnGap / max(rain, 0.05))
+                    // Use a stable eligibility per slot. With a new random
+                    // admission for each generation, rejected slots could
+                    // never retry and the alive count converged to zero.
+                    float admission = rainStateHash(index + 419.0);
+                    float gapScale = lerp(3.0, 0.5, sqrt(rain));
+                    if (rain > 0.001
+                        && admission < gRainStateTargetOccupancy
+                        && meta.b >= respawnGap * gapScale)
                     {
                         meta.a = generation * 4.0 + 2.0;
                     }
@@ -4667,8 +4681,13 @@ local function initializeRainGPUState()
         initialRain = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
     end
     initialRain = math.max(0.0, math.min(1.0, initialRain or 0.0))
+    rainDynamicSceneCopyState.lifecycleRainSmoothed = initialRain
     rainStateUpdateParams.values.gRainStateRainIntensity = initialRain
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = initialRain
+    rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
+        initialRain > 0.001 and math.min(1.0,
+            (0.05 + 0.90 * math.sqrt(initialRain))
+                * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE) or 0.0
     rainStateMetaUpdateParams.values.gRainStateAgeMin =
         cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
     rainStateMetaUpdateParams.values.gRainStateAgeMax =
@@ -4854,10 +4873,22 @@ local function updateRainGPUState(sim)
     local liveRain = sim.rainIntensity or 0.0
     if cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 then
         liveRain = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+        rainDynamicSceneCopyState.lifecycleRainSmoothed = liveRain
+    else
+        local previousRain =
+            rainDynamicSceneCopyState.lifecycleRainSmoothed or liveRain
+        local response = liveRain > previousRain and 3.0 or 0.20
+        liveRain = previousRain + (liveRain - previousRain)
+            * (1.0 - math.exp(-math.min(dt, 0.05) * response))
+        rainDynamicSceneCopyState.lifecycleRainSmoothed = liveRain
     end
     liveRain = math.max(0.0, math.min(1.0, liveRain))
     rainStateUpdateParams.values.gRainStateRainIntensity = liveRain
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = liveRain
+    rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
+        liveRain > 0.001 and math.min(1.0,
+            (0.05 + 0.90 * math.sqrt(liveRain))
+                * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE) or 0.0
     rainStateMetaUpdateParams.values.gRainStateAgeMin =
         cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
     rainStateMetaUpdateParams.values.gRainStateAgeMax =
@@ -6068,6 +6099,9 @@ local function requestRainDynamicStateReadback()
             ac.log(appNameDebug .. ' Rain lifecycle: rain='
                 .. string.format('%.2f',
                     rainStateMetaUpdateParams.values.gRainStateRainIntensity)
+                .. ' target='
+                .. string.format('%.2f',
+                    rainStateMetaUpdateParams.values.gRainStateTargetOccupancy)
                 .. ' alive=' .. tostring(aliveCount)
                 .. ' waiting=' .. tostring(waitingCount)
                 .. ' pending=' .. tostring(pendingCount)
@@ -9359,6 +9393,14 @@ function windowMain(dt)
     )
     if rainOverrideChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE = rainOverride
+    end
+    local densityScale, densityChanged = ui.slider(
+        'Moving drop density',
+        cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE,
+        0.5, 2.0, '%.2f'
+    )
+    if densityChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE = densityScale
     end
     local minimumAge, minimumAgeChanged = ui.slider(
         'Moving drop minimum age (seconds)',
