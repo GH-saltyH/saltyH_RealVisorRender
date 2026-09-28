@@ -496,7 +496,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_ENABLED = true,
         RAIN_DYNAMIC_MICRO_PATTERN_ENABLED = true,
         RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.65,
-        RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 2048,
+        RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.42,
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.85,
@@ -6251,26 +6251,45 @@ local function initializeRainDynamicSurfaceTest()
                             float2 baseCell = floor(p);
                             float best = -1.0;
                             float2 chosen = float2(0.0, 0.0);
-                            [unroll] for (int y = -1; y <= 1; ++y)
+                            // Two independently seeded, sparse strata avoid
+                            // a visible grid; later disks always win overlaps.
+                            [unroll] for (int layer = 0; layer < 2; ++layer)
                             {
-                                [unroll] for (int x = -1; x <= 1; ++x)
+                                [unroll] for (int y = -1; y <= 1; ++y)
                                 {
-                                    float2 cell = baseCell
-                                        + float2((float)x, (float)y);
-                                    float3 h = hashMicroCell(cell);
-                                    float2 center = cell + 0.5
-                                        + (h.xy - 0.5) * 0.30;
-                                    float2 local = (p - center) / 0.56;
-                                    if (dot(local, local) < 1.0 && h.z > best)
+                                    [unroll] for (int x = -1; x <= 1; ++x)
                                     {
-                                        best = h.z;
-                                        chosen = local;
+                                        float2 cell = baseCell
+                                            + float2((float)x, (float)y);
+                                        float3 h = hashMicroCell(cell
+                                            + float2(137.31, 417.73)
+                                                * (float)layer);
+                                        float2 center = cell + 0.5
+                                            + (h.xy - 0.5) * 0.90;
+                                        float2 local = (p - center) / 0.56;
+                                        float priority = (float)layer
+                                            + h.z * 0.5;
+                                        // Different probability on each
+                                        // stratum keeps clusters irregular.
+                                        float presence = frac(h.x * 13.71
+                                            + h.y * 7.17);
+                                        if (presence < 0.63
+                                            && dot(local, local) < 1.0
+                                            && priority > best)
+                                        {
+                                            best = priority;
+                                            chosen = local;
+                                        }
                                     }
                                 }
                             }
+                            float radius = saturate(length(chosen));
+                            // The topmost disk punches out its own thin rim.
+                            // Do not reveal an older disk beneath that rim.
+                            float interior = best >= 0.0
+                                && radius < 0.81 ? 1.0 : 0.0;
                             return float4(chosen * 0.5 + 0.5,
-                                saturate(length(chosen)),
-                                best >= 0.0 ? 1.0 : 0.0);
+                                radius, interior);
                         }
                     ]]
                 })
