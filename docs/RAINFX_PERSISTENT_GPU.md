@@ -5220,3 +5220,34 @@ area, no center fallback should remain after the preexisting droplets
 expire. If UV cell coverage remains low even with zero center fallback,
 investigate clustered mask coordinates or coarse GPU hash precision
 separately rather than increasing slot count.
+
+### 152. Give newly spawned moving drops downhill momentum (2026-09-28)
+
+The user now accepts the mobile lifetime and improved spatial randomness;
+minor birth patterns can be revisited after other layers are added.
+Previously every respawn wrote zero velocity, forcing external force
+integration to build momentum from a standstill. On a mobile birth,
+calculate the *new generation's* physical size using the same size
+distribution as the concurrent meta pass. Project world gravity onto
+the sampled visor surface normal, add small deterministic lateral
+variation, and assign 65–100% of a configurable initial-speed fraction
+of the existing size-dependent physical max speed. Rain gives an
+additional 75–100% speed factor. The existing speed clamp still applies
+to all later frames. Physics diagnostics 4/7/10 and stationary drops
+retain their prior initialization behavior.
+
+To keep a newborn from losing its momentum instantly to the ordinary
+viscous/attachment drag, smoothly reduce drag to 25% at birth and
+restore it by the configurable glide time. Default test settings are
+initial fraction 0.85 and glide 0.45 seconds. RainFX sliders expose
+0–1 for each, and the lifecycle log includes `birthSpeed` and `glide`.
+Tune these without changing the established gravity/inertia/airflow
+projection, calibrated max speed, or lifecycle occupancy.
+
+At a fixed camera, 2–4 second life and matched rain, first compare
+speed 0/glide 0 with 0.85/0.45. Check motion direction on a curved visor
+and whether larger births travel visibly farther without unnatural
+sideways launches; then try 0.65 and 1.0 initial fractions if needed.
+Compare FPS and alive/uvCells64x32 after at least one full replacement
+cycle. Rapid boundary exits would shorten effective life and should be
+measured before raising the speed cap or altering the rain density.
