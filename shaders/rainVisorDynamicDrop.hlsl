@@ -319,9 +319,9 @@ float4 main(PS_IN pin)
                         - smoothstep(0.72, 0.98, r);
                     float2 shotUVPerWindowPixel = gDynamicDropInvScreenSize
                         * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
-                    // Subtracting 3x the projected center displacement
-                    // produces a 2x inverted scene image in the interior.
-                    refractionOffset = -3.0 * fromCenterPixels
+                    // Subtracting 4.5x the projected center displacement
+                    // produces a 3.5x inverted scene image in the interior.
+                    refractionOffset = -4.5 * fromCenterPixels
                         * footprintFade * shotUVPerWindowPixel;
                 }
             }
@@ -400,6 +400,15 @@ float4 main(PS_IN pin)
                 refractedScene = txDynamicScreen.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
                     0.0).rgb;
+            // Right-lower: live HDR at the exact same inverted lens UV;
+            // right-upper: independent shot with weather sky correction.
+            // This isolates source color on sky and asphalt. The live HDR
+            // may contain earlier drops, so it is a diagnostic only.
+            if (gDynamicDropLiveHDRCompareDebug > 0.5
+                && local.x < 0.0 && local.y > 0.0)
+                refractedScene = txDynamicScene.SampleLevel(
+                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    0.0).rgb;
         }
         else
         {
@@ -423,6 +432,12 @@ float4 main(PS_IN pin)
             && gDynamicDropOpaqueRefractionSplitDebug > 0.5)
             opticalAccent += float3(0.95, 0.68, 0.08)
                 * (1.0 - smoothstep(0.005, 0.025, abs(local.x)))
+                * 0.55;
+        if (gDynamicDropGeometryShotDebug > 0.5
+            && gDynamicDropLiveHDRCompareDebug > 0.5
+            && local.x < 0.0)
+            opticalAccent += float3(0.95, 0.68, 0.08)
+                * (1.0 - smoothstep(0.005, 0.025, abs(local.y)))
                 * 0.55;
 
         // The translucent candidate was preferred over full replacement:
