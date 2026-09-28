@@ -5329,3 +5329,38 @@ and car airflow 0 versus 0.012. A 1 mm drop's *upper bound* is now
 0.256 UV/s at mobile cap 16; actual travel can be shorter due to
 projection, drag, and early mask exits. If fast exits lower alive count,
 investigate the boundary lifecycle separately.
+
+### 155. Stationary/driving impact profiles and readback prediction (2026-09-28)
+
+User tuning prefers an impact glide of 0.03–0.10 seconds and moving
+drag of 1.59/s. At rest, impact transfer 0.02 produces a sharp short
+descent followed by sticking (with some heavy bodies continuing to
+flow). While driving, 0.85–1.00 transfer and a 24× mobile speed limit
+are preferable. Keep the newly adopted rotating-anchor spawn pattern.
+
+Compute a smooth travel blend from car speed: zero up to 2 m/s, one
+at or above 18 m/s. Birth transfer interpolates 0.02→0.92 by default.
+The rolling speed ceiling interpolates from the calibrated limit to
+24×; additional car airflow fades out at rest. Leave the selected
+1.59/s moving drag at both speeds and default impact glide to 0.08 s.
+Invert the vehicle-relative projected V for both birth and ongoing
+moving airflow; this source remained active even when the independent
+external airflow flag was disabled. World gravity retains the already
+corrected +V surface contribution. Log `travelMix` and effective
+`birthSpeed` to distinguish the two regimes in game testing.
+
+The visual rebound has a second likely source: the CPU mesh previously
+extrapolated each asynchronous GPU position using its old velocity
+for as long as 0.35 seconds. A drop whose actual velocity changed
+after 0.03–0.10 seconds could be rendered far ahead and then snap
+back as a newer GPU readback arrived. Limit this prediction to at
+most 0.05 seconds and no longer than the chosen impact glide. This
+may trade some smoothness under high readback latency for reducing the
+false visual reversal; test before modifying further physical forces.
+
+Compare a fixed rain/camera stopped versus 20+ m/s, with 2–4 second
+lifetime and glide 0.08. Look separately for actual change in direction
+after glide and any readback snap. Record FPS, `travelMix`, effective
+`birthSpeed`, alive, `uvCells64x32` and `centerFallback`. If mobile
+drops flow too long after stopping, tune the transition/speed profile
+instead of reintroducing static adhesion for drops still in motion.
