@@ -41,10 +41,13 @@
 
 float4 main(PS_IN pin)
 {
-    float encodedSeed = floor(pin.Tex.x * 0.5);
+    bool surfaceMicroPattern = pin.Tex.x < -2.5;
+    float2 encodedTex = surfaceMicroPattern
+        ? float2(0.5, 0.5) : pin.Tex;
+    float encodedSeed = floor(encodedTex.x * 0.5);
     bool microLayer = encodedSeed >= 2048.0;
     float shapeSeed = encodedSeed - (microLayer ? 2048.0 : 0.0);
-    float2 quadTex = pin.Tex - float2(encodedSeed * 2.0, 0.0);
+    float2 quadTex = encodedTex - float2(encodedSeed * 2.0, 0.0);
     // Head quads encode three brief impact-age bands in whole UV steps.
     // Trail quads use 2..3 and therefore have no impact band.
     float impactBand = floor(quadTex.y * 0.25);
@@ -64,6 +67,49 @@ float4 main(PS_IN pin)
     float r = length(local);
     bool wideSide = gDynamicDropSplitCompareDebug < 0.5
         || local.x < 0.0;
+
+    if (surfaceMicroPattern)
+    {
+        clip(gDynamicDropMicroPatternEnabled - 0.5);
+        float2 patternUV = saturate(float2(
+            pin.Tex.x + 4.0, pin.Tex.y + 1.0));
+        float4 pattern = txDynamicMicroPattern.SampleLevel(
+            samLinearClamp, patternUV, 0.0);
+        clip(pattern.a - 0.5);
+        float2 lensLocal = pattern.xy * 2.0 - 1.0;
+        float lensRadius = saturate(pattern.z);
+        float rim = smoothstep(0.58, 0.95, lensRadius);
+        if (gDynamicDropMicroDebug > 0.5)
+        {
+            float3 diagnostic = lerp(float3(0.13, 0.22, 0.28),
+                float3(0.83, 0.95, 1.0), rim);
+            return float4(diagnostic, 0.83);
+        }
+        float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+            / gDynamicDropInvScreenSize;
+        float2 shotScale = lerp(float2(1.0, 1.0),
+            resolutionRatio, 0.98);
+        float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
+            * shotScale;
+        float2 refractionUV = sceneUV
+            - lensLocal * gDynamicDropMicroRefractionPixels
+                * gDynamicDropInvScreenSize * shotScale;
+        float3 sceneColor = txDynamicSnapshot.SampleLevel(
+            samLinearClamp, saturate(refractionUV),
+            gDynamicDropMicroSceneMip).rgb;
+        float3 lensNormal = normalize(float3(lensLocal,
+            sqrt(saturate(1.0 - lensRadius * lensRadius))));
+        float3 lightDirection = normalize(float3(
+            -0.45 + (sceneUV.x - 0.5) * 0.45,
+            -0.55 + (sceneUV.y - 0.5) * 0.35, 0.72));
+        float glint = saturate((dot(lensNormal,
+            lightDirection) - 0.86) * 7.0);
+        glint *= glint;
+        float3 lightAccent = float3(0.78, 0.90, 1.0)
+            * (glint * 0.19 + rim * 0.015);
+        return float4(sceneColor + lightAccent,
+            saturate(gDynamicDropMicroOpacity * (0.90 + rim * 0.10)));
+    }
 
     if (microLayer)
     {
