@@ -39,9 +39,17 @@
 // All txDynamicScene/gDynamicDrop* inputs are injected by render.mesh({
 // textures/values = ... }). Do not redeclare them in this file.
 
+SamplerState samPointMicroMask
+{
+    Filter = MIN_MAG_MIP_POINT;
+    AddressU = CLAMP;
+    AddressV = CLAMP;
+    AddressW = CLAMP;
+};
+
 float4 main(PS_IN pin)
 {
-    bool surfaceMicroPattern = pin.Tex.x < -8.0;
+    bool surfaceMicroPattern = pin.Tex.x < -2.5;
     float2 encodedTex = surfaceMicroPattern
         ? float2(0.5, 0.5) : pin.Tex;
     float encodedSeed = floor(encodedTex.x * 0.5);
@@ -71,11 +79,8 @@ float4 main(PS_IN pin)
     if (surfaceMicroPattern)
     {
         clip(gDynamicDropMicroPatternEnabled - 0.5);
-        // Source UVs can extend past 0..1: normalize the complete visor
-        // island instead of clamping away its right-hand area.
-        float2 sourceUV = float2(pin.Tex.x + 16.0, pin.Tex.y);
-        float2 patternUV = saturate((sourceUV - gDynamicDropMicroUVMin)
-            * gDynamicDropMicroUVInvRange);
+        float2 patternUV = saturate(float2(
+            pin.Tex.x + 4.0, pin.Tex.y + 1.0));
         // At zero rain, skip the entire static pattern.
         clip(gDynamicDropMicroRain - 0.001);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
@@ -85,14 +90,10 @@ float4 main(PS_IN pin)
         clip(pattern.a - 0.005);
         if (gDynamicDropMicroRain < 0.999)
         {
-            // Sample the exact mask texel for whole-disk selection.
-            // Linear threshold interpolation would leave rim fragments.
-            int lastTexel = max((int)gDynamicDropMicroPatternSize - 1, 0);
-            int2 maskPixel = min(int2(patternUV
-                * gDynamicDropMicroPatternSize),
-                int2(lastTexel, lastTexel));
-            float maskGate = txDynamicMicroPattern.Load(
-                int3(maskPixel, 0)).b;
+            // Point sampling by normalized UV keeps coverage and gate
+            // aligned even if the canvas is internally capped or resized.
+            float maskGate = txDynamicMicroPattern.SampleLevel(
+                samPointMicroMask, patternUV, 0.0).b;
             clip(gDynamicDropMicroRain - maskGate);
         }
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
@@ -121,8 +122,8 @@ float4 main(PS_IN pin)
         float2 uvDx = ddx(patternUV);
         float2 uvDy = ddy(patternUV);
         float determinant = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
-        float2 radiusUV = lensLocal * (0.56
-            / max(gDynamicDropMicroPatternGridUV, float2(1.0, 1.0)));
+        float2 radiusUV = lensLocal
+            * (0.56 / max(gDynamicDropMicroPatternGrid, 1.0));
         float2 centerOffsetPixels = float2(0.0, 0.0);
         if (abs(determinant) > 1e-9)
             centerOffsetPixels = float2(
@@ -140,7 +141,7 @@ float4 main(PS_IN pin)
         // independently rendered camera view this disk faces. The same
         // normal map and mesh transform drive the existing rain physics.
         float3 objectNormal = txDynamicControl.SampleLevel(
-            samLinearClamp, sourceUV,
+            samLinearClamp, float2(patternUV.x, patternUV.y - 1.0),
             0.0).rgb * 2.0 - 1.0;
         float3 worldNormal = normalize(mul(normalize(objectNormal),
             (float3x3)gDynamicDropObjectToWorld));
