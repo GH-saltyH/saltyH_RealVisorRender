@@ -487,7 +487,7 @@ local cfg = scriptSettings:mapConfig({
         -- Compare an uneven right-half outline with the circular left half.
         RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
         RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
-        RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED = true,
+        RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED = false,
         RAIN_DYNAMIC_DROP_IMPACT_SHAPE_SECONDS = 0.14,
         RAIN_DYNAMIC_DROP_IMPACT_LARGE_DIAMETER_MM = 3.0,
         RAIN_DYNAMIC_DROP_IMPACT_FAST_MIN_DIAMETER_MM = 1.4,
