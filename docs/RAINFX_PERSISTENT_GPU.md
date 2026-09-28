@@ -4394,3 +4394,29 @@ track, including color matching and highlight clipping, at the same camera.
 If reference is close to 1 or both halves remain dark, full tone mapping
 inversion or a final-LDR composition stage remains necessary. This single
 multiplication should not affect measurable FPS.
+
+### 126. Correct HLSL syntax and retest an HDR GeometryShot (2026-09-28)
+
+Review found a stray second `: gDynamicDropRefractionPixels;` immediately
+after the diagnostic ternary in shader revision 125. That is invalid HLSL.
+It first appeared with the 2.5x gain change, so neither that gain trial nor
+the subsequent white-reference trial demonstrates a successfully compiled
+new shader. Do not infer any color-space or white-reference conclusion from
+those visual observations. The prior opaque alpha result (section 124) was
+made before the syntax error and remains the last valid diagnostic.
+
+Remove the stray line and both experimental color gain branches. Preset
+`RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG=false` while retaining the scene-ready
+GeometryShot, original lighting, main shaders, grass, sky, the same
+`2161x1249` shot resolution, opaque alpha and 48px sample offset in both
+halves. Non-YEBIS uses `AntialiasingMode.None` and
+`R16G16B16A16.Float`; output matches the HDR main pass and passes through
+the final post-processing once. Keep the thin amber separator as an
+activation marker, and log shotYebis=false and shaderBytes. A clean game
+restart avoids cached shader state. Inspect whether opaque HDR drops now
+show correctly bright scene colors and visible displacement in Fog,
+Hurricane and a clear sky. Also check the expected Fog sky mismatch and
+whether rain/sky effects inside the shot differ from the final scene.
+Measure FPS at the same fixed camera and weather. Do not treat a full-screen
+quad rendered in the same HDR callback as an independent test for double
+tone mapping: it would undergo the same final post-processing as the drops.

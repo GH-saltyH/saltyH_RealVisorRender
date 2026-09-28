@@ -398,17 +398,13 @@ local cfg = scriptSettings:mapConfig({
         -- copy debug disabled while testing this branch.
         RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
         RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 16.0,
-        -- Compare 48px refraction against zero shift with opaque output,
-        -- preventing the unrefracted background from bleeding through.
+        -- Compare HDR scene color without the original background bleeding
+        -- through: opaque output and identical 48px optics on both halves.
         RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = true,
-        -- Compare raw shot RGB (visible right) with scene white-reference
-        -- scaling (visible left), preserving the opaque refraction sample.
-        RAIN_DYNAMIC_DROP_SHOT_WHITE_REFERENCE_DEBUG = true,
         -- Compare the clean GeometryShot against the final screen on sky.
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
-        -- Diagnose whether AC post-processing carries WeatherFX fog into a
-        -- processed independent shot. Disable after the comparison.
-        RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = true,
+        -- Keep the shot in HDR until the same final post-process as the frame.
+        RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = false,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6584,6 +6580,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG)
             .. ' geometryShot='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
+            .. ' shotYebis='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG)
             .. ' pixelUV='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
             .. ' whiteReferencePoint='
@@ -6645,12 +6643,6 @@ float4 main(PS_IN pin)
             gDynamicDropOpaqueRefractionSplitDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG
                 and 1.0 or 0.0,
-            gDynamicDropShotWhiteReferenceDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_WHITE_REFERENCE_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropShotWhiteReference =
-                math.max(0.25, math.min(64.0,
-                    sim.whiteReferencePoint or 1.0)),
 
             gDynamicDropSceneSourceDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG

@@ -292,7 +292,6 @@ float4 main(PS_IN pin)
             // output prevents the original background bleeding through.
             float refractionPixels = gDynamicDropOpaqueRefractionSplitDebug
                 > 0.5 ? 48.0 : gDynamicDropRefractionPixels;
-                : gDynamicDropRefractionPixels;
             float2 refractionOffset = dropNormal.xy * radialProfile
                 * refractionPixels
                 * gDynamicDropInvRenderTargetSize;
@@ -312,12 +311,6 @@ float4 main(PS_IN pin)
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
                 0.0).rgb;
-            // Compare the processed shot in the HDR main pass against its
-            // scene-dependent white reference. The visor back face mirrors
-            // local.x >= 0 into visible image-left.
-            if (gDynamicDropShotWhiteReferenceDebug > 0.5
-                && local.x >= 0.0)
-                refractedScene *= gDynamicDropShotWhiteReference;
             // Sky color test on the back-facing visor: image-left keeps
             // GeometryShot; image-right samples the final screen at the
             // identical normalized UV and displacement. Screen may contain
