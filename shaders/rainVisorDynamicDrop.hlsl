@@ -370,8 +370,10 @@ float4 main(PS_IN pin)
                 // The CPU already constructs this quad using surface
                 // tangents and normal; its on-screen derivatives encode
                 // the surface-dependent rotation and possible axis flip.
+                float orbMode = gDynamicDropWideOrbDebug > 0.5
+                    ? 1.0 : 0.0;
                 float2 centerUV = lerp(sceneUV - local * 0.01,
-                    float2(0.5, 0.5), 0.70);
+                    float2(0.5, 0.5), lerp(0.70, 0.90, orbMode));
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
                 float rotationSin, rotationCos;
@@ -394,12 +396,18 @@ float4 main(PS_IN pin)
                         + surfaceAxis.x * rotationSin);
                 float2 direction = rotatedAxis * local.x
                     + float2(-rotatedAxis.y, rotatedAxis.x) * local.y;
-                float2 wideUV = centerUV + direction * 0.17;
+                float2 wideUV = centerUV + direction
+                    * lerp(0.17, 0.70, orbMode);
                 // Spread the wide-to-local transition across most of the
                 // footprint: a narrow outer transition bent hard edges.
-                float wideWeight = 0.92
-                    * (1.0 - smoothstep(0.15, 0.96, r));
-                sampleUV = lerp(sampleUV, wideUV, wideWeight);
+                float wideWeight = lerp(
+                    0.92 * (1.0 - smoothstep(0.15, 0.96, r)),
+                    1.0 - smoothstep(0.60, 0.96, r), orbMode);
+                // The orb image is mostly a rotated camera view. Restore
+                // local UV only under a fading rim to avoid a visible fold.
+                sampleUV = lerp(lerp(sampleUV, sceneUV, orbMode),
+                    wideUV, wideWeight);
+                lensMIP = lerp(lensMIP, 4.5, orbMode);
             }
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sampleUV),
@@ -563,6 +571,10 @@ float4 main(PS_IN pin)
         if (gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
             alpha = (0.72 + fresnel * 0.08)
                 * (1.0 - smoothstep(0.42, 0.98, r));
+        if (gDynamicDropWideOrbDebug > 0.5
+            && gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
+            alpha = (0.72 + fresnel * 0.08)
+                * (1.0 - smoothstep(0.45, 0.92, r));
         return float4(refractedScene + opticalAccent, alpha);
     }
 
