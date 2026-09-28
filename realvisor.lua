@@ -405,6 +405,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
         -- Keep the shot in HDR until the same final post-process as the frame.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = false,
+        -- Visualize independent-shot depth in the visible right half:
+        -- magenta for far/sky, cyan for geometry. Visible left stays HDR.
+        RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6265,6 +6268,7 @@ render.onSceneReady(function()
             .. tostring(sim.frame))
     end
     local yebisShot = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
+    local shotWithDepth = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
     local shotScale = yebisShot and math.max(0.5, math.min(1.0,
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE)) or 1.0
     local shotWidth = math.max(1, math.floor(shotScale * (
@@ -6277,6 +6281,7 @@ render.onSceneReady(function()
         or rainDynamicSceneCopyState.shotWidth ~= shotWidth
         or rainDynamicSceneCopyState.shotHeight ~= shotHeight
         or rainDynamicSceneCopyState.shotYebis ~= yebisShot
+        or rainDynamicSceneCopyState.shotWithDepth ~= shotWithDepth
     if shotResized then
         if rainDynamicSceneCopyState.geometryShot then
             rainDynamicSceneCopyState.geometryShot:dispose()
@@ -6285,7 +6290,7 @@ render.onSceneReady(function()
             ac.findNodes('sceneRoot:yes'),
             vec2(shotWidth, shotHeight),
             1,
-            false,
+            shotWithDepth,
             yebisShot and render.AntialiasingMode.YEBIS
                 or render.AntialiasingMode.None,
             yebisShot and render.TextureFormat.R8G8B8A8.UNorm
@@ -6300,6 +6305,7 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.shotWidth = shotWidth
         rainDynamicSceneCopyState.shotHeight = shotHeight
         rainDynamicSceneCopyState.shotYebis = yebisShot
+        rainDynamicSceneCopyState.shotWithDepth = shotWithDepth
     end
     rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
         sim.cameraClipNear,
@@ -6316,6 +6322,7 @@ render.onSceneReady(function()
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: updated '
             .. tostring(shotWidth) .. 'x' .. tostring(shotHeight)
             .. ' yebis=' .. tostring(yebisShot)
+            .. ' depth=' .. tostring(shotWithDepth)
             .. ' frame=' .. tostring(sim.frame))
     end
 end)
@@ -6582,6 +6589,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
             .. ' shotYebis='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG)
+            .. ' shotDepthDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG)
             .. ' pixelUV='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
             .. ' whiteReferencePoint='
@@ -6619,6 +6628,11 @@ float4 main(PS_IN pin)
             txDynamicSnapshot = rainDynamicSceneCopyState.geometryShot
                 or rainDynamicSceneCopyState.canvas
                 or 'dynamic::hdr',
+            txDynamicShotDepth =
+                rainDynamicSceneCopyState.shotWithDepth
+                and rainDynamicSceneCopyState.geometryShot
+                and rainDynamicSceneCopyState.geometryShot:depth()
+                or false,
             txDynamicScreen = 'dynamic::screen',
             txDynamicControl = textureRainSurfaceNormal,
         },
@@ -6664,6 +6678,10 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG
                 and 1.0
                 or 0.0,
+            gDynamicDropSkyDepthDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
 
             gDynamicDropGeometryUVScaleA =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A,

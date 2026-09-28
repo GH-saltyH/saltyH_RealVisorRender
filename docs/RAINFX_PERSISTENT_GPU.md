@@ -4399,11 +4399,12 @@ multiplication should not affect measurable FPS.
 
 Review found a stray second `: gDynamicDropRefractionPixels;` immediately
 after the diagnostic ternary in shader revision 125. That is invalid HLSL.
-It first appeared with the 2.5x gain change, so neither that gain trial nor
-the subsequent white-reference trial demonstrates a successfully compiled
-new shader. Do not infer any color-space or white-reference conclusion from
-those visual observations. The prior opaque alpha result (section 124) was
-made before the syntax error and remains the last valid diagnostic.
+It first appeared with the 2.5x gain change in the repository. The user later
+clarified that they manually repaired HLSL in the game files while running
+the gain and white-reference trials. Those visual observations remain valid
+for the tested local shader; the repository revision by itself cannot prove
+which locally repaired variant was active. Future experiments must log the
+loaded shader length/version and verify the visible activation marker.
 
 Remove the stray line and both experimental color gain branches. Preset
 `RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG=false` while retaining the scene-ready
@@ -4420,3 +4421,35 @@ whether rain/sky effects inside the shot differ from the final scene.
 Measure FPS at the same fixed camera and weather. Do not treat a full-screen
 quad rendered in the same HDR callback as an independent test for double
 tone mapping: it would undergo the same final post-processing as the drops.
+
+### 127. Adopt visor references and classify sky in the HDR shot (2026-09-28)
+
+The user adopts the Reddit medium-rain helmet video as the ordinary-rain
+reference. The attached CSP windscreen stills show dense small stationary
+drops beneath a separate layer of flowing, wider drops and streaks. For a
+water-repellent visor, use fewer persistent microdrops than a windscreen.
+Implement drop optics with a larger scene footprint relative to each drop's
+projected radius, then rain-conditioned respawn and transient adhesion/flow,
+then deposited trails with merge/split and depletion, then a low-resolution
+external wet-film/haze UV mask cleared temporarily by flowing water. Treat
+close following spray as a separate short event, gated by wet/rain state,
+other car position relative to forward direction, distance and motion; the
+event drives many fast surface flows and temporarily blurs the film. Build
+each stage against the same one-per-frame GeometryShot and measure matched
+FPS. Interior condensation is distinct from an exterior film, so the latter
+is the current interpretation of water-cleared haze.
+
+The user suspects incorrect sky tone is the source of most optical mismatch.
+Before increasing refraction, preset `RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG=true`
+to allocate a depth buffer on the existing HDR GeometryShot. The visible
+left half of each opaque 48px drop retains raw HDR scene color; visible right
+shows its own shot depth sampled at exactly the refracted UV: magenta for
+far/sky (>0.99999), cyan for geometry/invalid depth. The amber center seam
+remains the shader-activation marker. Compare a drop spanning sky and a
+building/track edge in Fog, Hurricane and clear weather. Confirm the sky
+region and shot HDR color mismatch before applying any WeatherFX tint. If
+every right half is cyan or magenta, adjust depth interpretation and recheck
+binding instead of masking scene colors. Depth allocation adds about one
+full-size D32 surface (~10.8 MB at 2161x1249) and one depth sample per
+visible debug pixel; record weather-matched FPS, then disable the debug flag
+to release the attachment after the classifier is validated.

@@ -311,6 +311,19 @@ float4 main(PS_IN pin)
             refractedScene = txDynamicSnapshot.SampleLevel(
                 samLinearClamp, saturate(sceneUV + refractionOffset),
                 0.0).rgb;
+            // Visible right half: inspect shot depth at exactly the same
+            // refracted UV. Magenta indicates a far/sky pixel; cyan indicates
+            // geometry or a missing/invalid depth signal. The other half
+            // remains the unaltered HDR shot for visual comparison.
+            if (gDynamicDropSkyDepthDebug > 0.5 && local.x < 0.0)
+            {
+                float shotDepth = txDynamicShotDepth.SampleLevel(
+                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    0.0).r;
+                refractedScene = shotDepth > 0.99999
+                    ? float3(0.95, 0.12, 0.72)
+                    : float3(0.05, 0.55, 0.70);
+            }
             // Sky color test on the back-facing visor: image-left keeps
             // GeometryShot; image-right samples the final screen at the
             // identical normalized UV and displacement. Screen may contain
