@@ -5554,3 +5554,16 @@ orientation, dark/bright weather contrast, boundaries and app ON/OFF FPS.
 If side coverage clips hard, lower BEND or SIDE_UPSHIFT. Set GLOW to zero
 to compare only source direction; glow is intentionally subtle and should
 not illuminate dark sky without refracted light.
+
+### Low-detail orb source probe
+
+The position-dependent view was judged visually better; its face glow is
+still difficult to see. Keep the accepted source radius and position mapping.
+Reuse the already built 10-level GeometryShot mip chain to blur its sample:
+center mip 6.0 and edge mip 5.0 instead of 4.5 and 3.5. The two temporary UI
+sliders under Orb scene blur range from 0 to 8 and update at draw time. These
+are optical lookup changes, not a reduction in GeometryShot rendering cost.
+At the user's 2161x1249 shot size, mip 6 represents roughly 34x20 source
+texels and mip 5 roughly 68x39; sampling interpolates between levels.
+Compare center/edge 4.5/3.5 against 6/5 at fixed weather and camera, checking
+recognizable scene structure, neighboring orb diversity, boundaries, and FPS.
