@@ -506,6 +506,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 1.0,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
+        RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 1.0,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
@@ -7772,6 +7773,8 @@ float4 main(PS_IN pin)
             gDynamicDropCameraLook = sim.cameraLook,
             gDynamicDropMicroRimStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
+            gDynamicDropMicroExtraRimWidth =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
@@ -10312,6 +10315,15 @@ function windowMain(dt)
     )
     if microNormalChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = microNormalGain
+    end
+
+    local microRimWidth, microRimWidthChanged = ui.slider(
+        'Micro gap / extra rim width',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH,
+        0.0, 0.10, '%.3f'
+    )
+    if microRimWidthChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = microRimWidth
     end
 
     local microRainPower, microRainPowerChanged = ui.slider(
