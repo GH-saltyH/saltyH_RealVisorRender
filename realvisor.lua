@@ -415,9 +415,9 @@ local cfg = scriptSettings:mapConfig({
         -- Both halves share weather-corrected sky; right half inverts a
         -- wider projected scene footprint for an optics-only comparison.
         RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = true,
-        -- Within the wider right-hand lens, compare the documented LDR
-        -- screen source against the clean HDR shot at the same displaced UV.
-        RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = true,
+        -- The screen copy did not fix the rain overlay or tone mismatch;
+        -- disable its per-frame allocation/copy/mips before testing stages.
+        RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -442,6 +442,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
         RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
+        -- Probe whether a later particle/smoke pass places visor water over
+        -- the sharp falling-rain overlay. May not be called in every scene.
+        RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG = true,
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
         RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
@@ -6401,9 +6404,11 @@ end)
 -- are in the visor mesh's local coordinates; use the scene mesh's original
 -- transform when drawing it explicitly.
 --------------------------------------------------------
-render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
-    and 'main.track.transparent'
-    or 'main.root.transparent', function()
+render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+    and 'main.smoke'
+    or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
+        and 'main.track.transparent'
+        or 'main.root.transparent'), function()
     if not cfg.RUNTIME.RAIN_ENABLED
         or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
     then
@@ -6412,6 +6417,11 @@ render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
 
     local sim = ac.getSim()
     if not sim then
+        return
+    end
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+        and rainDynamicSceneCopyState.lastSmokeDrawFrame == sim.frame
+    then
         return
     end
 
@@ -6647,7 +6657,9 @@ float4 main(PS_IN pin)
             .. ' prepass='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS)
             .. ' drawStage='
-            .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'track' or 'root')
+            .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+                and 'smoke' or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
+                    and 'track' or 'root'))
             .. ' sparseFrame='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG)
             .. ' hdrSnapshot='
@@ -6813,6 +6825,11 @@ float4 main(PS_IN pin)
         },
         shader = rainDynamicDropShader.HLSL
     })
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+        and dynamicDrawn
+    then
+        rainDynamicSceneCopyState.lastSmokeDrawFrame = sim.frame
+    end
 
     rainDynamicSurfaceMesh:setVisible(false, false)
 
@@ -6820,7 +6837,9 @@ float4 main(PS_IN pin)
         ac.log(
             appNameDebug
             .. ' Dynamic drop Stage 4B.2 '
-            .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'track' or 'root')
+            .. (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+                and 'smoke' or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
+                    and 'track' or 'root'))
             .. ' draw: result='
             .. tostring(dynamicDrawn)
             .. ' shaderBytes='
@@ -6837,7 +6856,24 @@ end)
 
 render.on('main.track.transparent', function()
     -- ac.log('[RealVisor] ENTER main.track.transparent')
-    
+    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+        and not rainDynamicManualDrawLogged
+    then
+        local stageSim = ac.getSim()
+        if stageSim then
+            if not rainDynamicSceneCopyState.smokeProbeStartFrame then
+                rainDynamicSceneCopyState.smokeProbeStartFrame = stageSim.frame
+            elseif not rainDynamicSceneCopyState.smokeProbeWarned
+                and stageSim.frame
+                    - rainDynamicSceneCopyState.smokeProbeStartFrame > 120
+            then
+                ac.warn(appNameDebug .. ' Dynamic drop smoke stage: '
+                    .. 'no completed drop draw after 120 frames')
+                rainDynamicSceneCopyState.smokeProbeWarned = true
+            end
+        end
+    end
+
     
     if not cfg.RUNTIME.RAIN_ENABLED  then
         return
