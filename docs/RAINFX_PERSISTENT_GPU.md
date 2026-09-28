@@ -4824,3 +4824,35 @@ or abruptly changing content appears near the soft rim. Compare FPS to
 section 140 under equal conditions. A good result would motivate a
 later orientation driven by actual drop shape, motion and surface normal;
 the current seed is a controlled visual proxy.
+
+### 142. Align broad images with projected visor surface (2026-09-28)
+
+At a fixed comparison, app disabled → enabled was 58 → 47 FPS on the
+previous build and 58 → 47–48 FPS after the broad-image rotation. The
+user confirms neighboring drops show different scene orientations and
+the rotation helps, but requests a surface-related pattern and observes
+a sharp bend at the drop edge. These numbers do not establish a GPU
+cost for the rotation alone, only that it made no measurable change in
+this comparison.
+
+The dynamic mesh is already built from each drop's sampled visor
+position, normal, U tangent and V tangent. Instead of assuming that the
+mesh shader exposes a particular interpolated normal field or adding a
+per-drop CPU lookup, invert the existing local-coordinate screen
+Jacobian to recover the projected U tangent. The wide image axis now
+follows that projected tangent, including a flip if the projection
+reverses direction. Preset
+`RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG=true`, with a remaining
+stable per-drop angle bounded by
+`RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS=0.45` (~±26°). This represents
+surface projection, not a measured water-film normal or reflection ray.
+The existing texture and pass count stay unchanged.
+
+The wide-to-local blend now starts at r=0.15 rather than r=0.58 and
+reaches the base lens at r=0.96. Right-side alpha starts fading at
+r=0.42 rather than r=0.62. The center retains the wide view; spreading
+the transition should reduce the abrupt image bend at the rim. Examine
+the rim and drop visibility together: broadening can make the desired
+large scene harder to recognize. At the same Hurricane camera and rain
+intensity, compare the center image and projected orientation across
+center/edge drops, rim continuity, possible sudden 180° flips, and FPS.
