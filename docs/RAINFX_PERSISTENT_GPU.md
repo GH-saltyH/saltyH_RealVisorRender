@@ -5602,3 +5602,19 @@ respawn gap. The state and meta passes must agree on the same ownership rule;
 no in-place writes or per-pixel unbounded scan. Establish a collision budget
 and instrument merged pairs, alive count and frame cost at 512 slots before
 turning it on by default. A drawn overlap alone does not count as merged mass.
+
+
+### Impact gate calibration correction
+
+Restrict the brief impact silhouette pulse to two independent conditions:
+(1) a newly born drop at least 3.0 mm in diameter at any vehicle speed, or
+(2) a newly born drop at least 1.4 mm while normalized travel mix is at least
+0.75 (high-speed vehicle motion). The pulse lasts 0.14 s. These are initial
+visual thresholds to calibrate, not measured physical breakup limits. A light
+rainfall should therefore show no impact pulse unless a rare large drop is
+born; ordinary small births stay unchanged. Compare stopped vs fast driving
+under heavy rain, and inspect the app's generation/birth logs alongside
+visible pop-ins. The current pulse only shapes the parent drop and its optical
+highlight; detached satellite droplets require a small separately budgeted
+GPU pool or reuse of currently reserved trail geometry and are the next
+visual step if this pulse reads too much like simple morphing.
