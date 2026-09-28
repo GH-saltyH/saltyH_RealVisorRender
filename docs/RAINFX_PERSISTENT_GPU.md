@@ -4856,3 +4856,32 @@ the rim and drop visibility together: broadening can make the desired
 large scene harder to recognize. At the same Hurricane camera and rain
 intensity, compare the center image and projected orientation across
 center/edge drops, rim continuity, possible sudden 180° flips, and FPS.
+
+### 143. Broad, low-detail forward scene in a visor orb (2026-09-28)
+
+The user reports no FPS change in section 142, much more natural
+surface-aligned rotations, and a smaller rim bend. The next comparison
+deliberately resembles a tiny orb carrying almost the entire forward
+view. Preset `RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG=true`. On the image-right
+side, keep surface-aligned orientation and the stable ±26° deviation,
+but move the wide sample center closer to the viewport midpoint and
+expand its radius from 0.17 to 0.70 screen UV per unit droplet radius.
+The visible central 60% of the drop can therefore sample a broad
+fraction of the forward viewport. The mapping is a rotated broad view,
+with the concave distortion removed inside the orb. At r=0.60..0.96,
+blend the sample back to the undistorted local scene; alpha already
+fades beginning at r=0.45 and reaches zero by r=0.92 to mask that
+transition. This is an artistic probe, not a physical cubemap or a new
+render of six directions.
+
+Sample the existing 10-mip HDR GeometryShot at mip 4.5 instead of about
+1.4–1.9. At 2161×1249, that is roughly an 96×55-equivalent detail
+level, with no extra shot, scene pass or texture allocation. Color and
+depth still use the same sample UV, though the depth texture remains
+unblurred and can produce mismatched sky/geometry transitions. Expect
+possible clamping of samples near the rotated viewport corners. The
+image-left lens remains the prior comparison. Compare recognizable
+landmarks and orientation, amount of blur, sky/road tone mismatch,
+rim seams/clamps and paired FPS on the same Hurricane camera and rain
+intensity. If the user likes the broad view, separate image footprint,
+rotation, mip and opacity controls for later tuning.
