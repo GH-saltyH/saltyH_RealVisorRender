@@ -73,12 +73,25 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroPatternEnabled - 0.5);
         float2 patternUV = saturate(float2(
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
+        // At zero rain, skip the entire static pattern.
+        clip(gDynamicDropMicroRain - 0.001);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
             samLinearClamp, patternUV, 0.0);
-        // Alpha contains the static clearing order for valid pixels;
-        // gaps and the top disk's rim remain zero at every rain level.
+        // Alpha is zero on the whole topmost disk rim and on gaps.
         clip(pattern.a - 0.005);
-        clip(gDynamicDropMicroRain - pattern.a);
+        if (gDynamicDropMicroRain < 0.999)
+        {
+            // Sample the exact mask texel for removal. Interpolating its
+            // threshold used to leave surviving slivers around erased disks.
+            int lastTexel = max((int)gDynamicDropMicroPatternSize - 1, 0);
+            int2 maskPixel = min(int2(patternUV
+                * gDynamicDropMicroPatternSize),
+                int2(lastTexel, lastTexel));
+            float maskGate = txDynamicMicroPattern.Load(
+                int3(maskPixel, 0)).a;
+            clip(maskGate - 0.005);
+            clip(gDynamicDropMicroRain - maskGate);
+        }
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(pattern.z);
         // The winning disk owns the pixel; its outer ring also marks
