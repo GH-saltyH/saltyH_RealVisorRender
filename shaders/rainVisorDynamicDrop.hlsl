@@ -364,7 +364,30 @@ float4 main(PS_IN pin)
                     0.0).r;
                 if (shotDepth > 0.99999)
                 {
-                    if (gDynamicDropSkyCloudDetailDebug > 0.5)
+                    if (gDynamicDropScreenSourceCompareDebug > 0.5
+                        && local.x < 0.0 && local.y > 0.0)
+                    {
+                        // Two mip reads from a half-size screen copy:
+                        // level 4 removes narrow bright rain streaks,
+                        // level 8 supplies a broad local cloud reference.
+                        // Carry only relative luminance into the already
+                        // verified fog tone, never the LDR scene color.
+                        float2 weatherUV = saturate(
+                            sceneUV + refractionOffset);
+                        float3 weatherCloud = txDynamicWeatherScreen.SampleLevel(
+                            samLinearClamp, weatherUV, 4.0).rgb;
+                        float3 weatherBroad = txDynamicWeatherScreen.SampleLevel(
+                            samLinearClamp, weatherUV, 8.0).rgb;
+                        float3 lumaWeights = float3(
+                            0.2126, 0.7152, 0.0722);
+                        float cloudRatio = clamp(
+                            dot(weatherCloud, lumaWeights)
+                            / max(dot(weatherBroad, lumaWeights), 0.04),
+                            0.82, 1.18);
+                        refractedScene = gDynamicDropWeatherFogColor
+                            * cloudRatio;
+                    }
+                    else if (gDynamicDropSkyCloudDetailDebug > 0.5)
                     {
                         // Transfer only cloud luminance contrast onto the
                         // weather-matched sky color. A broad mip of the
@@ -392,15 +415,8 @@ float4 main(PS_IN pin)
                         refractedScene = gDynamicDropWeatherFogColor;
                 }
             }
-            // Right-upper keeps the clean shot. Right-lower samples the
-            // documented LDR screen source at the same inverted UV. Reuse
-            // the existing single screen sampling site: previous tests
-            // crashed when two such sites were compiled together. The LDR
-            // color can darken after this HDR pass's post-processing and
-            // may contain previous drops, so judge scene structure first.
-            if (local.x < 0.0 && (gDynamicDropSkySourceDebug > 0.5
-                || (gDynamicDropScreenSourceCompareDebug > 0.5
-                    && local.y > 0.0)))
+            // Legacy direct LDR source probe, disabled in the current test.
+            if (gDynamicDropSkySourceDebug > 0.5 && local.x < 0.0)
                 refractedScene = txDynamicScreen.SampleLevel(
                     samLinearClamp, saturate(sceneUV + refractionOffset),
                     0.0).rgb;
