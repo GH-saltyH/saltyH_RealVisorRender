@@ -415,9 +415,9 @@ local cfg = scriptSettings:mapConfig({
         -- Both halves share weather-corrected sky; right half inverts a
         -- wider projected scene footprint for an optics-only comparison.
         RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = true,
-        -- Within the wider right-hand lens, compare HDR main-scene color
-        -- against the clean shot using the same displaced UV.
-        RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG = true,
+        -- Within the wider right-hand lens, compare the documented LDR
+        -- screen source against the clean HDR shot at the same displaced UV.
+        RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6617,8 +6617,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG)
             .. ' invertedFootprintDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
-            .. ' liveHDRCompareDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG)
+            .. ' screenSourceCompareDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
             .. ' fogColor='
             .. tostring(sim.fogColor)
             .. ' pixelUV='
@@ -6723,8 +6723,8 @@ float4 main(PS_IN pin)
             gDynamicDropInvertedFootprintDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG
                 and 1.0 or 0.0,
-            gDynamicDropLiveHDRCompareDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG
+            gDynamicDropScreenSourceCompareDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropWeatherFogColor = sim.fogColor,
 
