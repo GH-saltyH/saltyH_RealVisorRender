@@ -4515,3 +4515,25 @@ right-hand sky darkness is gone, whether cloud relief remains visible,
 whether boundaries show dark halos, and whether FPS stays near 73–75.
 If successful, test a larger/inverted right-hand optical footprint in a
 separate experiment; stronger optics will amplify any residual sky mismatch.
+
+### 131. Compare a projected, inverted wider lens against existing optics (2026-09-28)
+
+The user confirms that darkness declined after the cloud contrast clamp,
+although the droplet sky still differs from the final Hurricane scene.
+Preset `RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG=true` and retain the
+current HDR shot, depth, 10 mips, restrained cloud contrast, opaque 48px
+split and amber center marker. Correct sky on both halves using the same
+fog-color/depth logic. Keep the visible left at the validated 48px radial
+refraction. On the visible right, use the screen-space derivative of each
+drop's UV to recover its projected center-to-pixel displacement; subtract
+three times that displacement when sampling the shot, producing an inverted
+image spanning about twice the drop's projected width in its interior.
+Fade the extra displacement near its rim. This handles different droplet
+sizes and visor orientations without a hardcoded projected radius. The
+depth lookup and cloud contrast use the same shifted UV as scene sampling.
+At the same Hurricane camera compare drop readability, object inversion,
+remaining sky mismatch, edge artifacts and FPS against the 73–75 baseline.
+The old sunset-cloud silhouette can persist in luminance even after hue
+correction; stronger optics may make it more obvious. If the right half
+does not invert or yields a discontinuity, inspect UV derivative orientation
+and return to the 48px optical baseline before tuning trails or spray.
