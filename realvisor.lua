@@ -296,6 +296,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FORCE_GRAVITY_ENABLED = true,
         RAIN_FORCE_INERTIA_ENABLED = true,
         RAIN_FORCE_AIRFLOW_ENABLED = false,
+        -- false: original signed tangent airflow, true: downward visor
+        -- runoff with the original left/right tangent component.
+        RAIN_AIRFLOW_DOWNWARD_MODE = true,
+        RAIN_AIRFLOW_DOWNWARD_GAIN = 1.5,
 
         -- All external accelerations enter the GPU in SI m/s^2 and
         -- share this compact surface-force conversion.
@@ -311,7 +315,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Drop dynamics
         -- Acceleration after surface adhesion is exceeded.
-        RAIN_FLOW_ACCELERATION = 0.020,
+        RAIN_FLOW_ACCELERATION = 0.0756,
 
         -- Post-adhesion flow intensity multiplier. Default 1.0 preserves
         -- the current physical calibration; later tuning must still respect
@@ -361,7 +365,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
         -- Fraction of the calibrated free-fall/relative-air impact
         -- momentum transferred to initial surface motion.
-        RAIN_GPU_STATE_BIRTH_STILL_FRACTION = 0.02,
+        RAIN_GPU_STATE_BIRTH_STILL_FRACTION = 0.014,
         RAIN_GPU_STATE_BIRTH_SPEED_FRACTION = 0.92,
         -- Temporary surface-speed allowance for fresh impacts; ordinary
         -- calibrated speed limit returns as the impact glide expires.
@@ -373,8 +377,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_MOBILE_THRESHOLD_UV = 0.015,
         -- Duration of reduced drag after impact; ordinary drag returns
         -- smoothly afterward. Zero disables the glide.
-        RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = 0.08,
-        RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS = 0.12,
+        RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = 0.022,
+        RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS = 0.010,
         RAIN_GPU_STATE_LIFECYCLE_LOG = true,
         RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
@@ -778,6 +782,10 @@ local rainStateUpdateParams = {
         gRainGravityGain = cfg.RUNTIME.RAIN_FORCE_GRAVITY_GAIN,
         gRainInertiaGain = cfg.RUNTIME.RAIN_FORCE_INERTIA_GAIN,
         gRainAirflowGain = cfg.RUNTIME.RAIN_FORCE_AIRFLOW_GAIN,
+        gRainAirflowDownwardMode =
+            cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE and 1.0 or 0.0,
+        gRainAirflowDownwardGain =
+            cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN,
         gRainAirVelocityWorld = vec3(0.0, 0.0, 0.0),
         gRainAirDensity = cfg.RUNTIME.RAIN_AIR_DENSITY,
         gRainAirDragCoeff = cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
@@ -1227,10 +1235,12 @@ local rainStateUpdateParams = {
 
         float3 rainStateExternalForceWorld(
             float3 normalWorld,
-            float radius
+            float radius,
+            out float3 airWorld
         )
         {
             float3 forceWorld = float3(0.0, 0.0, 0.0);
+            airWorld = float3(0.0, 0.0, 0.0);
 
             if (fmod(floor(gRainForceMask), 2.0) >= 0.5)
                 forceWorld +=
@@ -1243,12 +1253,15 @@ local rainStateUpdateParams = {
                     * gRainPhysicsAccelScale * gRainInertiaGain;
 
             if (fmod(floor(gRainForceMask / 4.0), 2.0) >= 0.5)
-                forceWorld +=
+            {
+                airWorld =
                     rainStateAirflowAccelerationWorld(
                         normalWorld,
                         radius
                     )
                     * gRainPhysicsAccelScale * gRainAirflowGain;
+                forceWorld += airWorld;
+            }
 
             return forceWorld;
         }
@@ -1262,10 +1275,12 @@ local rainStateUpdateParams = {
             float3 normalWorld =
                 rainStateNormalWorld(position);
 
+            float3 airWorld;
             float3 forceWorld =
                 rainStateExternalForceWorld(
                     normalWorld,
-                    radius
+                    radius,
+                    airWorld
                 );
 
             float2 tangentForce =
@@ -1285,6 +1300,27 @@ local rainStateUpdateParams = {
                         * gRainPhysicsAccelScale * gRainGravityGain,
                     normalWorld);
                 tangentForce.y += abs(gravity.y) - gravity.y;
+            }
+
+            if (gRainStateLifecycle > 0.5
+                && gRainAirflowDownwardMode > 0.5
+                && fmod(floor(gRainForceMask / 4.0), 2.0) >= 0.5)
+            {
+                float2 airTangent = rainStateProjectForce(
+                    airWorld, normalWorld);
+                float speed = length(gRainAirVelocityWorld);
+                float referenceGravity = max(gRainStateGravity
+                    * gRainPhysicsAccelScale, 0.1);
+                float cap = referenceGravity * (1.0
+                    + min(speed / 20.0, 4.0)
+                        * max(gRainAirflowDownwardGain, 0.0));
+                float downward = min(length(airWorld) * 0.30
+                    * max(gRainAirflowDownwardGain, 0.0), cap);
+                downward = max(downward, abs(airTangent.x)
+                    * max(gRainAirflowDownwardGain, 0.0) * 0.65);
+                // Leave projected X untouched; replace only airflow V.
+                // Increasing signed V moves toward the visor bottom.
+                tangentForce.y += downward - airTangent.y;
             }
 
             forceMagnitude =
@@ -5149,6 +5185,10 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_FORCE_INERTIA_GAIN
     rainStateUpdateParams.values.gRainAirflowGain =
         cfg.RUNTIME.RAIN_FORCE_AIRFLOW_GAIN
+    rainStateUpdateParams.values.gRainAirflowDownwardMode =
+        cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE and 1.0 or 0.0
+    rainStateUpdateParams.values.gRainAirflowDownwardGain =
+        cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN
     rainStateUpdateParams.values.gRainAirVelocityWorld:set(
         -ac.getCar(0).velocity.x,
         -ac.getCar(0).velocity.y,
@@ -6505,8 +6545,14 @@ local function requestRainDynamicStateReadback()
                     cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER)
                 .. ' flowDrag=' .. string.format('%.2f',
                     cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG)
-                .. ' glide=' .. string.format('%.2f',
+                .. ' glide=' .. string.format('%.3f',
                     cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS)
+                .. ' settle=' .. string.format('%.3f',
+                    cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS)
+                .. ' airDown=' .. tostring(
+                    cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE)
+                .. ' airDownGain=' .. string.format('%.2f',
+                    cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN)
                 .. ' birthsSinceLog='
                 .. tostring(rainDynamicSceneCopyState.birthsSinceLog))
             rainDynamicSceneCopyState.birthsSinceLog = 0
@@ -9974,6 +10020,24 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED =
             not cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED
     end
+
+    local airflowModeChanged, _ = ui.checkbox(
+        'Airflow follows visor downward (compare with original)',
+        cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE
+    )
+    if airflowModeChanged then
+        cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE =
+            not cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE
+    end
+    local airflowDownGain, airflowDownGainChanged = ui.slider(
+        'Airflow downward / outward coupling',
+        cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN,
+        0.0, 3.0, '%.2f'
+    )
+    if airflowDownGainChanged then
+        cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN = airflowDownGain
+    end
+    ui.text('Mode affects settled moving drops only when Airflow is enabled.')
 
     local activeForceMask =
         (cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and RAIN_FORCE_GRAVITY or 0)
