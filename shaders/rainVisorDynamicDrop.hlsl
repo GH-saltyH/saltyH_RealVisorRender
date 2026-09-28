@@ -436,7 +436,7 @@ float4 main(PS_IN pin)
                 // local UV only under a fading rim to avoid a visible fold.
                 sampleUV = lerp(lerp(sampleUV, sceneUV, orbMode),
                     wideUV, wideWeight);
-                float orbMIP = lerp(4.5,
+                float orbMIP = lerp(gDynamicDropWideOrbCenterMip,
                     gDynamicDropWideOrbEdgeMip,
                     smoothstep(0.38, 0.82, r));
                 lensMIP = lerp(lensMIP, orbMIP, orbMode);
