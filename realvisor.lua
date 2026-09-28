@@ -442,8 +442,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
         RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
-        -- Probe whether a later particle/smoke pass places visor water over
-        -- the sharp falling-rain overlay. May not be called in every scene.
+        -- Verified: this stage excludes sharp rain streaks from dynamic
+        -- drops. Other KN5 transparent visor regions still show the artifact
+        -- and require a separate visor-wide rendering/order investigation.
         RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG = true,
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
