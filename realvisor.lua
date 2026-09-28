@@ -476,7 +476,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG = false,
         -- Keep the low-detail center; make its visible edge about half as
         -- blurred using the same existing GeometryShot mip chain.
-        RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 3.5,
+        RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP = 6.0,
+        RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 5.0,
         -- The screen copy did not fix the rain overlay or tone mismatch;
         -- disable its per-frame allocation/copy/mips before testing stages.
         RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
@@ -7462,6 +7463,8 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropWideOrbEdgeMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
+            gDynamicDropWideOrbCenterMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP,
             gDynamicDropScreenSourceCompareDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
                 and 1.0 or 0.0,
@@ -9965,6 +9968,24 @@ function windowMain(dt)
     end
     ui.text('Driving blend: stopped below 2 m/s; full at 18 m/s.')
 
+    ui.separator()
+    ui.text('Orb scene blur (existing shot mip chain)')
+    local orbCenterMip, orbCenterMipChanged = ui.slider(
+        'Orb center blur mip',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP,
+        0.0, 8.0, '%.1f'
+    )
+    if orbCenterMipChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_CENTER_MIP = orbCenterMip
+    end
+    local orbEdgeMip, orbEdgeMipChanged = ui.slider(
+        'Orb edge blur mip',
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
+        0.0, 8.0, '%.1f'
+    )
+    if orbEdgeMipChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = orbEdgeMip
+    end
     ui.separator()
     ui.text('Dynamic drop trail calibration (temporary)')
     ui.text('Moving head only; history/clearing stationary drops is a later stage.')
