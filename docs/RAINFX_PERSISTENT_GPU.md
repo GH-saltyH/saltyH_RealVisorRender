@@ -14,6 +14,7 @@ Persistent GPU State -> Physics Update -> Surface Normal/Tangent -> Gravity + Ve
 ## 3. Current status
 Already validated: persistent A/B GPU state, independent persistent drop state, position integration, object-space normal to world normal, tangent force projection, gravity, vehicle acceleration, adhesion threshold, radius-to-mass relationship, force-to-acceleration, linear drag, maximum speed, airflow diagnostics, combined force diagnostics, and the measured 3x3 size/mass/displacement test.
 Not finalized: final surface movement/rendering, merge, residue/shrink, and final drop appearance. Persistent dead -> waiting -> respawn lifecycle is implemented; the next validation task is to verify it under the finalized signed coordinate contract.
+Critical render-order finding (2026-09-28): drawing dynamic visor drops in `main.smoke` removes the sharp falling-rain streak highlight inside their footprints. Other transparent regions of the KN5 visor still exhibit the same artifact even without our custom shader; their rendering/order needs a separate visor-wide fix.
 Therefore the current task is NOT to redesign the physics from zero. It is to consolidate the already tested physics into one persistent simulation.
 
 ## 4. Persistent state
@@ -4647,3 +4648,23 @@ falling rain still crosses/highlights inside drop regions, and FPS within
 comparable Hurricane precipitation intensity. If the noise persists with
 visible drops at smoke stage, a later screen/weather composition is likely,
 and this app callback does not establish a means to mask that engine pass.
+
+### 136. Confirm smoke-stage rain masking and track KN5 visor regions (2026-09-28)
+
+The user confirms a positive smoke-stage test: sharp falling rain is
+excluded from the dynamic-droplet footprints. This supports a render-order
+explanation for the earlier color inversion/noise; the observation does
+not identify the exact internal CSP rain pass. Keep
+`RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG=true` as the tested draw-stage preset
+while continuing the optical work. The extra weather-screen copy remains
+disabled, since it did not correct the artifact or the scene tone.
+
+**High-priority separate issue:** other transparent areas of the visor KN5
+show the same streak highlight even when they use their ordinary KN5
+material instead of the dynamic custom shader. A change limited to droplet
+HLSL or its `GeometryShot` cannot fix those areas. Inventory the affected
+visor mesh/material names, compare each region's transparent rendering
+against the smoke-stage water, and investigate a visor-wide ordering or
+mask solution that preserves transparency and depth. Do not treat the
+successful droplet-stage move as proof that the whole KN5 visor is fixed.
+This work remains pending; no other KN5 material is altered in this test.
