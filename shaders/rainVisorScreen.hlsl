@@ -39,11 +39,16 @@ SamplerState samLinearRain
     Meta:
         R = physical droplet radius in visor UV
         G = physical normalized mass profile
-        A = lifecycle state
+        A = generation * 4 + lifecycle state
             0 = dead/waiting
             1 = alive
             2 = respawn pending
 */
+
+float rainStateLifecycleStatus(float packedStatus)
+{
+    return packedStatus - floor(packedStatus * 0.25) * 4.0;
+}
 
 float rainCanonicalDrop(
     PS_IN pin,
@@ -91,7 +96,7 @@ float4 rainPersistentStateRender(
             0.0
         );
 
-        if (meta.a < 0.5 || meta.a > 1.5)
+        if (abs(rainStateLifecycleStatus(meta.a) - 1.0) > 0.5)
             continue;
 
         result = max(
@@ -263,7 +268,7 @@ float4 rainPredictedPositionsDebug(PS_IN pin)
             0.0
         );
 
-        if (meta.a < 0.5 || meta.a > 1.5)
+        if (abs(rainStateLifecycleStatus(meta.a) - 1.0) > 0.5)
             continue;
 
         float2 predicted =
@@ -321,7 +326,7 @@ float4 rainForceDirectionDebug(PS_IN pin)
             0.0
         );
 
-        if (meta.a < 0.5 || meta.a > 1.5)
+        if (abs(rainStateLifecycleStatus(meta.a) - 1.0) > 0.5)
             continue;
 
         float3 normalWorld = rainDebugNormalWorld(state.rg);
@@ -414,7 +419,7 @@ float4 rainPhysicalStateViewerDebug(PS_IN pin)
             0.0
         );
 
-        if (meta.a < 0.5 || meta.a > 1.5)
+        if (abs(rainStateLifecycleStatus(meta.a) - 1.0) > 0.5)
             continue;
 
         float speed =
@@ -497,9 +502,9 @@ float4 rainLifecycleDebug(PS_IN pin)
         {
             result = marker;
 
-            if (meta.a < 0.5)
+            if (rainStateLifecycleStatus(meta.a) < 0.5)
                 color = float3(0.0, 0.0, 0.0);
-            else if (meta.a > 1.5)
+            else if (rainStateLifecycleStatus(meta.a) > 1.5)
                 color = float3(1.0, 0.85, 0.10);
             else
                 color = float3(0.25, 0.95, 1.0);
@@ -545,7 +550,7 @@ float4 rainPhysicalStateDebug(PS_IN pin)
             0.0
         );
 
-        if (meta.a < 0.5 || meta.a > 1.5)
+        if (abs(rainStateLifecycleStatus(meta.a) - 1.0) > 0.5)
             continue;
 
         moving = max(
