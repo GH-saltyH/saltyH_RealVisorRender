@@ -334,7 +334,7 @@ local cfg = scriptSettings:mapConfig({
         -- Persistent state:
         -- 0 = disabled
         -- 1 = initialize only
-        -- 3 = canonical persistent RainFX physics
+        -- 3 = canonical persistent RainFX physics + weather-driven lifecycle
         -- 4 = canonical persistent physics + 3x3 physical-size diagnostic
         -- 6 = canonical persistent physics + boundary lifecycle
         -- 7 = single persistent droplet position probe
@@ -347,6 +347,11 @@ local cfg = scriptSettings:mapConfig({
 
         -- Persistent lifecycle: explicit surface exit/death/respawn. No edge wrapping.
         RAIN_GPU_STATE_LIFECYCLE = true,
+        -- -1: live CSP rain intensity. 0..1: deterministic test weather.
+        RAIN_GPU_STATE_RAIN_OVERRIDE = -1.0,
+        RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
+        RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
+        RAIN_GPU_STATE_LIFECYCLE_LOG = true,
         RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
         RAIN_GPU_STATE_RESPAWN_GAP_MAX = 0.75,
@@ -722,9 +727,9 @@ local RAIN_DEBUG_OPTIONS = {
 local RAIN_GPU_STATE_MODE_OPTIONS = {
     '[0] Disabled',
     '[1] Initialize only',
-    '[3] Canonical persistent RainFX physics',
+    '[3] Canonical physics + rain lifecycle',
     '[4] Canonical persistent physics + 3x3 physical-size diagnostic',
-    '[6] Canonical persistent physics + boundary lifecycle',
+    '[6] Boundary lifecycle comparison (rain lifecycle active)',
     '[7] Single persistent droplet position probe',
     '[10] Canonical physical 9-drop validation'
 }
@@ -770,6 +775,9 @@ local rainStateUpdateParams = {
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
+        gRainStateRainIntensity = 0.0,
+        gRainStateAgeMin = 8.0,
+        gRainStateAgeMax = 18.0,
         gRainStateSingleDropTest = 0.0,
         gRainStateSingleDropPosition = vec2(
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
@@ -1430,17 +1438,20 @@ local rainStateUpdateParams = {
             float dt = max(gRainStateDeltaTime, 0.0);
 
             /*
-                Lifecycle flags in Meta.A:
+                Lifecycle flags in Meta.A modulo 4; the integer quotient
+                identifies the current birth generation:
                     0 = dead / waiting for respawn gap
                     1 = alive
                     2 = respawn pending; consume on this state pass
 
                 Meta.B remains the accumulated age/waiting timer.
-                The respawn cycle is derived deterministically from stateIndex.
+                The respawn cycle comes from the packed generation.
             */
             if (gRainStateLifecycle > 0.5)
             {
-                if (meta.a > 1.5)
+                float generation = floor(meta.a * 0.25);
+                float status = meta.a - generation * 4.0;
+                if (status > 1.5)
                 {
                     if (gRainStatePhysicalTest > 0.5 && index < 9.0)
                     {
@@ -1461,7 +1472,7 @@ local rainStateUpdateParams = {
                     float2 respawn =
                         rainStateRespawnPosition(
                             index,
-                            meta.b
+                            generation + 1.0
                         );
 
                     return float4(
@@ -1471,7 +1482,7 @@ local rainStateUpdateParams = {
                     );
                 }
 
-                if (meta.a < 0.5)
+                if (status < 0.5)
                 {
                     return float4(
                         p,
@@ -1513,6 +1524,9 @@ local rainStateMetaUpdateParams = {
         gRainStateBoundaryMargin = 0.005,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
+        gRainStateRainIntensity = 0.0,
+        gRainStateAgeMin = 8.0,
+        gRainStateAgeMax = 18.0,
         gRainStateSingleDropTest = 0.0,
     },
 
@@ -1614,7 +1628,13 @@ local rainStateMetaUpdateParams = {
                 float radius = diameterMM * 0.00146484375;
                 float mass = rainStatePhysicalMassProfile(diameterMM);
 
-                return float4(radius, mass, 0.0, 1.0);
+                // Rain-dependent initial population prevents a dry startup
+                // from filling every slot with permanent visible drops.
+                float occupancy = saturate(gRainStateRainIntensity);
+                float allowed = rainStateHash(index + 419.0);
+                float initialStatus = gRainStateLifecycle > 0.5
+                    && allowed >= occupancy ? 0.0 : 1.0;
+                return float4(radius, mass, 0.0, initialStatus);
             }
 
             float4 meta = txRainStateMeta.SampleLevel(
@@ -1625,21 +1645,20 @@ local rainStateMetaUpdateParams = {
 
             if (gRainStateLifecycle > 0.5)
             {
-                if (meta.a > 1.5)
+                // Meta.A packs generation * 4 + status, preserving the
+                // existing single-channel state and readback footprint.
+                float generation = floor(meta.a * 0.25);
+                float status = meta.a - generation * 4.0;
+                float rain = saturate(gRainStateRainIntensity);
+                if (status > 1.5)
                 {
-                    /*
-                        Consume the pending respawn. Meta is float4, so there
-                        is no Meta.C channel: use the accumulated waiting-age
-                        value as the respawn seed before resetting age.
-                    */
-                    float respawnSeed = meta.b;
-
-                    meta.a = 1.0;
+                    float nextGeneration = fmod(generation + 1.0, 4096.0);
+                    meta.a = nextGeneration * 4.0 + 1.0;
                     meta.b = 0.0;
 
                     float diameterMM =
                         rainStatePhysicalDiameterMM(
-                            index + respawnSeed * 17.123
+                            index + nextGeneration * 17.123
                         );
 
                     meta.r = diameterMM * 0.00146484375;
@@ -1648,29 +1667,24 @@ local rainStateMetaUpdateParams = {
                     return meta;
                 }
 
-                if (meta.a < 0.5)
+                if (status < 0.5)
                 {
                     meta.b += dt;
 
-                    float gap01 = rainStateHash(
-                        index
-                        + 701.0
-                    );
-
+                    float gap01 = rainStateHash(index
+                        + generation * 23.71 + 701.0);
                     float respawnGap = lerp(
                         gRainStateRespawnGapMin,
-                        gRainStateRespawnGapMax,
-                        gap01
-                    );
-
-                    if (meta.b >= respawnGap)
+                        gRainStateRespawnGapMax, gap01);
+                    // A newly born slot must be admitted by current rain.
+                    // Zero rain keeps waiting indefinitely; lower rain
+                    // occupies fewer of the fixed-size GPU slots.
+                    float admission = rainStateHash(index
+                        + generation * 11.73 + 419.0);
+                    if (rain > 0.001 && admission < rain
+                        && meta.b >= respawnGap / max(rain, 0.05))
                     {
-                        /*
-                            Preserve the accumulated wait value for the
-                            pending-respawn seed. It is reset only after the
-                            state shader consumes the respawn.
-                        */
-                        meta.a = 2.0;
+                        meta.a = generation * 4.0 + 2.0;
                     }
 
                     return meta;
@@ -1703,7 +1717,19 @@ local rainStateMetaUpdateParams = {
 
                 if (exits)
                 {
-                    meta.a = 0.0;
+                    meta.a = generation * 4.0;
+                    meta.b = 0.0;
+                    return meta;
+                }
+
+                float ageRange = lerp(gRainStateAgeMin,
+                    gRainStateAgeMax,
+                    rainStateHash(index + generation * 5.197 + 211.0));
+                if (rain <= 0.001)
+                    ageRange = min(ageRange, 2.0);
+                if (meta.b + dt >= ageRange)
+                {
+                    meta.a = generation * 4.0;
                     meta.b = 0.0;
                     return meta;
                 }
@@ -4603,7 +4629,8 @@ local function initializeRainGPUState()
 
     local lifecycle =
         (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6)
             and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
         )
         and 1.0
@@ -4633,6 +4660,19 @@ local function initializeRainGPUState()
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MIN
     rainStateMetaUpdateParams.values.gRainStateRespawnGapMax =
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+
+    local initialSim = ac.getSim()
+    local initialRain = initialSim and initialSim.rainIntensity or 0.0
+    if cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 then
+        initialRain = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+    end
+    initialRain = math.max(0.0, math.min(1.0, initialRain or 0.0))
+    rainStateUpdateParams.values.gRainStateRainIntensity = initialRain
+    rainStateMetaUpdateParams.values.gRainStateRainIntensity = initialRain
+    rainStateMetaUpdateParams.values.gRainStateAgeMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
+    rainStateMetaUpdateParams.values.gRainStateAgeMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MAX_SECONDS
 
     rainStateUpdateParams.textures.txRainState = false
     rainStateUpdateParams.textures.txRainStateMeta = false
@@ -4726,7 +4766,8 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 4 and 1.0 or 0.0
     rainStateUpdateParams.values.gRainStateLifecycle =
         (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6)
             and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
         )
         and 1.0
@@ -4795,7 +4836,8 @@ local function updateRainGPUState(sim)
         math.min(dt, 0.05)
     rainStateMetaUpdateParams.values.gRainStateLifecycle =
         (
-            cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6
+            (cfg.RUNTIME.RAIN_GPU_STATE_MODE == 3
+                or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 6)
             and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
         )
         and 1.0
@@ -4808,6 +4850,18 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
     rainStateMetaUpdateParams.values.gRainStateSingleDropTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7 and 1.0 or 0.0
+
+    local liveRain = sim.rainIntensity or 0.0
+    if cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 then
+        liveRain = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+    end
+    liveRain = math.max(0.0, math.min(1.0, liveRain))
+    rainStateUpdateParams.values.gRainStateRainIntensity = liveRain
+    rainStateMetaUpdateParams.values.gRainStateRainIntensity = liveRain
+    rainStateMetaUpdateParams.values.gRainStateAgeMin =
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
+    rainStateMetaUpdateParams.values.gRainStateAgeMax =
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MAX_SECONDS
 
     local readState =
         rainStateReadIsA and rainStateA or rainStateB
@@ -5655,7 +5709,7 @@ end
 --   [2N..3N)   velocity U encoded around 0.5
 --   [3N..4N)   velocity V encoded around 0.5
 --   [4N..5N)   physical radius in UV
---   [5N..6N)   alive flag (1 only for lifecycle state == alive)
+--   [5N..6N)   packed generation*4 + lifecycle status
 --
 -- accessData() is asynchronous. The callback only copies scalar values into
 -- Lua arrays; alterVertices() is applied from the render callback afterwards.
@@ -5696,8 +5750,7 @@ float4 main(PS_IN pin)
     } else if (channel < 4.5) {
         value = max(meta.r, 0.0);
     } else {
-        // Renderer only needs visibility, not the complete lifecycle enum.
-        value = (meta.a > 0.5 && meta.a < 1.5) ? 1.0 : 0.0;
+        value = meta.a;
     }
 
     return float4(value, value, value, value);
@@ -5724,6 +5777,8 @@ local function initializeRainDynamicStateReadback()
     rainDynamicStateLatestAcceptedRequestFrame = -1
     rainDynamicStateHasSnapshot = false
     rainDynamicStateSnapshotTime = 0.0
+    rainDynamicSceneCopyState.generation = {}
+    rainDynamicSceneCopyState.birthsSinceLog = 0
 
     for slotIndex = 1, ringSize do
         local canvas = ui.ExtraCanvas(
@@ -5969,6 +6024,9 @@ local function requestRainDynamicStateReadback()
         local velocityRange =
             cfg.RUNTIME.RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE
 
+        rainDynamicSceneCopyState.generation =
+            rainDynamicSceneCopyState.generation or {}
+        local aliveCount, waitingCount, pendingCount, births = 0, 0, 0, 0
         for i = 0, count - 1 do
             local dst = i + 1
             rainDynamicStateU[dst] =
@@ -5983,8 +6041,39 @@ local function requestRainDynamicStateReadback()
                 * 2.0 * velocityRange
             rainDynamicStateRadius[dst] =
                 data:floatValue(count * 4 + i, 0)
+            local packedStatus = data:floatValue(count * 5 + i, 0)
+            local generation = math.floor(packedStatus / 4)
+            if rainDynamicSceneCopyState.generation[dst] ~= nil
+                and rainDynamicSceneCopyState.generation[dst]
+                    ~= generation then
+                births = births + 1
+            end
+            rainDynamicSceneCopyState.generation[dst] = generation
+            local status = packedStatus % 4
             rainDynamicStateAlive[dst] =
-                data:floatValue(count * 5 + i, 0)
+                status == 1 and 1.0 or 0.0
+            if status == 1 then
+                aliveCount = aliveCount + 1
+            elseif status == 2 then
+                pendingCount = pendingCount + 1
+            else
+                waitingCount = waitingCount + 1
+            end
+        end
+
+        rainDynamicSceneCopyState.birthsSinceLog =
+            (rainDynamicSceneCopyState.birthsSinceLog or 0) + births
+        if cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE_LOG
+            and rainDynamicStateCallbackCount % 180 == 0 then
+            ac.log(appNameDebug .. ' Rain lifecycle: rain='
+                .. string.format('%.2f',
+                    rainStateMetaUpdateParams.values.gRainStateRainIntensity)
+                .. ' alive=' .. tostring(aliveCount)
+                .. ' waiting=' .. tostring(waitingCount)
+                .. ' pending=' .. tostring(pendingCount)
+                .. ' birthsSinceLog='
+                .. tostring(rainDynamicSceneCopyState.birthsSinceLog))
+            rainDynamicSceneCopyState.birthsSinceLog = 0
         end
 
         rainDynamicStateSnapshotTime = slot.requestTime
@@ -9260,6 +9349,38 @@ function windowMain(dt)
     end
 
     ui.text('Canonical physical RainFX state: physical droplet profile + unified external forces.')
+
+    ui.separator()
+    ui.text('Lifecycle test: -1 = live rain, 0 = dry, 0.5 = medium, 1 = heavy.')
+    local rainOverride, rainOverrideChanged = ui.slider(
+        'Lifecycle rain override',
+        cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE,
+        -1.0, 1.0, '%.2f'
+    )
+    if rainOverrideChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE = rainOverride
+    end
+    local minimumAge, minimumAgeChanged = ui.slider(
+        'Moving drop minimum age (seconds)',
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS,
+        1.0, 30.0, '%.1f'
+    )
+    if minimumAgeChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS = minimumAge
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MAX_SECONDS = math.max(
+            minimumAge, cfg.RUNTIME.RAIN_GPU_STATE_AGE_MAX_SECONDS)
+    end
+    local maximumAge, maximumAgeChanged = ui.slider(
+        'Moving drop maximum age (seconds)',
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MAX_SECONDS,
+        1.0, 45.0, '%.1f'
+    )
+    if maximumAgeChanged then
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MAX_SECONDS = maximumAge
+        cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS = math.min(
+            maximumAge, cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS)
+    end
+    ui.text('Boundary exits remain active; age sliders change live GPU state.')
 
     ui.separator()
     ui.text('Dynamic drop trail calibration (temporary)')
