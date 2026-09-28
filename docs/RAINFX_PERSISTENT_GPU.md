@@ -5515,3 +5515,22 @@ Then add a separate dense, tiny, low-resolution optical background layer with
 its own occupancy and draw budget. Finally use timed, position-history trail
 segments, clearing the background film where a moving drop passed. Keep each
 layer independently switchable for matched FPS and visual comparisons.
+
+### Wide-field lens follow-up
+
+The morphology test passed: the silhouette remains stable during movement,
+obvious shape repetition was not observed, and whole-app ON/OFF differed by
+about 6 FPS in the user's test. Similar-looking images inside drops remain:
+the orb source was centered 90% toward screen midpoint with a 0.70 screen-UV
+radius. Next experiment uses 72% center convergence, radius 0.48, and a mild
+radial convex curve (at most 16% edge compression). The image inversion is a
+180-degree rotation of both image axes, not a one-axis mirror; test the toggle
+to verify the observed visor orientation. No extra texture lookup is added.
+
+For a matched test, keep existing shot and morphology flags enabled, compare
+`RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE=true/false`, and use
+`RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS=0.48` (try 0.40 and 0.56 if needed).
+Check whether neighboring drops show different image content, whether image
+orientation makes sense on both visor sides, and the same-camera app ON/OFF
+FPS delta. If the edge shows a new discontinuity, report which side and
+whether it changes with the inversion toggle.
