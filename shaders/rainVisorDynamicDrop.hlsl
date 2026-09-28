@@ -78,7 +78,10 @@ float4 main(PS_IN pin)
         clip(pattern.a - 0.5);
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(pattern.z);
-        float rim = smoothstep(0.58, 0.95, lensRadius);
+        // The winning disk owns the pixel; its outer ring also marks
+        // boundaries where a newer disk hides an older one.
+        float rim = smoothstep(0.69, 0.87, lensRadius)
+            * (1.0 - smoothstep(0.96, 1.0, lensRadius));
         if (gDynamicDropMicroDebug > 0.5)
         {
             float3 diagnostic = lerp(float3(0.13, 0.22, 0.28),
@@ -91,9 +94,26 @@ float4 main(PS_IN pin)
             resolutionRatio, 0.98);
         float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
             * shotScale;
-        float2 refractionUV = sceneUV
-            - lensLocal * gDynamicDropMicroRefractionPixels
-                * gDynamicDropInvScreenSize * shotScale;
+        // Recover the screen-space center of this disk from the smooth
+        // visor UV derivatives. A fixed pixel offset cannot invert disks
+        // whose projected sizes change across the curved visor or with DLSS.
+        float2 uvDx = ddx(patternUV);
+        float2 uvDy = ddy(patternUV);
+        float determinant = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
+        float2 radiusUV = lensLocal
+            * (0.90 / max(gDynamicDropMicroPatternGrid, 1.0));
+        float2 centerOffsetPixels = float2(0.0, 0.0);
+        if (abs(determinant) > 1e-9)
+            centerOffsetPixels = float2(
+                (uvDy.y * radiusUV.x - uvDy.x * radiusUV.y)
+                    / determinant,
+                (uvDx.x * radiusUV.y - uvDx.y * radiusUV.x)
+                    / determinant);
+        float2 centerSceneUV = sceneUV
+            - ddx(sceneUV) * centerOffsetPixels.x
+            - ddy(sceneUV) * centerOffsetPixels.y;
+        float2 refractionUV = centerSceneUV
+            - (sceneUV - centerSceneUV) * gDynamicDropMicroImageScale;
         float3 sceneColor = txDynamicSnapshot.SampleLevel(
             samLinearClamp, saturate(refractionUV),
             gDynamicDropMicroSceneMip).rgb;
@@ -106,9 +126,12 @@ float4 main(PS_IN pin)
             lightDirection) - 0.86) * 7.0);
         glint *= glint;
         float3 lightAccent = float3(0.78, 0.90, 1.0)
-            * (glint * 0.19 + rim * 0.015);
-        return float4(sceneColor + lightAccent,
-            saturate(gDynamicDropMicroOpacity * (0.90 + rim * 0.10)));
+            * (glint * 0.15 + rim * gDynamicDropMicroRimStrength);
+        // Preserve the live scene tone beneath the dense pattern: the
+        // independent scene shot differs most strongly around weather sky.
+        float opacity = saturate(gDynamicDropMicroOpacity
+            + rim * 0.20 + glint * 0.08);
+        return float4(sceneColor + lightAccent, opacity);
     }
 
     if (microLayer)
