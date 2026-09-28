@@ -870,16 +870,20 @@ local rainStateUpdateParams = {
         }
 
         /*
-            Deterministic rejection sampling for initial/respawn positions.
-            This runs only when creating/recreating a droplet, not for every
-            live state every frame.
+            Spread initial positions across the visor. On later births,
+            compare valid candidates against a bounded sample of living
+            drops, so short lifetimes do not repeatedly fill a few spots.
+            Only births pay for the additional texture reads.
         */
         float2 rainStateFindValidPosition(
             float stateIndex,
             float cycleSeed
         )
         {
-            for (int attempt = 0; attempt < 32; ++attempt)
+            float2 best = float2(0.5, -0.5);
+            float bestClearance = -1.0;
+            int candidateCount = gRainStateInit > 0.5 ? 32 : 16;
+            for (int attempt = 0; attempt < candidateCount; ++attempt)
             {
                 float seed =
                     stateIndex
@@ -887,23 +891,53 @@ local rainStateUpdateParams = {
                     + (float)attempt * 37.719
                     + 911.731;
 
-                float2 candidate = float2(
-                    rainStateHash(seed + 13.0),
-                    -rainStateHash(seed + 47.0)
-                );
+                float2 candidate = attempt == 0 && cycleSeed < 0.5
+                    ? float2(frac((stateIndex + 0.5) * 0.61803398875),
+                        -frac((stateIndex + 0.5) * 0.75487766625))
+                    : float2(rainStateHash(seed + 13.0),
+                        -rainStateHash(seed + 47.0));
 
-                if (rainStateBoundaryMask(candidate) >= 0.5)
+                if (rainStateBoundaryMask(candidate) < 0.5)
+                {
+                    continue;
+                }
+
+                if (gRainStateInit > 0.5)
                 {
                     return candidate;
                 }
+
+                float clearance = 1.0;
+                float count = max(gRainStateCount, 1.0);
+                for (int probe = 0; probe < 16; ++probe)
+                {
+                    float otherIndex = fmod(
+                        stateIndex + 1.0 + (float)probe * 37.0
+                            + (float)attempt * 53.0,
+                        count);
+                    float2 uv = float2((otherIndex + 0.5) / count, 0.5);
+                    float4 otherMeta = txRainStateMeta.SampleLevel(
+                        samPointRain, uv, 0.0);
+                    float otherGeneration = floor(otherMeta.a * 0.25);
+                    float otherStatus = otherMeta.a - otherGeneration * 4.0;
+                    if (otherStatus < 0.5 || otherStatus > 1.5)
+                    {
+                        continue;
+                    }
+                    float2 otherPosition = txRainState.SampleLevel(
+                        samPointRain, uv, 0.0).rg;
+                    float2 delta = candidate - otherPosition;
+                    clearance = min(clearance,
+                        dot(delta, delta) - otherMeta.r * otherMeta.r);
+                }
+                if (clearance > bestClearance)
+                {
+                    best = candidate;
+                    bestClearance = clearance;
+                }
             }
 
-            /*
-                Safe deterministic fallback. A malformed/empty mask should
-                not create undefined state; normal lifecycle validation will
-                still expose such a mask immediately.
-            */
-            return float2(0.5, -0.5);
+            return best;
         }
 
         /*
@@ -1573,20 +1607,20 @@ local rainStateMetaUpdateParams = {
 
         float rainStateBirthDiameterMM(float index, float rain)
         {
-            float sizeReach = saturate(sqrt(saturate(rain) * 2.0));
-            float physicalMaximum = lerp(1.4, 6.0, sizeReach);
-            // Preserve the approved 0.03 profile, but at higher densities
-            // keep most bodies small enough to remain individually legible.
-            float visualMaximum = rain <= 0.03
-                ? physicalMaximum
-                : lerp(2.53, 4.1,
-                    saturate((rain - 0.03) / 0.47));
-            float rareLarge = rainStateHash(index + 307.0);
-            float maximum = rareLarge
-                    > 1.0 - lerp(0.01, 0.07, saturate(rain))
-                ? physicalMaximum : visualMaximum;
+            float intensity = saturate((rain - 0.03) / 0.67);
+            float minimum = lerp(0.35, 1.15, intensity);
+            float maximum = rain <= 0.03
+                ? lerp(1.4, 2.53, saturate(rain / 0.03))
+                : lerp(2.53, 4.1, saturate((rain - 0.03) / 0.47));
+            // A separate rare impact reaches the full physical diameter;
+            // the ordinary size distribution never reaches 6 mm.
+            float rareChance = lerp(0.001, 0.008, saturate(rain));
+            if (rainStateHash(index + 307.0) > 1.0 - rareChance)
+            {
+                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
+            }
             float randomSize = rainStateHash(index + 101.0);
-            return lerp(0.35, maximum, randomSize * randomSize);
+            return lerp(minimum, maximum, randomSize * randomSize);
         }
 
         float rainStatePhysicalMassProfile(float diameterMM)
