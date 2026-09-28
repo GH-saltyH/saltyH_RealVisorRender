@@ -246,19 +246,27 @@ float4 main(PS_IN pin)
         return float4(sceneColor, 1.0);
     }
 
-    // Each drop has a stable, distinct angular contour. The same adjusted
-    // radius drives clipping, lens normal, rim and alpha.
+    // The birth seed chooses a round, stretched or asymmetric footprint.
+    // The same radius drives clipping, lens normal, rim and alpha.
     float footprintScale = 1.0;
     if (gDynamicDropShapeDebug > 0.5)
     {
         float angle = atan2(local.y, local.x);
         float phase = shapeSeed * 2.3999632;
-        float contour = (0.09 + 0.07 * frac(shapeSeed * 0.7548777))
-            * (0.5 + 0.5 * sin(3.0 * angle + phase + 0.7))
-            + (0.06 + 0.07 * frac(shapeSeed * 0.5698403))
-            * (0.5 + 0.5 * sin(5.0 * angle - phase * 0.73 - 0.9));
-        contour *= saturate(gDynamicDropShapeStrength);
-        footprintScale = 1.0 - contour;
+        float family = frac((shapeSeed + 1.0) * 0.61803399);
+        float strength = saturate(gDynamicDropShapeStrength);
+        float contour = (0.045 + 0.065 * frac(shapeSeed * 0.7548777))
+            * sin(3.0 * angle + phase + 0.7)
+            + (0.025 + 0.055 * frac(shapeSeed * 0.5698403))
+            * sin(5.0 * angle - phase * 0.73 - 0.9);
+        // A single broad lobe creates a tear-like silhouette in some births;
+        // others remain nearly circular or gently elliptical.
+        float broadLobe = max(0.0, cos(angle - phase));
+        contour += (family > 0.67 ? 0.13 : 0.0)
+            * (broadLobe * broadLobe - 0.25);
+        contour += (family > 0.32 && family <= 0.67 ? 0.09 : 0.0)
+            * cos(2.0 * angle + phase);
+        footprintScale = 0.88 + strength * contour;
         r /= footprintScale;
         clip(1.0 - r);
     }
