@@ -6308,8 +6308,10 @@ local function initializeRainDynamicSurfaceTest()
                             // winning original disk. Erasing that disk never
                             // cuts a new circle through an existing image.
                             float gate = 0.01 + 0.98 * baseGate;
+                            // B stores selection order, A stores only
+                            // geometry. Changing rain cannot shrink A.
                             return float4(chosen * 0.5 + 0.5,
-                                radius, interior * gate);
+                                gate, interior);
                         }
                     ]]
                 })
