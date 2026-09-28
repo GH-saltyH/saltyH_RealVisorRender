@@ -324,6 +324,19 @@ float4 main(PS_IN pin)
                     ? float3(0.95, 0.12, 0.72)
                     : float3(0.05, 0.55, 0.70);
             }
+            // The depth test was verified with Hurricane sky and geometry.
+            // Replace only the visible-right sky with the live fog color to
+            // test its brightness and hue against the unmodified left sky.
+            // Ground/buildings retain their original refracted HDR color.
+            else if (gDynamicDropSkyFogColorDebug > 0.5
+                && local.x < 0.0)
+            {
+                float shotDepth = txDynamicShotDepth.SampleLevel(
+                    samLinearClamp, saturate(sceneUV + refractionOffset),
+                    0.0).r;
+                if (shotDepth > 0.99999)
+                    refractedScene = gDynamicDropWeatherFogColor;
+            }
             // Sky color test on the back-facing visor: image-left keeps
             // GeometryShot; image-right samples the final screen at the
             // identical normalized UV and displacement. Screen may contain

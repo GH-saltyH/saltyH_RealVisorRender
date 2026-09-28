@@ -4453,3 +4453,27 @@ binding instead of masking scene colors. Depth allocation adds about one
 full-size D32 surface (~10.8 MB at 2161x1249) and one depth sample per
 visible debug pixel; record weather-matched FPS, then disable the debug flag
 to release the attachment after the classifier is validated.
+
+### 128. Compare the actual fog color only on classified sky (2026-09-28)
+
+The user confirms the shot-depth classification across weather: sky and
+the wrongly projected sunset clouds are magenta, geometry is cyan. Focus
+all subsequent weather comparisons on Hurricane, with 72–74 FPS at the
+depth diagnostic camera as the current paired baseline. The existing
+HDR shot and depth buffer can therefore isolate sky from scene objects.
+
+Preset `RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG=false` and
+`RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG=true`. Keep the one shot with depth,
+48px optics, opaque alpha and the center activation marker. On the visible
+right only, replace pixels with depth >0.99999 by `ac.getSim().fogColor`;
+keep right-side geometry and all visible-left pixels as the original HDR
+GeometryShot. Log the fog color. Compare both halves against the real sky
+and against building/track colors at the same Hurricane camera. This
+solid-color probe intentionally discards cloud detail; it tests whether
+the runtime fog color has a suitable hue/brightness in this HDR draw stage.
+If it appears too dark, too bright or mismatched, do not use it as a
+production sky override. If it matches the final Hurricane sky reasonably,
+the next step is a sky-only blend with edge-aware transitions and a test
+against clearer weather. A second geometry shot and global color gain are
+not part of this experiment. Record FPS to isolate the extra sky-depth
+sample cost within the same weather.

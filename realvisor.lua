@@ -407,7 +407,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = false,
         -- Visualize independent-shot depth in the visible right half:
         -- magenta for far/sky, cyan for geometry. Visible left stays HDR.
-        RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG = true,
+        RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG = false,
+        -- With verified shot depth, compare raw HDR sky (visible left)
+        -- against the current fog color on sky pixels (visible right).
+        RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6269,6 +6272,7 @@ render.onSceneReady(function()
     end
     local yebisShot = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG
     local shotWithDepth = cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
+        or cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG
     local shotScale = yebisShot and math.max(0.5, math.min(1.0,
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE)) or 1.0
     local shotWidth = math.max(1, math.floor(shotScale * (
@@ -6591,6 +6595,10 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG)
             .. ' shotDepthDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG)
+            .. ' skyFogColorDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG)
+            .. ' fogColor='
+            .. tostring(sim.fogColor)
             .. ' pixelUV='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
             .. ' whiteReferencePoint='
@@ -6682,6 +6690,11 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
                 and rainDynamicSceneCopyState.shotWithDepth
                 and 1.0 or 0.0,
+            gDynamicDropSkyFogColorDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
+            gDynamicDropWeatherFogColor = sim.fogColor,
 
             gDynamicDropGeometryUVScaleA =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A,
