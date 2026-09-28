@@ -56,6 +56,8 @@ float4 main(PS_IN pin)
 
     float2 local = (quadTex - 0.5) * 2.0;
     float r = length(local);
+    bool wideSide = gDynamicDropSplitCompareDebug < 0.5
+        || local.x < 0.0;
 
     if (trailQuad)
     {
@@ -302,7 +304,7 @@ float4 main(PS_IN pin)
             float2 localDy = ddy(local);
             if ((gDynamicDropInvertedFootprintDebug > 0.5
                 || gDynamicDropConcaveLensDebug > 0.5)
-                && local.x < 0.0)
+                && wideSide)
             {
                 // Reconstruct the projected quad radius from the mesh UV
                 // Jacobian. This works for each droplet's own screen size
@@ -349,7 +351,7 @@ float4 main(PS_IN pin)
             }
             // On the back-facing visor, only the image-right half receives
             // the force-driven prototype; the left retains proven optics.
-            if (gDynamicDropWaveEnvelope > 0.0 && local.x < 0.0)
+            if (gDynamicDropWaveEnvelope > 0.0 && wideSide)
             {
                 float waveProfile = smoothstep(0.10, 0.45, r)
                     * (1.0 - smoothstep(0.75, 1.0, r));
@@ -361,9 +363,9 @@ float4 main(PS_IN pin)
                     * gDynamicDropInvRenderTargetSize;
             }
             float lensMIP = gDynamicDropConcaveLensDebug > 0.5
-                && local.x < 0.0 ? lerp(1.4, 1.9, saturate(r)) : 0.0;
+                && wideSide ? lerp(1.4, 1.9, saturate(r)) : 0.0;
             float2 sampleUV = sceneUV + refractionOffset;
-            if (gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
+            if (gDynamicDropWideSceneDebug > 0.5 && wideSide)
             {
                 // Roughly one third of the viewport crosses the diameter
                 // of each drop. Keep a slightly position-dependent center
@@ -419,7 +421,7 @@ float4 main(PS_IN pin)
             // Visible right half: inspect shot depth at exactly the same
             // refracted UV. Magenta indicates a far/sky pixel; cyan indicates
             // geometry or a missing/invalid depth signal.
-            if (gDynamicDropSkyDepthDebug > 0.5 && local.x < 0.0)
+            if (gDynamicDropSkyDepthDebug > 0.5 && wideSide)
             {
                 float shotDepth = txDynamicShotDepth.SampleLevel(
                     samLinearClamp, saturate(sampleUV),
@@ -431,7 +433,7 @@ float4 main(PS_IN pin)
             // Both halves use the same sky correction while the new lens
             // comparison is enabled, isolating the optical shape.
             else if (gDynamicDropSkyFogColorDebug > 0.5
-                && (local.x < 0.0
+                && (wideSide
                     || gDynamicDropInvertedFootprintDebug > 0.5
                     || gDynamicDropConcaveLensDebug > 0.5))
             {
@@ -515,11 +517,11 @@ float4 main(PS_IN pin)
                 * lerp(0.035, 0.16, saturate(sceneLuma))
             + float3(0.92, 0.98, 1.00) * highlight * 0.14;
         if (gDynamicDropConcaveLensDebug > 0.5
-            && local.x < 0.0)
+            && wideSide)
             opticalAccent *= 0.55;
         if (gDynamicDropWideGlintDebug > 0.5
             && gDynamicDropConcaveLensDebug > 0.5
-            && local.x < 0.0)
+            && wideSide)
         {
             // A broad scene direction informs only positive light contrast.
             // Keep the base lens monotonic and the reflected scene hue out
@@ -569,14 +571,14 @@ float4 main(PS_IN pin)
             alpha = 1.0;
         if (gDynamicDropSoftCompositeDebug > 0.5
             && gDynamicDropConcaveLensDebug > 0.5
-            && local.x < 0.0)
+            && wideSide)
             alpha = (0.38 + fresnel * 0.08 + highlight * 0.04)
                 * (1.0 - smoothstep(0.72, 1.0, r));
-        if (gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
+        if (gDynamicDropWideSceneDebug > 0.5 && wideSide)
             alpha = (0.72 + fresnel * 0.08)
                 * (1.0 - smoothstep(0.42, 0.98, r));
         if (gDynamicDropWideOrbDebug > 0.5
-            && gDynamicDropWideSceneDebug > 0.5 && local.x < 0.0)
+            && gDynamicDropWideSceneDebug > 0.5 && wideSide)
             alpha = (0.72 + fresnel * 0.08)
                 * (1.0 - smoothstep(0.45, 0.92, r));
         return float4(refractedScene + opticalAccent, alpha);
