@@ -127,11 +127,10 @@ float4 main(PS_IN pin)
         glint *= glint;
         float3 lightAccent = float3(0.78, 0.90, 1.0)
             * (glint * 0.15 + rim * gDynamicDropMicroRimStrength);
-        // Preserve the live scene tone beneath the dense pattern: the
-        // independent scene shot differs most strongly around weather sky.
-        float opacity = saturate(gDynamicDropMicroOpacity
-            + rim * 0.20 + glint * 0.08);
-        return float4(sceneColor + lightAccent, opacity);
+        // Each winning disk carries its complete scene image. Uncovered
+        // pattern texels are clipped above and reveal the live scene.
+        return float4(sceneColor + lightAccent,
+            saturate(gDynamicDropMicroOpacity));
     }
 
     if (microLayer)
