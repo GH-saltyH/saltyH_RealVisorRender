@@ -4769,3 +4769,35 @@ and edge softness. Record paired FPS with similar rainfall. If the added
 highlight helps only in clear sky or invents highlights behind fog, remove
 it and investigate a weather-correct light source before extending the
 sampling footprint.
+
+### 140. Test a broad scene image inside each drop (2026-09-28)
+
+The user observed no glint in section 139. The supplied CSP close-ups
+(`image(4).png`, `image(5).png`) show many overlapping stationary drops,
+distinct falling water, and a trail that temporarily removes the small
+drop pattern while leaving a mildly refracting, faintly tinted path. The
+user also identifies a possible diffuse underlayer; its composition and
+origin cannot be established from screenshots alone. These guide later
+simulation and layering, but first isolate the broad-image hypothesis.
+
+Preset `RAIN_DYNAMIC_DROP_WIDE_GLINT_DEBUG=false` and
+`RAIN_DYNAMIC_DROP_WIDE_SCENE_DEBUG=true`. Only the image-right drop half
+maps approximately one third of the viewport across a drop diameter,
+with a stable small angular variation and a center biased toward the
+middle of the screen. Blend the mapping back to the established lens by
+r=0.94, and fade right-side opacity toward its outline. The left half
+remains the previous concave-lens control. Color, depth-based sky
+classification and sky correction sample the same new UV. The extra
+image sample replaces the existing image sample: there is no new capture
+or render pass. This deliberately tests conspicuous content inside a
+drop; it is not yet a physical optical model. The larger sampling range
+can accentuate the known HDR GeometryShot versus weather tone mismatch.
+
+On a fixed Hurricane camera and comparable rain intensity, inspect
+recognizable image features across each half, variation among drops,
+seams or collapsed detail at the rim, sky/road tone differences and
+paired FPS. Then decide whether to retain broad mapping or revisit its
+source before implementing independent stationary, falling, trail and
+diffuse underlayers. A later trail should clear the stationary layer in
+its swept region, with recovery over time; layering and screen coverage
+need separate performance budgets.
