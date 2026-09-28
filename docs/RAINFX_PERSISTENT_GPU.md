@@ -4740,3 +4740,32 @@ scene at the correct color stage. Independently vary droplet outline,
 orientation, merging and trail widths after a visually stable composition
 is chosen. CSP's irregular forms are a visual reference, not evidence that
 its private capture/occlusion pipeline is reproducible from the Lua app.
+
+### 139. Probe broad scene highlights independently of lens refraction (2026-09-28)
+
+The user reports a softer edge after section 138, while the independent
+scene's tone remains distinguishable. In the supplied CSP screenshot
+(`image(3).png`), bright features appear across many drops and their
+direction varies. The screenshot alone does not establish that each drop
+refracts the entire screen: reflections, overlapping drops and flow could
+also contribute. Increasing the base lens displacement would reintroduce
+the compressed edge or amplify the source tone mismatch.
+
+Preset `RAIN_DYNAMIC_DROP_WIDE_GLINT_DEBUG=true` on the image-right
+concave lens only; the left control and soft edge are unchanged. Two
+additional mip reads from the existing HDR GeometryShot compare a wide
+screen-direction light sample with its local coarse reference. Transfer
+only positive relative luminance as a restrained pale highlight; the
+sample's hue is never copied into the drop. A stable per-drop twist and
+small screen-position variation change highlight orientation. This is a
+diagnostic approximation to broad-field illumination, not a screen-wide
+physically accurate lens or a solution to missing WeatherFX color. The
+shot may contain bright clouds absent from the final Hurricane scene.
+
+At the same Hurricane weather, rain intensity and fixed camera, compare
+image-right drops with the left: visibility across dark and bright
+backgrounds, false sunset/cloud glints, repeated patterns, second images
+and edge softness. Record paired FPS with similar rainfall. If the added
+highlight helps only in clear sky or invents highlights behind fog, remove
+it and investigate a weather-correct light source before extending the
+sampling footprint.
