@@ -466,6 +466,35 @@ float4 main(PS_IN pin)
         if (gDynamicDropConcaveLensDebug > 0.5
             && local.x < 0.0)
             opticalAccent *= 0.55;
+        if (gDynamicDropWideGlintDebug > 0.5
+            && gDynamicDropConcaveLensDebug > 0.5
+            && local.x < 0.0)
+        {
+            // A broad scene direction informs only positive light contrast.
+            // Keep the base lens monotonic and the reflected scene hue out
+            // of the drop, so the old shot's weather tint is not copied.
+            float2 screenAtDrop = pin.PosH.xy
+                * gDynamicDropInvScreenSize;
+            float twist = (frac(shapeSeed * 0.6180339) - 0.5) * 0.8
+                + (screenAtDrop.x - 0.5) * 0.3;
+            float2 broadDirection = float2(
+                local.x + twist * local.y,
+                local.y - twist * local.x);
+            float2 broadUV = saturate(0.5
+                + broadDirection * 0.46);
+            float3 lightSample = txDynamicSnapshot.SampleLevel(
+                samLinearClamp, broadUV, 2.0).rgb;
+            float3 lightReference = txDynamicSnapshot.SampleLevel(
+                samLinearClamp, broadUV, 8.0).rgb;
+            float3 lightWeights = float3(0.2126, 0.7152, 0.0722);
+            float lightContrast = dot(lightSample, lightWeights)
+                / max(dot(lightReference, lightWeights), 0.08);
+            float glint = saturate((lightContrast - 1.35) * 0.55)
+                * smoothstep(0.05, 0.22, r)
+                * (1.0 - smoothstep(0.72, 0.96, r));
+            opticalAccent += float3(0.78, 0.88, 1.0)
+                * glint * 0.9;
+        }
         if (gDynamicDropGeometryShotDebug > 0.5
             && gDynamicDropOpaqueRefractionSplitDebug > 0.5)
             opticalAccent += float3(0.95, 0.68, 0.08)
