@@ -408,12 +408,13 @@ local cfg = scriptSettings:mapConfig({
         -- Visualize independent-shot depth in the visible right half:
         -- magenta for far/sky, cyan for geometry. Visible left stays HDR.
         RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG = false,
-        -- With verified shot depth, compare raw HDR sky (visible left)
-        -- against the current fog color on sky pixels (visible right).
+        -- Replace shot sky tone with the current weather fog color.
         RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG = true,
-        -- Compare fog-colored sky with the original shot's cloud brightness
-        -- restored (visible right), while visible left remains untouched.
+        -- Recover restrained cloud brightness using the shot's broad mip.
         RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG = true,
+        -- Both halves share weather-corrected sky; right half inverts a
+        -- wider projected scene footprint for an optics-only comparison.
+        RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = true,
         -- Full-size YEBIS verifies refraction after the half-size fog test.
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
         -- Retain force-driven wave code for later optical tuning.
@@ -6611,6 +6612,8 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG)
             .. ' skyCloudDetailDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG)
+            .. ' invertedFootprintDebug='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
             .. ' fogColor='
             .. tostring(sim.fogColor)
             .. ' pixelUV='
@@ -6711,6 +6714,9 @@ float4 main(PS_IN pin)
             gDynamicDropSkyCloudDetailDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
                 and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
+            gDynamicDropInvertedFootprintDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG
                 and 1.0 or 0.0,
             gDynamicDropWeatherFogColor = sim.fogColor,
 
