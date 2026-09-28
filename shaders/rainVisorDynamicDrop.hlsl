@@ -41,8 +41,10 @@
 
 float4 main(PS_IN pin)
 {
-    float shapeSeed = floor(pin.Tex.x * 0.5);
-    float2 quadTex = pin.Tex - float2(shapeSeed * 2.0, 0.0);
+    float encodedSeed = floor(pin.Tex.x * 0.5);
+    bool microLayer = encodedSeed >= 2048.0;
+    float shapeSeed = encodedSeed - (microLayer ? 2048.0 : 0.0);
+    float2 quadTex = pin.Tex - float2(encodedSeed * 2.0, 0.0);
     // Head quads encode three brief impact-age bands in whole UV steps.
     // Trail quads use 2..3 and therefore have no impact band.
     float impactBand = floor(quadTex.y * 0.25);
@@ -62,6 +64,30 @@ float4 main(PS_IN pin)
     float r = length(local);
     bool wideSide = gDynamicDropSplitCompareDebug < 0.5
         || local.x < 0.0;
+
+    if (microLayer)
+    {
+        clip(gDynamicDropMicroLayerEnabled - 0.5);
+        clip(1.0 - r);
+        float zMicro = sqrt(saturate(1.0 - r * r));
+        float2 microOffset = local * (1.0 - r * r)
+            * gDynamicDropMicroRefractionPixels
+            * gDynamicDropInvScreenSize;
+        float3 microScene = txDynamicSnapshot.SampleLevel(
+            samLinearClamp,
+            saturate(pin.ScreenPos + microOffset),
+            gDynamicDropMicroSceneMip).rgb;
+        float microRim = smoothstep(0.42, 0.96, r)
+            * (1.0 - smoothstep(0.94, 1.0, r));
+        float3 microNormal = normalize(float3(local, zMicro));
+        float microGlint = pow(saturate(dot(microNormal,
+            normalize(float3(-0.45, -0.55, 0.70)))), 48.0);
+        float microAlpha = microRim * gDynamicDropMicroOpacity
+            + microGlint * 0.08;
+        return float4(microScene
+            + float3(0.78, 0.90, 1.0) * microGlint * 0.18,
+            saturate(microAlpha));
+    }
 
     if (trailQuad)
     {
