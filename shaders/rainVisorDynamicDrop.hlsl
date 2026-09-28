@@ -70,12 +70,17 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroLayerEnabled - 0.5);
         clip(1.0 - r);
         float zMicro = sqrt(saturate(1.0 - r * r));
+        float2 microResolutionRatio = gDynamicDropInvRenderTargetSize
+            / gDynamicDropInvScreenSize;
+        float2 microUV = pin.PosH.xy * gDynamicDropInvScreenSize
+            * lerp(float2(1.0, 1.0), microResolutionRatio, 0.98);
         float2 microOffset = local * (1.0 - r * r)
             * gDynamicDropMicroRefractionPixels
-            * gDynamicDropInvScreenSize;
+            * gDynamicDropInvScreenSize
+            * lerp(float2(1.0, 1.0), microResolutionRatio, 0.98);
         float3 microScene = txDynamicSnapshot.SampleLevel(
             samLinearClamp,
-            saturate(pin.ScreenPos + microOffset),
+            saturate(microUV + microOffset),
             gDynamicDropMicroSceneMip).rgb;
         float microRim = smoothstep(0.42, 0.96, r)
             * (1.0 - smoothstep(0.94, 1.0, r));
