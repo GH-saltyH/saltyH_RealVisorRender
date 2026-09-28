@@ -4537,3 +4537,26 @@ The old sunset-cloud silhouette can persist in luminance even after hue
 correction; stronger optics may make it more obvious. If the right half
 does not invert or yields a discontinuity, inspect UV derivative orientation
 and return to the 48px optical baseline before tuning trails or spray.
+
+### 132. Compare color sources inside a wider inverted drop (2026-09-28)
+
+The user confirms inversion works, but under Hurricane the sky is brighter
+than the real dark sky or darker than the real bright sky. Asphalt also
+acquires a visible color boundary, proving the separate GeometryShot has a
+broader scene/color mismatch that a sky-only fog tint cannot solve. Do not
+accept a stronger optical model until its input matches the composed scene.
+
+Preset `RAIN_DYNAMIC_DROP_LIVE_HDR_COMPARE_DEBUG=true`. Widen the projected
+right-half inverted lens from 3.0x to 4.5x center displacement (about 3.5x
+inverted scene magnification at its interior). The left half retains its
+existing 48px optics. Split the right half horizontally with a thin amber
+marker: upper reads the nonrecursive shot with the weather sky correction;
+lower reads `dynamic::hdr` at exactly the same refracted UV and opaque HDR
+output. Sample the main HDR buffer only in this diagnostic and do not add
+an inverse tone map. At the same Hurricane camera, compare upper/lower right
+against the actual asphalt and dark/bright sky for color and alignment;
+look for repeated visor droplets within the lower half and record FPS vs the
+prior 73–75. If the live HDR half matches geometry/sky but shows feedback,
+the remaining issue is access to a clean main composition, not the lens
+strength. If both differ from the actual asphalt, investigate their shared
+HDR draw stage, exposure or compositing before adding trails and spray.
