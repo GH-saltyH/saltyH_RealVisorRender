@@ -5534,3 +5534,23 @@ Check whether neighboring drops show different image content, whether image
 orientation makes sense on both visor sides, and the same-camera app ON/OFF
 FPS delta. If the edge shows a new discontinuity, report which side and
 whether it changes with the inversion toggle.
+
+### Surface-directed wide-field source probe
+
+The 0.48 radius was accepted. Instead of aiming every orb mostly at screen
+center, reconstruct the projected center of its quad from the same local UV
+derivatives already used for the lens. A drop below screen center now points
+toward upper scene; above points toward lower scene. Left and right drops
+point toward their respective upper sides. The two-axis 180-degree image
+inversion remains independently switchable. This is an empirical viewport
+direction profile, not a full ray-traced water interface.
+
+Defaults: `RAIN_DYNAMIC_DROP_ORB_POSITION_BEND=0.72`,
+`RAIN_DYNAMIC_DROP_ORB_SIDE_UPSHIFT=0.22`,
+`RAIN_DYNAMIC_DROP_ORB_GLOW=0.12`. Glow reuses the refracted sample's
+luminance and existing normal highlight, so it adds no texture sample.
+At one fixed camera, check the four stated visor positions, invert-image
+orientation, dark/bright weather contrast, boundaries and app ON/OFF FPS.
+If side coverage clips hard, lower BEND or SIDE_UPSHIFT. Set GLOW to zero
+to compare only source direction; glow is intentionally subtle and should
+not illuminate dark sky without refracted light.
