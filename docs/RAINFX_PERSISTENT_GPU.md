@@ -5445,3 +5445,41 @@ adhesion and speed/drag; inertia only; airflow only; then combinations.
 Log FPS, alive and mask exits if a lower attachment threshold makes
 many drops leave the surface prematurely. Keep the shortened CPU
 prediction window that previously reduced visible rebound.
+
+### 158. Calibrated birth timing and selectable visor airflow (2026-09-28)
+
+User-selected defaults are stopped impact transfer 0.014, glide 0.022
+seconds, settle 0.010 seconds, and settled flow acceleration 0.0756;
+other tuned values remain as previously configured. Live physics sliders
+continue to allow A/B checks around those defaults.
+
+The user's actual visor/vehicle shows lateral airflow response that is
+plausible but the previous raw surface tangent pushes droplets upward
+too strongly. Add an independent Airflow mode checkbox, enabled for
+this test: legacy OFF projects the original signed airflow force into
+UV unchanged; new mode ON retains the same lateral UV component and
+replaces *only the airflow V component* with a positive (downward)
+component. Estimate downward force from the existing once-computed
+airflow acceleration and vehicle speed, cap its central contribution
+relative to reference gravity, and keep a configurable fraction of the
+lateral magnitude as downward force at the visor edges. A strength
+slider defaults to 1.5; 0 removes this directional correction. This
+does not alter the existing airflow incidence, density, drag coefficient
+or size dependence used to form the raw aerodynamic force. The same
+airWorld calculation is reused without adding a second per-droplet
+fluid-force evaluation. Signed V stays -1 top to 0 bottom. Birth stroke
+and its brief settle window still ignore all settled-water forces.
+
+This airflow direction is an empirical visor-specific test profile,
+not a claim that wind always drives water downhill on all windscreens.
+The moving hydrophobic-windscreen literature models airflow speed and
+drop size as important for sliding/rolling; angled windscreens can have
+different flow directions. Research reference:
+https://www.mdpi.com/2076-3417/14/9/3763
+
+Test at identical rain, car speed and camera, with Airflow ON: toggle
+the new directional mode OFF/ON, then try downward strength 0.5, 1.5
+and 2.5. Watch whether drops move outward *and down*, whether central
+drops move down, and whether top-of-visor exits, bottom exits, alive
+count and FPS change. With Airflow OFF the new mode must have no effect.
+Other forces can be isolated with their existing toggles/sliders.
