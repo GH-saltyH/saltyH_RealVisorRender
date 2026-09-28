@@ -5251,3 +5251,42 @@ sideways launches; then try 0.65 and 1.0 initial fractions if needed.
 Compare FPS and alive/uvCells64x32 after at least one full replacement
 cycle. Rapid boundary exits would shorten effective life and should be
 measured before raising the speed cap or altering the rain density.
+
+### 153. Post-impact flow and temporary speed envelope (2026-09-28)
+
+The first impulse produced only a twitch, occasionally appearing to
+rise. The old cap and attachment drag immediately erased the initial
+motion. Signed visor V remains -1 at top and 0 at bottom. At birth,
+orient the falling component toward increasing V; separately project
+the car-relative motion. Curved visor edges add an outward spread bias.
+This edge weight is a cheap approximation, not a measured mesh tangent.
+
+For mobile births calculate free-fall speed as 3.778×D^0.67 m/s,
+combine it with 12% of the car-relative world speed, project onto the
+visor tangent, and transfer only 0.006 of the resulting motion to the
+visor surface. The transfer slider (default 0.85) multiplies that
+calibrated fraction. Drops under approximately 0.65 mm remain pinned,
+with a gradual mobility ramp to 1.40 mm. The temporary speed allowance
+is 4 times the calibrated surface limit by default, decaying to the
+original limit across a 0.45-second glide. Drag and attachment damping
+also return smoothly to their original values. This incoming speed is
+not copied directly into surface motion. Existing physical diagnostic
+modes continue to use the calibrated surface model.
+
+Experiments on moving hydrophobic surfaces report directional impact
+spreading and recoil, and inclined-surface experiments connect
+tangential impact speed and pinning to subsequent motion. These support
+modeling impact and settled adhesion separately, but do not prescribe
+the transfer constants for this helmet visor:
+- https://pubs.rsc.org/en/content/articlelanding/2017/sm/c6sm02514e
+- https://www.mdpi.com/2079-6412/13/2/264
+- https://pmc.ncbi.nlm.nih.gov/articles/PMC5813023/
+
+Test stationary first with the same camera, 2–4 second lifetime and
+rain: compare transfer 0 versus 0.85, cap 1 versus 4 and glide 0.45.
+At the center new drops should go down (increasing V); at the sides
+they may lean outward. Compare alive, boundary exits, FPS, and signed
+state position in Debug 51 if screen orientation remains confusing.
+During driving, check whether lateral lean responds to speed and
+direction. Later pop-in/splashing should use a separate bounded number
+of large-impact child drops rather than unbounded per-drop fragments.
