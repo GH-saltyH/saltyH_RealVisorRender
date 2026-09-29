@@ -528,11 +528,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION = true,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.21,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 6.2,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.50,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 7.1,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.48,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.12,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.63,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.60,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 7.8,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
@@ -570,7 +570,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
         RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
-        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
+        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.11,
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
         RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = false,
@@ -889,6 +889,17 @@ local rainStateUpdateParams = {
         gRainStatePhysicalGridTest = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
+        gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
+        gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
+        gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
+        gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+        gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
+        gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
+        gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
+        gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
+        gRainSizeBias = cfg.RUNTIME.RAIN_GPU_SIZE_BIAS,
+        gRainSizeRareDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY,
+        gRainSizeRareHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
@@ -1788,17 +1799,6 @@ local rainStateMetaUpdateParams = {
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
         gRainStateTargetOccupancy = 0.0,
-        gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
-        gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
-        gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
-        gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
-        gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
-        gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
-        gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
-        gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
-        gRainSizeBias = cfg.RUNTIME.RAIN_GPU_SIZE_BIAS,
-        gRainSizeRareDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY,
-        gRainSizeRareHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY,
         gRainStateExposure = 1.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
@@ -5290,8 +5290,9 @@ local function updateRainGPUState(sim)
         {'gRainSizeRareDry', 'RAIN_GPU_SIZE_RARE_DRY'},
         {'gRainSizeRareHeavy', 'RAIN_GPU_SIZE_RARE_HEAVY'},
     }) do
-        rainStateMetaUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
+        rainStateUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
     end
+
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = liveRain
     rainStateMetaUpdateParams.values.gRainStateExposure = exposure
     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
