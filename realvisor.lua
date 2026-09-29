@@ -521,7 +521,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.48,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.12,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 7.8,
-        RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH = 3.5,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
@@ -7223,7 +7222,6 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS))
     local cursor = state.trailMaskCursor
     local stamps = {}
-    local fastBirthStamps = 0
     local inspected = 0
     local predictedAge = math.min(math.max(
         rainDynamicStateRenderClock - rainDynamicStateSnapshotTime, 0.0),
@@ -7248,29 +7246,10 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
                 local minimum = math.max(radius * 0.4, 1.0 / size)
                 local distance2 = du * du + dv * dv
                 if not old or distance2 >= minimum * minimum then
-                    local birthAt = state.birthSeenAt
-                        and state.birthSeenAt[index] or -100.0
-                    local fastBirth = not old
-                        and state.currentTravelMix
-                        and state.currentTravelMix > 0.75
-                        and rainDynamicStateRenderClock - birthAt < 0.35
-                        and radius * 2.0 >= 1.4
-                            * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+                    -- New births stamp only at their current position.
+                    -- Subsequent movement leaves the ordinary trail.
                     local fromU = old and old.u or u
                     local fromV = old and old.v or v
-                    if fastBirth then
-                        fastBirthStamps = fastBirthStamps + 1
-                        -- Pop-in shape follows signed visor V (-1 top,
-                        -- 0 bottom), while subsequent motion belongs to
-                        -- the regular GPU surface-force model.
-                        local stretch = radius
-                            * cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH
-                            * state.currentTravelMix
-                        fromU = math.max(0.0, math.min(1.0,
-                            u - (u - 0.5) * stretch * 0.60))
-                        fromV = math.max(-1.0, v - stretch)
-                    end
-                    -- A respawn never draws a line from the previous life.
                     stamps[#stamps + 1] = {
                         x0 = fromU * size, y0 = (fromV + 1.0) * size,
                         x1 = u * size, y1 = (v + 1.0) * size,
@@ -7309,18 +7288,14 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     state.trailMaskRead = target
     state.trailMaskFrame = sim.frame
     state.trailMaskStamps = (state.trailMaskStamps or 0) + #stamps
-    state.trailMaskFastBirths = (state.trailMaskFastBirths or 0)
-        + fastBirthStamps
     if sim.frame % 180 == 0 then
         ac.log(appNameDebug .. ' Dynamic UV mask: '
             .. tostring(size) .. 'x' .. tostring(size)
             .. ' stamps=' .. tostring(state.trailMaskStamps)
-            .. ' fastBirths=' .. tostring(state.trailMaskFastBirths)
             .. ' budget=' .. tostring(limit)
             .. ' recoverySeconds='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS))
         state.trailMaskStamps = 0
-        state.trailMaskFastBirths = 0
     end
 end
 
@@ -10573,14 +10548,6 @@ function windowMain(dt)
     )
     if ridgeSecondsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = ridgeSeconds
-    end
-    local birthStretch, birthStretchChanged = ui.slider(
-        'High-speed birth stamp stretch',
-        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH,
-        1.0, 8.0, '%.1f'
-    )
-    if birthStretchChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH = birthStretch
     end
 
     ui.separator()
