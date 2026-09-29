@@ -497,6 +497,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_ENABLED = true,
         RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.7,
         RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 12288,
+        RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE = 4096,
+        RAIN_DYNAMIC_MICRO_NORMAL_BUMP = 1.30,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.035,
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.25,
@@ -504,8 +506,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 15.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 14.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 0.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 0.65,
-        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 0.50,
+        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 1.10,
+        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 0.85,
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.28,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
@@ -6328,6 +6330,63 @@ local function initializeRainDynamicSurfaceTest()
         else
             rainDynamicSceneCopyState.microPatternReady = false
         end
+        if rainDynamicSceneCopyState.microNormalCanvas then
+            rainDynamicSceneCopyState.microNormalCanvas:dispose()
+            rainDynamicSceneCopyState.microNormalCanvas = nil
+        end
+        rainDynamicSceneCopyState.microNormalReady = false
+        if rainDynamicSceneCopyState.microPatternReady then
+            local normalSize = math.max(256,
+                math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE))
+            local canvasOk, normalCanvas = pcall(function()
+                return ui.ExtraCanvas(vec2(normalSize, normalSize), 1,
+                    render.TextureFormat.R8G8B8A8.UNorm)
+                    :setName('RainFX static micro normals')
+            end)
+            if canvasOk and normalCanvas then
+                local bakeOk, bakeResult = pcall(function()
+                    return normalCanvas:updateWithShader({
+                        textures = {
+                            txMicroMask = rainDynamicSceneCopyState.microPatternCanvas
+                        },
+                        shader = [[
+                            SamplerState samLinearMicroBake
+                            {
+                                Filter = MIN_MAG_MIP_LINEAR;
+                                AddressU = CLAMP;
+                                AddressV = CLAMP;
+                                AddressW = CLAMP;
+                            };
+                            float4 main(PS_IN pin)
+                            {
+                                float4 disk = txMicroMask.SampleLevel(
+                                    samLinearMicroBake, pin.Tex, 0.0);
+                                float2 xy = disk.xy * 2.0 - 1.0;
+                                float z = sqrt(saturate(1.0 - dot(xy, xy)));
+                                float3 normal = normalize(float3(xy, z));
+                                return float4(normal * 0.5 + 0.5, 1.0);
+                            }
+                        ]]
+                    })
+                end)
+                rainDynamicSceneCopyState.microNormalReady =
+                    bakeOk and bakeResult ~= false
+                if rainDynamicSceneCopyState.microNormalReady then
+                    rainDynamicSceneCopyState.microNormalCanvas = normalCanvas
+                else
+                    normalCanvas:dispose()
+                    ac.warn(appNameDebug .. ' Micro normal bake: '
+                        .. tostring(bakeResult))
+                end
+            else
+                ac.warn(appNameDebug .. ' Micro normal canvas: '
+                    .. tostring(normalCanvas))
+            end
+            ac.log(appNameDebug .. ' Micro normals: '
+                .. tostring(normalSize) .. 'x' .. tostring(normalSize)
+                .. ' ready='
+                .. tostring(rainDynamicSceneCopyState.microNormalReady))
+        end
         ac.log(appNameDebug .. ' Micro pattern: '
             .. tostring(patternSize) .. 'x' .. tostring(patternSize)
             .. ' grid=' .. tostring(patternGrid)
@@ -7627,6 +7686,8 @@ float4 main(PS_IN pin)
             txDynamicControl = textureRainSurfaceNormal,
             txDynamicMicroPattern =
                 rainDynamicSceneCopyState.microPatternCanvas or false,
+            txDynamicMicroNormal =
+                rainDynamicSceneCopyState.microNormalCanvas or false,
         },
         values = {
             gDynamicDropDebugUV =
@@ -7777,6 +7838,10 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT,
             gDynamicDropMicroAngleShadow =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW,
+            gDynamicDropMicroNormalReady =
+                rainDynamicSceneCopyState.microNormalReady and 1.0 or 0.0,
+            gDynamicDropMicroNormalBump =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP,
             gDynamicDropMicroNormalGain =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
             gDynamicDropObjectToWorld =
@@ -10353,6 +10418,15 @@ function windowMain(dt)
     )
     if microAngleShadowChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = microAngleShadow
+    end
+
+    local microNormalBump, microNormalBumpChanged = ui.slider(
+        'Micro convex normal strength',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP,
+        0.25, 2.5, '%.2f'
+    )
+    if microNormalBumpChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP = microNormalBump
     end
 
     local microRimWidth, microRimWidthChanged = ui.slider(
