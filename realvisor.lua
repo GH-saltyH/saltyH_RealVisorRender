@@ -889,20 +889,6 @@ local rainStateUpdateParams = {
         gRainStatePhysicalGridTest = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
-        gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
-        gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
-        gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
-        gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
-        gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
-        gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
-        gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
-        gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
-        gRainSizeBias = cfg.RUNTIME.RAIN_GPU_SIZE_BIAS,
-        gRainSizeRareDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY,
-        gRainSizeRareHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY,
-        gRainStateRespawnGapMin = 0.15,
-        gRainStateRespawnGapMax = 0.75,
-        gRainStateRainIntensity = 0.0,
         gRainStateMobileSpeedMultiplier =
             cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER,
         gRainStateMobileDrag = cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG,
@@ -948,54 +934,6 @@ local rainStateUpdateParams = {
                 * float3(0.1031, 0.11369, 0.13787));
             p += dot(p, p.yzx + 33.33);
             return frac((p.xx + p.yz) * p.zy);
-        }
-
-        // Keep the sampled birth radius identical to the meta pass, which
-        // updates the size in the same frame as the state pass respawns.
-        float rainStateBirthDiameterMM(float index, float rain)
-        {
-            float minMM, maxMM;
-            if (rain <= 0.03)
-            {
-                float t = saturate(rain / 0.03);
-                minMM = lerp(gRainSizeMinDry, gRainSizeMinLight, t);
-                maxMM = lerp(gRainSizeMaxDry, gRainSizeMaxLight, t);
-            }
-            else if (rain <= 0.5)
-            {
-                float t = saturate((rain - 0.03) / 0.47);
-                minMM = lerp(gRainSizeMinLight, gRainSizeMinRain, t);
-                maxMM = lerp(gRainSizeMaxLight, gRainSizeMaxRain, t);
-            }
-            else
-            {
-                float t = saturate((rain - 0.5) / 0.5);
-                minMM = lerp(gRainSizeMinRain, gRainSizeMinHeavy, t);
-                maxMM = lerp(gRainSizeMaxRain, gRainSizeMaxHeavy, t);
-            }
-            float rareChance = lerp(gRainSizeRareDry,
-                gRainSizeRareHeavy, saturate(rain));
-            if (rainStateHash(index + 307.0) > 1.0 - rareChance)
-                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
-            float randomSize = rainStateHash(index + 101.0);
-            return lerp(minMM, max(minMM, maxMM),
-                pow(randomSize, max(gRainSizeBias, 0.1)));
-        }
-
-                float rainStatePhysicalMassProfile(float diameterMM)
-        {
-            float volumeMin = 0.5 * 0.5 * 0.5;
-            float volumeMax = 6.0 * 6.0 * 6.0;
-            float volume = diameterMM * diameterMM * diameterMM;
-
-            return lerp(
-                1.0,
-                9.0,
-                saturate(
-                    (volume - volumeMin)
-                    / (volumeMax - volumeMin)
-                )
-            );
         }
 
         /*
@@ -1799,6 +1737,20 @@ local rainStateMetaUpdateParams = {
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
         gRainStateTargetOccupancy = 0.0,
+        gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
+        gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
+        gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
+        gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+        gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
+        gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
+        gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
+        gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
+        gRainSizeBias = cfg.RUNTIME.RAIN_GPU_SIZE_BIAS,
+        gRainSizeRareDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY,
+        gRainSizeRareHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY,
+        gRainStateRespawnGapMin = 0.15,
+        gRainStateRespawnGapMax = 0.75,
+        gRainStateRainIntensity = 0.0,
         gRainStateExposure = 1.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
@@ -1841,20 +1793,32 @@ local rainStateMetaUpdateParams = {
 
         float rainStateBirthDiameterMM(float index, float rain)
         {
-            float intensity = saturate((rain - 0.03) / 0.67);
-            float minimum = lerp(0.35, 1.15, intensity);
-            float maximum = rain <= 0.03
-                ? lerp(1.4, 2.53, saturate(rain / 0.03))
-                : lerp(2.53, 4.1, saturate((rain - 0.03) / 0.47));
-            // A separate rare impact reaches the full physical diameter;
-            // the ordinary size distribution never reaches 6 mm.
-            float rareChance = lerp(0.001, 0.008, saturate(rain));
-            if (rainStateHash(index + 307.0) > 1.0 - rareChance)
+            float minimum, maximum;
+            if (rain <= 0.03)
             {
-                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
+                float t = saturate(rain / 0.03);
+                minimum = lerp(gRainSizeMinDry, gRainSizeMinLight, t);
+                maximum = lerp(gRainSizeMaxDry, gRainSizeMaxLight, t);
             }
+            else if (rain <= 0.50)
+            {
+                float t = saturate((rain - 0.03) / 0.47);
+                minimum = lerp(gRainSizeMinLight, gRainSizeMinRain, t);
+                maximum = lerp(gRainSizeMaxLight, gRainSizeMaxRain, t);
+            }
+            else
+            {
+                float t = saturate((rain - 0.50) / 0.50);
+                minimum = lerp(gRainSizeMinRain, gRainSizeMinHeavy, t);
+                maximum = lerp(gRainSizeMaxRain, gRainSizeMaxHeavy, t);
+            }
+            float rareChance = lerp(gRainSizeRareDry,
+                gRainSizeRareHeavy, saturate(rain));
+            if (rainStateHash(index + 307.0) > 1.0 - rareChance)
+                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
             float randomSize = rainStateHash(index + 101.0);
-            return lerp(minimum, maximum, randomSize * randomSize);
+            return lerp(minimum, max(minimum, maximum),
+                pow(randomSize, max(gRainSizeBias, 0.1)));
         }
 
         float rainStatePhysicalMassProfile(float diameterMM)
@@ -6424,7 +6388,9 @@ float4 main(PS_IN pin)
 {
     float count = max(gRainStateCount, 1.0);
     float total = count * 6.0;
-    float slot = min(floor(pin.Tex.x * total), total - 1.0);
+    float slot = min(floor(pin.Tex.y * gRainReadbackHeight)
+        * gRainReadbackWidth
+        + floor(pin.Tex.x * gRainReadbackWidth), total - 1.0);
     float channel = floor(slot / count);
     float index = slot - channel * count;
     float2 suv = float2((index + 0.5) / count, 0.5);
@@ -6469,6 +6435,9 @@ local function initializeRainDynamicStateReadback()
 
     rainDynamicStateReadbackSlots = {}
     rainDynamicStateReadbackCount = count
+    -- 6144 is the proven 1024-slot width; larger capacities use rows.
+    local readbackWidth = math.min(count * 6, 6144)
+    local readbackHeight = math.ceil(count * 6 / readbackWidth)
     rainDynamicStateReadbackNextSlot = 1
     rainDynamicStateReadbackReady = false
     rainDynamicStateLatestAcceptedRequestFrame = -1
@@ -6481,7 +6450,7 @@ local function initializeRainDynamicStateReadback()
 
     for slotIndex = 1, ringSize do
         local canvas = ui.ExtraCanvas(
-            vec2(count * 6, 1),
+            vec2(readbackWidth, readbackHeight),
             1,
             render.TextureFormat.R32.Float
         ):setName(
@@ -6501,6 +6470,8 @@ local function initializeRainDynamicStateReadback()
 
         rainDynamicStateReadbackSlots[slotIndex] = {
             canvas = canvas,
+            width = readbackWidth,
+            height = readbackHeight,
             pending = false,
             requestFrame = -1,
             requestTime = 0.0,
@@ -6511,6 +6482,8 @@ local function initializeRainDynamicStateReadback()
                 },
                 values = {
                     gRainStateCount = count,
+                    gRainReadbackWidth = readbackWidth,
+                    gRainReadbackHeight = readbackHeight,
                     gRainStateVelocityEncodeRange =
                         cfg.RUNTIME.RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE,
                 },
@@ -6542,7 +6515,9 @@ local function initializeRainDynamicStateReadback()
         .. tostring(count)
         .. ' drops / '
         .. tostring(count * 6)
-        .. ' R32FLOAT scalars / ring='
+        .. ' R32FLOAT scalars in '
+        .. tostring(readbackWidth) .. 'x' .. tostring(readbackHeight)
+        .. ' / ring='
         .. tostring(ringSize)
     )
 
@@ -6611,6 +6586,8 @@ local function requestRainDynamicStateReadback()
     slot.params.textures.txRainState = state
     slot.params.textures.txRainStateMeta = meta
     slot.params.values.gRainStateCount = count
+    slot.params.values.gRainReadbackWidth = slot.width
+    slot.params.values.gRainReadbackHeight = slot.height
     slot.params.values.gRainStateVelocityEncodeRange =
         cfg.RUNTIME.RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE
     slot.requestFrame = requestFrame
@@ -6728,19 +6705,26 @@ local function requestRainDynamicStateReadback()
         local aliveCount, waitingCount, pendingCount, births = 0, 0, 0, 0
         for i = 0, count - 1 do
             local dst = i + 1
+            local width = slot.width
             rainDynamicStateU[dst] =
-                data:floatValue(i, 0)
+                data:floatValue(i % width, math.floor(i / width))
             rainDynamicStateV[dst] =
-                data:floatValue(count + i, 0) - 1.0
+                data:floatValue((count + i) % width,
+                    math.floor((count + i) / width)) - 1.0
             rainDynamicStateVelocityU[dst] =
-                (data:floatValue(count * 2 + i, 0) - 0.5)
+                (data:floatValue((count * 2 + i) % width,
+                    math.floor((count * 2 + i) / width)) - 0.5)
                 * 2.0 * velocityRange
             rainDynamicStateVelocityV[dst] =
-                (data:floatValue(count * 3 + i, 0) - 0.5)
+                (data:floatValue((count * 3 + i) % width,
+                    math.floor((count * 3 + i) / width)) - 0.5)
                 * 2.0 * velocityRange
             rainDynamicStateRadius[dst] =
-                data:floatValue(count * 4 + i, 0)
-            local packedStatus = data:floatValue(count * 5 + i, 0)
+                data:floatValue((count * 4 + i) % width,
+                    math.floor((count * 4 + i) / width))
+            local packedStatus = data:floatValue(
+                (count * 5 + i) % width,
+                math.floor((count * 5 + i) / width))
             local generation = math.floor(packedStatus / 4)
             if rainDynamicSceneCopyState.generation[dst] ~= nil
                 and rainDynamicSceneCopyState.generation[dst]
