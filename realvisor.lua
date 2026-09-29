@@ -529,6 +529,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = 12.0,
         RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.18,
         RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
+        RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP = 2.0,
+        RAIN_DYNAMIC_BIRTH_MASK_SHADOW = 0.045,
+        RAIN_DYNAMIC_BIRTH_MASK_RELIEF = 1.0,
+        RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN = 14.0,
+        RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL = true,
+        RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS = 1.5,
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 2048,
         RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW = true,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
@@ -8275,6 +8281,22 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT,
             gDynamicDropBirthOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
+            gDynamicDropBirthSceneMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP,
+            gDynamicDropBirthShadow =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW,
+            gDynamicDropBirthRelief =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RELIEF,
+            gDynamicDropBirthEdgeGain =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN,
+            gDynamicDropBirthWideNormal =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL
+                and 1.0 or 0.0,
+            gDynamicDropBirthNormalReach =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS,
+            gDynamicDropBirthInvMaskSize =
+                1.0 / math.max(
+                    rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
             gDynamicDropTrailMaskDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
@@ -10834,6 +10856,12 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION
         end
+        changed = ui.checkbox('Wide mask normal (compare)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL
+        end
         changed = ui.checkbox('Micro circles weather sky tone',
             cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION)
         if changed then
@@ -10859,6 +10887,30 @@ function windowMain(dt)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = value
         end
+        value, changed = ui.slider('Birth scene blur / mip level',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP,
+            0.0, 6.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP = value
+        end
+        value, changed = ui.slider('Birth normal reach (mask texels)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS,
+            0.5, 4.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS = value
+        end
+        value, changed = ui.slider('Birth normal relief',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RELIEF,
+            0.0, 2.5, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RELIEF = value
+        end
+        value, changed = ui.slider('Birth refraction edge gain',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN,
+            0.0, 40.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN = value
+        end
         value, changed = ui.slider('Birth refraction (pixels)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
             0.0, 40.0, '%.1f')
@@ -10870,6 +10922,12 @@ function windowMain(dt)
             0.0, 0.7, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = value
+        end
+        value, changed = ui.slider('Birth angle shadow',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW,
+            0.0, 0.50, '%.3f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW = value
         end
         value, changed = ui.slider('Birth scene opacity',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
@@ -11004,6 +11062,27 @@ function windowMain(dt)
 
     ui.separator()
     ui.text('Micro droplets: scene optics')
+    do
+        local value, changed = ui.slider(
+            'Micro scene image scale',
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
+            1.0, 30.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = value
+        end
+        value, changed = ui.slider('Micro scene opacity',
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
+            0.0, 1.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY = value
+        end
+        value, changed = ui.slider('Micro angle rim highlight',
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
+            0.0, 0.60, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = value
+        end
+    end
     local microBlur, microBlurChanged = ui.slider(
         'Micro scene blur / mip level',
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
@@ -11066,7 +11145,7 @@ function windowMain(dt)
     local microConcave, microConcaveChanged = ui.slider(
         'Micro concave scene profile',
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS,
-        0.0, 1.60, '%.2f'
+        0.0, 3.00, '%.2f'
     )
     if microConcaveChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = microConcave
