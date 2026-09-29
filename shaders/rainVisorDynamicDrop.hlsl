@@ -92,15 +92,22 @@ float4 main(PS_IN pin)
             return float4(coverage.r, coverage.g, 0.12,
                 saturate(strength * 0.85));
         }
-        // A thin water film occupies gaps and fully cleared circles.
-        // The established micro material wins where its disk still exists.
-        if (gDynamicDropTrailFilmEnabled > 0.5)
+        // G holds a broad wiped film; R holds a narrow, short-lived
+        // liquid core. Both share one canvas and one scene source.
+        if (gDynamicDropTrailFilmEnabled > 0.5
+            || gDynamicDropTrailRidgeEnabled > 0.5)
         {
-            float filmCoverage = txDynamicTrailMask.SampleLevel(
-                samLinearClamp, patternUV, 0.0).r;
+            float2 coverage = txDynamicTrailMask.SampleLevel(
+                samLinearClamp, patternUV, 0.0).rg;
+            float filmCoverage = gDynamicDropTrailFilmEnabled > 0.5
+                ? coverage.g : 0.0;
+            float ridgeCoverage = gDynamicDropTrailRidgeEnabled > 0.5
+                ? coverage.r : 0.0;
             float2 filmGradient = float2(
                 ddx(filmCoverage), ddy(filmCoverage));
-            if (filmCoverage > 0.04)
+            float2 ridgeGradient = float2(
+                ddx(ridgeCoverage), ddy(ridgeCoverage));
+            if (max(filmCoverage, ridgeCoverage) > 0.04)
             {
                 float4 filmPattern = txDynamicMicroPattern.SampleLevel(
                     samLinearClamp, patternUV, 0.0);
@@ -125,6 +132,9 @@ float4 main(PS_IN pin)
                             * gDynamicDropTrailMaskWipeStrength));
                     filmHasDisk = visibleDisk > 0.015;
                 }
+                // A fresh liquid ridge sits above even a surviving disk.
+                if (ridgeCoverage > 0.20)
+                    filmHasDisk = false;
                 if (!filmHasDisk)
                 {
                     float2 resolutionRatio = gDynamicDropInvRenderTargetSize
@@ -133,18 +143,31 @@ float4 main(PS_IN pin)
                         resolutionRatio, 0.98);
                     float2 filmUV = pin.PosH.xy
                         * gDynamicDropInvScreenSize * shotScale;
-                    float2 normal = filmGradient
+                    float2 filmNormal = filmGradient
                         / max(length(filmGradient), 0.0001);
-                    float edge = saturate(length(filmGradient) * 20.0);
-                    float2 offset = normal * edge
-                        * gDynamicDropTrailFilmPixels
+                    float filmEdge = saturate(
+                        length(filmGradient) * 20.0);
+                    float2 ridgeNormal = ridgeGradient
+                        / max(length(ridgeGradient), 0.0001);
+                    float ridgeEdge = saturate(
+                        length(ridgeGradient) * 22.0);
+                    float2 offset = (filmNormal * filmEdge
+                            * gDynamicDropTrailFilmPixels
+                        + ridgeNormal * ridgeEdge
+                            * gDynamicDropTrailRidgePixels
+                            * ridgeCoverage)
                         * gDynamicDropInvRenderTargetSize;
                     float3 filmScene = txDynamicSnapshot.SampleLevel(
                         samLinearClamp, saturate(filmUV + offset),
-                        2.0).rgb;
-                    return float4(filmScene,
-                        saturate(filmCoverage
-                            * gDynamicDropTrailFilmOpacity));
+                        lerp(2.0, 1.0, ridgeCoverage)).rgb;
+                    float3 ridgeAccent = float3(0.30, 0.35, 0.38)
+                        * ridgeEdge * ridgeCoverage * 0.12;
+                    float opacity = filmCoverage
+                        * gDynamicDropTrailFilmOpacity
+                        + ridgeCoverage
+                            * gDynamicDropTrailRidgeOpacity;
+                    return float4(filmScene + ridgeAccent,
+                        saturate(opacity));
                 }
             }
         }
