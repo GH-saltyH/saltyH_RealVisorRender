@@ -47,6 +47,24 @@ SamplerState samPointMicroMask
     AddressW = CLAMP;
 };
 
+// Match far shot pixels to the current WeatherFX fog tone. Transfer only
+// bounded cloud luminance from the shot; never copy its mismatched sky hue.
+float3 rainDynamicWeatherSkyTone(float3 scene, float2 uv)
+{
+    float depth = txDynamicShotDepth.SampleLevel(
+        samLinearClamp, saturate(uv), 0.0).r;
+    if (depth <= 0.99999)
+        return scene;
+    float3 broad = txDynamicSnapshot.SampleLevel(
+        samLinearClamp, saturate(uv), 9.0).rgb;
+    float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float contrast = clamp(
+        1.0 + (dot(scene, weights)
+            / max(dot(broad, weights), 0.02) - 1.0) * 0.25,
+        0.95, 1.12);
+    return gDynamicDropWeatherFogColor * contrast;
+}
+
 float4 main(PS_IN pin)
 {
     bool surfaceMicroPattern = pin.Tex.x < -2.5;
@@ -108,9 +126,11 @@ float4 main(PS_IN pin)
                 float2 offset = slope * edge * birth
                     * gDynamicDropBirthRefractionPixels
                     * gDynamicDropInvRenderTargetSize;
+                float2 sampleUV = saturate(sceneUV + offset);
                 float3 scene = txDynamicSnapshot.SampleLevel(
-                    samLinearClamp, saturate(sceneUV + offset),
-                    2.0).rgb;
+                    samLinearClamp, sampleUV, 2.0).rgb;
+                if (gDynamicDropBirthSkyCorrection > 0.5)
+                    scene = rainDynamicWeatherSkyTone(scene, sampleUV);
 
                 float3 objectNormal = txDynamicControl.SampleLevel(
                     samLinearClamp,
@@ -339,9 +359,13 @@ float4 main(PS_IN pin)
         float2 refractionUV = centerSceneUV + normalSceneShift
             + rotatedDelta * gDynamicDropMicroImageScale
                 * inwardProfile;
+        float2 microSampleUV = saturate(refractionUV);
         float3 sceneColor = txDynamicSnapshot.SampleLevel(
-            samLinearClamp, saturate(refractionUV),
+            samLinearClamp, microSampleUV,
             gDynamicDropMicroSceneMip).rgb;
+        if (gDynamicDropMicroSkyCorrection > 0.5)
+            sceneColor = rainDynamicWeatherSkyTone(
+                sceneColor, microSampleUV);
         // This normal field is baked once from the same winning circles
         // as the mask. It is a tangent-space spherical cap per disk.
         float3 capNormal = normalize(float3(lensLocal,
