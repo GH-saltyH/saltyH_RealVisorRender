@@ -526,11 +526,15 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.20,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 5.0,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.21,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 6.2,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.55,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.25,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 9.0,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
-        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.00,
+        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
         -- the visual values have been selected in the game.
@@ -7354,17 +7358,26 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     local source = state.trailMaskRead
     local target = source == state.trailMaskA
         and state.trailMaskB or state.trailMaskA
-    local decay = math.exp(-math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
-        * 3.0 / math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS, 0.05))
+    local frameDt = math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
+    local wipeDecay = math.exp(-frameDt * 3.0
+        / math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS, 0.05))
+    local ridgeDecay = math.exp(-frameDt * 3.0
+        / math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS, 0.05))
     local copied = target:updateWithShader({
         async = true,
         textures = { txWipePrevious = source },
-        values = { gWipeDecay = decay },
+        values = {
+            gWipeDecay = wipeDecay,
+            gRidgeDecay = ridgeDecay,
+        },
         shader = [[
             float4 main(PS_IN pin)
             {
-                return txWipePrevious.SampleLevel(samLinearClamp,
-                    pin.Tex, 0.0) * gWipeDecay;
+                float4 previous = txWipePrevious.SampleLevel(
+                    samLinearClamp, pin.Tex, 0.0);
+                return float4(previous.r * gRidgeDecay,
+                    previous.g * gWipeDecay, 0.0,
+                    previous.a * gWipeDecay);
             }
         ]]
     })
@@ -7433,14 +7446,21 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     state.trailMaskCursor = (cursor - 1 + inspected) % count + 1
     if #stamps > 0 then
         target:update(function()
-            local color = rgbm(0.90, 0.95, 0.0, 1.0)
+            local wipeColor = rgbm(0.0, 0.95, 0.0, 1.0)
+            local ridgeColor = rgbm(0.95, 0.95, 0.0, 1.0)
             for _, stamp in ipairs(stamps) do
                 local first = vec2(stamp.x0, stamp.y0)
                 local last = vec2(stamp.x1, stamp.y1)
-                ui.drawLine(first, last, color,
+                ui.drawLine(first, last, wipeColor,
                     math.max(stamp.radius * 1.5, 2.0))
                 ui.drawCircleFilled(last, stamp.radius,
-                    color, 8)
+                    wipeColor, 8)
+                -- Narrow liquid core inside a wider wiped footprint.
+                ui.drawLine(first, last, ridgeColor,
+                    math.max(stamp.radius * 0.75, 1.0))
+                ui.drawCircleFilled(last,
+                    math.max(stamp.radius * 0.55, 0.75),
+                    ridgeColor, 8)
             end
         end)
     end
@@ -8127,6 +8147,15 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY,
             gDynamicDropTrailFilmPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS,
+            gDynamicDropTrailRidgeEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED
+                and rainDynamicSceneCopyState.trailMaskRead
+                and 1.0 or 0.0,
+            gDynamicDropTrailRidgeOpacity =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY,
+            gDynamicDropTrailRidgePixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
@@ -10705,6 +10734,39 @@ function windowMain(dt)
     )
     if filmPixelsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = filmPixels
+    end
+
+    local ridgeChanged = ui.checkbox(
+        'Narrow liquid ridge in wiped paths',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED
+    )
+    if ridgeChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED =
+            not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED
+    end
+    local ridgeOpacity, ridgeOpacityChanged = ui.slider(
+        'Liquid ridge opacity',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY,
+        0.0, 0.60, '%.2f'
+    )
+    if ridgeOpacityChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = ridgeOpacity
+    end
+    local ridgePixels, ridgePixelsChanged = ui.slider(
+        'Liquid ridge refraction (pixels)',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS,
+        0.0, 16.0, '%.1f'
+    )
+    if ridgePixelsChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = ridgePixels
+    end
+    local ridgeSeconds, ridgeSecondsChanged = ui.slider(
+        'Liquid ridge lifetime (seconds)',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS,
+        0.15, 2.00, '%.2f'
+    )
+    if ridgeSecondsChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = ridgeSeconds
     end
 
     ui.separator()
