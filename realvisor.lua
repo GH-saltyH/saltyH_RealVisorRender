@@ -530,6 +530,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.18,
         RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
         RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP = 2.0,
+        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING = true,
+        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE = 12.0,
+        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES = 180.0,
+        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX = 1.0,
         RAIN_DYNAMIC_BIRTH_MASK_SHADOW = 0.045,
         RAIN_DYNAMIC_BIRTH_MASK_RELIEF = 1.0,
         RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN = 14.0,
@@ -7397,9 +7401,10 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             shader = [[
                 float4 main(PS_IN pin)
                 {
-                    float intensity = txBirthPrevious.SampleLevel(
-                        samLinearClamp, pin.Tex, 0.0).r * gBirthDecay;
-                    return float4(intensity, 0.0, 0.0, intensity);
+                    float4 previous = txBirthPrevious.SampleLevel(
+                        samLinearClamp, pin.Tex, 0.0);
+                    return float4(previous.rgb * gBirthDecay,
+                        previous.r * gBirthDecay);
                 }
             ]]
         })
@@ -7549,8 +7554,11 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     end
     if #stamps > 0 then
         target:update(function()
-            local bodyColor = rgbm(1.0, 0.0, 0.0, 1.0)
             for _, stamp in ipairs(stamps) do
+                -- R: footprint, G/B: the unwarped droplet center in
+                -- normalized visor UV. One lifetime keeps one scene pivot.
+                local bodyColor = rgbm(1.0,
+                    stamp.x / size, stamp.y / size, 1.0)
                 if stamp.tailX then
                     ui.drawLine(
                         vec2(stamp.tailX, stamp.tailY),
@@ -8283,6 +8291,18 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
             gDynamicDropBirthSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP,
+            gDynamicDropBirthImageMapping =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING
+                and 1.0 or 0.0,
+            gDynamicDropBirthImageScale =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE,
+            gDynamicDropBirthImageRotation = vec2(
+                math.cos(math.rad(
+                    cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES)),
+                math.sin(math.rad(
+                    cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES))),
+            gDynamicDropBirthImageMix =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX,
             gDynamicDropBirthShadow =
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW,
             gDynamicDropBirthRelief =
@@ -10862,6 +10882,12 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL
         end
+        changed = ui.checkbox('Birth scene center mapping (compare)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING
+        end
         changed = ui.checkbox('Micro circles weather sky tone',
             cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION)
         if changed then
@@ -10886,6 +10912,24 @@ function windowMain(dt)
             0.0, 3.0, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = value
+        end
+        value, changed = ui.slider('Birth scene area scale',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE,
+            0.5, 80.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE = value
+        end
+        value, changed = ui.slider('Birth scene rotation (degrees)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES,
+            -180.0, 180.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES = value
+        end
+        value, changed = ui.slider('Birth scene mapping mix',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX,
+            0.0, 1.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX = value
         end
         value, changed = ui.slider('Birth scene blur / mip level',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP,
