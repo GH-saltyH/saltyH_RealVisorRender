@@ -529,7 +529,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = 12.0,
         RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.18,
         RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
-        RAIN_DYNAMIC_BIRTH_MASK_SIZE = 1024,
+        RAIN_DYNAMIC_BIRTH_MASK_SIZE = 2048,
+        RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW = true,
         RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
         RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
@@ -7335,11 +7336,8 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         state.birthMaskA = ui.ExtraCanvas(vec2(size, size), 1,
             render.TextureFormat.R8G8B8A8.UNorm)
             :setName('RainFX Birth Mask A')
-        state.birthMaskB = ui.ExtraCanvas(vec2(size, size), 1,
-            render.TextureFormat.R8G8B8A8.UNorm)
-            :setName('RainFX Birth Mask B')
+        state.birthMaskB = nil
         state.birthMaskA:clear(rgbm.colors.transparent)
-        state.birthMaskB:clear(rgbm.colors.transparent)
         state.birthMaskRead = state.birthMaskA
         state.birthMaskSize = size
         state.birthMaskFrame = nil
@@ -7348,38 +7346,61 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     end
     if state.birthMaskSuspended then
         state.birthMaskA:clear(rgbm.colors.transparent)
-        state.birthMaskB:clear(rgbm.colors.transparent)
+        if state.birthMaskB then
+            state.birthMaskB:clear(rgbm.colors.transparent)
+        end
         state.birthMaskSuspended = false
     end
     if state.birthMaskFrame == sim.frame then return end
-    local source = state.birthMaskRead
-    local target = source == state.birthMaskA
-        and state.birthMaskB or state.birthMaskA
+    local fullRedraw = cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW
+    local target
     local seconds = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS, 0.05)
-    local decay = math.exp(-math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
-        * 2.0 / seconds)
-    local copied = target:updateWithShader({
-        async = true,
-        textures = { txBirthPrevious = source },
-        values = { gBirthDecay = decay },
-        shader = [[
-            float4 main(PS_IN pin)
-            {
-                float intensity = txBirthPrevious.SampleLevel(
-                    samLinearClamp, pin.Tex, 0.0).r * gBirthDecay;
-                return float4(intensity, 0.0, 0.0, intensity);
-            }
-        ]]
-    })
-    if copied == false then return end
+    if fullRedraw then
+        if state.birthMaskB then
+            state.birthMaskRead = state.birthMaskA
+            state.birthMaskB:dispose()
+            state.birthMaskB = nil
+        end
+        target = state.birthMaskA
+        target:clear(rgbm.colors.transparent)
+    else
+        if not state.birthMaskB then
+            state.birthMaskB = ui.ExtraCanvas(vec2(size, size), 1,
+                render.TextureFormat.R8G8B8A8.UNorm)
+                :setName('RainFX Birth Mask B')
+            state.birthMaskB:clear(rgbm.colors.transparent)
+        end
+        local source = state.birthMaskRead
+        target = source == state.birthMaskA
+            and state.birthMaskB or state.birthMaskA
+        local decay = math.exp(
+            -math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
+            * 2.0 / seconds)
+        local copied = target:updateWithShader({
+            async = true,
+            textures = { txBirthPrevious = source },
+            values = { gBirthDecay = decay },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    float intensity = txBirthPrevious.SampleLevel(
+                        samLinearClamp, pin.Tex, 0.0).r * gBirthDecay;
+                    return float4(intensity, 0.0, 0.0, intensity);
+                }
+            ]]
+        })
+        if copied == false then return end
+    end
 
     local stamps = {}
     local count = rainDynamicStateReadbackCount
     local budget = math.max(1, math.floor(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS))
-    local recentBudget = math.min(budget, math.max(0, math.floor(
-        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS)))
+    if fullRedraw then budget = math.max(budget, count) end
+    local recentBudget = fullRedraw and count
+        or math.min(budget, math.max(0, math.floor(
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS)))
     local growTime = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS, 0.01)
     local predictedAge = math.min(math.max(
@@ -7470,6 +7491,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             .. ' stamps=' .. tostring(state.birthMaskStamps)
             .. ' fresh=' .. tostring(state.birthMaskFresh)
             .. ' budget=' .. tostring(budget)
+            .. ' fullRedraw=' .. tostring(fullRedraw)
             .. ' recovery=' .. tostring(seconds))
         state.birthMaskStamps = 0
         state.birthMaskFresh = 0
@@ -10682,6 +10704,12 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
         end
+        changed = ui.checkbox('Birth mask full redraw (no ghost)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW
+        end
         local value
         value, changed = ui.slider('Birth refraction (pixels)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
@@ -10724,7 +10752,7 @@ function windowMain(dt)
         end
         value, changed = ui.slider('Birth mask stamps per frame',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS,
-            16.0, 128.0, '%.0f')
+            16.0, 512.0, '%.0f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS =
                 math.floor(value + 0.5)
