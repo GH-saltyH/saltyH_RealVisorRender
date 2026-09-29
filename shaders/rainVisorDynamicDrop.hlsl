@@ -600,6 +600,8 @@ float4 main(PS_IN pin)
                         -abs(dropOffset.x) * gDynamicDropOrbSideUpshift);
                 float2 centerUV = lerp(sceneUV - local * 0.01,
                     clamp(bentCenter, 0.12, 0.88), orbMode);
+                if (gDynamicDropForwardSceneOnly > 0.5)
+                    centerUV = orbDropCenter;
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
                 float rotationSin, rotationCos;
@@ -629,8 +631,12 @@ float4 main(PS_IN pin)
                 // A mild convex profile maps the center smoothly and
                 // compresses the edge without a repeated sharp rim image.
                 float convex = 1.0 - 0.16 * saturate(r * r);
-                float2 wideUV = centerUV + direction
-                    * lerp(0.17, gDynamicDropOrbFieldRadius, orbMode)
+                float fieldRadius = lerp(0.17,
+                    gDynamicDropOrbFieldRadius, orbMode);
+                if (gDynamicDropForwardSceneOnly > 0.5)
+                    fieldRadius = min(fieldRadius,
+                        gDynamicDropForwardSceneRadius);
+                float2 wideUV = centerUV + direction * fieldRadius
                     * lerp(1.0, convex, orbMode);
                 // Spread the wide-to-local transition across most of the
                 // footprint: a narrow outer transition bent hard edges.
