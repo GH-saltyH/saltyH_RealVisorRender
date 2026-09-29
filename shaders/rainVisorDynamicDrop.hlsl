@@ -107,19 +107,21 @@ float4 main(PS_IN pin)
                 samPointMicroMask, patternUV, 0.0).b;
             clip(gDynamicDropMicroRain - maskGate);
         }
+        float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float microVisibility = 1.0;
         if (gDynamicDropTrailMaskWipeEnabled > 0.5)
         {
-            // G is the time-decaying clearance field. Preserve the baked
-            // dot contour; only the whole disk's contribution fades out.
+            // All pixels of a winning disk share one clearance sample.
+            // Keep its existing baked, pixelated silhouette intact.
+            float2 diskCenterUV = patternUV - lensLocal
+                * (0.56 / max(gDynamicDropMicroPatternGrid, 1.0));
             float clearance = txDynamicTrailMask.SampleLevel(
-                samLinearClamp, patternUV, 0.0).g;
+                samLinearClamp, saturate(diskCenterUV), 0.0).g;
             microVisibility = 1.0 - smoothstep(0.08, 0.70,
                 saturate(clearance
                     * gDynamicDropTrailMaskWipeStrength));
             clip(microVisibility - 0.01);
         }
-        float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(length(lensLocal));
         // The baked alpha owns the silhouette, including its pixelated rim.
         // The winning disk owns the pixel; its outer ring also marks
