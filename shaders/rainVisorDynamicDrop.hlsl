@@ -60,16 +60,6 @@ float4 main(PS_IN pin)
     // Trail quads use 2..3 and therefore have no impact band.
     float impactBand = floor(quadTex.y * 0.25);
     quadTex.y -= impactBand * 4.0;
-    // GPU head quads encode their visor UV below the integer quad/band UV.
-    // Remove the shared fraction before local shape and impact decoding.
-    float packedVisorUV = frac(quadTex.y);
-    quadTex.y -= packedVisorUV;
-    float packedCode = floor(packedVisorUV * 65536.0 + 0.5);
-    float2 dropVisorUV = float2(
-        floor(packedCode / 256.0),
-        packedCode - floor(packedCode / 256.0) * 256.0)
-        / 255.0;
-    dropVisorUV.y -= 1.0;
     bool trailQuad = quadTex.y > 1.5;
     if (trailQuad)
         quadTex.y -= 2.0;
@@ -596,21 +586,6 @@ float4 main(PS_IN pin)
     float z = sqrt(saturate(1.0 - r * r));
     float3 dropNormal = normalize(float3(local / footprintScale, z));
 
-    float3 gpuCameraNormal = float3(0.0, 0.0, 1.0);
-    if (gDynamicDropNormalOptics > 0.5)
-    {
-        float3 objectNormal = txDynamicControl.SampleLevel(
-            samLinearClamp, dropVisorUV, 0.0).rgb * 2.0 - 1.0;
-        float3 worldNormal = normalize(mul(normalize(objectNormal),
-            (float3x3)gDynamicDropObjectToWorld));
-        gpuCameraNormal = normalize(float3(
-            dot(worldNormal, gDynamicDropCameraSide),
-            -dot(worldNormal, gDynamicDropCameraUp),
-            dot(worldNormal, gDynamicDropCameraLook)));
-        if (gpuCameraNormal.z < 0.0)
-            gpuCameraNormal *= -1.0;
-    }
-
     float fresnel = pow(saturate(1.0 - z), 2.4);
 
     float3 lightDirection = normalize(float3(-0.45, -0.55, 0.70));
@@ -731,10 +706,6 @@ float4 main(PS_IN pin)
                     clamp(bentCenter, 0.12, 0.88), orbMode);
                 if (gDynamicDropForwardSceneOnly > 0.5)
                     centerUV = orbDropCenter;
-                if (gDynamicDropNormalOptics > 0.5)
-                    centerUV += clamp(gpuCameraNormal.xy
-                        / max(gpuCameraNormal.z, 0.35)
-                        * gDynamicDropNormalSceneGain, -0.20, 0.20);
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
                 float rotationSin, rotationCos;
@@ -889,35 +860,6 @@ float4 main(PS_IN pin)
         if (gDynamicDropConcaveLensDebug > 0.5
             && wideSide)
             opticalAccent *= 0.55;
-        if (gDynamicDropNormalOptics > 0.5)
-        {
-            // Same recess-facing visor tangent model as the micro layer,
-            // with independent gains for these larger moving drops.
-            float3 capNormal = normalize(float3(
-                -dropNormal.xy * gDynamicDropNormalBump,
-                max(dropNormal.z, 0.08)));
-            float3 tangentX = normalize(float3(
-                max(gpuCameraNormal.z, 0.08), 0.0, -gpuCameraNormal.x));
-            float3 tangentY = normalize(cross(gpuCameraNormal, tangentX));
-            float3 worldLightCamera = float3(
-                dot(gDynamicDropMicroLightWorld, gDynamicDropCameraSide),
-                -dot(gDynamicDropMicroLightWorld, gDynamicDropCameraUp),
-                dot(gDynamicDropMicroLightWorld, gDynamicDropCameraLook));
-            float2 tangentLight = float2(
-                dot(worldLightCamera, tangentX),
-                dot(worldLightCamera, tangentY));
-            float2 reliefLight = normalize(tangentLight * 0.55
-                + float2(-0.48, -0.36));
-            float interior = smoothstep(0.08, 0.30, r)
-                * (1.0 - smoothstep(0.55, 0.76, r));
-            float relief = dot(capNormal.xy, reliefLight)
-                * interior * (0.85
-                    + saturate(1.0 - gpuCameraNormal.z) * 0.80);
-            opticalAccent += float3(0.78, 0.90, 1.0)
-                * saturate(relief) * gDynamicDropNormalLight * 0.52;
-            refractedScene *= 1.0
-                - saturate(-relief) * gDynamicDropNormalShadow * 0.42;
-        }
         if (gDynamicDropWideOrbDebug > 0.5
             && gDynamicDropWideSceneDebug > 0.5 && wideSide)
         {
