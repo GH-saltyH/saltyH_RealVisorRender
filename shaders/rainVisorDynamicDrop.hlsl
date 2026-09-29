@@ -159,8 +159,13 @@ float4 main(PS_IN pin)
                 - centerDelta.y * gDynamicDropMicroImageRotation.y,
             centerDelta.x * gDynamicDropMicroImageRotation.y
                 + centerDelta.y * gDynamicDropMicroImageRotation.x);
+        // Looking through the inner visor face: the center recedes,
+        // with a gradually shallower scale toward the near edge.
+        float inwardProfile = 1.0 + gDynamicDropMicroConcaveOptics
+            * (1.0 - lensRadius * lensRadius);
         float2 refractionUV = centerSceneUV + normalSceneShift
-            + rotatedDelta * gDynamicDropMicroImageScale;
+            + rotatedDelta * gDynamicDropMicroImageScale
+                * inwardProfile;
         float3 sceneColor = txDynamicSnapshot.SampleLevel(
             samLinearClamp, saturate(refractionUV),
             gDynamicDropMicroSceneMip).rgb;
@@ -170,9 +175,12 @@ float4 main(PS_IN pin)
             sqrt(saturate(1.0 - lensRadius * lensRadius))));
         if (gDynamicDropMicroNormalReady > 0.5)
             capNormal = txDynamicMicroNormal.SampleLevel(
-                samLinearClamp, patternUV, 0.0).rgb * 2.0 - 1.0;
+                samLinearClamp, patternUV,
+                gDynamicDropMicroNormalMip).rgb * 2.0 - 1.0;
+        // The rider sees the rear of the exterior convex drop. Its
+        // cap slopes therefore read as a recess from the camera side.
         capNormal = normalize(float3(
-            capNormal.xy * gDynamicDropMicroNormalBump,
+            -capNormal.xy * gDynamicDropMicroNormalBump,
             max(capNormal.z, 0.08)));
         float3 visorNormal = normalize(cameraNormal);
         float3 tangentX = normalize(float3(
@@ -180,13 +188,21 @@ float4 main(PS_IN pin)
         float3 tangentY = normalize(cross(visorNormal, tangentX));
         float3 shadedNormal = normalize(tangentX * capNormal.x
             + tangentY * capNormal.y + visorNormal * capNormal.z);
-        float3 keyLight = normalize(float3(-0.48, -0.58, 0.66));
+        // Keep the light in world space. Camera movement and the visor's
+        // changing surface orientation now alter each disk's lit side.
+        float3 worldLightCamera = float3(
+            dot(gDynamicDropMicroLightWorld, gDynamicDropCameraSide),
+            -dot(gDynamicDropMicroLightWorld, gDynamicDropCameraUp),
+            dot(gDynamicDropMicroLightWorld, gDynamicDropCameraLook));
+        float3 keyLight = normalize(float3(worldLightCamera.xy,
+            max(abs(worldLightCamera.z), 0.28)));
         float3 halfLight = normalize(keyLight + float3(0.0, 0.0, 1.0));
         float grazing = saturate(1.0 - visorNormal.z);
-        float bevel = smoothstep(0.10, 0.76, lensRadius);
+        float edgeFade = 1.0 - smoothstep(0.50, 0.78, lensRadius);
+        float bevel = smoothstep(0.08, 0.44, lensRadius) * edgeFade;
         float signedLight = (dot(shadedNormal, keyLight)
             - dot(visorNormal, keyLight)) * bevel;
-        float angleGain = 0.75 + grazing * 1.15;
+        float angleGain = 0.65 + grazing * 1.10;
         float litSide = saturate(signedLight) * angleGain
             * gDynamicDropMicroAngleLight;
         float darkSide = saturate(-signedLight) * angleGain
@@ -196,12 +212,12 @@ float4 main(PS_IN pin)
         specular *= specular;
         specular *= specular;
         specular *= specular;
-        specular *= bevel * (0.35 + grazing * 0.85)
+        specular *= bevel * (0.25 + grazing * 0.75)
             * gDynamicDropMicroAngleLight;
         float3 lightAccent = float3(0.78, 0.90, 1.0)
-            * (litSide * 0.62 + specular * 0.30
-                + rim * gDynamicDropMicroRimStrength);
-        sceneColor *= 1.0 - saturate(darkSide * 0.70);
+            * (litSide * 0.25 + specular * 0.10
+                + rim * gDynamicDropMicroRimStrength * 0.30);
+        sceneColor *= 1.0 - saturate(darkSide * 0.25);
         // Each winning disk carries its complete scene image. Uncovered
         // pattern texels are clipped above and reveal the live scene.
         // The baked mask clips the topmost disk's entire thin rim, so
