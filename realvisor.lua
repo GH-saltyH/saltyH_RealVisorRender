@@ -7376,15 +7376,31 @@ render.onSceneReady(function()
         sim.cameraClipNear,
         sim.cameraClipFar
     )
-    rainDynamicSceneCopyState.geometryShot:update(
-        sim.cameraPosition,
-        sim.cameraLook,
-        sim.cameraUp,
-        sim.cameraFOV
-    )
-    if shotMips > 1 then
-        rainDynamicSceneCopyState.geometryShot:mipsUpdate()
+    local shotOk, shotResult = pcall(function()
+        local updated = rainDynamicSceneCopyState.geometryShot:update(
+            sim.cameraPosition,
+            sim.cameraLook,
+            sim.cameraUp,
+            sim.cameraFOV
+        )
+        if updated == false then return false end
+        if shotMips > 1 then
+            local mipsUpdated =
+                rainDynamicSceneCopyState.geometryShot:mipsUpdate()
+            if mipsUpdated == false then return false end
+        end
+        return true
+    end)
+    if not shotOk or not shotResult then
+        rainDynamicSceneCopyState.shotFrame = nil
+        if not rainDynamicSceneCopyState.shotWaitLogged then
+            ac.warn(appNameDebug .. ' Dynamic drop scene-ready shot '
+                .. 'pending; retrying: ' .. tostring(shotResult))
+            rainDynamicSceneCopyState.shotWaitLogged = true
+        end
+        return
     end
+    rainDynamicSceneCopyState.shotWaitLogged = false
     rainDynamicSceneCopyState.shotFrame = sim.frame
     if not rainDynamicManualPreDrawLogged or shotResized then
         ac.log(appNameDebug .. ' Dynamic drop scene-ready shot: updated '
@@ -7513,13 +7529,17 @@ float4 main(PS_IN pin)
     end
 
     if cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG
-        and not rainDynamicSceneCopyState.geometryShot
+        and (not rainDynamicSceneCopyState.geometryShot
+            or rainDynamicSceneCopyState.shotFrame ~= sim.frame)
     then
-        if not rainDynamicManualPreDrawLogged then
-            ac.log(appNameDebug .. ' Dynamic drop scene-ready shot unavailable')
+        if not rainDynamicSceneCopyState.shotDrawWaitLogged then
+            ac.warn(appNameDebug .. ' Dynamic drop waiting for current '
+                .. 'scene-ready shot')
+            rainDynamicSceneCopyState.shotDrawWaitLogged = true
         end
         return
     end
+    rainDynamicSceneCopyState.shotDrawWaitLogged = false
 
     render.setBlendMode(
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
