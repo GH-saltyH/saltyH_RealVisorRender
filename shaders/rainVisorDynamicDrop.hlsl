@@ -134,8 +134,8 @@ float4 main(PS_IN pin)
         float2 centerSceneUV = sceneUV
             - ddx(sceneUV) * centerOffsetPixels.x
             - ddy(sceneUV) * centerOffsetPixels.y;
-        // Mirror only horizontally: each nearly round disk keeps a
-        // recognizable, low-resolution view from directly in front of it.
+        // Rotate the view around each disk's center, preserving its
+        // orientation at zero degrees instead of mirroring it.
         float2 centerDelta = sceneUV - centerSceneUV;
         // The object-space visor normal determines which part of the
         // independently rendered camera view this disk faces. The same
@@ -154,22 +154,44 @@ float4 main(PS_IN pin)
         float2 normalSceneShift = clamp(cameraNormal.xy
             / max(cameraNormal.z, 0.35)
             * gDynamicDropMicroNormalGain, -0.20, 0.20);
+        float2 rotatedDelta = float2(
+            centerDelta.x * gDynamicDropMicroImageRotation.x
+                - centerDelta.y * gDynamicDropMicroImageRotation.y,
+            centerDelta.x * gDynamicDropMicroImageRotation.y
+                + centerDelta.y * gDynamicDropMicroImageRotation.x);
         float2 refractionUV = centerSceneUV + normalSceneShift
-            + centerDelta * float2(-gDynamicDropMicroImageScale,
-                gDynamicDropMicroImageScale);
+            + rotatedDelta * gDynamicDropMicroImageScale;
         float3 sceneColor = txDynamicSnapshot.SampleLevel(
             samLinearClamp, saturate(refractionUV),
             gDynamicDropMicroSceneMip).rgb;
-        float3 lensNormal = normalize(float3(lensLocal,
+        // Tilt a shallow spherical-cap normal with the visor's own
+        // camera-space normal. The bright and dark sides respond to angle.
+        float3 capNormal = normalize(float3(lensLocal * 0.78,
             sqrt(saturate(1.0 - lensRadius * lensRadius))));
-        float3 lightDirection = normalize(float3(
-            -0.45 + (sceneUV.x - 0.5) * 0.45,
-            -0.55 + (sceneUV.y - 0.5) * 0.35, 0.72));
-        float glint = saturate((dot(lensNormal,
-            lightDirection) - 0.86) * 7.0);
-        glint *= glint;
+        float3 shadedNormal = normalize(float3(
+            capNormal.xy + cameraNormal.xy * 0.48,
+            capNormal.z * max(cameraNormal.z, 0.28)));
+        float3 keyLight = normalize(float3(-0.48, -0.58, 0.66));
+        float3 halfLight = normalize(keyLight + float3(0.0, 0.0, 1.0));
+        float grazing = saturate(1.0 - cameraNormal.z);
+        float bevel = smoothstep(0.22, 0.78, lensRadius);
+        float signedLight = (dot(shadedNormal, keyLight)
+            - dot(cameraNormal, keyLight)) * bevel;
+        float litSide = saturate(signedLight)
+            * (0.55 + grazing * 1.2) * gDynamicDropMicroAngleLight;
+        float darkSide = saturate(-signedLight)
+            * (0.55 + grazing * 1.2) * gDynamicDropMicroAngleShadow;
+        float specular = saturate(dot(shadedNormal, halfLight));
+        specular *= specular;
+        specular *= specular;
+        specular *= specular;
+        specular *= specular;
+        specular *= bevel * (0.25 + grazing * 0.75)
+            * gDynamicDropMicroAngleLight;
         float3 lightAccent = float3(0.78, 0.90, 1.0)
-            * (glint * 0.15 + rim * gDynamicDropMicroRimStrength);
+            * (litSide * 0.34 + specular * 0.22
+                + rim * gDynamicDropMicroRimStrength);
+        sceneColor *= 1.0 - saturate(darkSide * 0.42);
         // Each winning disk carries its complete scene image. Uncovered
         // pattern texels are clipped above and reveal the live scene.
         // The baked mask clips the topmost disk's entire thin rim, so
