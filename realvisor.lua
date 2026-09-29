@@ -520,6 +520,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
+        -- Prototype persistent UV wipe mask; no head or micro composition yet.
+        RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,
+        RAIN_DYNAMIC_TRAIL_MASK_DEBUG = true,
+        RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
+        RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
+        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 0.80,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
         -- the visual values have been selected in the game.
@@ -7295,6 +7301,13 @@ render.onSceneReady(function()
         and not rainStateInitialized then return end
     rainDynamicSceneCopyState.stateReadyFrame = sim.frame
     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
+        local maskOk, maskError = pcall(
+            rainDynamicSceneCopyState.updateTrailMask, sim)
+        if not maskOk and not rainDynamicSceneCopyState.maskWarned then
+            ac.warn(appNameDebug .. ' Dynamic UV mask update failed: '
+                .. tostring(maskError))
+            rainDynamicSceneCopyState.maskWarned = true
+        end
         if not initializeRainDynamicSurfaceTest() then return end
         rainDynamicSceneCopyState.preparedFrame = sim.frame
         if not rainDynamicSceneCopyState.prepareReadyLogged then
@@ -7306,6 +7319,137 @@ render.onSceneReady(function()
         end
     end
 end)
+
+-- Stage 1: low-resolution persistent visor-UV motion mask. Existing
+-- readback supplies head centers; no per-drop surface lookup or trail mesh.
+rainDynamicSceneCopyState.updateTrailMask = function(sim)
+    if not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
+        or not rainDynamicStateHasSnapshot then return end
+    local size = math.max(128, math.floor(
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SIZE))
+    local state = rainDynamicSceneCopyState
+    if not state.trailMaskA or state.trailMaskSize ~= size then
+        if state.trailMaskA then state.trailMaskA:dispose() end
+        if state.trailMaskB then state.trailMaskB:dispose() end
+        state.trailMaskA = ui.ExtraCanvas(vec2(size, size), 1,
+            render.TextureFormat.R8G8B8A8.UNorm)
+            :setName('RainFX Wipe Mask A')
+        state.trailMaskB = ui.ExtraCanvas(vec2(size, size), 1,
+            render.TextureFormat.R8G8B8A8.UNorm)
+            :setName('RainFX Wipe Mask B')
+        state.trailMaskA:clear(rgbm.colors.transparent)
+        state.trailMaskB:clear(rgbm.colors.transparent)
+        state.trailMaskRead = state.trailMaskA
+        state.trailMaskSize = size
+        state.trailMaskLast = {}
+        state.trailMaskCursor = 1
+        state.trailMaskFrame = nil
+    end
+    if state.trailMaskFrame == sim.frame then return end
+    local source = state.trailMaskRead
+    local target = source == state.trailMaskA
+        and state.trailMaskB or state.trailMaskA
+    local decay = math.exp(-math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
+        * 3.0 / math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS, 0.05))
+    local copied = target:updateWithShader({
+        async = true,
+        textures = { txWipePrevious = source },
+        values = { gWipeDecay = decay },
+        shader = [[
+            float4 main(PS_IN pin)
+            {
+                return txWipePrevious.SampleLevel(samLinearClamp,
+                    pin.Tex, 0.0) * gWipeDecay;
+            }
+        ]]
+    })
+    if copied == false then return end
+
+    local count = rainDynamicStateReadbackCount
+    local limit = math.max(1, math.floor(
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS))
+    local cursor = state.trailMaskCursor
+    local stamps = {}
+    local inspected = 0
+    local predictedAge = math.min(math.max(
+        rainDynamicStateRenderClock - rainDynamicStateSnapshotTime, 0.0),
+        cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS)
+    while inspected < count and #stamps < limit do
+        local index = (cursor - 1 + inspected) % count + 1
+        local generation = state.generation
+            and state.generation[index] or 0
+        local old = state.trailMaskLast[index]
+        if (rainDynamicStateAlive[index] or 0) > 0.5 then
+            local u = (rainDynamicStateU[index] or 0.0)
+                + (rainDynamicStateVelocityU[index] or 0.0)
+                    * predictedAge
+            local v = (rainDynamicStateV[index] or -1.0)
+                + (rainDynamicStateVelocityV[index] or 0.0)
+                    * predictedAge
+            local radius = rainDynamicStateRadius[index] or 0.0
+            if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
+                if old and old.generation ~= generation then old = nil end
+                local du = old and u - old.u or 0.0
+                local dv = old and v - old.v or 0.0
+                local minimum = math.max(radius * 0.4, 1.0 / size)
+                local distance2 = du * du + dv * dv
+                if not old or distance2 >= minimum * minimum then
+                    local birthAt = state.birthSeenAt
+                        and state.birthSeenAt[index] or -100.0
+                    local fastBirth = not old
+                        and state.currentTravelMix
+                        and state.currentTravelMix > 0.75
+                        and rainDynamicStateRenderClock - birthAt < 0.15
+                        and radius * 2.0 >= 1.4
+                            * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+                    local fromU = old and old.u or u
+                    local fromV = old and old.v or v
+                    if fastBirth then
+                        fromU = u - (rainDynamicStateVelocityU[index] or 0)
+                            * 0.045
+                        fromV = v - (rainDynamicStateVelocityV[index] or 0)
+                            * 0.045
+                    end
+                    -- A respawn never draws a line from the previous life.
+                    stamps[#stamps + 1] = {
+                        x0 = fromU * size, y0 = (fromV + 1.0) * size,
+                        x1 = u * size, y1 = (v + 1.0) * size,
+                        radius = math.max(radius * size, 1.4),
+                    }
+                    state.trailMaskLast[index] = {
+                        u = u, v = v, generation = generation }
+                end
+            end
+        else
+            state.trailMaskLast[index] = nil
+        end
+        inspected = inspected + 1
+    end
+    state.trailMaskCursor = (cursor - 1 + inspected) % count + 1
+    if #stamps > 0 then
+        target:update(function()
+            local color = rgbm(0.90, 0.95, 0.0, 1.0)
+            for _, stamp in ipairs(stamps) do
+                local first = vec2(stamp.x0, stamp.y0)
+                local last = vec2(stamp.x1, stamp.y1)
+                ui.drawLine(first, last, color,
+                    math.max(stamp.radius * 1.5, 2.0))
+                ui.drawCircleFilled(last, stamp.radius,
+                    color, 8)
+            end
+        end)
+    end
+    state.trailMaskRead = target
+    state.trailMaskFrame = sim.frame
+    state.trailMaskStamps = (state.trailMaskStamps or 0) + #stamps
+    if sim.frame % 180 == 0 then
+        ac.log(appNameDebug .. ' Dynamic UV mask: '
+            .. tostring(size) .. 'x' .. tostring(size)
+            .. ' stamps=' .. tostring(state.trailMaskStamps)
+            .. ' budget=' .. tostring(limit))
+        state.trailMaskStamps = 0
+    end
+end
 
 -- Update the independent scene before the main render, as recommended by
 -- the CSP GeometryShot API. The transparent pass only reads this texture.
@@ -7780,6 +7924,8 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.microPatternCanvas or false,
             txDynamicMicroNormal =
                 rainDynamicSceneCopyState.microNormalCanvas or false,
+            txDynamicTrailMask =
+                rainDynamicSceneCopyState.trailMaskRead or false,
         },
         values = {
             gDynamicDropDebugUV =
@@ -7953,6 +8099,11 @@ float4 main(PS_IN pin)
             gDynamicDropCameraLook = sim.cameraLook,
             gDynamicDropMicroRimStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
+            gDynamicDropTrailMaskDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
+                and rainDynamicSceneCopyState.trailMaskRead
+                and 1.0 or 0.0,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
