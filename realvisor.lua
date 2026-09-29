@@ -520,9 +520,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
-        -- Prototype persistent UV wipe mask; no head or micro composition yet.
+        -- Persistent UV wipe mask composited with the static micro layer.
         RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,
-        RAIN_DYNAMIC_TRAIL_MASK_DEBUG = true,
+        RAIN_DYNAMIC_TRAIL_MASK_DEBUG = false,
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true,
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 0.80,
@@ -8104,6 +8106,13 @@ float4 main(PS_IN pin)
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
                 and rainDynamicSceneCopyState.trailMaskRead
                 and 1.0 or 0.0,
+            gDynamicDropTrailMaskWipeEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED
+                and rainDynamicSceneCopyState.trailMaskRead
+                and 1.0 or 0.0,
+            gDynamicDropTrailMaskWipeStrength =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
@@ -10620,6 +10629,34 @@ function windowMain(dt)
     )
     if trailOpacityChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY = trailOpacity
+    end
+
+    ui.separator()
+    ui.text('Dynamic UV mask and micro clearing')
+    local maskDebugChanged = ui.checkbox(
+        'Show UV mask instead of micro circles',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
+    )
+    if maskDebugChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG =
+            not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
+    end
+    local maskWipeChanged = ui.checkbox(
+        'Clear micro circles along drop paths',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED
+    )
+    if maskWipeChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED =
+            not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED
+    end
+    local wipeStrength, wipeStrengthChanged = ui.slider(
+        'Micro clearing strength',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH,
+        0.0, 1.50, '%.2f'
+    )
+    if wipeStrengthChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH =
+            wipeStrength
     end
 
     ui.separator()
