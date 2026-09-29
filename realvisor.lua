@@ -500,22 +500,22 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE = 4096,
         RAIN_DYNAMIC_MICRO_NORMAL_BUMP = 0.90,
         RAIN_DYNAMIC_MICRO_NORMAL_MIP = 1.5,
-        RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = 0.52,
+        RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = 1.60,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.035,
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.25,
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 15.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 14.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 65.3,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 18.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 165.3,
         RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 1.23,
         RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 1.16,
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
-        RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.28,
+        RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.92,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
         RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
-        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 1.0,
+        RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
         RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
@@ -10453,7 +10453,7 @@ function windowMain(dt)
     local microConcave, microConcaveChanged = ui.slider(
         'Micro concave scene profile',
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS,
-        0.0, 0.60, '%.2f'
+        0.0, 1.60, '%.2f'
     )
     if microConcaveChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = microConcave
@@ -10462,7 +10462,7 @@ function windowMain(dt)
     local microRainPower, microRainPowerChanged = ui.slider(
         'Micro circle density / rain curve',
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER,
-        0.40, 3.00, '%.2f'
+        -1.00, 3.00, '%.2f'
     )
     if microRainPowerChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = microRainPower
