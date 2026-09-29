@@ -98,9 +98,7 @@ float4 main(PS_IN pin)
         }
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(length(lensLocal));
-        // The baked circle ends at radius 0.81. Move its inner edge
-        // inward at runtime without reallocating or redrawing the mask.
-        clip(0.81 - gDynamicDropMicroExtraRimWidth - lensRadius);
+        // The baked alpha owns the silhouette, including its pixelated rim.
         // The winning disk owns the pixel; its outer ring also marks
         // boundaries where a newer disk hides an older one.
         float rim = smoothstep(0.65, 0.79, lensRadius);
@@ -188,36 +186,31 @@ float4 main(PS_IN pin)
         float3 tangentY = normalize(cross(visorNormal, tangentX));
         float3 shadedNormal = normalize(tangentX * capNormal.x
             + tangentY * capNormal.y + visorNormal * capNormal.z);
-        // Keep the light in world space. Camera movement and the visor's
-        // changing surface orientation now alter each disk's lit side.
+        // Project scene light into this drop's local visor tangent frame.
+        // A view-side grazing component keeps the relief visible when
+        // the sun is directly behind the visor or hidden by weather.
         float3 worldLightCamera = float3(
             dot(gDynamicDropMicroLightWorld, gDynamicDropCameraSide),
             -dot(gDynamicDropMicroLightWorld, gDynamicDropCameraUp),
             dot(gDynamicDropMicroLightWorld, gDynamicDropCameraLook));
-        float3 keyLight = normalize(float3(worldLightCamera.xy,
-            max(abs(worldLightCamera.z), 0.28)));
-        float3 halfLight = normalize(keyLight + float3(0.0, 0.0, 1.0));
+        float2 tangentLight = float2(
+            dot(worldLightCamera, tangentX),
+            dot(worldLightCamera, tangentY));
+        float2 reliefLight = normalize(tangentLight * 0.55
+            + float2(-0.48, -0.36));
         float grazing = saturate(1.0 - visorNormal.z);
-        float edgeFade = 1.0 - smoothstep(0.50, 0.78, lensRadius);
-        float bevel = smoothstep(0.08, 0.44, lensRadius) * edgeFade;
-        float signedLight = (dot(shadedNormal, keyLight)
-            - dot(visorNormal, keyLight)) * bevel;
-        float angleGain = 0.65 + grazing * 1.10;
-        float litSide = saturate(signedLight) * angleGain
+        float interiorRelief = smoothstep(0.08, 0.30, lensRadius)
+            * (1.0 - smoothstep(0.55, 0.76, lensRadius));
+        float signedLight = dot(capNormal.xy, reliefLight)
+            * interiorRelief * (0.85 + grazing * 0.80);
+        float litSide = saturate(signedLight)
             * gDynamicDropMicroAngleLight;
-        float darkSide = saturate(-signedLight) * angleGain
+        float darkSide = saturate(-signedLight)
             * gDynamicDropMicroAngleShadow;
-        float specular = saturate(dot(shadedNormal, halfLight));
-        specular *= specular;
-        specular *= specular;
-        specular *= specular;
-        specular *= specular;
-        specular *= bevel * (0.25 + grazing * 0.75)
-            * gDynamicDropMicroAngleLight;
         float3 lightAccent = float3(0.78, 0.90, 1.0)
-            * (litSide * 0.25 + specular * 0.10
-                + rim * gDynamicDropMicroRimStrength * 0.30);
-        sceneColor *= 1.0 - saturate(darkSide * 0.25);
+            * (litSide * 0.52
+                + rim * gDynamicDropMicroRimStrength * 0.20);
+        sceneColor *= 1.0 - saturate(darkSide * 0.42);
         // Each winning disk carries its complete scene image. Uncovered
         // pattern texels are clipped above and reveal the live scene.
         // The baked mask clips the topmost disk's entire thin rim, so
