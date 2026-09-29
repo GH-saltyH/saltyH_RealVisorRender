@@ -532,6 +532,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 2048,
         RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW = true,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
+        RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION = true,
+        RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = 0.85,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS = 0.04,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = 1.5,
         RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
@@ -7439,6 +7441,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                     -- radius; use the same UV span for both canvas axes.
                     radius = (rainDynamicStateRadius[index] or 0.0)
                         * size * (0.28 + 0.72 * growth),
+                    index = index,
                 }
                 fresh = fresh + 1
             end
@@ -7470,6 +7473,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                     local stamp = {
                         x = u * size, y = (v + 1.0) * size,
                         radius = radiusPx,
+                        index = index,
                     }
                     if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH
                         and radiusPx > 0.0 then
@@ -7503,6 +7507,38 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     end
     state.birthMaskCursor = count > 0
         and (cursor - 1 + inspected) % count + 1 or 1
+    local shaped = 0
+    if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION then
+        local strength = math.max(0.0, math.min(1.5,
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH))
+        for _, stamp in ipairs(stamps) do
+            -- A stable per-life lobe keeps the outline from crawling
+            -- between full-frame redraws. Bias it down/outward on the visor.
+            local generation = state.generation
+                and state.generation[stamp.index] or 0
+            local seed = rainDynamicSurfaceFrac(
+                stamp.index * 0.7548776662
+                + generation * 0.5698402911)
+            if seed > 0.34 and stamp.radius >= 1.2 then
+                local secondary = rainDynamicSurfaceFrac(
+                    stamp.index * 0.6180339887
+                    + generation * 0.4142135623)
+                local jitter = (secondary - 0.5) * 1.10
+                local dirX = (stamp.x / size - 0.5) * 0.9
+                    + jitter
+                local dirY = 1.0 + (seed - 0.5) * 0.30
+                local length = math.sqrt(dirX * dirX + dirY * dirY)
+                local radius = stamp.radius
+                local reach = radius
+                    * (0.45 + 0.15 * secondary) * strength
+                stamp.lobeX = stamp.x + dirX / length * reach
+                stamp.lobeY = stamp.y + dirY / length * reach
+                stamp.lobeRadius = radius * (0.55 + 0.10 * secondary)
+                stamp.radius = radius * (1.0 - 0.10 * strength)
+                shaped = shaped + 1
+            end
+        end
+    end
     if #stamps > 0 then
         target:update(function()
             local bodyColor = rgbm(1.0, 0.0, 0.0, 1.0)
@@ -7518,6 +7554,11 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                         stamp.radius,
                         bodyColor, 12)
                 end
+                if stamp.lobeX then
+                    ui.drawCircleFilled(
+                        vec2(stamp.lobeX, stamp.lobeY),
+                        stamp.lobeRadius, bodyColor, 12)
+                end
                 ui.drawCircleFilled(
                     vec2(stamp.x, stamp.y), stamp.radius,
                     bodyColor, 16)
@@ -7530,6 +7571,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     state.birthMaskFresh = (state.birthMaskFresh or 0) + fresh
     state.birthMaskStretched = (state.birthMaskStretched or 0)
         + stretched
+    state.birthMaskShaped = (state.birthMaskShaped or 0) + shaped
     state.birthMaskMaxMotion = math.max(
         state.birthMaskMaxMotion or 0.0, maxMotionRadii)
     if sim.frame % 180 == 0 then
@@ -7538,6 +7580,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             .. ' stamps=' .. tostring(state.birthMaskStamps)
             .. ' fresh=' .. tostring(state.birthMaskFresh)
             .. ' stretched=' .. tostring(state.birthMaskStretched)
+            .. ' shaped=' .. tostring(state.birthMaskShaped)
             .. ' maxMotionRadii='
             .. string.format('%.2f', state.birthMaskMaxMotion)
             .. ' budget=' .. tostring(budget)
@@ -7546,6 +7589,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         state.birthMaskStamps = 0
         state.birthMaskFresh = 0
         state.birthMaskStretched = 0
+        state.birthMaskShaped = 0
         state.birthMaskMaxMotion = 0.0
     end
 end
@@ -10768,7 +10812,19 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH
         end
+        changed = ui.checkbox('Asymmetric drop outline',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION
+        end
         local value
+        value, changed = ui.slider('Asymmetric outline strength',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH,
+            0.0, 1.5, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = value
+        end
         value, changed = ui.slider('Moving body lookback (seconds)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS,
             0.0, 0.12, '%.3f')
