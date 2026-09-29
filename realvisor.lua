@@ -523,7 +523,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 7.8,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
-        RAIN_DYNAMIC_BIRTH_MASK_DEBUG = true,
+        RAIN_DYNAMIC_BIRTH_MASK_DEBUG = false,
+        RAIN_DYNAMIC_BIRTH_MASK_OPTICS = true,
+        RAIN_DYNAMIC_BIRTH_MASK_ONLY = true,
+        RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = 12.0,
+        RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.18,
+        RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 256,
         RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 0.35,
         RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
@@ -8074,6 +8079,22 @@ float4 main(PS_IN pin)
                 and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG
                 and rainDynamicSceneCopyState.birthMaskRead
                 and 1.0 or 0.0,
+            gDynamicDropBirthMaskOptics =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS
+                and rainDynamicSceneCopyState.birthMaskRead
+                and 1.0 or 0.0,
+            gDynamicDropBirthMaskOnly =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
+                and rainDynamicSceneCopyState.birthMaskRead
+                and 1.0 or 0.0,
+            gDynamicDropBirthRefractionPixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
+            gDynamicDropBirthHighlight =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT,
+            gDynamicDropBirthOpacity =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
             gDynamicDropTrailMaskDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
@@ -10597,7 +10618,37 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG
         end
+        changed = ui.checkbox('Birth mask optical scene',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS
+        end
+        changed = ui.checkbox('Birth mask only (hide old GPU heads)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
+        end
         local value
+        value, changed = ui.slider('Birth refraction (pixels)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
+            0.0, 40.0, '%.1f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = value
+        end
+        value, changed = ui.slider('Birth angle highlight',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT,
+            0.0, 0.7, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = value
+        end
+        value, changed = ui.slider('Birth scene opacity',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
+            0.0, 1.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY = value
+        end
         value, changed = ui.slider('Birth growth time (seconds)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS,
             0.03, 0.35, '%.2f')
