@@ -515,6 +515,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
+        RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION = true,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.21,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 6.2,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
@@ -8334,6 +8335,10 @@ float4 main(PS_IN pin)
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED
                 and rainDynamicSceneCopyState.trailMaskRead
                 and 1.0 or 0.0,
+            gDynamicDropTrailSkyCorrection =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
             gDynamicDropTrailFilmOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY,
             gDynamicDropTrailFilmPixels =
@@ -11086,6 +11091,14 @@ function windowMain(dt)
     )
     if ridgeOpacityChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = ridgeOpacity
+    end
+    do
+        local changed = ui.checkbox('Wiped paths weather sky tone',
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION =
+                not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION
+        end
     end
     local ridgePixels, ridgePixelsChanged = ui.slider(
         'Liquid ridge refraction (pixels)',
