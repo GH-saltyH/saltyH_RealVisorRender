@@ -107,6 +107,18 @@ float4 main(PS_IN pin)
                 samPointMicroMask, patternUV, 0.0).b;
             clip(gDynamicDropMicroRain - maskGate);
         }
+        float microVisibility = 1.0;
+        if (gDynamicDropTrailMaskWipeEnabled > 0.5)
+        {
+            // G is the time-decaying clearance field. Preserve the baked
+            // dot contour; only the whole disk's contribution fades out.
+            float clearance = txDynamicTrailMask.SampleLevel(
+                samLinearClamp, patternUV, 0.0).g;
+            microVisibility = 1.0 - smoothstep(0.08, 0.70,
+                saturate(clearance
+                    * gDynamicDropTrailMaskWipeStrength));
+            clip(microVisibility - 0.01);
+        }
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float lensRadius = saturate(length(lensLocal));
         // The baked alpha owns the silhouette, including its pixelated rim.
@@ -227,7 +239,7 @@ float4 main(PS_IN pin)
         // The baked mask clips the topmost disk's entire thin rim, so
         // underlying scene appears even when another disk lies below it.
         return float4(sceneColor + lightAccent,
-            saturate(gDynamicDropMicroOpacity));
+            saturate(gDynamicDropMicroOpacity * microVisibility));
     }
 
     if (microLayer)
