@@ -498,7 +498,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.7,
         RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 12288,
         RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE = 4096,
-        RAIN_DYNAMIC_MICRO_NORMAL_BUMP = 1.30,
+        RAIN_DYNAMIC_MICRO_NORMAL_BUMP = 0.90,
+        RAIN_DYNAMIC_MICRO_NORMAL_MIP = 1.5,
+        RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = 0.22,
         RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
         RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.035,
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.25,
@@ -506,8 +508,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 15.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 14.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 0.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 1.10,
-        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 0.85,
+        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 0.85,
+        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 0.65,
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.28,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
@@ -6339,13 +6341,13 @@ local function initializeRainDynamicSurfaceTest()
             local normalSize = math.max(256,
                 math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE))
             local canvasOk, normalCanvas = pcall(function()
-                return ui.ExtraCanvas(vec2(normalSize, normalSize), 1,
+                return ui.ExtraCanvas(vec2(normalSize, normalSize), 6,
                     render.TextureFormat.R8G8B8A8.UNorm)
                     :setName('RainFX static micro normals')
             end)
             if canvasOk and normalCanvas then
                 local bakeOk, bakeResult = pcall(function()
-                    return normalCanvas:updateWithShader({
+                    local updated = normalCanvas:updateWithShader({
                         textures = {
                             txMicroMask = rainDynamicSceneCopyState.microPatternCanvas
                         },
@@ -6368,6 +6370,10 @@ local function initializeRainDynamicSurfaceTest()
                             }
                         ]]
                     })
+                    if updated ~= false then
+                        normalCanvas:mipsUpdate()
+                    end
+                    return updated
                 end)
                 rainDynamicSceneCopyState.microNormalReady =
                     bakeOk and bakeResult ~= false
@@ -7842,6 +7848,11 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.microNormalReady and 1.0 or 0.0,
             gDynamicDropMicroNormalBump =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP,
+            gDynamicDropMicroNormalMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_MIP,
+            gDynamicDropMicroConcaveOptics =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS,
+            gDynamicDropMicroLightWorld = sim.lightDirection,
             gDynamicDropMicroNormalGain =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
             gDynamicDropObjectToWorld =
@@ -10427,6 +10438,23 @@ function windowMain(dt)
     )
     if microNormalBumpChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP = microNormalBump
+    end
+
+    local microNormalMip, microNormalMipChanged = ui.slider(
+        'Micro normal softness / mip',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_MIP,
+        0.0, 4.0, '%.1f'
+    )
+    if microNormalMipChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_MIP = microNormalMip
+    end
+    local microConcave, microConcaveChanged = ui.slider(
+        'Micro concave scene profile',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS,
+        0.0, 0.60, '%.2f'
+    )
+    if microConcaveChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = microConcave
     end
 
     local microRimWidth, microRimWidthChanged = ui.slider(
