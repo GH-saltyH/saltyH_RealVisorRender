@@ -336,7 +336,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 512,
+        RAIN_GPU_STATE_COUNT = 4096,
 
         -- Persistent state:
         -- 0 = disabled
@@ -361,17 +361,19 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
         RAIN_GPU_STATE_CAPACITY_RAMP_POWER = 1.0,
         -- Live birth-size keyframes in mm; a slot samples these at birth.
-        RAIN_GPU_SIZE_MIN_DRY = 0.35,
-        RAIN_GPU_SIZE_MIN_LIGHT = 0.35,
-        RAIN_GPU_SIZE_MIN_RAIN = 0.91,
-        RAIN_GPU_SIZE_MIN_HEAVY = 1.15,
-        RAIN_GPU_SIZE_MAX_DRY = 1.40,
-        RAIN_GPU_SIZE_MAX_LIGHT = 2.53,
-        RAIN_GPU_SIZE_MAX_RAIN = 4.10,
-        RAIN_GPU_SIZE_MAX_HEAVY = 4.10,
+        RAIN_GPU_SIZE_MIN_DRY = 0.60,                   -- Default 0.35mm
+        RAIN_GPU_SIZE_MIN_LIGHT = 0.83,                 -- Default 0.35mm
+        RAIN_GPU_SIZE_MIN_RAIN = 0.91,                  -- Default 0.91mm    
+        RAIN_GPU_SIZE_MIN_HEAVY = 1.19,                 -- Default 1.15mm
+        RAIN_GPU_SIZE_MIN_RARE = 2.30,                  -- Default 5mm
+        RAIN_GPU_SIZE_MAX_DRY = 1.01,                   -- Default 1.40mm
+        RAIN_GPU_SIZE_MAX_LIGHT = 1.09,                 -- Default 2.53mm
+        RAIN_GPU_SIZE_MAX_RAIN = 1.53,                  -- Default 4.10mm
+        RAIN_GPU_SIZE_MAX_HEAVY = 1.86,                 -- Default 4.10mm
+        RAIN_GPU_SIZE_MAX_RARE = 3.50,                  -- Default 6mm            
         RAIN_GPU_SIZE_BIAS = 2.0,
-        RAIN_GPU_SIZE_RARE_DRY = 0.001,
-        RAIN_GPU_SIZE_RARE_HEAVY = 0.008,
+        RAIN_GPU_SIZE_RARECHANCE_DRY = 0.001,
+        RAIN_GPU_SIZE_RARECHANCE_HEAVY = 0.008,
         -- Add encounters from vehicle speed without changing surface flow.
         RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,
         RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
@@ -1733,21 +1735,20 @@ local rainStateMetaUpdateParams = {
         gRainStatePhysicalGridTest = 0.0,
         gRainStateLifecycle = 0.0,
         gRainStateBoundaryMargin = 0.005,
-        gRainStateRespawnGapMin = 0.15,
-        gRainStateRespawnGapMax = 0.75,
-        gRainStateRainIntensity = 0.0,
         gRainStateTargetOccupancy = 0.0,
         gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
         gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
         gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
         gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+        gRainSizeMinRare = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RARE,
         gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
         gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
         gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
         gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
+        gRainSizeMaxRare = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RARE,
         gRainSizeBias = cfg.RUNTIME.RAIN_GPU_SIZE_BIAS,
-        gRainSizeRareDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY,
-        gRainSizeRareHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY,
+        gRainSizeRareChanceDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARECHANCE_DRY,
+        gRainSizeRareChanceHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARECHANCE_HEAVY,
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
@@ -1812,10 +1813,10 @@ local rainStateMetaUpdateParams = {
                 minimum = lerp(gRainSizeMinRain, gRainSizeMinHeavy, t);
                 maximum = lerp(gRainSizeMaxRain, gRainSizeMaxHeavy, t);
             }
-            float rareChance = lerp(gRainSizeRareDry,
-                gRainSizeRareHeavy, saturate(rain));
+            float rareChance = lerp(gRainSizeRareChanceDry,
+                gRainSizeRareChanceHeavy, saturate(rain));
             if (rainStateHash(index + 307.0) > 1.0 - rareChance)
-                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
+                return lerp(gRainSizeMinRare, gRainSizeMaxRare, rainStateHash(index + 619.0));
             float randomSize = rainStateHash(index + 101.0);
             return lerp(minimum, max(minimum, maximum),
                 pow(randomSize, max(gRainSizeBias, 0.1)));
@@ -5246,15 +5247,18 @@ local function updateRainGPUState(sim)
         {'gRainSizeMinLight', 'RAIN_GPU_SIZE_MIN_LIGHT'},
         {'gRainSizeMinRain', 'RAIN_GPU_SIZE_MIN_RAIN'},
         {'gRainSizeMinHeavy', 'RAIN_GPU_SIZE_MIN_HEAVY'},
+        {'gRainSizeMinRare', 'RAIN_GPU_SIZE_MIN_RARE'},
         {'gRainSizeMaxDry', 'RAIN_GPU_SIZE_MAX_DRY'},
         {'gRainSizeMaxLight', 'RAIN_GPU_SIZE_MAX_LIGHT'},
         {'gRainSizeMaxRain', 'RAIN_GPU_SIZE_MAX_RAIN'},
         {'gRainSizeMaxHeavy', 'RAIN_GPU_SIZE_MAX_HEAVY'},
+        {'gRainSizeMaxRare', 'RAIN_GPU_SIZE_MAX_RARE'},
         {'gRainSizeBias', 'RAIN_GPU_SIZE_BIAS'},
-        {'gRainSizeRareDry', 'RAIN_GPU_SIZE_RARE_DRY'},
-        {'gRainSizeRareHeavy', 'RAIN_GPU_SIZE_RARE_HEAVY'},
+        {'gRainSizeRareChanceDry', 'RAIN_GPU_SIZE_RARECHANCE_DRY'},
+        {'gRainSizeRareChanceHeavy', 'RAIN_GPU_SIZE_RARECHANCE_HEAVY'},
     }) do
-        rainStateUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
+        --rainStateUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
+        rainStateMetaUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
     end
 
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = liveRain
@@ -10751,25 +10755,37 @@ function windowMain(dt)
             { 'Rain maximum', 'RAIN_GPU_SIZE_MAX_RAIN' },
             { 'Heavy minimum', 'RAIN_GPU_SIZE_MIN_HEAVY' },
             { 'Heavy maximum', 'RAIN_GPU_SIZE_MAX_HEAVY' },
+            { 'Rare minimum', 'RAIN_GPU_SIZE_MIN_RARE' },
+            { 'Rare maximum', 'RAIN_GPU_SIZE_MAX_RARE' },
         }) do
             local value, changed = ui.slider(key[1] .. ' (mm)',
-                cfg.RUNTIME[key[2]], 0.15, 5.0, '%.2f')
+                cfg.RUNTIME[key[2]], 0.15, 6.0, '%.2f')
             if changed then cfg.RUNTIME[key[2]] = value end
         end
         local value, changed = ui.slider('Birth size small-drop bias',
             cfg.RUNTIME.RAIN_GPU_SIZE_BIAS, 0.5, 4.0, '%.2f')
         if changed then cfg.RUNTIME.RAIN_GPU_SIZE_BIAS = value end
-        value, changed = ui.slider('Rare 5-6 mm chance at dry',
-            cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY, 0.0, 0.03, '%.3f')
-        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY = value end
-        value, changed = ui.slider('Rare 5-6 mm chance at heavy',
-            cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY, 0.0, 0.03, '%.3f')
-        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY = value end
+        
+        
+        local strSliderChanceRareDry = 'Rare'
+                                    .. string.format('%.2f', cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RARE)
+                                    .. 'mm chance at dry'
+        value, changed = ui.slider(strSliderChanceRareDry,
+                                    cfg.RUNTIME.RAIN_GPU_SIZE_RARECHANCE_DRY, 0.0, 0.03, '%.3f')
+        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARECHANCE_DRY = value end
+                                    
+                                    
+        local strSliderChanceRareHeavy = 'Rare'
+                                    .. string.format('%.2f', cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RARE)
+                                    .. 'mm chance at heavy'
+        value, changed = ui.slider(strSliderChanceRareHeavy,
+                                    cfg.RUNTIME.RAIN_GPU_SIZE_RARECHANCE_HEAVY, 0.0, 0.03, '%.3f')
+        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARECHANCE_HEAVY = value end
     end
     do
         local value, changed = ui.slider('Extra capacity rain ramp',
-            cfg.RUNTIME.RAIN_GPU_STATE_CAPACITY_RAMP_POWER,
-            0.4, 3.0, '%.2f')
+                                    cfg.RUNTIME.RAIN_GPU_STATE_CAPACITY_RAMP_POWER,
+                                    0.4, 3.0, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_GPU_STATE_CAPACITY_RAMP_POWER = value
         end
