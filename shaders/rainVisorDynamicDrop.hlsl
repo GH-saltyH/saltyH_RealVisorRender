@@ -81,6 +81,17 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroPatternEnabled - 0.5);
         float2 patternUV = saturate(float2(
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
+        // Diagnostic displays UV-space water and wiping coverage over
+        // the complete visor, including gaps between static circles.
+        if (gDynamicDropTrailMaskDebug > 0.5)
+        {
+            float2 coverage = txDynamicTrailMask.SampleLevel(
+                samLinearClamp, patternUV, 0.0).rg;
+            float strength = max(coverage.r, coverage.g);
+            clip(strength - 0.01);
+            return float4(coverage.r, coverage.g, 0.12,
+                saturate(strength * 0.85));
+        }
         // At zero rain, skip the entire static pattern.
         clip(gDynamicDropMicroRain - 0.001);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
