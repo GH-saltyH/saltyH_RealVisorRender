@@ -527,7 +527,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
-        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 0.80,
+        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.00,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
         -- Temporary live trail calibration controls; remove the UI after
         -- the visual values have been selected in the game.
@@ -7448,7 +7448,9 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
         ac.log(appNameDebug .. ' Dynamic UV mask: '
             .. tostring(size) .. 'x' .. tostring(size)
             .. ' stamps=' .. tostring(state.trailMaskStamps)
-            .. ' budget=' .. tostring(limit))
+            .. ' budget=' .. tostring(limit)
+            .. ' recoverySeconds='
+            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS))
         state.trailMaskStamps = 0
     end
 end
@@ -10657,6 +10659,15 @@ function windowMain(dt)
     if wipeStrengthChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH =
             wipeStrength
+    end
+    local wipeSeconds, wipeSecondsChanged = ui.slider(
+        'Wipe recovery time (seconds)',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS,
+        0.30, 5.00, '%.2f'
+    )
+    if wipeSecondsChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS =
+            wipeSeconds
     end
 
     ui.separator()
