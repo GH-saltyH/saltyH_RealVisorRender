@@ -81,14 +81,76 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroPatternEnabled - 0.5);
         float2 patternUV = saturate(float2(
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
-        if (gDynamicDropBirthMaskDebug > 0.5)
+        if (gDynamicDropBirthMaskDebug > 0.5
+            || gDynamicDropBirthMaskOptics > 0.5)
         {
             float birth = txDynamicBirthMask.SampleLevel(
                 samLinearClamp, patternUV, 0.0).r;
+            // Derivatives must be evaluated before per-pixel coverage
+            // branching; the 256px field supplies a soft lens normal.
+            float2 birthGradient = float2(ddx(birth), ddy(birth));
             if (birth > 0.035)
-                return float4(float3(0.12, 0.82, 1.0)
-                    * (0.35 + 0.65 * birth),
-                    saturate(birth * 0.85));
+            {
+                if (gDynamicDropBirthMaskDebug > 0.5)
+                    return float4(float3(0.12, 0.82, 1.0)
+                        * (0.35 + 0.65 * birth),
+                        saturate(birth * 0.85));
+
+                float2 resolutionRatio =
+                    gDynamicDropInvRenderTargetSize
+                    / gDynamicDropInvScreenSize;
+                float2 sceneUV = pin.PosH.xy
+                    * gDynamicDropInvScreenSize
+                    * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+                float2 slope = birthGradient
+                    / max(length(birthGradient), 0.0001);
+                float edge = saturate(length(birthGradient) * 14.0);
+                float2 offset = slope * edge * birth
+                    * gDynamicDropBirthRefractionPixels
+                    * gDynamicDropInvRenderTargetSize;
+                float3 scene = txDynamicSnapshot.SampleLevel(
+                    samLinearClamp, saturate(sceneUV + offset),
+                    2.0).rgb;
+
+                float3 objectNormal = txDynamicControl.SampleLevel(
+                    samLinearClamp,
+                    float2(patternUV.x, patternUV.y - 1.0),
+                    0.0).rgb * 2.0 - 1.0;
+                float3 worldNormal = normalize(mul(
+                    normalize(objectNormal),
+                    (float3x3)gDynamicDropObjectToWorld));
+                float3 cameraNormal = normalize(float3(
+                    dot(worldNormal, gDynamicDropCameraSide),
+                    -dot(worldNormal, gDynamicDropCameraUp),
+                    dot(worldNormal, gDynamicDropCameraLook)));
+                if (cameraNormal.z < 0.0)
+                    cameraNormal *= -1.0;
+                float3 tangentX = normalize(float3(
+                    max(cameraNormal.z, 0.08), 0.0,
+                    -cameraNormal.x));
+                float3 tangentY = normalize(cross(
+                    cameraNormal, tangentX));
+                float3 light = float3(
+                    dot(gDynamicDropMicroLightWorld,
+                        gDynamicDropCameraSide),
+                    -dot(gDynamicDropMicroLightWorld,
+                        gDynamicDropCameraUp),
+                    dot(gDynamicDropMicroLightWorld,
+                        gDynamicDropCameraLook));
+                float2 projectedLight = normalize(float2(
+                    dot(light, tangentX),
+                    dot(light, tangentY)) + float2(-0.4, -0.3));
+                float relief = dot(-slope, projectedLight)
+                    * edge * birth;
+                scene += float3(0.78, 0.90, 1.0)
+                    * saturate(relief)
+                    * gDynamicDropBirthHighlight;
+                scene *= 1.0 - saturate(-relief)
+                    * gDynamicDropBirthHighlight * 0.25;
+                float alpha = smoothstep(0.04, 0.25, birth)
+                    * gDynamicDropBirthOpacity;
+                return float4(scene, alpha);
+            }
         }
         // Diagnostic displays UV-space water and wiping coverage over
         // the complete visor, including gaps between static circles.
@@ -405,6 +467,8 @@ float4 main(PS_IN pin)
             gDynamicDropTrailOpacity * fade);
     }
 
+    if (gDynamicDropBirthMaskOnly > 0.5)
+        clip(-1.0);
     clip(1.0 - r);
 
     if (gDynamicDropScreenUVDebug > 0.5)
