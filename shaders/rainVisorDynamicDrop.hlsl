@@ -102,8 +102,9 @@ float4 main(PS_IN pin)
         if (gDynamicDropBirthMaskDebug > 0.5
             || gDynamicDropBirthMaskOptics > 0.5)
         {
-            float birth = txDynamicBirthMask.SampleLevel(
-                samLinearClamp, patternUV, 0.0).r;
+            float4 birthSample = txDynamicBirthMask.SampleLevel(
+                samLinearClamp, patternUV, 0.0);
+            float birth = birthSample.r;
             // Screen and visor-UV derivatives are evaluated before the
             // divergent coverage branch. The wider probe can smooth the
             // relief where several stamped bodies join.
@@ -150,7 +151,46 @@ float4 main(PS_IN pin)
                 float2 offset = slope * edge * birth
                     * gDynamicDropBirthRefractionPixels
                     * gDynamicDropInvRenderTargetSize;
-                float2 sampleUV = saturate(sceneUV + offset);
+                float2 sceneMappedUV = sceneUV;
+                if (gDynamicDropBirthImageMapping > 0.5)
+                {
+                    // G/B carry the original head center, while R is the
+                    // anti-aliased footprint. Undo the edge premultiplication.
+                    float2 centerVisorUV = saturate(
+                        birthSample.gb / max(birth, 0.001));
+                    float2 fromCenterUV = patternUV - centerVisorUV;
+                    float determinant = patternDx.x * patternDy.y
+                        - patternDx.y * patternDy.x;
+                    if (abs(determinant) > 1e-9)
+                    {
+                        float2 centerOffsetPixels = float2(
+                            (patternDy.y * fromCenterUV.x
+                                - patternDy.x * fromCenterUV.y)
+                                / determinant,
+                            (patternDx.x * fromCenterUV.y
+                                - patternDx.y * fromCenterUV.x)
+                                / determinant);
+                        float2 shotUVPerPixel =
+                            gDynamicDropInvScreenSize
+                            * lerp(float2(1.0, 1.0),
+                                resolutionRatio, 0.98);
+                        float2 centerSceneUV = sceneUV
+                            - centerOffsetPixels * shotUVPerPixel;
+                        float2 relative = sceneUV - centerSceneUV;
+                        float2 rotated = float2(
+                            relative.x * gDynamicDropBirthImageRotation.x
+                                - relative.y
+                                    * gDynamicDropBirthImageRotation.y,
+                            relative.x * gDynamicDropBirthImageRotation.y
+                                + relative.y
+                                    * gDynamicDropBirthImageRotation.x);
+                        float2 expanded = centerSceneUV
+                            + rotated * gDynamicDropBirthImageScale;
+                        sceneMappedUV = lerp(sceneUV, expanded,
+                            saturate(gDynamicDropBirthImageMix));
+                    }
+                }
+                float2 sampleUV = saturate(sceneMappedUV + offset);
                 float3 scene = txDynamicSnapshot.SampleLevel(
                     samLinearClamp, sampleUV,
                     gDynamicDropBirthSceneMip).rgb;
