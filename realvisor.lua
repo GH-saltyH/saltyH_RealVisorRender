@@ -359,6 +359,7 @@ local cfg = scriptSettings:mapConfig({
         -- At r=0.03 / 0.08 / 0.50, approximate eligible fractions are
         -- 0.21 / 0.30 / 0.69 before the optional density multiplier.
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
+        RAIN_GPU_STATE_CAPACITY_RAMP_POWER = 1.0,
         -- Live birth-size keyframes in mm; a slot samples these at birth.
         RAIN_GPU_SIZE_MIN_DRY = 0.35,
         RAIN_GPU_SIZE_MIN_LIGHT = 0.35,
@@ -556,6 +557,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = 0.85,
+        RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED = true,
+        RAIN_DYNAMIC_BIRTH_PUDDLE_SHARE = 0.25,
+        RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM = 1.40,
+        RAIN_DYNAMIC_BIRTH_PUDDLE_REACH = 0.70,
         RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION = true,
         RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION = true,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS = 0.04,
@@ -4890,6 +4895,15 @@ rainDynamicSceneCopyState.lifecycleTargetForRain = function(rain)
     return math.min(1.0, 0.95 + 0.05 * (rain - 0.50) / 0.20)
 end
 
+rainDynamicSceneCopyState.lifecycleCapacityFactor = function(rain)
+    local count = math.max(rainStateCountForMode(), 512)
+    local base = math.min(1.0, 512.0 / count)
+    local t = math.max(0.0, math.min(1.0,
+        (rain - 0.03) / 0.97))
+    return base + (1.0 - base)
+        * (t ^ cfg.RUNTIME.RAIN_GPU_STATE_CAPACITY_RAMP_POWER)
+end
+
 rainDynamicSceneCopyState.lifecycleExposureForVelocity = function(velocity)
     if not velocity then return 1.0 end
     local speed = math.sqrt(velocity.x * velocity.x
@@ -5017,6 +5031,7 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
         math.min(1.0,
             rainDynamicSceneCopyState.lifecycleTargetForRain(initialRain)
+                * rainDynamicSceneCopyState.lifecycleCapacityFactor(initialRain)
                 * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE
                 * initialExposure)
     rainStateMetaUpdateParams.values.gRainStateAgeMin =
@@ -5282,6 +5297,7 @@ local function updateRainGPUState(sim)
     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
         math.min(1.0,
             rainDynamicSceneCopyState.lifecycleTargetForRain(liveRain)
+                * rainDynamicSceneCopyState.lifecycleCapacityFactor(liveRain)
                 * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE * exposure)
     rainStateMetaUpdateParams.values.gRainStateAgeMin =
         cfg.RUNTIME.RAIN_GPU_STATE_AGE_MIN_SECONDS
@@ -7459,7 +7475,9 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     state.birthMaskCursor = count > 0
         and (cursor - 1 + inspected) % count + 1 or 1
     local shaped = 0
-    if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION then
+    local puddles = 0
+    if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION
+        or cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED then
         local strength = math.max(0.0, math.min(1.5,
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH))
         for _, stamp in ipairs(stamps) do
@@ -7470,7 +7488,8 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             local seed = rainDynamicSurfaceFrac(
                 stamp.index * 0.7548776662
                 + generation * 0.5698402911)
-            if seed > 0.34 and stamp.radius >= 1.2 then
+            if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION
+                and seed > 0.34 and stamp.radius >= 1.2 then
                 local secondary = rainDynamicSurfaceFrac(
                     stamp.index * 0.6180339887
                     + generation * 0.4142135623)
@@ -7487,6 +7506,45 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                 stamp.lobeRadius = radius * (0.55 + 0.10 * secondary)
                 stamp.radius = radius * (1.0 - 0.10 * strength)
                 shaped = shaped + 1
+            end
+            local diameterMM = 2.0
+                * (rainDynamicStateRadius[stamp.index] or 0.0)
+                / math.max(cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM, 0.000001)
+            local puddleSeed = rainDynamicSurfaceFrac(
+                stamp.index * 0.4142135623 + generation * 0.7320508076)
+            if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED
+                and diameterMM >= cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM
+                and puddleSeed < cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_SHARE
+            then
+                -- The per-life seed selects a stable irregular footprint.
+                -- A moving drop bends its forward lobe toward velocity.
+                local angle = rainDynamicSurfaceFrac(
+                    stamp.index * 0.5698402911 + generation * 0.6180339887)
+                    * math.pi * 2.0
+                local velocityU = rainDynamicStateVelocityU[stamp.index] or 0.0
+                local velocityV = rainDynamicStateVelocityV[stamp.index] or 0.0
+                local speed = math.sqrt(velocityU * velocityU
+                    + velocityV * velocityV)
+                local motion = math.min(speed * 10.0, 1.0)
+                local dx = math.cos(angle) * (1.0 - motion)
+                    + (speed > 0.000001 and velocityU / speed or 0.0)
+                        * motion
+                local dy = math.sin(angle) * (1.0 - motion)
+                    + (speed > 0.000001 and velocityV / speed or 0.0)
+                        * motion
+                local norm = math.max(math.sqrt(dx * dx + dy * dy), 0.001)
+                dx, dy = dx / norm, dy / norm
+                local reach = stamp.radius
+                    * cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_REACH
+                stamp.puddleX = stamp.x + dx * reach
+                stamp.puddleY = stamp.y + dy * reach
+                stamp.puddleRadius = stamp.radius * (0.58 + 0.12 * puddleSeed)
+                stamp.puddle2X = stamp.x
+                    + (-dy * 0.7 - dx * 0.35) * reach
+                stamp.puddle2Y = stamp.y
+                    + (dx * 0.7 - dy * 0.35) * reach
+                stamp.puddle2Radius = stamp.radius * 0.42
+                puddles = puddles + 1
             end
         end
     end
@@ -7508,6 +7566,12 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                         stamp.radius,
                         bodyColor, 12)
                 end
+                if stamp.puddleX then
+                    ui.drawCircleFilled(vec2(stamp.puddleX, stamp.puddleY),
+                        stamp.puddleRadius, bodyColor, 12)
+                    ui.drawCircleFilled(vec2(stamp.puddle2X, stamp.puddle2Y),
+                        stamp.puddle2Radius, bodyColor, 12)
+                end
                 if stamp.lobeX then
                     ui.drawCircleFilled(
                         vec2(stamp.lobeX, stamp.lobeY),
@@ -7526,6 +7590,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     state.birthMaskStretched = (state.birthMaskStretched or 0)
         + stretched
     state.birthMaskShaped = (state.birthMaskShaped or 0) + shaped
+    state.birthMaskPuddles = (state.birthMaskPuddles or 0) + puddles
     state.birthMaskMaxMotion = math.max(
         state.birthMaskMaxMotion or 0.0, maxMotionRadii)
     if sim.frame % 180 == 0 then
@@ -7535,6 +7600,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             .. ' fresh=' .. tostring(state.birthMaskFresh)
             .. ' stretched=' .. tostring(state.birthMaskStretched)
             .. ' shaped=' .. tostring(state.birthMaskShaped)
+            .. ' puddles=' .. tostring(state.birthMaskPuddles)
             .. ' maxMotionRadii='
             .. string.format('%.2f', state.birthMaskMaxMotion)
             .. ' budget=' .. tostring(budget)
@@ -7544,6 +7610,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         state.birthMaskFresh = 0
         state.birthMaskStretched = 0
         state.birthMaskShaped = 0
+        state.birthMaskPuddles = 0
         state.birthMaskMaxMotion = 0.0
     end
 end
@@ -10714,6 +10781,16 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY, 0.0, 0.03, '%.3f')
         if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY = value end
     end
+    do
+        local value, changed = ui.slider('Extra capacity rain ramp',
+            cfg.RUNTIME.RAIN_GPU_STATE_CAPACITY_RAMP_POWER,
+            0.4, 3.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_GPU_STATE_CAPACITY_RAMP_POWER = value
+        end
+        ui.text('At 0.03 rain, preserve the 512-slot population;')
+        ui.text('at 1.00 rain, use all selected slots.')
+    end
     local exposureGain, exposureChanged = ui.slider(
         'Driving rain exposure gain',
         cfg.RUNTIME.RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN,
@@ -10808,6 +10885,12 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION
         end
+        changed = ui.checkbox('Irregular large birth puddles',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED
+        end
         changed = ui.checkbox('Birth mask weather sky tone',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION)
         if changed then
@@ -10838,6 +10921,24 @@ function windowMain(dt)
             0.0, 1.5, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = value
+        end
+        value, changed = ui.slider('Puddle share of large births',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_SHARE,
+            0.0, 1.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_SHARE = value
+        end
+        value, changed = ui.slider('Puddle minimum diameter (mm)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM,
+            0.5, 5.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM = value
+        end
+        value, changed = ui.slider('Puddle lobe reach (radii)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_REACH,
+            0.2, 1.3, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_REACH = value
         end
         value, changed = ui.slider('Moving body lookback (seconds)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS,
