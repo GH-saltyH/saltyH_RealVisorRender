@@ -74,13 +74,9 @@ float4 main(PS_IN pin)
     bool microLayer = encodedSeed >= 2048.0;
     float shapeSeed = encodedSeed - (microLayer ? 2048.0 : 0.0);
     float2 quadTex = encodedTex - float2(encodedSeed * 2.0, 0.0);
-    // Head quads encode three brief impact-age bands in whole UV steps.
-    // Trail quads use 2..3 and therefore have no impact band.
+    // Head quads encode brief impact-age bands in whole UV steps.
     float impactBand = floor(quadTex.y * 0.25);
     quadTex.y -= impactBand * 4.0;
-    bool trailQuad = quadTex.y > 1.5;
-    if (trailQuad)
-        quadTex.y -= 2.0;
     if (gDynamicDropDebugUV > 0.5)
     {
         // Do not clip anything in this branch. If the dynamic mesh is bound
@@ -525,39 +521,6 @@ float4 main(PS_IN pin)
         return float4(microScene
             + float3(0.78, 0.90, 1.0) * microGlint * 0.18,
             saturate(microAlpha));
-    }
-
-    if (trailQuad)
-    {
-        clip(gDynamicDropTrailEnabled - 0.5);
-        float along = saturate(local.x * 0.5 + 0.5);
-        float trailWidth = lerp(0.68, 1.0, along);
-        float trailEdge = max(abs(local.x), abs(local.y) / trailWidth);
-        clip(1.0 - trailEdge);
-        float fade = smoothstep(-1.0, -0.25, local.x)
-            * (1.0 - smoothstep(-0.20, 0.75, local.x))
-            * (1.0 - smoothstep(0.78, 1.0, trailEdge));
-        float2 offset = float2(local.y, -local.x) * 6.0;
-        float3 trailScene;
-        if (gDynamicDropGeometryShotDebug > 0.5)
-        {
-            float2 resolutionRatio = gDynamicDropInvRenderTargetSize
-                / gDynamicDropInvScreenSize;
-            float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
-                * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
-            trailScene = txDynamicSnapshot.SampleLevel(samLinearClamp,
-                saturate(sceneUV + offset * gDynamicDropInvRenderTargetSize),
-                0.0).rgb;
-        }
-        else
-            trailScene = txDynamicScene.SampleLevel(samLinearClamp,
-                saturate(pin.ScreenPos + offset * gDynamicDropInvScreenSize),
-                0.0).rgb;
-        float rim = smoothstep(0.72, 1.0, trailEdge);
-        float trailLuma = dot(trailScene, float3(0.2126, 0.7152, 0.0722));
-        return float4(trailScene + float3(0.72, 0.86, 1.0)
-            * rim * lerp(0.025, 0.10, saturate(trailLuma)),
-            gDynamicDropTrailOpacity * fade);
     }
 
     if (gDynamicDropBirthMaskOnly > 0.5)
