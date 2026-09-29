@@ -530,7 +530,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.18,
         RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 256,
-        RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 0.35,
+        RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
+        RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS = 64,
+        RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
         RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
@@ -7341,6 +7343,8 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         state.birthMaskRead = state.birthMaskA
         state.birthMaskSize = size
         state.birthMaskFrame = nil
+        state.birthMaskCursor = 1
+        state.birthMaskRecentCursor = 1
     end
     if state.birthMaskSuspended then
         state.birthMaskA:clear(rgbm.colors.transparent)
@@ -7354,7 +7358,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     local seconds = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS, 0.05)
     local decay = math.exp(-math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
-        * 4.0 / seconds)
+        * 2.0 / seconds)
     local copied = target:updateWithShader({
         async = true,
         textures = { txBirthPrevious = source },
@@ -7371,18 +7375,28 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     if copied == false then return end
 
     local stamps = {}
+    local count = rainDynamicStateReadbackCount
+    local budget = math.max(1, math.floor(
+        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS))
+    local recentBudget = math.min(budget, math.max(0, math.floor(
+        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS)))
     local growTime = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS, 0.01)
-    local ageLimit = math.min(growTime, seconds)
     local predictedAge = math.min(math.max(
         rainDynamicStateRenderClock - rainDynamicStateSnapshotTime, 0.0),
         cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS)
-    for index = 1, rainDynamicStateReadbackCount do
-        if #stamps >= 48 then break end
+    local recentCursor = state.birthMaskRecentCursor or 1
+    local fresh = 0
+
+    -- Give new births a few growing stamps before the rotating refresh
+    -- sweep handles all living drops. Rotation avoids low-slot bias.
+    for inspected = 0, count - 1 do
+        if fresh >= recentBudget then break end
+        local index = (recentCursor - 1 + inspected) % count + 1
         local birthAt = state.birthSeenAt
             and state.birthSeenAt[index]
         local age = birthAt and rainDynamicStateRenderClock - birthAt
-        if age and age >= 0.0 and age < ageLimit
+        if age and age >= 0.0 and age < growTime
             and (rainDynamicStateAlive[index] or 0.0) > 0.5
         then
             local u = (rainDynamicStateU[index] or -1.0)
@@ -7393,16 +7407,51 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                     * predictedAge
             if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
                 local growth = math.min(age / growTime, 1.0)
-                local radius = math.max(
-                    (rainDynamicStateRadius[index] or 0.0) * size * 1.3,
-                    2.0) * (0.28 + 0.72 * growth)
                 stamps[#stamps + 1] = {
                     x = u * size, y = (v + 1.0) * size,
-                    radius = radius,
+                    radius = math.max(
+                        (rainDynamicStateRadius[index] or 0.0)
+                            * size * 1.3, 2.0)
+                        * (0.28 + 0.72 * growth),
                 }
+                fresh = fresh + 1
             end
         end
     end
+    state.birthMaskRecentCursor = count > 0
+        and (recentCursor - 1 + 41) % count + 1 or 1
+
+    -- Refresh only a fixed slice per frame. Stale footprints decay in
+    -- this same canvas while existing wipe/ridge masks remain independent.
+    local cursor = state.birthMaskCursor or 1
+    local inspected = 0
+    while inspected < count and #stamps < budget do
+        local index = (cursor - 1 + inspected) % count + 1
+        if (rainDynamicStateAlive[index] or 0.0) > 0.5 then
+            local birthAt = state.birthSeenAt
+                and state.birthSeenAt[index]
+            local age = birthAt and rainDynamicStateRenderClock - birthAt
+            if not age or age >= growTime then
+                local u = (rainDynamicStateU[index] or -1.0)
+                    + (rainDynamicStateVelocityU[index] or 0.0)
+                        * predictedAge
+                local v = (rainDynamicStateV[index] or -2.0)
+                    + (rainDynamicStateVelocityV[index] or 0.0)
+                        * predictedAge
+                if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
+                    stamps[#stamps + 1] = {
+                        x = u * size, y = (v + 1.0) * size,
+                        radius = math.max(
+                            (rainDynamicStateRadius[index] or 0.0)
+                                * size * 1.3, 2.0),
+                    }
+                end
+            end
+        end
+        inspected = inspected + 1
+    end
+    state.birthMaskCursor = count > 0
+        and (cursor - 1 + inspected) % count + 1 or 1
     if #stamps > 0 then
         target:update(function()
             for _, stamp in ipairs(stamps) do
@@ -7415,12 +7464,16 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     state.birthMaskRead = target
     state.birthMaskFrame = sim.frame
     state.birthMaskStamps = (state.birthMaskStamps or 0) + #stamps
+    state.birthMaskFresh = (state.birthMaskFresh or 0) + fresh
     if sim.frame % 180 == 0 then
         ac.log(appNameDebug .. ' Dynamic birth mask: '
             .. tostring(size) .. 'x' .. tostring(size)
             .. ' stamps=' .. tostring(state.birthMaskStamps)
-            .. ' lifespan=' .. tostring(seconds))
+            .. ' fresh=' .. tostring(state.birthMaskFresh)
+            .. ' budget=' .. tostring(budget)
+            .. ' recovery=' .. tostring(seconds))
         state.birthMaskStamps = 0
+        state.birthMaskFresh = 0
     end
 end
 
@@ -10655,11 +10708,18 @@ function windowMain(dt)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = value
         end
-        value, changed = ui.slider('Birth mask lifetime (seconds)',
+        value, changed = ui.slider('Birth mask recovery (seconds)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS,
-            0.10, 1.0, '%.2f')
+            0.20, 3.0, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS = value
+        end
+        value, changed = ui.slider('Birth mask stamps per frame',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS,
+            16.0, 128.0, '%.0f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS =
+                math.floor(value + 0.5)
         end
     end
 
