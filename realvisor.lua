@@ -363,22 +363,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,
         RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
         RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
-        -- Fraction of the calibrated free-fall/relative-air impact
-        -- momentum transferred to initial surface motion.
-        RAIN_GPU_STATE_BIRTH_STILL_FRACTION = 0.014,
-        RAIN_GPU_STATE_BIRTH_SPEED_FRACTION = 0.92,
-        -- Temporary surface-speed allowance for fresh impacts; ordinary
-        -- calibrated speed limit returns as the impact glide expires.
-        RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER = 4.0,
         RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER = 24.0,
         RAIN_GPU_STATE_MOBILE_DRAG = 1.59,
         RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION = 0.08,
         RAIN_GPU_STATE_MOVING_FORCE_GAIN = 16.0,
         RAIN_GPU_STATE_MOBILE_THRESHOLD_UV = 0.015,
-        -- Duration of reduced drag after impact; ordinary drag returns
-        -- smoothly afterward. Zero disables the glide.
-        RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = 0.022,
-        RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS = 0.010,
         RAIN_GPU_STATE_LIFECYCLE_LOG = true,
         RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
@@ -529,9 +518,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.21,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 6.2,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.55,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.25,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 9.0,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.48,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.12,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 7.8,
+        RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH = 3.5,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
@@ -866,14 +856,6 @@ local rainStateUpdateParams = {
         gRainStateRespawnGapMin = 0.15,
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
-        gRainStateBirthSpeedFraction =
-            cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION,
-        gRainStateBirthSpeedCapMultiplier =
-            cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER,
-        gRainStateBirthGlideSeconds =
-            cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS,
-        gRainStateBirthSettleSeconds =
-            cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS,
         gRainStateMobileSpeedMultiplier =
             cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER,
         gRainStateMobileDrag = cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG,
@@ -1447,31 +1429,17 @@ local rainStateUpdateParams = {
                 * dt;
         }
 
-        float rainStateBirthGlide(float age)
-        {
-            float seconds = max(gRainStateBirthGlideSeconds, 0.0);
-            return gRainStateLifecycle > 0.5 && seconds > 0.0001
-                ? saturate((seconds - age) / seconds) : 0.0;
-        }
-
         float2 rainStateApplyDrag(
             float2 velocity,
             float forceMagnitude,
             float adhesion,
             float dt,
-            float age,
             float mobile
         )
         {
-            /*
-                Keep the existing numerical behavior:
-                below adhesion the droplet receives the stronger
-                attachment damping, then the normal flow drag is applied.
-            */
-            float glide = rainStateBirthGlide(age);
+            // Ordinary flow drag and kinetic adhesion apply from birth.
             float drag = lerp(gRainStateFlowDrag,
                 max(gRainStateMobileDrag, 0.0), mobile);
-            float dragScale = lerp(1.0, 0.12, glide);
 
             if (forceMagnitude <= adhesion && mobile < 0.5)
             {
@@ -1479,7 +1447,6 @@ local rainStateUpdateParams = {
                     exp(
                         -drag
                         * 2.0
-                        * (1.0 - glide)
                         * dt
                     );
             }
@@ -1487,7 +1454,6 @@ local rainStateUpdateParams = {
             velocity *=
                 exp(
                     -max(drag, 0.0)
-                    * dragScale
                     * dt
                 );
 
@@ -1497,7 +1463,6 @@ local rainStateUpdateParams = {
         float2 rainStateClampSpeed(
             float2 velocity,
             float radius,
-            float age,
             float mobile
         )
         {
@@ -1508,10 +1473,7 @@ local rainStateUpdateParams = {
                 rainStateMaxSpeedValue(radius)
                 * lerp(1.0,
                     max(gRainStateMobileSpeedMultiplier, 1.0),
-                    mobile * gRainStateTravelMix)
-                * lerp(1.0,
-                    max(gRainStateBirthSpeedCapMultiplier, 1.0),
-                    rainStateBirthGlide(age) * mobile);
+                    mobile * gRainStateTravelMix);
 
             if (
                 speed
@@ -1563,48 +1525,9 @@ local rainStateUpdateParams = {
             float radius,
             float mass,
             float stateIndex,
-            float dt,
-            float age
+            float dt
         )
         {
-            // Birth is a brief surface impact, independent of the forces
-            // governing settled water. Stop its stored momentum at the end
-            // of the glide; regular physics begins from rest afterward.
-            if (gRainStateLifecycle > 0.5
-                && gRainStateBirthGlideSeconds > 0.0001)
-            {
-                if (age < gRainStateBirthGlideSeconds)
-                {
-                    float elapsed = saturate(age
-                        / gRainStateBirthGlideSeconds);
-                    float nextElapsed = saturate((age + dt)
-                        / gRainStateBirthGlideSeconds);
-                    // Recover the unchanged launch vector from the
-                    // exponentially decaying stored velocity. Integrate
-                    // a fixed stroke over normalized age, so a glide
-                    // shorter than one frame still moves downward.
-                    float2 launch = velocity * exp(2.0 * elapsed);
-                    float diameterMM = radius * 2.0
-                        / max(gRainStatePhysicalDiameterUVPerMM, 0.000001);
-                    float mobileFraction = smoothstep(0.65, 1.40,
-                        diameterMM);
-                    float distance = max(length(launch) * 0.068,
-                        radius * 3.0 * mobileFraction);
-                    float2 stroke = length(launch) > 0.000001
-                        ? launch / length(launch) * distance
-                        : float2(0.0, 0.0);
-                    float step = smoothstep(0.0, 1.0, nextElapsed)
-                        - smoothstep(0.0, 1.0, elapsed);
-                    return float4(position + stroke * step,
-                        launch * exp(-2.0 * nextElapsed));
-                }
-                if (age < gRainStateBirthGlideSeconds
-                    + max(gRainStateBirthSettleSeconds, dt))
-                {
-                    return float4(position, 0.0, 0.0);
-                }
-            }
-
             float forceMagnitude = 0.0;
 
             float2 tangentForce =
@@ -1646,7 +1569,6 @@ local rainStateUpdateParams = {
                     forceMagnitude,
                     movingAdhesion,
                     dt,
-                    age,
                     mobile
                 );
 
@@ -1654,7 +1576,6 @@ local rainStateUpdateParams = {
                 rainStateClampSpeed(
                     velocity,
                     radius,
-                    age,
                     mobile
                 );
 
@@ -1782,67 +1703,10 @@ local rainStateUpdateParams = {
                             p
                         );
 
-                    // The meta pass assigns this same generation's new
-                    // radius after the state pass; use its new size now.
-                    float diameterMM = rainStateBirthDiameterMM(
-                        index + fmod(generation + 1.0, 4096.0)
-                            * 17.123,
-                        saturate(gRainStateRainIntensity));
-                    float birthRadius = diameterMM
-                        * gRainStatePhysicalDiameterUVPerMM * 0.5;
-                    float3 normalWorld = rainStateNormalWorld(respawn);
-                    // Free-fall speed is the PRE-impact world speed, not a
-                    // speed to copy directly onto the surface. Transfer a
-                    // small calibrated part of the tangent component.
-                    float terminalMS = 3.778
-                        * pow(max(diameterMM, 0.5), 0.67);
-                    float2 fall = rainStateProjectForce(
-                        float3(0.0, -terminalMS, 0.0), normalWorld);
-                    float edge = smoothstep(0.16, 0.46,
-                        abs(respawn.x - 0.5));
-                    float outward = (respawn.x < 0.5 ? -1.0 : 1.0)
-                        * terminalMS * 0.14 * edge;
-                    // Signed visor V: -1 top, 0 bottom. Correct the
-                    // gravity projection's orientation at impact so a
-                    // stationary vehicle cannot launch a drop upward.
-                    float2 surfaceImpact = float2(
-                        fall.x * 0.15 + outward,
-                        max(abs(fall.y), terminalMS * 0.35)
-                            * lerp(1.0, 0.85, edge));
-                    // Small drops can remain pinned after contact; large
-                    // impacts transfer more momentum on the waterproof face.
-                    float mobileFraction = smoothstep(0.65, 1.40,
-                        diameterMM);
-                    float lateral = (rainStateHash(index
-                        + generation * 19.17 + 823.0) - 0.5) * 0.03;
-                    surfaceImpact.x += lateral * terminalMS;
-                    // 1 mm -> 0.0029296875 UV, so UV per metre = 1000
-                    // times the calibrated UV per millimetre. 0.020 is a
-                    // tunable impact-transfer fraction, not free-fall motion.
-                    float2 initialVelocity = surfaceImpact
-                        * (gRainStatePhysicalDiameterUVPerMM * 1000.0)
-                        * 0.020 * saturate(gRainStateBirthSpeedFraction)
-                        * mobileFraction;
-                    if (gRainStateBirthGlideSeconds <= 0.0001)
-                    {
-                        initialVelocity = float2(0.0, 0.0);
-                    }
-                    float impactLimit = rainStateMaxSpeedValue(birthRadius)
-                        * lerp(1.0,
-                            max(gRainStateMobileSpeedMultiplier, 1.0),
-                            gRainStateTravelMix)
-                        * max(gRainStateBirthSpeedCapMultiplier, 1.0);
-                    float impactSpeed = length(initialVelocity);
-                    if (impactSpeed > impactLimit)
-                    {
-                        initialVelocity *= impactLimit
-                            / max(impactSpeed, 0.000001);
-                    }
-
-                    return float4(
-                        respawn,
-                        initialVelocity
-                    );
+                    // A new lifetime begins at rest. The normal surface
+                    // forces take over on the next physics update; its
+                    // visual birth streak belongs to the shared UV mask.
+                    return float4(respawn, 0.0, 0.0);
                 }
 
                 if (status < 0.5)
@@ -1862,8 +1726,7 @@ local rainStateUpdateParams = {
                     radius,
                     mass,
                     index,
-                    dt,
-                    meta.b
+                    dt
                 );
             }
 
@@ -5098,13 +4961,9 @@ local function initializeRainGPUState()
     initialRain = math.max(0.0, math.min(1.0, initialRain or 0.0))
     rainDynamicSceneCopyState.lifecycleRainSmoothed = initialRain
     local initialCar = ac.getCar(0)
-    local initialMix = rainDynamicSceneCopyState.lifecycleTravelMix(
-        initialCar and initialCar.velocity)
-    rainStateUpdateParams.values.gRainStateTravelMix = initialMix
-    rainStateUpdateParams.values.gRainStateBirthSpeedFraction =
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION
-        + (cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION
-            - cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION) * initialMix
+    rainStateUpdateParams.values.gRainStateTravelMix =
+        rainDynamicSceneCopyState.lifecycleTravelMix(
+            initialCar and initialCar.velocity)
     local initialExposure =
         rainDynamicSceneCopyState.lifecycleExposureForVelocity(
             initialCar and initialCar.velocity)
@@ -5284,12 +5143,6 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_FLOW_SPEED_SCALE
     rainStateUpdateParams.values.gRainStateFlowDrag =
         cfg.RUNTIME.RAIN_FLOW_DRAG
-    rainStateUpdateParams.values.gRainStateBirthSpeedCapMultiplier =
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER
-    rainStateUpdateParams.values.gRainStateBirthGlideSeconds =
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS
-    rainStateUpdateParams.values.gRainStateBirthSettleSeconds =
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS
     rainStateUpdateParams.values.gRainStateMobileSpeedMultiplier =
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER
     rainStateUpdateParams.values.gRainStateMobileDrag =
@@ -5361,10 +5214,6 @@ local function updateRainGPUState(sim)
         activeVelocity)
     rainDynamicSceneCopyState.currentTravelMix = travelMix
     rainStateUpdateParams.values.gRainStateTravelMix = travelMix
-    rainStateUpdateParams.values.gRainStateBirthSpeedFraction =
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION
-        + (cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION
-            - cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION) * travelMix
     local exposure = rainDynamicSceneCopyState.lifecycleExposureForVelocity(
         activeVelocity)
     rainStateUpdateParams.values.gRainStateRainIntensity = liveRain
@@ -6897,20 +6746,10 @@ local function requestRainDynamicStateReadback()
                 .. ' centerFallback=' .. tostring(centerFallback)
                 .. ' travelMix=' .. string.format('%.2f',
                     rainStateUpdateParams.values.gRainStateTravelMix)
-                .. ' stillSpeed=' .. string.format('%.2f',
-                    cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION)
-                .. ' birthSpeed=' .. string.format('%.2f',
-                    rainStateUpdateParams.values.gRainStateBirthSpeedFraction)
-                .. ' impactCap=' .. string.format('%.1f',
-                    cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER)
                 .. ' flowCap=' .. string.format('%.1f',
                     cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER)
                 .. ' flowDrag=' .. string.format('%.2f',
                     cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG)
-                .. ' glide=' .. string.format('%.3f',
-                    cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS)
-                .. ' settle=' .. string.format('%.3f',
-                    cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS)
                 .. ' airDown=' .. tostring(
                     cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE)
                 .. ' airDownGain=' .. string.format('%.2f',
@@ -7002,11 +6841,7 @@ local function applyRainDynamicStateToSurfaceMesh()
     )
     predictionAge = math.min(
         predictionAge,
-        cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS,
-        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
-            and math.min(cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS,
-                0.05)
-            or cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS
+        cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS
     )
 
     for i = 0, meshCount - 1 do
@@ -7388,6 +7223,7 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS))
     local cursor = state.trailMaskCursor
     local stamps = {}
+    local fastBirthStamps = 0
     local inspected = 0
     local predictedAge = math.min(math.max(
         rainDynamicStateRenderClock - rainDynamicStateSnapshotTime, 0.0),
@@ -7417,16 +7253,22 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
                     local fastBirth = not old
                         and state.currentTravelMix
                         and state.currentTravelMix > 0.75
-                        and rainDynamicStateRenderClock - birthAt < 0.15
+                        and rainDynamicStateRenderClock - birthAt < 0.35
                         and radius * 2.0 >= 1.4
                             * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
                     local fromU = old and old.u or u
                     local fromV = old and old.v or v
                     if fastBirth then
-                        fromU = u - (rainDynamicStateVelocityU[index] or 0)
-                            * 0.045
-                        fromV = v - (rainDynamicStateVelocityV[index] or 0)
-                            * 0.045
+                        fastBirthStamps = fastBirthStamps + 1
+                        -- Pop-in shape follows signed visor V (-1 top,
+                        -- 0 bottom), while subsequent motion belongs to
+                        -- the regular GPU surface-force model.
+                        local stretch = radius
+                            * cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH
+                            * state.currentTravelMix
+                        fromU = math.max(0.0, math.min(1.0,
+                            u - (u - 0.5) * stretch * 0.60))
+                        fromV = math.max(-1.0, v - stretch)
                     end
                     -- A respawn never draws a line from the previous life.
                     stamps[#stamps + 1] = {
@@ -7467,14 +7309,18 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     state.trailMaskRead = target
     state.trailMaskFrame = sim.frame
     state.trailMaskStamps = (state.trailMaskStamps or 0) + #stamps
+    state.trailMaskFastBirths = (state.trailMaskFastBirths or 0)
+        + fastBirthStamps
     if sim.frame % 180 == 0 then
         ac.log(appNameDebug .. ' Dynamic UV mask: '
             .. tostring(size) .. 'x' .. tostring(size)
             .. ' stamps=' .. tostring(state.trailMaskStamps)
+            .. ' fastBirths=' .. tostring(state.trailMaskFastBirths)
             .. ' budget=' .. tostring(limit)
             .. ' recoverySeconds='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS))
         state.trailMaskStamps = 0
+        state.trailMaskFastBirths = 0
     end
 end
 
@@ -10572,30 +10418,6 @@ function windowMain(dt)
     end
     ui.text('Boundary exits remain active; age sliders change live GPU state.')
 
-    local stillSpeed, stillSpeedChanged = ui.slider(
-        'Stopped impact transfer',
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION,
-        0.0, 0.20, '%.3f'
-    )
-    if stillSpeedChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_STILL_FRACTION = stillSpeed
-    end
-    local birthSpeed, birthSpeedChanged = ui.slider(
-        'Driving impact transfer',
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION,
-        0.0, 1.0, '%.2f'
-    )
-    if birthSpeedChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_FRACTION = birthSpeed
-    end
-    local impactCap, impactCapChanged = ui.slider(
-        'Impact speed cap / surface speed',
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER,
-        1.0, 8.0, '%.1f'
-    )
-    if impactCapChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SPEED_CAP_MULTIPLIER = impactCap
-    end
     local movingCap, movingCapChanged = ui.slider(
         'Moving drop speed / calibrated cap',
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER,
@@ -10611,22 +10433,6 @@ function windowMain(dt)
     )
     if movingDragChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_DRAG = movingDrag
-    end
-    local birthGlide, birthGlideChanged = ui.slider(
-        'New drop glide (seconds)',
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS,
-        0.0, 0.20, '%.3f'
-    )
-    if birthGlideChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_GLIDE_SECONDS = birthGlide
-    end
-    local settleTime, settleChanged = ui.slider(
-        'New drop settle (seconds)',
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS,
-        0.0, 0.30, '%.3f'
-    )
-    if settleChanged then
-        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_SETTLE_SECONDS = settleTime
     end
     ui.text('Driving blend: stopped below 2 m/s; full at 18 m/s.')
 
@@ -10767,6 +10573,14 @@ function windowMain(dt)
     )
     if ridgeSecondsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = ridgeSeconds
+    end
+    local birthStretch, birthStretchChanged = ui.slider(
+        'High-speed birth stamp stretch',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH,
+        1.0, 8.0, '%.1f'
+    )
+    if birthStretchChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_BIRTH_STRETCH = birthStretch
     end
 
     ui.separator()
