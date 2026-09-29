@@ -313,9 +313,13 @@ float4 main(PS_IN pin)
                             * gDynamicDropTrailRidgePixels
                             * ridgeCoverage)
                         * gDynamicDropInvRenderTargetSize;
+                    float2 filmSampleUV = saturate(filmUV + offset);
                     float3 filmScene = txDynamicSnapshot.SampleLevel(
-                        samLinearClamp, saturate(filmUV + offset),
+                        samLinearClamp, filmSampleUV,
                         lerp(2.0, 1.0, ridgeCoverage)).rgb;
+                    if (gDynamicDropTrailSkyCorrection > 0.5)
+                        filmScene = rainDynamicWeatherSkyTone(
+                            filmScene, filmSampleUV);
                     float3 ridgeAccent = float3(0.30, 0.35, 0.38)
                         * ridgeEdge * ridgeCoverage * 0.12;
                     float opacity = filmCoverage
