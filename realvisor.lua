@@ -534,6 +534,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = 0.85,
+        RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION = true,
+        RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION = true,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS = 0.04,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = 1.5,
         RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
@@ -8254,6 +8256,14 @@ float4 main(PS_IN pin)
                 and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS
                 and rainDynamicSceneCopyState.birthMaskRead
                 and 1.0 or 0.0,
+            gDynamicDropBirthSkyCorrection =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
+            gDynamicDropMicroSkyCorrection =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
             gDynamicDropBirthMaskOnly =
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
@@ -10817,6 +10827,18 @@ function windowMain(dt)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION
+        end
+        changed = ui.checkbox('Birth mask weather sky tone',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION
+        end
+        changed = ui.checkbox('Micro circles weather sky tone',
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION =
+                not cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION
         end
         local value
         value, changed = ui.slider('Asymmetric outline strength',
