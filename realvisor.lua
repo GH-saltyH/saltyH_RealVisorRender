@@ -359,6 +359,18 @@ local cfg = scriptSettings:mapConfig({
         -- At r=0.03 / 0.08 / 0.50, approximate eligible fractions are
         -- 0.21 / 0.30 / 0.69 before the optional density multiplier.
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
+        -- Live birth-size keyframes in mm; a slot samples these at birth.
+        RAIN_GPU_SIZE_MIN_DRY = 0.35,
+        RAIN_GPU_SIZE_MIN_LIGHT = 0.35,
+        RAIN_GPU_SIZE_MIN_RAIN = 0.91,
+        RAIN_GPU_SIZE_MIN_HEAVY = 1.15,
+        RAIN_GPU_SIZE_MAX_DRY = 1.40,
+        RAIN_GPU_SIZE_MAX_LIGHT = 2.53,
+        RAIN_GPU_SIZE_MAX_RAIN = 4.10,
+        RAIN_GPU_SIZE_MAX_HEAVY = 4.10,
+        RAIN_GPU_SIZE_BIAS = 2.0,
+        RAIN_GPU_SIZE_RARE_DRY = 0.001,
+        RAIN_GPU_SIZE_RARE_HEAVY = 0.008,
         -- Add encounters from vehicle speed without changing surface flow.
         RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,
         RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
@@ -508,7 +520,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
-        RAIN_DYNAMIC_DROP_TRAIL_ENABLED = false,
         -- Persistent UV wipe mask composited with the static micro layer.
         RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_DEBUG = false,
@@ -555,16 +566,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
-        RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
-        -- Temporary live trail calibration controls; remove the UI after
-        -- the visual values have been selected in the game.
-        RAIN_DYNAMIC_DROP_TRAIL_WIDTH = 0.38,
-        RAIN_DYNAMIC_DROP_TRAIL_OPACITY = 0.35,
-        -- Compare single-sample tangent projection with a second surface lookup.
-        RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE = true,
-        -- Keep CPU trail geometry while suppressing only trail pixels for FPS A/B.
-        RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED = true,
-
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
         RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = false,
@@ -937,36 +938,35 @@ local rainStateUpdateParams = {
         // updates the size in the same frame as the state pass respawns.
         float rainStateBirthDiameterMM(float index, float rain)
         {
-            float intensity = saturate((rain - 0.03) / 0.67);
-            float minimum = lerp(0.35, 1.15, intensity);
-            float maximum = rain <= 0.03
-                ? lerp(1.4, 2.53, saturate(rain / 0.03))
-                : lerp(2.53, 4.1, saturate((rain - 0.03) / 0.47));
-            float rareChance = lerp(0.001, 0.008, saturate(rain));
-            if (rainStateHash(index + 307.0) > 1.0 - rareChance)
+            float minMM, maxMM;
+            if (rain <= 0.03)
             {
-                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
+                float t = saturate(rain / 0.03);
+                minMM = lerp(gRainSizeMinDry, gRainSizeMinLight, t);
+                maxMM = lerp(gRainSizeMaxDry, gRainSizeMaxLight, t);
             }
+            else if (rain <= 0.5)
+            {
+                float t = saturate((rain - 0.03) / 0.47);
+                minMM = lerp(gRainSizeMinLight, gRainSizeMinRain, t);
+                maxMM = lerp(gRainSizeMaxLight, gRainSizeMaxRain, t);
+            }
+            else
+            {
+                float t = saturate((rain - 0.5) / 0.5);
+                minMM = lerp(gRainSizeMinRain, gRainSizeMinHeavy, t);
+                maxMM = lerp(gRainSizeMaxRain, gRainSizeMaxHeavy, t);
+            }
+            float rareChance = lerp(gRainSizeRareDry,
+                gRainSizeRareHeavy, saturate(rain));
+            if (rainStateHash(index + 307.0) > 1.0 - rareChance)
+                return lerp(5.0, 6.0, rainStateHash(index + 619.0));
             float randomSize = rainStateHash(index + 101.0);
-            return lerp(minimum, maximum, randomSize * randomSize);
+            return lerp(minMM, max(minMM, maxMM),
+                pow(randomSize, max(gRainSizeBias, 0.1)));
         }
 
-        /*
-            Final physical droplet model.
-            Every persistent texel uses a deterministic hash-selected
-            diameter in the measured 0.5–6.0 mm domain.
-            Future rain profiles may replace only this distribution.
-        */
-        float rainStatePhysicalDiameterMM(float index)
-        {
-            return lerp(
-                0.5,
-                6.0,
-                rainStateHash(index + 101.0)
-            );
-        }
-
-        float rainStatePhysicalMassProfile(float diameterMM)
+                float rainStatePhysicalMassProfile(float diameterMM)
         {
             float volumeMin = 0.5 * 0.5 * 0.5;
             float volumeMax = 6.0 * 6.0 * 6.0;
@@ -1783,6 +1783,17 @@ local rainStateMetaUpdateParams = {
         gRainStateRespawnGapMax = 0.75,
         gRainStateRainIntensity = 0.0,
         gRainStateTargetOccupancy = 0.0,
+        gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
+        gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
+        gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
+        gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+        gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
+        gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
+        gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
+        gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
+        gRainSizeBias = cfg.RUNTIME.RAIN_GPU_SIZE_BIAS,
+        gRainSizeRareDry = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY,
+        gRainSizeRareHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY,
         gRainStateExposure = 1.0,
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
@@ -4856,6 +4867,7 @@ local function rainStateCountForMode()
             and 9
             or cfg.RUNTIME.RAIN_GPU_STATE_MODE == 7
             and 1
+            or rainDynamicSceneCopyState.allocatedStateCount
             or cfg.RUNTIME.RAIN_GPU_STATE_COUNT
         )
     )
@@ -4942,6 +4954,8 @@ local function initializeRainGPUState()
         rainStateMetaB = nil
         return false
     end
+
+    rainDynamicSceneCopyState.allocatedStateCount = count
 
     local physicalTest =
         cfg.RUNTIME.RAIN_GPU_STATE_MODE == 10 and 1.0 or 0.0
@@ -5247,6 +5261,22 @@ local function updateRainGPUState(sim)
     local exposure = rainDynamicSceneCopyState.lifecycleExposureForVelocity(
         activeVelocity)
     rainStateUpdateParams.values.gRainStateRainIntensity = liveRain
+    -- Birth-size controls affect the next generation without rebuilding state.
+    for _, pair in ipairs({
+        {'gRainSizeMinDry', 'RAIN_GPU_SIZE_MIN_DRY'},
+        {'gRainSizeMinLight', 'RAIN_GPU_SIZE_MIN_LIGHT'},
+        {'gRainSizeMinRain', 'RAIN_GPU_SIZE_MIN_RAIN'},
+        {'gRainSizeMinHeavy', 'RAIN_GPU_SIZE_MIN_HEAVY'},
+        {'gRainSizeMaxDry', 'RAIN_GPU_SIZE_MAX_DRY'},
+        {'gRainSizeMaxLight', 'RAIN_GPU_SIZE_MAX_LIGHT'},
+        {'gRainSizeMaxRain', 'RAIN_GPU_SIZE_MAX_RAIN'},
+        {'gRainSizeMaxHeavy', 'RAIN_GPU_SIZE_MAX_HEAVY'},
+        {'gRainSizeBias', 'RAIN_GPU_SIZE_BIAS'},
+        {'gRainSizeRareDry', 'RAIN_GPU_SIZE_RARE_DRY'},
+        {'gRainSizeRareHeavy', 'RAIN_GPU_SIZE_RARE_HEAVY'},
+    }) do
+        rainStateMetaUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
+    end
     rainStateMetaUpdateParams.values.gRainStateRainIntensity = liveRain
     rainStateMetaUpdateParams.values.gRainStateExposure = exposure
     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
@@ -5976,7 +6006,9 @@ local function initializeRainDynamicSurfaceTest()
 
     rainDynamicSurfaceParent = parent
 
-    local count = math.max(math.floor(cfg.RUNTIME.RAIN_GPU_STATE_COUNT), 1)
+    local count = cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+        and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
+        and 0 or rainStateCountForMode()
     local useMicroPattern = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
         and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
     local microCount = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
@@ -5986,9 +6018,9 @@ local function initializeRainDynamicSurfaceTest()
     local patternVertexCount = useMicroPattern and #vertices or 0
     local patternIndexCount = useMicroPattern and #indices or 0
     local meshVertices = ac.VertexBuffer(
-        count * 8 + microCount * 4 + patternVertexCount)
+        count * 4 + microCount * 4 + patternVertexCount)
     local meshIndices = ac.IndicesBuffer(
-        count * 12 + microCount * 6 + patternIndexCount)
+        count * 6 + microCount * 6 + patternIndexCount)
     rainDynamicSurfaceMeshVertices = meshVertices
     rainDynamicSurfaceMeshCount = count
 
@@ -6044,36 +6076,19 @@ local function initializeRainDynamicSurfaceTest()
         end
 
         local base = vertexIndex - 1
-        -- Draw the trail first; the body should conceal its center endpoint.
-        meshIndices:set(indexIndex, base + 4)
-        meshIndices:set(indexIndex + 1, base + 5)
-        meshIndices:set(indexIndex + 2, base + 6)
-        meshIndices:set(indexIndex + 3, base + 4)
-        meshIndices:set(indexIndex + 4, base + 6)
-        meshIndices:set(indexIndex + 5, base + 7)
-
-        -- Reserve a second quad for a velocity-aligned optical trail.
-        -- It remains degenerate until a moving GPU state is read back.
-        local dead = vec3(0, 0, 0)
-        local fallbackNormal = vec3(0, 0, 1)
-        meshVertices:set(vertexIndex + 4, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 2)))
-        meshVertices:set(vertexIndex + 5, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 2)))
-        meshVertices:set(vertexIndex + 6, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 3)))
-        meshVertices:set(vertexIndex + 7, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 3)))
-        meshIndices:set(indexIndex + 6, base)
-        meshIndices:set(indexIndex + 7, base + 1)
-        meshIndices:set(indexIndex + 8, base + 2)
-        meshIndices:set(indexIndex + 9, base)
-        meshIndices:set(indexIndex + 10, base + 2)
-        meshIndices:set(indexIndex + 11, base + 3)
-
-        vertexIndex = vertexIndex + 8
-        indexIndex = indexIndex + 12
+        meshIndices:set(indexIndex, base)
+        meshIndices:set(indexIndex + 1, base + 1)
+        meshIndices:set(indexIndex + 2, base + 2)
+        meshIndices:set(indexIndex + 3, base)
+        meshIndices:set(indexIndex + 4, base + 2)
+        meshIndices:set(indexIndex + 5, base + 3)
+        vertexIndex = vertexIndex + 4
+        indexIndex = indexIndex + 6
     end
 
     -- A fixed, area-stratified micro-droplet field uses the same visor lookup.
     -- Its indices are first so moving drops composite over this base layer.
-    local microVertexIndex = count * 8 + 1
+    local microVertexIndex = count * 4 + 1
     local microMapped = 0
     local microClusters = math.max(1, math.ceil(microCount / 3))
     for i = 0, microCount - 1 do
@@ -6117,7 +6132,7 @@ local function initializeRainDynamicSurfaceTest()
             center + uOffset + vOffset, normal, vec2(seed * 2 + 1, 1)))
         meshVertices:set(microVertexIndex + 3, ac.MeshVertex.new(
             center - uOffset + vOffset, normal, vec2(seed * 2, 1)))
-        local microBase = count * 8 + i * 4
+        local microBase = count * 4 + i * 4
         meshIndices:set(indexBase, microBase)
         meshIndices:set(indexBase + 1, microBase + 1)
         meshIndices:set(indexBase + 2, microBase + 2)
@@ -6137,7 +6152,7 @@ local function initializeRainDynamicSurfaceTest()
     end
 
     if useMicroPattern then
-        local baseVertex = count * 8 + microCount * 4
+        local baseVertex = count * 4 + microCount * 4
         for i = 1, patternVertexCount do
             local source = vertices:get(i)
             meshVertices:set(baseVertex + i, ac.MeshVertex.new(
@@ -6796,6 +6811,7 @@ local function requestRainDynamicStateReadback()
 end
 
 local function applyRainDynamicStateToSurfaceMesh()
+    if rainDynamicSurfaceMeshCount == 0 then return end
     if not rainDynamicStateHasSnapshot
         or not rainDynamicSurfaceMesh
         or not rainDynamicSurfaceMeshVertices
@@ -6875,7 +6891,7 @@ local function applyRainDynamicStateToSurfaceMesh()
     )
 
     for i = 0, meshCount - 1 do
-        local vertexIndex = i * 8 + 1
+        local vertexIndex = i * 4 + 1
         -- Keep the silhouette stable during a life, but change it on rebirth.
         -- A prime-sized band avoids the former 61-slot repeating pattern.
         local shapeBand = ((i * 73
@@ -6975,85 +6991,6 @@ local function applyRainDynamicStateToSurfaceMesh()
             rainDynamicSurfaceMeshVertices:set(vertexIndex + 3, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 1)))
         end
 
-        local trailSample = nil
-        local tailPosition = nil
-        local trailSpeed = 0.0
-        local trailU = rainDynamicStateVelocityU[i + 1] or 0.0
-        local trailV = rainDynamicStateVelocityV[i + 1] or 0.0
-        if cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
-            and sample and radiusUV > 0.0 and uv
-        then
-            trailSpeed = math.sqrt(trailU * trailU + trailV * trailV)
-            if trailSpeed > 0.0005 then
-                -- Include the head's radius before measuring visible length:
-                -- shorter strips remain entirely inside larger bodies.
-                local tailLength = math.min(radiusUV * 6.0,
-                    radiusUV + math.max(radiusUV * 1.2,
-                        trailSpeed * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS))
-                local tailU = uv.x - trailU / trailSpeed * tailLength
-                local tailV = uv.y - trailV / trailSpeed * tailLength
-                if tailU >= 0.0 and tailU <= 1.0
-                    and tailV >= -1.0 and tailV <= 0.0
-                then
-                    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_FAST_SURFACE then
-                        tailPosition = sample.position
-                            - sample.tangentU * (trailU / trailSpeed
-                                * tailLength * sample.metersPerUVU)
-                            - sample.tangentV * (trailV / trailSpeed
-                                * tailLength * sample.metersPerUVV)
-                        trailSample = sample
-                    else
-                        trailSample = rainDynamicSurfaceSample(
-                            rainDynamicSurfaceLookup,
-                            rainDynamicSurfaceVertices,
-                            vec2(tailU, tailV)
-                        )
-                        tailPosition = trailSample and trailSample.position
-                    end
-                end
-            end
-        end
-        if trailSample then
-            local perpU, perpV = -trailV / trailSpeed, trailU / trailSpeed
-            local headCenter = sample.position + sample.normal * surfaceOffset
-            local tailCenter = tailPosition
-                + trailSample.normal * surfaceOffset
-            local headWidth = sample.tangentU
-                    * (perpU * radiusUV
-                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
-                        * sample.metersPerUVU)
-                + sample.tangentV
-                    * (perpV * radiusUV
-                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
-                        * sample.metersPerUVV)
-            local tailWidth = trailSample.tangentU
-                    * (perpU * radiusUV
-                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
-                        * 0.58 * trailSample.metersPerUVU)
-                + trailSample.tangentV
-                    * (perpV * radiusUV
-                        * cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH
-                        * 0.58 * trailSample.metersPerUVV)
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 4,
-                ac.MeshVertex.new(tailCenter - tailWidth, trailSample.normal,
-                    vec2(shapeBand, 2)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 5,
-                ac.MeshVertex.new(headCenter - headWidth, sample.normal,
-                    vec2(shapeBand + 1, 2)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 6,
-                ac.MeshVertex.new(headCenter + headWidth, sample.normal,
-                    vec2(shapeBand + 1, 3)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 7,
-                ac.MeshVertex.new(tailCenter + tailWidth, trailSample.normal,
-                    vec2(shapeBand, 3)))
-        else
-            local dead = vec3(0, 0, 0)
-            local fallbackNormal = vec3(0, 0, 1)
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 4, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 2)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 5, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 2)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 6, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand + 1, 3)))
-            rainDynamicSurfaceMeshVertices:set(vertexIndex + 7, ac.MeshVertex.new(dead, fallbackNormal, vec2(shapeBand, 3)))
-        end
     end
 
     rainDynamicSurfaceMesh:alterVertices(
@@ -7786,7 +7723,9 @@ render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
 
     updateRainDynamicStateRenderClock(sim)
     requestRainDynamicStateReadback()
-    applyRainDynamicStateToSurfaceMesh()
+    if rainDynamicSurfaceMeshCount > 0 then
+        applyRainDynamicStateToSurfaceMesh()
+    end
 
     if cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS then
         local copyWidth = math.max(1, math.floor((sim.windowWidth or 1) * 0.5 + 0.5))
@@ -8356,12 +8295,6 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
-            gDynamicDropTrailEnabled =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
-                and cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
-                and 1.0 or 0.0,
-            gDynamicDropTrailOpacity =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY,
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,
@@ -10730,6 +10663,21 @@ function windowMain(dt)
     if rainOverrideChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE = rainOverride
     end
+    do
+        local count, changed = ui.slider('GPU drop slots (restart game)',
+            cfg.RUNTIME.RAIN_GPU_STATE_COUNT, 512.0, 4096.0, '%.0f')
+        if changed then
+            cfg.RUNTIME.RAIN_GPU_STATE_COUNT =
+                math.max(512, math.min(4096,
+                    math.floor(count / 512 + 0.5) * 512))
+        end
+        ui.text('Allocated slots: '
+            .. tostring(rainDynamicSceneCopyState.allocatedStateCount or 0)
+            .. ' / selected: '
+            .. tostring(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
+        ui.text('512 = baseline; 3072 = 6x capacity. Change needs game restart.')
+        ui.text('Birth mask redraw and GPU readback scale with live slots; compare FPS.')
+    end
     local densityScale, densityChanged = ui.slider(
         'Moving drop density',
         cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE,
@@ -10737,6 +10685,34 @@ function windowMain(dt)
     )
     if densityChanged then
         cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE = densityScale
+    end
+    ui.separator()
+    ui.text('Moving droplet birth size (mm): weather keyframes')
+    ui.text('Dry=0, Light=0.03, Rain=0.50, Heavy=1.00. New births only.')
+    do
+        for _, key in ipairs({
+            { 'Dry minimum', 'RAIN_GPU_SIZE_MIN_DRY' },
+            { 'Dry maximum', 'RAIN_GPU_SIZE_MAX_DRY' },
+            { 'Light minimum', 'RAIN_GPU_SIZE_MIN_LIGHT' },
+            { 'Light maximum', 'RAIN_GPU_SIZE_MAX_LIGHT' },
+            { 'Rain minimum', 'RAIN_GPU_SIZE_MIN_RAIN' },
+            { 'Rain maximum', 'RAIN_GPU_SIZE_MAX_RAIN' },
+            { 'Heavy minimum', 'RAIN_GPU_SIZE_MIN_HEAVY' },
+            { 'Heavy maximum', 'RAIN_GPU_SIZE_MAX_HEAVY' },
+        }) do
+            local value, changed = ui.slider(key[1] .. ' (mm)',
+                cfg.RUNTIME[key[2]], 0.15, 5.0, '%.2f')
+            if changed then cfg.RUNTIME[key[2]] = value end
+        end
+        local value, changed = ui.slider('Birth size small-drop bias',
+            cfg.RUNTIME.RAIN_GPU_SIZE_BIAS, 0.5, 4.0, '%.2f')
+        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_BIAS = value end
+        value, changed = ui.slider('Rare 5-6 mm chance at dry',
+            cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY, 0.0, 0.03, '%.3f')
+        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARE_DRY = value end
+        value, changed = ui.slider('Rare 5-6 mm chance at heavy',
+            cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY, 0.0, 0.03, '%.3f')
+        if changed then cfg.RUNTIME.RAIN_GPU_SIZE_RARE_HEAVY = value end
     end
     local exposureGain, exposureChanged = ui.slider(
         'Driving rain exposure gain',
@@ -10787,50 +10763,6 @@ function windowMain(dt)
     ui.text('Driving blend: stopped below 2 m/s; full at 18 m/s.')
 
     ui.separator()
-    ui.text('Dynamic drop trail calibration (temporary)')
-    ui.text('Moving head only; history/clearing stationary drops is a later stage.')
-    local trailToggleChanged, _ = ui.checkbox(
-        'Draw dynamic trails',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
-    )
-    if trailToggleChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED =
-            not cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_ENABLED
-    end
-    local trailPixelChanged, _ = ui.checkbox(
-        'Draw trail pixels (keep mesh for FPS A/B)',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
-    )
-    if trailPixelChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED =
-            not cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_PIXEL_ENABLED
-    end
-    local trailWidth, trailWidthChanged = ui.slider(
-        'Trail width / drop radius',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH,
-        0.08, 0.90, '%.2f'
-    )
-    if trailWidthChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_WIDTH = trailWidth
-    end
-    local trailSeconds, trailSecondsChanged = ui.slider(
-        'Trail length / current speed (seconds)',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS,
-        0.08, 1.20, '%.2f'
-    )
-    if trailSecondsChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_SECONDS = trailSeconds
-    end
-    local trailOpacity, trailOpacityChanged = ui.slider(
-        'Trail opacity',
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY,
-        0.05, 0.70, '%.2f'
-    )
-    if trailOpacityChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY = trailOpacity
-    end
-
-    ui.separator()
     ui.text('GPU birth mask: growth probe')
     do
         local changed = ui.checkbox('GPU birth mask enabled',
@@ -10857,6 +10789,7 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
         end
+        ui.text('Changing birth mask only requires game restart to rebuild mesh.')
         changed = ui.checkbox('Birth mask full redraw (no ghost)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW)
         if changed then
