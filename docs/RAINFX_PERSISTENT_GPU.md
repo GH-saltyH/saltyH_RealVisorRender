@@ -5717,3 +5717,67 @@ foreground dynamic drops remain drawable. Fine rain-intensity-dependent
 lifecycle and clearing beneath mobile trails follow after this stage.
 
 Default micro source displacement is 8 screen pixels along the negative lens-local axis. For the nominal ~0.65 mm disk this aims to make the tiny forward view invert across its center; the projected pixel radius changes with visor angle, so verify the direction in game before treating it as calibrated optics.
+
+## Dynamic surface mask architecture after historical-trail cost test
+
+The three-segment CPU/mesh-history experiment was rolled back after the user
+reported approximately 20 FPS total RealVisor cost. That measurement is for the
+whole app, not an isolated 20 FPS trail delta. The accepted micro pattern,
+optics, GPU state lifecycle and scene-ready initialization remain. Measure
+the reverted baseline at the same camera and weather before attributing a
+specific cost to the removed experiment.
+
+### Shared surface signals
+
+Keep the fixed, high-detail micro-circle pattern immutable. Add a small
+persistent visor-UV canvas (start 512x512, RG8 or RGBA8) with two independent
+signals: R = transient water thickness/coverage, G = recent wiping/clearing.
+Use two canvases in ping-pong order: decay the prior canvas into the next one,
+then stamp only newly moved/impacted droplets in one `ExtraCanvas:update()`
+callback. Do not read and write the same canvas in a shader pass. Map signed
+visor V (-1 at top, 0 at bottom) to texture V by adding 1. Preserve the exact
+same UV domain and surface mask as the accepted static pattern.
+
+The final visor shader samples the unchanged micro pattern and the small
+dynamic mask. G suppresses micro circles and the future thin exterior film,
+recovering over time. R supplies a soft, relatively broad refraction/film
+profile. Discarded micro pixels expose the current scene. The mask stores no
+scene color, which remains sampled from the independent GeometryShot at draw
+time. A high-frequency contour or glint may stay in the foreground drop
+optics; do not blur the established micro-circle silhouettes.
+
+Keep the existing GPU state positions, lifecycle and physical forces as the
+source of truth. Use the already available asynchronous state readback to
+stamp only births and positions that moved enough to affect the low-resolution
+canvas. Extrapolate within its bounded prediction age. At birth, one compact
+stamp makes a round or irregular pop-in; with sufficient travel speed and
+birth momentum, stretch this stamp along the actual UV velocity for the short
+impact interval. Continued motion lays down a narrow wipe and film trace,
+which persists for its own lifetime after the head stops or dies. Small heads
+do not need individual 3D quads once a mask-based optical head is validated.
+
+Visual union of overlapping R stamps can look like coalescence, but does not
+transfer mass. True merge must still assign one deterministic survivor and
+update both GPU state/meta passes consistently; retain that as a separate
+bounded-neighbor experiment after the mask path works.
+
+### Validation and fallback
+
+1. Record app-off/on FPS at fixed camera, rain and weather on the reverted
+   build. The historical trail has returned to disabled.
+2. Render only the 512x512 mask as a debug overlay with a low cap on stamps
+   per update (start 64); log submitted stamps and changed UV cells.
+   Compare 256/512/1024 resolutions and mask enabled/disabled.
+3. Composite wipe G against static micro circles. Confirm the circles vanish
+   under a moving droplet and recover from the older path first, with no
+   change in the accepted circle boundary. Then add R as a restrained water
+   film over the same mask.
+4. Only after the mask budget and projection are validated, compare removing
+   CPU surface lookup/readback-driven dynamic head quads against the existing
+   mesh heads. Keep the GeometryShot and static micro pattern identical during
+   the A/B test.
+
+`ExtraCanvas:update()` groups multiple UI draw operations in one update and
+does not clear the prior content. `updateWithShader()` can perform the decay
+pass. This API supports the prototype; its actual draw-call and update cost
+must be measured in CSP before replacing the head renderer.
