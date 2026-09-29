@@ -503,6 +503,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 15.0,
         RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 14.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 0.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 0.65,
+        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 0.50,
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.28,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
@@ -7765,6 +7768,15 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.microPatternGrid or 1,
             gDynamicDropMicroImageScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
+            gDynamicDropMicroImageRotation = vec2(
+                math.cos(math.rad(
+                    cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES)),
+                math.sin(math.rad(
+                    cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES))),
+            gDynamicDropMicroAngleLight =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT,
+            gDynamicDropMicroAngleShadow =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW,
             gDynamicDropMicroNormalGain =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
             gDynamicDropObjectToWorld =
@@ -10316,6 +10328,31 @@ function windowMain(dt)
     )
     if microNormalChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = microNormalGain
+    end
+
+    local microRotation, microRotationChanged = ui.slider(
+        'Micro scene rotation (degrees)',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES,
+        -180.0, 180.0, '%.1f'
+    )
+    if microRotationChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = microRotation
+    end
+    local microAngleLight, microAngleLightChanged = ui.slider(
+        'Micro angle highlight',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT,
+        0.0, 2.0, '%.2f'
+    )
+    if microAngleLightChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = microAngleLight
+    end
+    local microAngleShadow, microAngleShadowChanged = ui.slider(
+        'Micro angle shadow',
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW,
+        0.0, 2.0, '%.2f'
+    )
+    if microAngleShadowChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = microAngleShadow
     end
 
     local microRimWidth, microRimWidthChanged = ui.slider(
