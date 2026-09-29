@@ -81,6 +81,15 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroPatternEnabled - 0.5);
         float2 patternUV = saturate(float2(
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
+        if (gDynamicDropBirthMaskDebug > 0.5)
+        {
+            float birth = txDynamicBirthMask.SampleLevel(
+                samLinearClamp, patternUV, 0.0).r;
+            if (birth > 0.035)
+                return float4(float3(0.12, 0.82, 1.0)
+                    * (0.35 + 0.65 * birth),
+                    saturate(birth * 0.85));
+        }
         // Diagnostic displays UV-space water and wiping coverage over
         // the complete visor, including gaps between static circles.
         if (gDynamicDropTrailMaskDebug > 0.5)
