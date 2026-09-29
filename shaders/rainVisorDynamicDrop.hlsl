@@ -53,15 +53,8 @@ float4 main(PS_IN pin)
     float2 encodedTex = surfaceMicroPattern
         ? float2(0.5, 0.5) : pin.Tex;
     float encodedSeed = floor(encodedTex.x * 0.5);
-    // Whole-number bands keep slot identity independent from the 0..1
-    // local quad UV. Micro and surface-pattern bands remain untouched.
-    bool indexedDrop = encodedSeed >= 4096.0;
-    float dropIndex = indexedDrop
-        ? floor((encodedSeed - 4096.0) / 1024.0) : -1.0;
-    float visualSeed = encodedSeed
-        - (indexedDrop ? 4096.0 + dropIndex * 1024.0 : 0.0);
-    bool microLayer = visualSeed >= 2048.0;
-    float shapeSeed = visualSeed - (microLayer ? 2048.0 : 0.0);
+    bool microLayer = encodedSeed >= 2048.0;
+    float shapeSeed = encodedSeed - (microLayer ? 2048.0 : 0.0);
     float2 quadTex = encodedTex - float2(encodedSeed * 2.0, 0.0);
     // Head quads encode three brief impact-age bands in whole UV steps.
     // Trail quads use 2..3 and therefore have no impact band.
@@ -593,26 +586,6 @@ float4 main(PS_IN pin)
     float z = sqrt(saturate(1.0 - r * r));
     float3 dropNormal = normalize(float3(local / footprintScale, z));
 
-    float3 gpuCameraNormal = float3(0.0, 0.0, 1.0);
-    if (gDynamicDropNormalOptics > 0.5 && indexedDrop)
-    {
-        float2 stateUV = float2(
-            (dropIndex + 0.5) / max(gDynamicDropStateCount, 1.0),
-            0.5);
-        float2 dropVisorUV = txDynamicState.SampleLevel(
-            samPointMicroMask, stateUV, 0.0).xy;
-        float3 objectNormal = txDynamicControl.SampleLevel(
-            samLinearClamp, dropVisorUV, 0.0).rgb * 2.0 - 1.0;
-        float3 worldNormal = normalize(mul(normalize(objectNormal),
-            (float3x3)gDynamicDropObjectToWorld));
-        gpuCameraNormal = normalize(float3(
-            dot(worldNormal, gDynamicDropCameraSide),
-            -dot(worldNormal, gDynamicDropCameraUp),
-            dot(worldNormal, gDynamicDropCameraLook)));
-        if (gpuCameraNormal.z < 0.0)
-            gpuCameraNormal *= -1.0;
-    }
-
     float fresnel = pow(saturate(1.0 - z), 2.4);
 
     float3 lightDirection = normalize(float3(-0.45, -0.55, 0.70));
@@ -733,10 +706,6 @@ float4 main(PS_IN pin)
                     clamp(bentCenter, 0.12, 0.88), orbMode);
                 if (gDynamicDropForwardSceneOnly > 0.5)
                     centerUV = orbDropCenter;
-                if (gDynamicDropNormalOptics > 0.5 && indexedDrop)
-                    centerUV += clamp(gpuCameraNormal.xy
-                        / max(gpuCameraNormal.z, 0.35)
-                        * gDynamicDropNormalSceneGain, -0.20, 0.20);
                 float angle = (frac(shapeSeed * 0.6180339) * 2.0 - 1.0)
                     * gDynamicDropWideRotationRadians;
                 float rotationSin, rotationCos;
@@ -891,35 +860,6 @@ float4 main(PS_IN pin)
         if (gDynamicDropConcaveLensDebug > 0.5
             && wideSide)
             opticalAccent *= 0.55;
-        if (gDynamicDropNormalOptics > 0.5 && indexedDrop)
-        {
-            // Back-facing spherical cap and visor-relative relief:
-            // same light convention as micro disks, independent gains.
-            float3 capNormal = normalize(float3(
-                -dropNormal.xy * gDynamicDropNormalBump,
-                max(dropNormal.z, 0.08)));
-            float3 tangentX = normalize(float3(
-                max(gpuCameraNormal.z, 0.08), 0.0, -gpuCameraNormal.x));
-            float3 tangentY = normalize(cross(gpuCameraNormal, tangentX));
-            float3 worldLightCamera = float3(
-                dot(gDynamicDropMicroLightWorld, gDynamicDropCameraSide),
-                -dot(gDynamicDropMicroLightWorld, gDynamicDropCameraUp),
-                dot(gDynamicDropMicroLightWorld, gDynamicDropCameraLook));
-            float2 tangentLight = float2(
-                dot(worldLightCamera, tangentX),
-                dot(worldLightCamera, tangentY));
-            float2 reliefLight = normalize(tangentLight * 0.55
-                + float2(-0.48, -0.36));
-            float interior = smoothstep(0.08, 0.30, r)
-                * (1.0 - smoothstep(0.55, 0.76, r));
-            float relief = dot(capNormal.xy, reliefLight)
-                * interior * (0.85
-                    + saturate(1.0 - gpuCameraNormal.z) * 0.80);
-            opticalAccent += float3(0.78, 0.90, 1.0)
-                * saturate(relief) * gDynamicDropNormalLight * 0.52;
-            refractedScene *= 1.0
-                - saturate(-relief) * gDynamicDropNormalShadow * 0.42;
-        }
         if (gDynamicDropWideOrbDebug > 0.5
             && gDynamicDropWideSceneDebug > 0.5 && wideSide)
         {
