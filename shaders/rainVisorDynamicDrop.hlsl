@@ -92,6 +92,62 @@ float4 main(PS_IN pin)
             return float4(coverage.r, coverage.g, 0.12,
                 saturate(strength * 0.85));
         }
+        // A thin water film occupies gaps and fully cleared circles.
+        // The established micro material wins where its disk still exists.
+        if (gDynamicDropTrailFilmEnabled > 0.5)
+        {
+            float filmCoverage = txDynamicTrailMask.SampleLevel(
+                samLinearClamp, patternUV, 0.0).r;
+            float2 filmGradient = float2(
+                ddx(filmCoverage), ddy(filmCoverage));
+            if (filmCoverage > 0.04)
+            {
+                float4 filmPattern = txDynamicMicroPattern.SampleLevel(
+                    samLinearClamp, patternUV, 0.0);
+                bool filmHasDisk = filmPattern.a > 0.005
+                    && gDynamicDropMicroRain > 0.001;
+                if (filmHasDisk && gDynamicDropMicroRain < 0.999)
+                {
+                    float filmGate = txDynamicMicroPattern.SampleLevel(
+                        samPointMicroMask, patternUV, 0.0).b;
+                    filmHasDisk = gDynamicDropMicroRain >= filmGate;
+                }
+                if (filmHasDisk
+                    && gDynamicDropTrailMaskWipeEnabled > 0.5)
+                {
+                    float2 filmLocal = filmPattern.xy * 2.0 - 1.0;
+                    float2 diskCenterUV = patternUV - filmLocal
+                        * (0.56 / max(gDynamicDropMicroPatternGrid, 1.0));
+                    float diskClearance = txDynamicTrailMask.SampleLevel(
+                        samLinearClamp, saturate(diskCenterUV), 0.0).g;
+                    float visibleDisk = 1.0 - smoothstep(0.08, 0.70,
+                        saturate(diskClearance
+                            * gDynamicDropTrailMaskWipeStrength));
+                    filmHasDisk = visibleDisk > 0.015;
+                }
+                if (!filmHasDisk)
+                {
+                    float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+                        / gDynamicDropInvScreenSize;
+                    float2 shotScale = lerp(float2(1.0, 1.0),
+                        resolutionRatio, 0.98);
+                    float2 filmUV = pin.PosH.xy
+                        * gDynamicDropInvScreenSize * shotScale;
+                    float2 normal = filmGradient
+                        / max(length(filmGradient), 0.0001);
+                    float edge = saturate(length(filmGradient) * 20.0);
+                    float2 offset = normal * edge
+                        * gDynamicDropTrailFilmPixels
+                        * gDynamicDropInvRenderTargetSize;
+                    float3 filmScene = txDynamicSnapshot.SampleLevel(
+                        samLinearClamp, saturate(filmUV + offset),
+                        2.0).rgb;
+                    return float4(filmScene,
+                        saturate(filmCoverage
+                            * gDynamicDropTrailFilmOpacity));
+                }
+            }
+        }
         // At zero rain, skip the entire static pattern.
         clip(gDynamicDropMicroRain - 0.001);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
