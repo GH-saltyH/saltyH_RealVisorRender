@@ -104,9 +104,12 @@ float4 main(PS_IN pin)
         {
             float birth = txDynamicBirthMask.SampleLevel(
                 samLinearClamp, patternUV, 0.0).r;
-            // Derivatives must be evaluated before per-pixel coverage
-            // branching; the 256px field supplies a soft lens normal.
+            // Screen and visor-UV derivatives are evaluated before the
+            // divergent coverage branch. The wider probe can smooth the
+            // relief where several stamped bodies join.
             float2 birthGradient = float2(ddx(birth), ddy(birth));
+            float2 patternDx = ddx(patternUV);
+            float2 patternDy = ddy(patternUV);
             if (birth > 0.035)
             {
                 if (gDynamicDropBirthMaskDebug > 0.5)
@@ -120,15 +123,37 @@ float4 main(PS_IN pin)
                 float2 sceneUV = pin.PosH.xy
                     * gDynamicDropInvScreenSize
                     * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+                if (gDynamicDropBirthWideNormal > 0.5)
+                {
+                    float stepUV = max(gDynamicDropBirthInvMaskSize
+                        * gDynamicDropBirthNormalReach, 0.000001);
+                    float2 shiftU = float2(stepUV, 0.0);
+                    float2 shiftV = float2(0.0, stepUV);
+                    float2 slopeUV = float2(
+                        txDynamicBirthMask.SampleLevel(samLinearClamp,
+                            saturate(patternUV + shiftU), 0.0).r
+                        - txDynamicBirthMask.SampleLevel(samLinearClamp,
+                            saturate(patternUV - shiftU), 0.0).r,
+                        txDynamicBirthMask.SampleLevel(samLinearClamp,
+                            saturate(patternUV + shiftV), 0.0).r
+                        - txDynamicBirthMask.SampleLevel(samLinearClamp,
+                            saturate(patternUV - shiftV), 0.0).r
+                    ) / (2.0 * stepUV);
+                    birthGradient = float2(
+                        dot(slopeUV, patternDx),
+                        dot(slopeUV, patternDy));
+                }
                 float2 slope = birthGradient
                     / max(length(birthGradient), 0.0001);
-                float edge = saturate(length(birthGradient) * 14.0);
+                float edge = saturate(length(birthGradient)
+                    * gDynamicDropBirthEdgeGain);
                 float2 offset = slope * edge * birth
                     * gDynamicDropBirthRefractionPixels
                     * gDynamicDropInvRenderTargetSize;
                 float2 sampleUV = saturate(sceneUV + offset);
                 float3 scene = txDynamicSnapshot.SampleLevel(
-                    samLinearClamp, sampleUV, 2.0).rgb;
+                    samLinearClamp, sampleUV,
+                    gDynamicDropBirthSceneMip).rgb;
                 if (gDynamicDropBirthSkyCorrection > 0.5)
                     scene = rainDynamicWeatherSkyTone(scene, sampleUV);
 
@@ -161,12 +186,12 @@ float4 main(PS_IN pin)
                     dot(light, tangentX),
                     dot(light, tangentY)) + float2(-0.4, -0.3));
                 float relief = dot(-slope, projectedLight)
-                    * edge * birth;
+                    * edge * birth * gDynamicDropBirthRelief;
                 scene += float3(0.78, 0.90, 1.0)
                     * saturate(relief)
                     * gDynamicDropBirthHighlight;
                 scene *= 1.0 - saturate(-relief)
-                    * gDynamicDropBirthHighlight * 0.25;
+                    * gDynamicDropBirthShadow;
                 float alpha = smoothstep(0.04, 0.25, birth)
                     * gDynamicDropBirthOpacity;
                 return float4(scene, alpha);
