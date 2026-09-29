@@ -529,7 +529,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = 12.0,
         RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.18,
         RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
-        RAIN_DYNAMIC_BIRTH_MASK_SIZE = 256,
+        RAIN_DYNAMIC_BIRTH_MASK_SIZE = 1024,
         RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
         RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
@@ -7409,10 +7409,10 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                 local growth = math.min(age / growTime, 1.0)
                 stamps[#stamps + 1] = {
                     x = u * size, y = (v + 1.0) * size,
-                    radius = math.max(
-                        (rainDynamicStateRadius[index] or 0.0)
-                            * size * 1.3, 2.0)
-                        * (0.28 + 0.72 * growth),
+                    -- State radius is already the physical visor-UV
+                    -- radius; use the same UV span for both canvas axes.
+                    radius = (rainDynamicStateRadius[index] or 0.0)
+                        * size * (0.28 + 0.72 * growth),
                 }
                 fresh = fresh + 1
             end
@@ -7441,9 +7441,8 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                 if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
                     stamps[#stamps + 1] = {
                         x = u * size, y = (v + 1.0) * size,
-                        radius = math.max(
-                            (rainDynamicStateRadius[index] or 0.0)
-                                * size * 1.3, 2.0),
+                        radius = (rainDynamicStateRadius[index] or 0.0)
+                            * size,
                     }
                 end
             end
@@ -10713,6 +10712,15 @@ function windowMain(dt)
             0.20, 3.0, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS = value
+        end
+        value, changed = ui.combo('Birth mask resolution',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 2048 and 3
+                or cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 1024 and 2
+                or 1,
+            { '512 x 512', '1024 x 1024', '2048 x 2048' })
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE =
+                ({ 512, 1024, 2048 })[value]
         end
         value, changed = ui.slider('Birth mask stamps per frame',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS,
