@@ -4987,35 +4987,44 @@ rainDynamicSceneCopyState.lifecycleTravelMix = function(velocity)
 end
 
 local function initializeRainGPUState()
-    if rainStateA and rainStateB and rainStateMetaA and rainStateMetaB then
+    if rainStateInitialized and rainStateA and rainStateB
+        and rainStateMetaA and rainStateMetaB then
         return true
     end
 
     local count = rainStateCountForMode()
 
-    rainStateA = ui.ExtraCanvas(
-        vec2(count, 1),
-        1,
-        render.TextureFormat.R32G32B32A32.Float
-    ):setName('RainFX State A')
+    if not rainStateA then
+        rainStateA = ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State A')
+    end
 
-    rainStateB = ui.ExtraCanvas(
-        vec2(count, 1),
-        1,
-        render.TextureFormat.R32G32B32A32.Float
-    ):setName('RainFX State B')
+    if not rainStateB then
+        rainStateB = ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State B')
+    end
 
-    rainStateMetaA = ui.ExtraCanvas(
-        vec2(count, 1),
-        1,
-        render.TextureFormat.R32G32B32A32.Float
-    ):setName('RainFX State Meta A')
+    if not rainStateMetaA then
+        rainStateMetaA = ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State Meta A')
+    end
 
-    rainStateMetaB = ui.ExtraCanvas(
-        vec2(count, 1),
-        1,
-        render.TextureFormat.R32G32B32A32.Float
-    ):setName('RainFX State Meta B')
+    if not rainStateMetaB then
+        rainStateMetaB = ui.ExtraCanvas(
+            vec2(count, 1),
+            1,
+            render.TextureFormat.R32G32B32A32.Float
+        ):setName('RainFX State Meta B')
+    end
 
     if not rainStateA or not rainStateB or not rainStateMetaA or not rainStateMetaB then
         ac.warn(appNameDebug .. ' Rain GPU state: ExtraCanvas allocation failed')
@@ -5106,10 +5115,26 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.textures.txRainState = false
     rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
 
-    rainStateA:updateWithShader(rainStateUpdateParams)
-    rainStateB:updateWithShader(rainStateUpdateParams)
-    rainStateMetaA:updateWithShader(rainStateMetaUpdateParams)
-    rainStateMetaB:updateWithShader(rainStateMetaUpdateParams)
+    local initPasses = {
+        { rainStateA, rainStateUpdateParams, 'state A' },
+        { rainStateB, rainStateUpdateParams, 'state B' },
+        { rainStateMetaA, rainStateMetaUpdateParams, 'meta A' },
+        { rainStateMetaB, rainStateMetaUpdateParams, 'meta B' },
+    }
+    for _, pass in ipairs(initPasses) do
+        local ok, result = pcall(function()
+            return pass[1]:updateWithShader(pass[2])
+        end)
+        if not ok or result == false then
+            if not rainDynamicSceneCopyState.stateInitWarning then
+                ac.warn(appNameDebug .. ' Rain GPU state init pending at '
+                    .. pass[3] .. ': ' .. tostring(result))
+                rainDynamicSceneCopyState.stateInitWarning = true
+            end
+            return false
+        end
+    end
+    rainDynamicSceneCopyState.stateInitWarning = false
 
     rainStateUpdateParams.values.gRainStateInit = 0.0
     rainStateMetaUpdateParams.values.gRainStateInit = 0.0
@@ -5955,8 +5980,6 @@ local function initializeRainDynamicSurfaceTest()
         return rainDynamicSurfaceMesh ~= nil
     end
 
-    rainDynamicSurfaceInitialized = true
-
     if not rainTargetMesh or #rainTargetMesh == 0 then
         ac.warn(appNameDebug .. ' Dynamic surface test: rainTargetMesh unavailable')
         return false
@@ -6432,6 +6455,8 @@ local function initializeRainDynamicSurfaceTest()
     -- of render.mesh(), because that API also respects SceneReference
     -- visibility on the target CSP build.
     rainDynamicSurfaceMesh:setVisible(false, false)
+
+    rainDynamicSurfaceInitialized = true
 
     ac.log(
         appNameDebug
@@ -7258,6 +7283,30 @@ render.on('main.track.opaque', function()
     rainDynamicSceneCopyState.captureFrame = sim.frame
 end)
 
+-- Complete GPU and transport preparation before transparent callbacks.
+-- These callbacks only consume resources prepared for this exact frame.
+render.onSceneReady(function()
+    if not initialized or not shaderInitialized
+        or not cfg.RUNTIME.RAIN_ENABLED then return end
+    local sim = ac.getSim()
+    if not sim then return end
+    updateRainGPUState(sim)
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE > 0
+        and not rainStateInitialized then return end
+    rainDynamicSceneCopyState.stateReadyFrame = sim.frame
+    if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
+        if not initializeRainDynamicSurfaceTest() then return end
+        rainDynamicSceneCopyState.preparedFrame = sim.frame
+        if not rainDynamicSceneCopyState.prepareReadyLogged then
+            ac.log(appNameDebug .. ' Dynamic drop scene-ready preparation '
+                .. 'complete: state=' .. tostring(rainStateInitialized)
+                .. ' surface=' .. tostring(rainDynamicSurfaceInitialized)
+                .. ' frame=' .. tostring(sim.frame))
+            rainDynamicSceneCopyState.prepareReadyLogged = true
+        end
+    end
+end)
+
 -- Update the independent scene before the main render, as recommended by
 -- the CSP GeometryShot API. The transparent pass only reads this texture.
 render.onSceneReady(function()
@@ -7383,13 +7432,16 @@ render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
         rainDynamicRootCallbackLogged = true
     end
 
-    -- Safe even if the track callback already updated physics this frame:
-    -- updateRainGPUState() is frame-guarded internally.
-    updateRainGPUState(sim)
-
-    if not initializeRainDynamicSurfaceTest() then
+    -- scene-ready prepares GPU state and transport before this draw.
+    if rainDynamicSceneCopyState.preparedFrame ~= sim.frame then
+        if not rainDynamicSceneCopyState.prepareWaitLogged then
+            ac.warn(appNameDebug .. ' Dynamic drop waiting for scene-ready '
+                .. 'GPU and surface preparation')
+            rainDynamicSceneCopyState.prepareWaitLogged = true
+        end
         return
     end
+    rainDynamicSceneCopyState.prepareWaitLogged = false
 
     local rainDynamicDropShader = nil
     for _, shader in ipairs(shaders) do
@@ -8029,7 +8081,12 @@ render.on('main.track.transparent', function()
     -- Persistent GPU state update
     --------------------------------------------------------
 
-    updateRainGPUState(sim)
+    -- Persistent state is prepared at scene-ready before any draw.
+    if cfg.RUNTIME.RAIN_GPU_STATE_MODE > 0
+        and rainDynamicSceneCopyState.stateReadyFrame ~= sim.frame
+    then
+        return
+    end
 
     --------------------------------------------------------
     -- Render
