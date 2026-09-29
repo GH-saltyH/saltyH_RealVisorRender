@@ -457,6 +457,11 @@ local cfg = scriptSettings:mapConfig({
         -- Limit GPU drop optics to the scene directly ahead of each drop.
         RAIN_DYNAMIC_DROP_FORWARD_SCENE_ONLY = true,
         RAIN_DYNAMIC_DROP_FORWARD_SCENE_RADIUS = 0.24,
+        RAIN_DYNAMIC_DROP_NORMAL_OPTICS_ENABLED = false,
+        RAIN_DYNAMIC_DROP_NORMAL_SCENE_GAIN = 0.02,
+        RAIN_DYNAMIC_DROP_NORMAL_BUMP = 0.85,
+        RAIN_DYNAMIC_DROP_NORMAL_LIGHT = 0.75,
+        RAIN_DYNAMIC_DROP_NORMAL_SHADOW = 0.65,
         -- Flip both projected surface axes for a 180-degree lens image test.
         RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE = false,
         -- Source direction follows the projected drop position on the visor.
@@ -5974,7 +5979,7 @@ local function initializeRainDynamicSurfaceTest()
     for i = 0, count - 1 do
         -- Encode a stable per-drop shape seed in whole, even Tex.x bands.
         -- HLSL removes the band before reconstructing 0..1 quad UV.
-        local shapeBand = ((i * 73) % 1021) * 2
+        local shapeBand = (4096 + i * 1024 + (i * 73) % 1021) * 2
         -- Stage 2 visual validation should measure surface mapping, not the
         -- occupancy of a rectangular UV bounding box. Select each diagnostic
         -- UV directly from valid triangles, weighted by triangle UV area.
@@ -6847,9 +6852,10 @@ local function applyRainDynamicStateToSurfaceMesh()
         local vertexIndex = i * 8 + 1
         -- Keep the silhouette stable during a life, but change it on rebirth.
         -- A prime-sized band avoids the former 61-slot repeating pattern.
-        local shapeBand = ((i * 73
-            + (rainDynamicSceneCopyState.generation[i + 1] or 0) * 131)
-            % 1021) * 2
+        local shapeBand = (4096 + i * 1024
+            + (i * 73
+                + (rainDynamicSceneCopyState.generation[i + 1] or 0) * 131)
+                % 1021) * 2
         local active =
             i < stateCount
             and (rainDynamicStateAlive[i + 1] or 0.0) > 0.5
@@ -7774,6 +7780,8 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.microNormalCanvas or false,
             txDynamicTrailMask =
                 rainDynamicSceneCopyState.trailMaskRead or false,
+            txDynamicState = rainStateInitialized
+                and (rainStateReadIsA and rainStateA or rainStateB) or false,
         },
         values = {
             gDynamicDropDebugUV =
@@ -7859,6 +7867,17 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropForwardSceneRadius =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_FORWARD_SCENE_RADIUS,
+            gDynamicDropStateCount = math.max(rainDynamicStateReadbackCount, 1),
+            gDynamicDropNormalOptics =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_OPTICS_ENABLED and 1.0 or 0.0,
+            gDynamicDropNormalSceneGain =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_SCENE_GAIN,
+            gDynamicDropNormalBump =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_BUMP,
+            gDynamicDropNormalLight =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_LIGHT,
+            gDynamicDropNormalShadow =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_SHADOW,
             gDynamicDropOrbInvertImage =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE
                 and 1.0 or 0.0,
@@ -10548,6 +10567,35 @@ function windowMain(dt)
     )
     if ridgeSecondsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = ridgeSeconds
+    end
+
+    ui.separator()
+    ui.text('GPU droplets: visor-normal optics')
+    do
+        local changed = ui.checkbox(
+            'GPU visor-normal optics (compare)',
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_OPTICS_ENABLED)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_OPTICS_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_OPTICS_ENABLED
+        end
+        local value
+        value, changed = ui.slider('GPU normal scene shift',
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_SCENE_GAIN,
+            0.0, 0.20, '%.3f')
+        if changed then cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_SCENE_GAIN = value end
+        value, changed = ui.slider('GPU normal relief',
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_BUMP,
+            0.0, 2.5, '%.2f')
+        if changed then cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_BUMP = value end
+        value, changed = ui.slider('GPU angle highlight',
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_LIGHT,
+            0.0, 2.0, '%.2f')
+        if changed then cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_LIGHT = value end
+        value, changed = ui.slider('GPU angle shadow',
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_SHADOW,
+            0.0, 2.0, '%.2f')
+        if changed then cfg.RUNTIME.RAIN_DYNAMIC_DROP_NORMAL_SHADOW = value end
     end
 
     ui.separator()
