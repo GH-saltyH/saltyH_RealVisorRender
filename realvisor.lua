@@ -6256,7 +6256,11 @@ local function initializeRainDynamicSurfaceTest()
         if rainDynamicSceneCopyState.microPatternCanvas then
             local maskOk, maskResult = pcall(function()
                 return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
-                    values = { gMicroPatternGrid = patternGrid },
+                    values = {
+                        gMicroPatternGrid = patternGrid,
+                        gMicroMaskRadius = 0.81
+                            - cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH
+                    },
                     shader = [[
                         float3 hashMicroCell(float2 cell)
                         {
@@ -6310,7 +6314,7 @@ local function initializeRainDynamicSurfaceTest()
                             // The topmost disk punches out its own thin rim.
                             // Do not reveal an older disk beneath that rim.
                             float interior = best >= 0.0
-                                && radius < 0.81 ? 1.0 : 0.0;
+                                && radius < gMicroMaskRadius ? 1.0 : 0.0;
                             // One activation threshold belongs to the
                             // winning original disk. Erasing that disk never
                             // cuts a new circle through an existing image.
@@ -7862,8 +7866,6 @@ float4 main(PS_IN pin)
             gDynamicDropCameraLook = sim.cameraLook,
             gDynamicDropMicroRimStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
-            gDynamicDropMicroExtraRimWidth =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
@@ -10455,15 +10457,6 @@ function windowMain(dt)
     )
     if microConcaveChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = microConcave
-    end
-
-    local microRimWidth, microRimWidthChanged = ui.slider(
-        'Micro gap / extra rim width',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH,
-        0.0, 0.10, '%.3f'
-    )
-    if microRimWidthChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = microRimWidth
     end
 
     local microRainPower, microRainPowerChanged = ui.slider(
