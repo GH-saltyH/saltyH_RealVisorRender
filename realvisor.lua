@@ -531,6 +531,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 2048,
         RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW = true,
+        RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
+        RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS = 0.04,
+        RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = 1.5,
         RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
         RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
@@ -7408,6 +7411,8 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS)
     local recentCursor = state.birthMaskRecentCursor or 1
     local fresh = 0
+    local stretched = 0
+    local maxMotionRadii = 0.0
 
     -- Give new births a few growing stamps before the rotating refresh
     -- sweep handles all living drops. Rotation avoids low-slot bias.
@@ -7460,11 +7465,37 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                     + (rainDynamicStateVelocityV[index] or 0.0)
                         * predictedAge
                 if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
-                    stamps[#stamps + 1] = {
+                    local radiusPx =
+                        (rainDynamicStateRadius[index] or 0.0) * size
+                    local stamp = {
                         x = u * size, y = (v + 1.0) * size,
-                        radius = (rainDynamicStateRadius[index] or 0.0)
-                            * size,
+                        radius = radiusPx,
                     }
+                    if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH
+                        and radiusPx > 0.0 then
+                        local velocityU =
+                            rainDynamicStateVelocityU[index] or 0.0
+                        local velocityV =
+                            rainDynamicStateVelocityV[index] or 0.0
+                        local speed = math.sqrt(
+                            velocityU * velocityU
+                            + velocityV * velocityV)
+                        local motionRadii = math.min(
+                            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII,
+                            speed
+                                * cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS
+                                / math.max(radiusPx / size, 0.000001))
+                        maxMotionRadii = math.max(maxMotionRadii, motionRadii)
+                        if speed > 0.0 and motionRadii > 0.20 then
+                            local distancePx = motionRadii * radiusPx
+                            stamp.tailX = stamp.x
+                                - velocityU / speed * distancePx
+                            stamp.tailY = stamp.y
+                                - velocityV / speed * distancePx
+                            stretched = stretched + 1
+                        end
+                    end
+                    stamps[#stamps + 1] = stamp
                 end
             end
         end
@@ -7474,10 +7505,22 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         and (cursor - 1 + inspected) % count + 1 or 1
     if #stamps > 0 then
         target:update(function()
+            local bodyColor = rgbm(1.0, 0.0, 0.0, 1.0)
             for _, stamp in ipairs(stamps) do
+                if stamp.tailX then
+                    ui.drawLine(
+                        vec2(stamp.tailX, stamp.tailY),
+                        vec2(stamp.x, stamp.y),
+                        bodyColor,
+                        stamp.radius * 2.0)
+                    ui.drawCircleFilled(
+                        vec2(stamp.tailX, stamp.tailY),
+                        stamp.radius,
+                        bodyColor, 12)
+                end
                 ui.drawCircleFilled(
                     vec2(stamp.x, stamp.y), stamp.radius,
-                    rgbm(1.0, 0.0, 0.0, 1.0), 16)
+                    bodyColor, 16)
             end
         end)
     end
@@ -7485,16 +7528,25 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     state.birthMaskFrame = sim.frame
     state.birthMaskStamps = (state.birthMaskStamps or 0) + #stamps
     state.birthMaskFresh = (state.birthMaskFresh or 0) + fresh
+    state.birthMaskStretched = (state.birthMaskStretched or 0)
+        + stretched
+    state.birthMaskMaxMotion = math.max(
+        state.birthMaskMaxMotion or 0.0, maxMotionRadii)
     if sim.frame % 180 == 0 then
         ac.log(appNameDebug .. ' Dynamic birth mask: '
             .. tostring(size) .. 'x' .. tostring(size)
             .. ' stamps=' .. tostring(state.birthMaskStamps)
             .. ' fresh=' .. tostring(state.birthMaskFresh)
+            .. ' stretched=' .. tostring(state.birthMaskStretched)
+            .. ' maxMotionRadii='
+            .. string.format('%.2f', state.birthMaskMaxMotion)
             .. ' budget=' .. tostring(budget)
             .. ' fullRedraw=' .. tostring(fullRedraw)
             .. ' recovery=' .. tostring(seconds))
         state.birthMaskStamps = 0
         state.birthMaskFresh = 0
+        state.birthMaskStretched = 0
+        state.birthMaskMaxMotion = 0.0
     end
 end
 
@@ -10710,7 +10762,25 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW
         end
+        changed = ui.checkbox('Moving drop body stretch',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH
+        end
         local value
+        value, changed = ui.slider('Moving body lookback (seconds)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS,
+            0.0, 0.12, '%.3f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS = value
+        end
+        value, changed = ui.slider('Moving body max reach (radii)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII,
+            0.0, 3.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = value
+        end
         value, changed = ui.slider('Birth refraction (pixels)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
             0.0, 40.0, '%.1f')
