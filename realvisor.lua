@@ -525,6 +525,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_DEBUG = false,
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.20,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 5.0,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.00,
@@ -8115,6 +8118,15 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropTrailMaskWipeStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH,
+            gDynamicDropTrailFilmEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED
+                and rainDynamicSceneCopyState.trailMaskRead
+                and 1.0 or 0.0,
+            gDynamicDropTrailFilmOpacity =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY,
+            gDynamicDropTrailFilmPixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS,
             gDynamicDropMicroSceneMip =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
@@ -10668,6 +10680,31 @@ function windowMain(dt)
     if wipeSecondsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS =
             wipeSeconds
+    end
+
+    local filmChanged = ui.checkbox(
+        'Thin water film in cleared paths',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED
+    )
+    if filmChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED =
+            not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED
+    end
+    local filmOpacity, filmOpacityChanged = ui.slider(
+        'Thin film opacity',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY,
+        0.0, 0.50, '%.2f'
+    )
+    if filmOpacityChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = filmOpacity
+    end
+    local filmPixels, filmPixelsChanged = ui.slider(
+        'Thin film refraction (pixels)',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS,
+        0.0, 10.0, '%.1f'
+    )
+    if filmPixelsChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = filmPixels
     end
 
     ui.separator()
