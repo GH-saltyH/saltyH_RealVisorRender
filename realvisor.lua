@@ -465,6 +465,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
         -- Orb field radius in screen UV: lower values show a closer scene.
         RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS = 0.48,
+        -- Limit GPU drop optics to the scene directly ahead of each drop.
+        RAIN_DYNAMIC_DROP_FORWARD_SCENE_ONLY = true,
+        RAIN_DYNAMIC_DROP_FORWARD_SCENE_RADIUS = 0.24,
         -- Flip both projected surface axes for a 180-degree lens image test.
         RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE = false,
         -- Source direction follows the projected drop position on the visor.
@@ -7398,8 +7401,15 @@ render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
     end
 
     if not rainDynamicDropShader then
-        ac.warn(appNameDebug .. ' Dynamic drop shader is not loaded')
+        if not rainDynamicSceneCopyState.shaderWaitLogged then
+            ac.warn(appNameDebug .. ' Dynamic drop shader waiting for load')
+            rainDynamicSceneCopyState.shaderWaitLogged = true
+        end
         return
+    end
+    if rainDynamicSceneCopyState.shaderWaitLogged then
+        ac.log(appNameDebug .. ' Dynamic drop shader ready')
+        rainDynamicSceneCopyState.shaderWaitLogged = false
     end
 
     updateRainDynamicStateRenderClock(sim)
@@ -7778,6 +7788,11 @@ float4 main(PS_IN pin)
                 and 1.0 or 0.0,
             gDynamicDropOrbFieldRadius =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS,
+            gDynamicDropForwardSceneOnly =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_FORWARD_SCENE_ONLY
+                and 1.0 or 0.0,
+            gDynamicDropForwardSceneRadius =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_FORWARD_SCENE_RADIUS,
             gDynamicDropOrbInvertImage =
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE
                 and 1.0 or 0.0,
@@ -8956,48 +8971,38 @@ end
 ------------------------------------------------------------
 
 local function initShaders()
-
-    for idx, shader in ipairs(shaders) do
-        
-        local file, err = io.open(shader.PATH, 'r')
-
-        if not file then
-
-            ac.log(
-                appNameDebug
-                .. ' HLSL load failed: '
-                .. shader.PATH
-                .. ' not exists'
-            )
-
-            shader.LOADED = false
-
-
-        else
-
-            ac.log(
-                appNameDebug
-                .. 'SHADER LOADED: '
-                .. shader.ID
-            )
-            
-            shader.HLSL = file:read('*a')
-            file:close()
-
-            shader.LOADED = true
-
-            shaderInitialized = true
-
-            ac.log(
-                appNameDebug
-                .. ' HLSL bytes=' .. tostring(#shader.HLSL)
-                .. ' path=' .. shader.PATH
-            )
-
+    local allLoaded = true
+    for _, shader in ipairs(shaders) do
+        if not shader.LOADED or not shader.HLSL
+            or #shader.HLSL == 0
+        then
+            local file, err = io.open(shader.PATH, 'r')
+            local source = nil
+            if file then
+                source = file:read('*a')
+                file:close()
+            end
+            if source and #source > 0 then
+                shader.HLSL = source
+                shader.LOADED = true
+                shader.RETRY_LOGGED = false
+                ac.log(appNameDebug .. ' SHADER LOADED: ' .. shader.ID
+                    .. ' HLSL bytes=' .. tostring(#source)
+                    .. ' path=' .. shader.PATH)
+            else
+                shader.HLSL = nil
+                shader.LOADED = false
+                allLoaded = false
+                if not shader.RETRY_LOGGED then
+                    ac.warn(appNameDebug .. ' HLSL not ready, retrying: '
+                        .. shader.PATH .. ' error=' .. tostring(err))
+                    shader.RETRY_LOGGED = true
+                end
+            end
         end
     end
+    shaderInitialized = allLoaded
 end
-
 
 ------------------------------------------------------------
 -- Update rain flow
