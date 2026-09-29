@@ -522,6 +522,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.12,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 7.8,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
+        RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
+        RAIN_DYNAMIC_BIRTH_MASK_DEBUG = true,
+        RAIN_DYNAMIC_BIRTH_MASK_SIZE = 256,
+        RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 0.35,
+        RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 2.46,
         RAIN_DYNAMIC_DROP_TRAIL_SECONDS = 0.30,
@@ -7151,6 +7156,17 @@ render.onSceneReady(function()
                 .. tostring(maskError))
             rainDynamicSceneCopyState.maskWarned = true
         end
+        if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED then
+            local birthOk, birthError = pcall(
+                rainDynamicSceneCopyState.updateBirthMask, sim)
+            if not birthOk and not rainDynamicSceneCopyState.birthMaskWarned then
+                ac.warn(appNameDebug .. ' Dynamic birth mask update failed: '
+                    .. tostring(birthError))
+                rainDynamicSceneCopyState.birthMaskWarned = true
+            end
+        else
+            rainDynamicSceneCopyState.birthMaskSuspended = true
+        end
         if not initializeRainDynamicSurfaceTest() then return end
         rainDynamicSceneCopyState.preparedFrame = sim.frame
         if not rainDynamicSceneCopyState.prepareReadyLogged then
@@ -7296,6 +7312,110 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
             .. ' recoverySeconds='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS))
         state.trailMaskStamps = 0
+    end
+end
+
+-- Birth probes use a separate small canvas so their growth cannot erase the
+-- validated R/G wipe and liquid-ridge channels. Only recent GPU births stamp.
+rainDynamicSceneCopyState.updateBirthMask = function(sim)
+    if not rainDynamicStateHasSnapshot then return end
+    local state = rainDynamicSceneCopyState
+    local size = math.max(128, math.floor(
+        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE))
+    if not state.birthMaskA or state.birthMaskSize ~= size then
+        if state.birthMaskA then state.birthMaskA:dispose() end
+        if state.birthMaskB then state.birthMaskB:dispose() end
+        state.birthMaskA = ui.ExtraCanvas(vec2(size, size), 1,
+            render.TextureFormat.R8G8B8A8.UNorm)
+            :setName('RainFX Birth Mask A')
+        state.birthMaskB = ui.ExtraCanvas(vec2(size, size), 1,
+            render.TextureFormat.R8G8B8A8.UNorm)
+            :setName('RainFX Birth Mask B')
+        state.birthMaskA:clear(rgbm.colors.transparent)
+        state.birthMaskB:clear(rgbm.colors.transparent)
+        state.birthMaskRead = state.birthMaskA
+        state.birthMaskSize = size
+        state.birthMaskFrame = nil
+    end
+    if state.birthMaskSuspended then
+        state.birthMaskA:clear(rgbm.colors.transparent)
+        state.birthMaskB:clear(rgbm.colors.transparent)
+        state.birthMaskSuspended = false
+    end
+    if state.birthMaskFrame == sim.frame then return end
+    local source = state.birthMaskRead
+    local target = source == state.birthMaskA
+        and state.birthMaskB or state.birthMaskA
+    local seconds = math.max(
+        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS, 0.05)
+    local decay = math.exp(-math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
+        * 4.0 / seconds)
+    local copied = target:updateWithShader({
+        async = true,
+        textures = { txBirthPrevious = source },
+        values = { gBirthDecay = decay },
+        shader = [[
+            float4 main(PS_IN pin)
+            {
+                float intensity = txBirthPrevious.SampleLevel(
+                    samLinearClamp, pin.Tex, 0.0).r * gBirthDecay;
+                return float4(intensity, 0.0, 0.0, intensity);
+            }
+        ]]
+    })
+    if copied == false then return end
+
+    local stamps = {}
+    local growTime = math.max(
+        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS, 0.01)
+    local ageLimit = math.min(growTime, seconds)
+    local predictedAge = math.min(math.max(
+        rainDynamicStateRenderClock - rainDynamicStateSnapshotTime, 0.0),
+        cfg.RUNTIME.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS)
+    for index = 1, rainDynamicStateReadbackCount do
+        if #stamps >= 48 then break end
+        local birthAt = state.birthSeenAt
+            and state.birthSeenAt[index]
+        local age = birthAt and rainDynamicStateRenderClock - birthAt
+        if age and age >= 0.0 and age < ageLimit
+            and (rainDynamicStateAlive[index] or 0.0) > 0.5
+        then
+            local u = (rainDynamicStateU[index] or -1.0)
+                + (rainDynamicStateVelocityU[index] or 0.0)
+                    * predictedAge
+            local v = (rainDynamicStateV[index] or -2.0)
+                + (rainDynamicStateVelocityV[index] or 0.0)
+                    * predictedAge
+            if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
+                local growth = math.min(age / growTime, 1.0)
+                local radius = math.max(
+                    (rainDynamicStateRadius[index] or 0.0) * size * 1.3,
+                    2.0) * (0.28 + 0.72 * growth)
+                stamps[#stamps + 1] = {
+                    x = u * size, y = (v + 1.0) * size,
+                    radius = radius,
+                }
+            end
+        end
+    end
+    if #stamps > 0 then
+        target:update(function()
+            for _, stamp in ipairs(stamps) do
+                ui.drawCircleFilled(
+                    vec2(stamp.x, stamp.y), stamp.radius,
+                    rgbm(1.0, 0.0, 0.0, 1.0), 16)
+            end
+        end)
+    end
+    state.birthMaskRead = target
+    state.birthMaskFrame = sim.frame
+    state.birthMaskStamps = (state.birthMaskStamps or 0) + #stamps
+    if sim.frame % 180 == 0 then
+        ac.log(appNameDebug .. ' Dynamic birth mask: '
+            .. tostring(size) .. 'x' .. tostring(size)
+            .. ' stamps=' .. tostring(state.birthMaskStamps)
+            .. ' lifespan=' .. tostring(seconds))
+        state.birthMaskStamps = 0
     end
 end
 
@@ -7774,6 +7894,8 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.microNormalCanvas or false,
             txDynamicTrailMask =
                 rainDynamicSceneCopyState.trailMaskRead or false,
+            txDynamicBirthMask =
+                rainDynamicSceneCopyState.birthMaskRead or false,
         },
         values = {
             gDynamicDropDebugUV =
@@ -7947,6 +8069,11 @@ float4 main(PS_IN pin)
             gDynamicDropCameraLook = sim.cameraLook,
             gDynamicDropMicroRimStrength =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
+            gDynamicDropBirthMaskDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG
+                and rainDynamicSceneCopyState.birthMaskRead
+                and 1.0 or 0.0,
             gDynamicDropTrailMaskDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
@@ -10453,6 +10580,36 @@ function windowMain(dt)
     )
     if trailOpacityChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_DROP_TRAIL_OPACITY = trailOpacity
+    end
+
+    ui.separator()
+    ui.text('GPU birth mask: growth probe')
+    do
+        local changed = ui.checkbox('GPU birth mask enabled',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+        end
+        changed = ui.checkbox('Show cyan birth mask',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG)
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG =
+                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG
+        end
+        local value
+        value, changed = ui.slider('Birth growth time (seconds)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS,
+            0.03, 0.35, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = value
+        end
+        value, changed = ui.slider('Birth mask lifetime (seconds)',
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS,
+            0.10, 1.0, '%.2f')
+        if changed then
+            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS = value
+        end
     end
 
     ui.separator()
