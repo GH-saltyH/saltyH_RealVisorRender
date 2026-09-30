@@ -65,6 +65,21 @@ float3 rainDynamicWeatherSkyTone(float3 scene, float2 uv)
     return gDynamicDropWeatherFogColor * contrast;
 }
 
+// Water field tap: the higher of head canvas and trail canvas wins, so a
+// head moving over its own trail keeps its own radius code.
+float4 rainWaterFieldTap(float2 uv)
+{
+    float4 head = txDynamicBirthMask.SampleLevel(samLinearClamp, uv, 0.0);
+    if (gDynamicDropWFTrail > 0.5)
+    {
+        float4 trail = txDynamicWaterTrail.SampleLevel(samLinearClamp,
+            uv, 0.0);
+        if (trail.g > head.g)
+            return trail;
+    }
+    return head;
+}
+
 float4 main(PS_IN pin)
 {
     bool surfaceMicroPattern = pin.Tex.x < -2.5;
@@ -95,7 +110,80 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroPatternEnabled - 0.5);
         float2 patternUV = saturate(float2(
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
-        if (gDynamicDropBirthMaskDebug > 0.5
+        if (gDynamicDropWaterField > 0.5)
+        {
+            // Water field (docs/RAINFX_WATER_FIELD.md). G = union height of
+            // soft kernels, R/G = radius code (texels / 32), B/G = impact
+            // energy. Heads and the decaying trail canvas share one rule.
+            float2 stepU = float2(gDynamicDropWFNormalStep, 0.0);
+            float2 stepV = float2(0.0, gDynamicDropWFNormalStep);
+            float4 w0 = rainWaterFieldTap(patternUV);
+            float hU1 = rainWaterFieldTap(patternUV + stepU).g;
+            float hU0 = rainWaterFieldTap(patternUV - stepU).g;
+            float hV1 = rainWaterFieldTap(patternUV + stepV).g;
+            float hV0 = rainWaterFieldTap(patternUV - stepV).g;
+            float h0 = w0.g;
+            // Derivatives before any per-pixel branch.
+            float2 wfDx = ddx(patternUV);
+            float2 wfDy = ddy(patternUV);
+            float hWidth = max(fwidth(h0) * 0.75, 0.004);
+            float inside = smoothstep(gDynamicDropWFThreshold - hWidth,
+                gDynamicDropWFThreshold + hWidth, h0);
+            if (gDynamicDropWFDebug > 0.5 && gDynamicDropWFDebug < 1.5
+                && h0 > 0.01)
+                return float4(h0, inside, 0.0, 0.85);
+            if (inside > 0.003)
+            {
+                float2 gradUV = float2(hU1 - hU0, hV1 - hV0)
+                    / (2.0 * max(gDynamicDropWFNormalStep, 1e-6));
+                float radiusUV = w0.r / max(w0.g, 0.02) * 32.0
+                    * gDynamicDropWFInvMaskSize;
+                float wfDet = wfDx.x * wfDy.y - wfDx.y * wfDy.x;
+                float radiusPx = radiusUV / sqrt(max(abs(wfDet), 1e-14));
+                // Dimensionless screen slope; points toward the drop centre
+                // (height increases inward). Shape independent.
+                float2 slope = float2(dot(gradUV, wfDx), dot(gradUV, wfDy))
+                    * radiusPx;
+                float slopeLen = length(slope);
+                if (gDynamicDropWFDebug > 1.5)
+                    return float4(slope * 0.5 + 0.5, 0.0, inside);
+                float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+                    / gDynamicDropInvScreenSize;
+                float2 sceneUV = pin.PosH.xy * gDynamicDropInvScreenSize
+                    * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+                // One rule for every drop: look toward (and past) the
+                // centre. The rim at the top sees below, the bottom rim sees
+                // above, so each image is inverted and neighbours agree.
+                float aspect = gDynamicDropInvScreenSize.x
+                    / max(gDynamicDropInvScreenSize.y, 1e-9);
+                float2 sampleUV = saturate(sceneUV + slope
+                    * gDynamicDropWFRefraction * float2(aspect, 1.0));
+                float wfMip = gDynamicDropWFSceneMip
+                    + gDynamicDropWFSlopeMip * saturate(slopeLen / 1.5);
+                float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp,
+                    sampleUV, wfMip).rgb;
+                if (gDynamicDropBirthSkyCorrection > 0.5)
+                    color = rainDynamicWeatherSkyTone(color, sampleUV);
+                // Steep rim: refraction/total internal reflection sends the
+                // view out of the scene, so energy is lost there.
+                color *= 1.0 - gDynamicDropWFEdgeLoss * smoothstep(
+                    gDynamicDropWFLossStart, gDynamicDropWFLossEnd, slopeLen);
+                // Lower inner rim picks up the broad sky (world up).
+                float2 screenUp = float2(gDynamicDropCameraSide.y,
+                    -gDynamicDropCameraUp.y);
+                screenUp = dot(screenUp, screenUp) > 1e-6
+                    ? normalize(screenUp) : float2(0.0, -1.0);
+                float facing = slopeLen > 1e-4
+                    ? saturate(dot(slope / slopeLen, screenUp)) : 0.0;
+                float energy = w0.b / max(w0.g, 0.02);
+                float glint = facing * facing * facing * facing
+                    * smoothstep(0.5, 1.1, slopeLen)
+                    * gDynamicDropWFGlint * (1.0 + energy);
+                color += gDynamicDropWeatherFogColor * glint;
+                return float4(color, inside * gDynamicDropWFOpacity);
+            }
+        }
+        else if (gDynamicDropBirthMaskDebug > 0.5
             || gDynamicDropBirthMaskOptics > 0.5)
         {
             float4 birthSample = txDynamicBirthMask.SampleLevel(

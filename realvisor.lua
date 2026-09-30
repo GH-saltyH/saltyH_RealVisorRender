@@ -336,7 +336,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 4096,
+        RAIN_GPU_STATE_COUNT = 2048,
 
         -- Persistent state:
         -- 0 = disabled
@@ -571,6 +571,40 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
         RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
+
+        -- Water field (docs/RAINFX_WATER_FIELD.md). Heads are drawn as soft
+        -- height kernels into the birth-mask canvas (fp16): G = union height,
+        -- R/G = radius code (radius texels / 32), B/G = impact energy.
+        -- A threshold on G gives the silhouette, so overlapping kernels merge
+        -- like metaballs; the slope of G drives one screen-space refraction
+        -- rule for every shape (round, lobed, torn, trail). false = legacy.
+        RAIN_DYNAMIC_WATER_FIELD_ENABLED = true,
+        RAIN_DYNAMIC_WATER_FIELD_DEBUG = 0, -- 1 height/silhouette, 2 slope
+        RAIN_DYNAMIC_WATER_FIELD_THRESHOLD = 0.35,
+        RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE = 1.24,
+        RAIN_DYNAMIC_WATER_FIELD_REFRACTION = 0.35, -- shot heights at slope 1
+        RAIN_DYNAMIC_WATER_FIELD_SCENE_MIP = 3.0,
+        RAIN_DYNAMIC_WATER_FIELD_SLOPE_MIP = 1.5,
+        RAIN_DYNAMIC_WATER_FIELD_EDGE_LOSS = 0.75,
+        RAIN_DYNAMIC_WATER_FIELD_LOSS_START = 0.70,
+        RAIN_DYNAMIC_WATER_FIELD_LOSS_END = 1.30,
+        RAIN_DYNAMIC_WATER_FIELD_GLINT = 0.45,
+        RAIN_DYNAMIC_WATER_FIELD_OPACITY = 0.97,
+        RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS = 1.0,
+        RAIN_DYNAMIC_WATER_FIELD_LOBES = true,
+        RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH = 0.35,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED = true,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH = 50.0,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH = 150.0,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.35,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 1.2,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED = true,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE = 1024,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 1.4,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.45,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.9,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 450.0,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED = 0.004, -- visor UV / s
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.11,
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
@@ -7283,6 +7317,270 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     end
 end
 
+
+-- Water field helpers (docs/RAINFX_WATER_FIELD.md). Stored on the shared
+-- state table instead of new chunk-level locals (Lua local/upvalue limits).
+rainDynamicSceneCopyState.waterKernel = function(state)
+    if state.waterKernelCanvas then return state.waterKernelCanvas end
+    local canvas = ui.ExtraCanvas(vec2(64, 64), 1,
+        render.TextureFormat.R8G8B8A8.UNorm)
+        :setName('RainFX water kernel')
+    -- Straight alpha dome h = 1 - r^2, zero at the quad's inscribed circle.
+    canvas:updateWithShader({
+        blendMode = render.BlendMode.Opaque,
+        shader = [[
+            float4 main(PS_IN pin)
+            {
+                float2 p = pin.Tex * 2.0 - 1.0;
+                return float4(1.0, 1.0, 1.0, saturate(1.0 - dot(p, p)));
+            }
+        ]]
+    })
+    state.waterKernelCanvas = canvas
+    return canvas
+end
+
+-- Draws every head stamp as soft kernels. Called inside canvas:update().
+rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
+    size, sim)
+    local kernel = state.waterKernel(state)
+    local ks = math.max(1.0, cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
+    local q1, q2, q3, q4 = vec2(), vec2(), vec2(), vec2()
+    local color = rgbm(0.0, 1.0, 0.0, 1.0)
+    local function kernelQuad(cx, cy, rx, ry, ux, uy, code, energy)
+        local ax, ay = rx * ks, ry * ks
+        local vx, vy = -uy, ux
+        q1.x, q1.y = cx - ux * ax - vx * ay, cy - uy * ax - vy * ay
+        q2.x, q2.y = cx + ux * ax - vx * ay, cy + uy * ax - vy * ay
+        q3.x, q3.y = cx + ux * ax + vx * ay, cy + uy * ax + vy * ay
+        q4.x, q4.y = cx - ux * ax + vx * ay, cy - uy * ax + vy * ay
+        color.r = math.min(code, 1.0)
+        color.g = 1.0
+        color.b = energy
+        color.mult = 1.0
+        ui.drawImageQuad(kernel, q1, q2, q3, q4, color)
+    end
+    local lobes = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES
+    local stretchGain = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH
+    local car = ac.getCar(0)
+    local kmh = car and car.speedKmh or 0.0
+    local tearMin = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH
+    local tearAmount = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED
+        and math.max(0.0, math.min(1.0, (kmh - tearMin) / math.max(
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH - tearMin,
+            1.0))) or 0.0
+    local tearSeconds = math.max(
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS, 0.01)
+    local tearMinRadiusUV =
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM * 0.5
+        * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+    local drawn = 0
+    for _, stamp in ipairs(stamps) do
+        local R = stamp.radius or 0.0
+        if R > 0.25 then
+            local index = stamp.index
+            local code = R / 32.0
+            local vu = rainDynamicStateVelocityU[index] or 0.0
+            local vv = rainDynamicStateVelocityV[index] or 0.0
+            local speed = math.sqrt(vu * vu + vv * vv)
+            local ux, uy = 1.0, 0.0
+            if speed > 1e-6 then ux, uy = vu / speed, vv / speed end
+            local generation = state.generation
+                and state.generation[index] or 0
+            local seedA = rainDynamicSurfaceFrac(index * 0.7548776662
+                + generation * 0.5698402911)
+            local seedB = rainDynamicSurfaceFrac(index * 0.6180339887
+                + generation * 0.4142135623)
+            if speed <= 1e-6 then
+                local angle = seedA * math.pi
+                ux, uy = math.cos(angle), math.sin(angle)
+            end
+            -- Body: mild stretch along motion, radius-relative.
+            local stretch = math.min(0.6, speed * stretchGain
+                / math.max(R / size, 1e-6) * 0.05)
+            kernelQuad(stamp.x, stamp.y, R * (1.0 + 0.6 * stretch),
+                R * (1.0 - 0.25 * stretch), ux, uy, code, 0.0)
+            drawn = drawn + 1
+            -- Tapered tail: two shrinking kernels toward the tail point.
+            if stamp.tailX then
+                for k = 1, 2 do
+                    local t = k * 0.4
+                    kernelQuad(stamp.x + (stamp.tailX - stamp.x) * t,
+                        stamp.y + (stamp.tailY - stamp.y) * t,
+                        R * (0.85 - 0.3 * t), R * (0.85 - 0.3 * t),
+                        ux, uy, code, 0.0)
+                end
+                drawn = drawn + 2
+            end
+            -- Existing per-life lobe and puddle circles become kernels.
+            if stamp.lobeX then
+                kernelQuad(stamp.lobeX, stamp.lobeY, stamp.lobeRadius,
+                    stamp.lobeRadius, ux, uy, stamp.lobeRadius / 32.0, 0.0)
+                drawn = drawn + 1
+            end
+            if stamp.puddleX then
+                kernelQuad(stamp.puddleX, stamp.puddleY, stamp.puddleRadius,
+                    stamp.puddleRadius, ux, uy, stamp.puddleRadius / 32.0, 0.0)
+                kernelQuad(stamp.puddle2X, stamp.puddle2Y,
+                    stamp.puddle2Radius, stamp.puddle2Radius, ux, uy,
+                    stamp.puddle2Radius / 32.0, 0.0)
+                drawn = drawn + 2
+            end
+            -- Stable per-life irregular outline: 0-2 offset kernels.
+            if lobes and R >= 2.0 then
+                local count = R >= 4.0 and 2 or 1
+                for k = 1, count do
+                    local a = (seedA + k * 0.37) * math.pi * 2.0
+                    local d = R * (0.25 + 0.30 * rainDynamicSurfaceFrac(
+                        seedB * 7.13 + k * 0.29))
+                    local rr = R * (0.45 + 0.30 * rainDynamicSurfaceFrac(
+                        seedA * 5.71 + k * 0.53))
+                    kernelQuad(stamp.x + math.cos(a) * d,
+                        stamp.y + math.sin(a) * d, rr, rr, ux, uy,
+                        R / 32.0, 0.0)
+                end
+                drawn = drawn + count
+            end
+            -- Impact at speed: torn sheet with radial fingers, briefly.
+            local birthAt = state.birthSeenAt and state.birthSeenAt[index]
+            local age = birthAt and rainDynamicStateRenderClock - birthAt
+            if tearAmount > 0.0 and age and age >= 0.0 and age < tearSeconds
+                and (rainDynamicStateRadius[index] or 0.0) >= tearMinRadiusUV
+            then
+                local life = age / tearSeconds
+                local fingers = math.floor(3 + 6 * tearAmount)
+                for k = 1, fingers do
+                    local f1 = rainDynamicSurfaceFrac(seedA * 3.1 + k * 0.618)
+                    local f2 = rainDynamicSurfaceFrac(seedB * 4.7 + k * 0.414)
+                    local a = math.atan2(uy, ux) + (f1 * 2.0 - 1.0) * 2.2
+                    local ca, sa = math.cos(a), math.sin(a)
+                    local d = R * (0.8 + 1.1 * f2) * (0.7 + tearAmount)
+                        * (1.0 + 0.6 * life)
+                    local rr = R * (0.15 + 0.25 * f1) * (1.0 - 0.5 * life)
+                    kernelQuad(stamp.x + ca * d, stamp.y + sa * d,
+                        rr * (1.0 + 1.6 * f2), rr, ca, sa, rr * 1.2 / 32.0,
+                        1.0)
+                end
+                drawn = drawn + fingers
+            end
+        end
+    end
+    state.waterFieldKernels = drawn
+end
+
+-- Persistent, noisily decaying trail canvas (thinner copies of moving heads).
+rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
+    headSize, sim)
+    if not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED then
+        state.waterTrailReady = false
+        return
+    end
+    local size = math.max(128, math.floor(
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE))
+    if not state.waterTrailA or state.waterTrailSize ~= size then
+        if state.waterTrailA then state.waterTrailA:dispose() end
+        if state.waterTrailB then state.waterTrailB:dispose() end
+        state.waterTrailA = ui.ExtraCanvas(vec2(size, size), 1,
+            render.TextureFormat.R16G16B16A16.Float)
+            :setName('RainFX water trail A')
+        state.waterTrailB = ui.ExtraCanvas(vec2(size, size), 1,
+            render.TextureFormat.R16G16B16A16.Float)
+            :setName('RainFX water trail B')
+        state.waterTrailA:clear(rgbm.colors.transparent)
+        state.waterTrailB:clear(rgbm.colors.transparent)
+        state.waterTrailRead = state.waterTrailA
+        state.waterTrailSize = size
+    end
+    local source = state.waterTrailRead
+    local target = source == state.waterTrailA
+        and state.waterTrailB or state.waterTrailA
+    local seconds = math.max(
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS, 0.05)
+    -- ln(1 / threshold) ~ 1.05: a full-height texel crosses the
+    -- silhouette threshold after about `seconds`.
+    local decay = math.exp(-math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
+        * 1.05 / seconds)
+    local copied = target:updateWithShader({
+        async = true,
+        blendMode = render.BlendMode.Opaque,
+        textures = { txTrailPrevious = source },
+        values = {
+            gTrailDecay = decay,
+            gTrailNoise = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE,
+            gTrailNoiseCells =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS,
+        },
+        shader = [[
+            float trailHash(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
+            }
+            float trailNoise(float2 x)
+            {
+                float2 i = floor(x);
+                float2 f = frac(x);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = trailHash(i);
+                float b = trailHash(i + float2(1.0, 0.0));
+                float c = trailHash(i + float2(0.0, 1.0));
+                float d = trailHash(i + float2(1.0, 1.0));
+                return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+            }
+            float4 main(PS_IN pin)
+            {
+                float4 previous = txTrailPrevious.SampleLevel(
+                    samLinearClamp, pin.Tex, 0.0);
+                // Spatially varying decay: thinning tracks break into
+                // beads where the noise keeps water longer.
+                float n = trailNoise(pin.Tex * gTrailNoiseCells);
+                float k = pow(gTrailDecay,
+                    max(0.05, 1.0 + gTrailNoise * (n * 2.0 - 1.0)));
+                float4 next = previous * k;
+                return next.g < 0.02 ? float4(0.0, 0.0, 0.0, 0.0) : next;
+            }
+        ]]
+    })
+    if copied == false then return end
+    state.waterTrailRead = target
+    state.waterTrailReady = true
+    local scale = size / math.max(headSize, 1)
+    local minSpeed = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED
+    local width = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH
+    local kernel = state.waterKernel(state)
+    local ks = math.max(1.0, cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
+    local p1, p2 = vec2(), vec2()
+    local color = rgbm(0.0, 1.0, 0.0, 1.0)
+    local trails = 0
+    target:update(function()
+        for _, stamp in ipairs(stamps) do
+            local index = stamp.index
+            local vu = rainDynamicStateVelocityU[index] or 0.0
+            local vv = rainDynamicStateVelocityV[index] or 0.0
+            local speed = math.sqrt(vu * vu + vv * vv)
+            local R = stamp.radius or 0.0
+            if speed >= minSpeed and R > 0.5 then
+                -- Just behind the head, so the head itself stays crisp.
+                local back = R * 0.9 / speed
+                local x = (stamp.x - vu * back) * scale
+                local y = (stamp.y - vv * back) * scale
+                local r = R * width * scale * ks
+                p1.x, p1.y = x - r, y - r
+                p2.x, p2.y = x + r, y + r
+                -- Radius code stays in head-mask texels for one decode.
+                color.r = math.min(R * width / 32.0, 1.0)
+                color.g = 1.0
+                color.b = 0.0
+                color.mult = 1.0
+                ui.drawImage(kernel, p1, p2, color)
+                trails = trails + 1
+            end
+        end
+    end)
+    state.waterTrailStamps = trails
+end
+
 -- Birth probes use a separate small canvas so their growth cannot erase the
 -- validated R/G wipe and liquid-ridge channels. Only recent GPU births stamp.
 rainDynamicSceneCopyState.updateBirthMask = function(sim)
@@ -7290,11 +7588,18 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     local state = rainDynamicSceneCopyState
     local size = math.max(128, math.floor(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE))
-    if not state.birthMaskA or state.birthMaskSize ~= size then
+    -- The water field needs fp16 height and radius channels.
+    local waterField = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
+    local birthFormat = waterField
+        and render.TextureFormat.R16G16B16A16.Float
+        or render.TextureFormat.R8G8B8A8.UNorm
+    if not state.birthMaskA or state.birthMaskSize ~= size
+        or state.birthMaskWaterField ~= waterField then
         if state.birthMaskA then state.birthMaskA:dispose() end
         if state.birthMaskB then state.birthMaskB:dispose() end
+        state.birthMaskWaterField = waterField
         state.birthMaskA = ui.ExtraCanvas(vec2(size, size), 1,
-            render.TextureFormat.R8G8B8A8.UNorm)
+            birthFormat)
             :setName('RainFX Birth Mask A')
         state.birthMaskB = nil
         state.birthMaskA:clear(rgbm.colors.transparent)
@@ -7312,7 +7617,10 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         state.birthMaskSuspended = false
     end
     if state.birthMaskFrame == sim.frame then return end
+    -- Water-field heads redraw every frame; the separate trail canvas keeps
+    -- history. Self-accumulating heads would flatten into plateaus.
     local fullRedraw = cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW
+        or waterField
     local target
     local seconds = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS, 0.05)
@@ -7327,7 +7635,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     else
         if not state.birthMaskB then
             state.birthMaskB = ui.ExtraCanvas(vec2(size, size), 1,
-                render.TextureFormat.R8G8B8A8.UNorm)
+                birthFormat)
                 :setName('RainFX Birth Mask B')
             state.birthMaskB:clear(rgbm.colors.transparent)
         end
@@ -7537,7 +7845,16 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             end
         end
     end
-    if #stamps > 0 then
+    if waterField then
+        -- Bake the kernel outside any canvas:update() callback.
+        state.waterKernel(state)
+        if #stamps > 0 then
+            target:update(function()
+                state.waterFieldDrawStamps(state, stamps, size, sim)
+            end)
+        end
+        state.waterFieldUpdateTrail(state, stamps, size, sim)
+    elseif #stamps > 0 then
         target:update(function()
             for _, stamp in ipairs(stamps) do
                 -- R: footprint, G/B: the unwarped droplet center in
@@ -8083,6 +8400,8 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.trailMaskRead or false,
             txDynamicBirthMask =
                 rainDynamicSceneCopyState.birthMaskRead or false,
+            txDynamicWaterTrail =
+                rainDynamicSceneCopyState.waterTrailRead or false,
         },
         values = {
             gDynamicDropDebugUV =
@@ -8351,6 +8670,41 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
+            gDynamicDropWaterField =
+                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
+                and rainDynamicSceneCopyState.birthMaskRead
+                and rainDynamicSceneCopyState.birthMaskWaterField
+                and 1.0 or 0.0,
+            gDynamicDropWFTrail =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED
+                and rainDynamicSceneCopyState.waterTrailReady
+                and rainDynamicSceneCopyState.waterTrailRead
+                and 1.0 or 0.0,
+            gDynamicDropWFDebug = math.floor(
+                (cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG or 0) + 0.5),
+            gDynamicDropWFThreshold =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_THRESHOLD,
+            gDynamicDropWFRefraction =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_REFRACTION,
+            gDynamicDropWFSceneMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SCENE_MIP,
+            gDynamicDropWFSlopeMip =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SLOPE_MIP,
+            gDynamicDropWFEdgeLoss =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_EDGE_LOSS,
+            gDynamicDropWFLossStart =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOSS_START,
+            gDynamicDropWFLossEnd =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOSS_END,
+            gDynamicDropWFGlint = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GLINT,
+            gDynamicDropWFOpacity =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_OPACITY,
+            gDynamicDropWFNormalStep =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
+                / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
+            gDynamicDropWFInvMaskSize = 1.0
+                / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,
@@ -11150,6 +11504,81 @@ function windowMain(dt)
     )
     if ridgeSecondsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = ridgeSeconds
+    end
+
+    ui.separator()
+    ui.text('Water field heads (soft kernels + threshold)')
+    do
+        local function wfSlider(label, key, minV, maxV, fmt)
+            local value, changed = ui.slider(label,
+                cfg.RUNTIME[key], minV, maxV, fmt)
+            if changed then cfg.RUNTIME[key] = value end
+        end
+        if ui.checkbox('Water field enabled',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
+        end
+        local debug, debugChanged = ui.slider(
+            'Water field debug (1 height, 2 slope)',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG, 0, 2, '%.0f')
+        if debugChanged then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG =
+                math.floor(debug + 0.5)
+        end
+        wfSlider('WF silhouette threshold',
+            'RAIN_DYNAMIC_WATER_FIELD_THRESHOLD', 0.05, 0.9, '%.2f')
+        wfSlider('WF kernel scale',
+            'RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE', 1.0, 2.0, '%.2f')
+        wfSlider('WF refraction field (shot heights)',
+            'RAIN_DYNAMIC_WATER_FIELD_REFRACTION', 0.0, 1.0, '%.2f')
+        wfSlider('WF scene mip',
+            'RAIN_DYNAMIC_WATER_FIELD_SCENE_MIP', 0.0, 8.0, '%.1f')
+        wfSlider('WF extra mip at slope',
+            'RAIN_DYNAMIC_WATER_FIELD_SLOPE_MIP', 0.0, 4.0, '%.1f')
+        wfSlider('WF rim energy loss',
+            'RAIN_DYNAMIC_WATER_FIELD_EDGE_LOSS', 0.0, 1.0, '%.2f')
+        wfSlider('WF loss start slope',
+            'RAIN_DYNAMIC_WATER_FIELD_LOSS_START', 0.0, 2.0, '%.2f')
+        wfSlider('WF loss end slope',
+            'RAIN_DYNAMIC_WATER_FIELD_LOSS_END', 0.1, 3.0, '%.2f')
+        wfSlider('WF lower rim sky glint',
+            'RAIN_DYNAMIC_WATER_FIELD_GLINT', 0.0, 2.0, '%.2f')
+        wfSlider('WF opacity',
+            'RAIN_DYNAMIC_WATER_FIELD_OPACITY', 0.0, 1.0, '%.2f')
+        wfSlider('WF normal step (texels)',
+            'RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS', 0.5, 4.0, '%.2f')
+        wfSlider('WF motion stretch',
+            'RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH', 0.0, 2.0, '%.2f')
+        if ui.checkbox('WF per-life lobes',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES
+        end
+        if ui.checkbox('WF torn impacts at speed',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED
+        end
+        wfSlider('WF tear start (km/h)',
+            'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH', 0.0, 200.0, '%.0f')
+        wfSlider('WF tear full (km/h)',
+            'RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH', 10.0, 300.0, '%.0f')
+        wfSlider('WF tear duration (s)',
+            'RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS', 0.05, 1.5, '%.2f')
+        if ui.checkbox('WF trails',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED
+        end
+        wfSlider('WF trail lifetime (s)',
+            'RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS', 0.1, 6.0, '%.2f')
+        wfSlider('WF trail width (radii)',
+            'RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH', 0.1, 1.0, '%.2f')
+        wfSlider('WF trail bead noise',
+            'RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE', 0.0, 1.5, '%.2f')
+        wfSlider('WF trail noise cells',
+            'RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS', 50.0, 1500.0, '%.0f')
     end
 
     ui.separator()
