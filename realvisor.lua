@@ -537,22 +537,36 @@ local cfg = scriptSettings:mapConfig({
         -- 0 = invisible cut line (gap). > 0 = draw the ring refracted but
         -- darkened by this amount instead.
         RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.0,
+        -- A/B: false = legacy micro optics (image scale + rotation), true =
+        -- the water-field head lens rule. Compare before deciding.
+        RAIN_DYNAMIC_MICRO_WATER_LENS = true,
+        RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION = 1.0, -- x WF refraction
+        RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE = 0.8,      -- FINE TUNED
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
         -- Persistent UV wipe mask composited with the static micro layer.
         RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_DEBUG = false,
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true,
-        RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.0,
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.5,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION = true,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.50,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 7.1,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.36,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 6.8,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 0.63,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.60,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 7.8,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 1.30,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.36,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 11.2,
         RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
+        -- Wipe / liquid-ridge path width from the drop's own diameter:
+        -- width = diameter * scale + offset (mm), floored to MIN texels.
+        -- Legacy was a fixed 1.5 R / 0.75 R with a 1.4-texel radius floor,
+        -- which at 512 made most drops the same width.
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE = 1.0,
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM = 0.4,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE = 0.60,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM = 0.0,
+        RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS = 1.0,
         RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
         RAIN_DYNAMIC_BIRTH_MASK_DEBUG = false,
         RAIN_DYNAMIC_BIRTH_MASK_OPTICS = true,
@@ -7358,10 +7372,11 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
                     -- Subsequent movement leaves the ordinary trail.
                     local fromU = old and old.u or u
                     local fromV = old and old.v or v
+                    -- radius is the physical visor-UV radius of this drop.
                     stamps[#stamps + 1] = {
                         x0 = fromU * size, y0 = (fromV + 1.0) * size,
                         x1 = u * size, y1 = (v + 1.0) * size,
-                        radius = math.max(radius * size, 1.4),
+                        diameter = 2.0 * radius * size,
                     }
                     state.trailMaskLast[index] = {
                         u = u, v = v, generation = generation }
@@ -7374,24 +7389,41 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     end
     state.trailMaskCursor = (cursor - 1 + inspected) % count + 1
     if #stamps > 0 then
+        local texelsPerMM = cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+            * size
+        local minWidth = math.max(0.25,
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS)
+        local wipeScale = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE
+        local wipeOffset = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM
+            * texelsPerMM
+        local ridgeScale =
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE
+        local ridgeOffset =
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM
+            * texelsPerMM
+        local widthSum, widthCount = 0.0, 0
         target:update(function()
             local wipeColor = rgbm(0.0, 0.95, 0.0, 1.0)
             local ridgeColor = rgbm(0.95, 0.95, 0.0, 1.0)
             for _, stamp in ipairs(stamps) do
                 local first = vec2(stamp.x0, stamp.y0)
                 local last = vec2(stamp.x1, stamp.y1)
-                ui.drawLine(first, last, wipeColor,
-                    math.max(stamp.radius * 1.5, 2.0))
-                ui.drawCircleFilled(last, stamp.radius,
-                    wipeColor, 8)
+                local wipeWidth = math.max(minWidth,
+                    stamp.diameter * wipeScale + wipeOffset)
+                local ridgeWidth = math.max(minWidth,
+                    stamp.diameter * ridgeScale + ridgeOffset)
+                ui.drawLine(first, last, wipeColor, wipeWidth)
+                ui.drawCircleFilled(last, wipeWidth * 0.5, wipeColor, 8)
                 -- Narrow liquid core inside a wider wiped footprint.
-                ui.drawLine(first, last, ridgeColor,
-                    math.max(stamp.radius * 0.75, 1.0))
-                ui.drawCircleFilled(last,
-                    math.max(stamp.radius * 0.55, 0.75),
-                    ridgeColor, 8)
+                ui.drawLine(first, last, ridgeColor, ridgeWidth)
+                ui.drawCircleFilled(last, ridgeWidth * 0.5, ridgeColor, 8)
+                widthSum = widthSum + wipeWidth
+                widthCount = widthCount + 1
             end
         end)
+        if widthCount > 0 then
+            state.trailMaskMeanWidth = widthSum / widthCount
+        end
     end
     state.trailMaskRead = target
     state.trailMaskFrame = sim.frame
@@ -8789,6 +8821,14 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX,
             gDynamicDropMicroOutlineDark =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK,
+            gDynamicDropMicroWaterLens =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS and 1.0 or 0.0,
+            gDynamicDropMicroWaterLensRefraction =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION,
+            gDynamicDropMicroWaterLensSlope =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE,
+            gDynamicDropWFKernelScale =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE,
             gDynamicDropMicroImageScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
             gDynamicDropMicroImageRotation = vec2(
@@ -11701,6 +11741,38 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH =
             wipeStrength
     end
+    do
+        -- Path width = drop diameter * scale + offset (debug tuning).
+        local function pathSlider(label, key, minV, maxV, fmt)
+            local value, changed = ui.slider(label,
+                cfg.RUNTIME[key], minV, maxV, fmt)
+            if changed then cfg.RUNTIME[key] = value end
+        end
+        pathSlider('Wipe width (x drop diameter)',
+            'RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE', 0.0, 3.0, '%.2f')
+        pathSlider('Wipe width offset (mm)',
+            'RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM', -1.0, 4.0, '%.2f')
+        pathSlider('Liquid ridge width (x drop diameter)',
+            'RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE', 0.0, 2.0, '%.2f')
+        pathSlider('Liquid ridge offset (mm)',
+            'RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM', -1.0, 3.0, '%.2f')
+        pathSlider('Path min width (mask texels)',
+            'RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS', 0.25, 4.0, '%.2f')
+        local maskSize, maskSizeChanged = ui.slider(
+            'Path mask resolution (texels)',
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SIZE, 256, 2048, '%.0f')
+        if maskSizeChanged then
+            -- Powers of two only; the canvas is recreated on change.
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SIZE =
+                2 ^ math.floor(math.log(math.max(maskSize, 256), 2) + 0.5)
+        end
+        local mmPerTexel = 1.0 / math.max(
+            cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+            * cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SIZE, 1e-6)
+        ui.text(string.format('Path mask %d (%.2f mm/texel), mean wipe width %.2f texels',
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SIZE, mmPerTexel,
+            rainDynamicSceneCopyState.trailMaskMeanWidth or 0.0))
+    end
     local wipeSeconds, wipeSecondsChanged = ui.slider(
         'Wipe recovery time (seconds)',
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS,
@@ -11873,6 +11945,15 @@ function windowMain(dt)
             rainDynamicSceneCopyState.microPatternGrid or 0))
         wfSlider('Micro outline (0 = invisible cut line)',
             'RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK', 0.0, 1.0, '%.2f')
+        if ui.checkbox('Micro optics: head lens rule (A/B vs legacy)',
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS) then
+            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS =
+                not cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS
+        end
+        wfSlider('Micro lens refraction (x WF field)',
+            'RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION', 0.0, 2.0, '%.2f')
+        wfSlider('Micro lens slope scale',
+            'RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE', 0.0, 2.0, '%.2f')
         wfSlider('WF tear min diameter (mm)',
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM', 0.3, 4.0, '%.2f')
         wfSlider('WF tear min piece (texels)',

@@ -90,3 +90,45 @@ Changes:
   - The current size and grid are shown.
   - Any change re-bakes the pattern and the micro normals 0.4 s after the last
     edit. The re-bake runs in `onSceneReady`, not in the UI callback.
+
+## Status after fine-tuning (2026-10-01)
+
+The user fine-tuned the bake values in game and committed them to Git as a
+known-good state. The low-resolution, dotted cut edges proved visually very
+effective, and careful tuning produced convincing overlapping lines.
+
+## Question: do micro disks use the head optics? No, until now (2026-10-01)
+
+The user observed that removing the legacy rotation parameter leaves the
+image un-inverted. That is correct.
+
+| | heads (water field) | micro disks (legacy) |
+|---|---|---|
+| lens input | height-field slope `∇G · radiusPx` (dimensionless, points to centre) | disk-local offset `centerDelta` in screen UV |
+| mapping | `sceneUV + slope · REFRACTION`: looking past the centre inverts the image by construction | `centerUV + rotate(centerDelta, IMAGE_ROTATION 165°) · IMAGE_SCALE · inwardProfile`: inversion exists **only** through the ~180° rotation |
+| blur | `SCENE_MIP + SLOPE_MIP·|slope|` | fixed `MICRO_LAYER_SCENE_MIP` |
+| rim | energy loss by slope + sky glint on the lower rim | additive blue-white relief/rim accent from baked normals and light |
+
+A/B added: `RAIN_DYNAMIC_MICRO_WATER_LENS` (UI "Micro optics: head lens
+rule").
+- When on, each micro disk (and each crescent fragment, which keeps its own
+  disk's lens coordinates) uses **exactly the head rule**:
+  - The analytic dome is `h = 1 - (r / KERNEL_SCALE)²` in visor UV, the same
+    profile as the head kernel.
+  - Its gradient is mapped to screen through the UV Jacobian and multiplied
+    by the projected radius.
+  - It then goes through the shared `rainWaterLensColor()`: refraction, slope
+    blur, edge loss, glint and sky correction.
+- It has no rotation parameter.
+- Extra controls:
+  - "Micro lens refraction" (× WF field, default 1.0)
+  - "Micro lens slope scale" (default 1.0)
+- The invisible cut lines, haze compositing and wipe visibility are
+  unchanged.
+- Legacy stays the default until the user confirms, because of the known risk
+  that the head rule reads metallic on dense fields.
+
+What to compare: the same view, heavy rain, toggled back and forth.
+- Inversion must agree between micro disks and heads.
+- Check whether the dense field turns chrome. If so, try a lower micro
+  refraction or a higher `WATER_FIELD_SCENE_MIP` / `SLOPE_MIP`.

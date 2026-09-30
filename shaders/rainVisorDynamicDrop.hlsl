@@ -198,6 +198,38 @@ float rainMicroRadiusCells(float packedB)
         (q + 0.5) / 16.0);
 }
 
+// Water-field lens rule (identical to the head branch): look past the
+// centre along the dimensionless slope, blur with slope, lose energy at the
+// steep rim, lower rim picks up broad sky light. Used by micro disks when
+// gDynamicDropMicroWaterLens is on, so both drop families share one optics.
+float3 rainWaterLensColor(float2 sceneUV, float2 slope, float energy,
+    float refraction)
+{
+    float slopeLen = length(slope);
+    float aspect = gDynamicDropInvScreenSize.x
+        / max(gDynamicDropInvScreenSize.y, 1e-9);
+    float2 sampleUV = saturate(sceneUV + slope * refraction
+        * float2(aspect, 1.0));
+    float lensMip = gDynamicDropWFSceneMip
+        + gDynamicDropWFSlopeMip * saturate(slopeLen / 1.5);
+    float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp,
+        sampleUV, lensMip).rgb;
+    if (gDynamicDropBirthSkyCorrection > 0.5)
+        color = rainDynamicWeatherSkyTone(color, sampleUV);
+    color *= 1.0 - gDynamicDropWFEdgeLoss * smoothstep(
+        gDynamicDropWFLossStart, gDynamicDropWFLossEnd, slopeLen);
+    float2 screenUp = float2(gDynamicDropCameraSide.y,
+        -gDynamicDropCameraUp.y);
+    screenUp = dot(screenUp, screenUp) > 1e-6
+        ? normalize(screenUp) : float2(0.0, -1.0);
+    float facing = slopeLen > 1e-4
+        ? saturate(dot(slope / slopeLen, screenUp)) : 0.0;
+    float glint = facing * facing * facing * facing
+        * smoothstep(0.5, 1.1, slopeLen)
+        * gDynamicDropWFGlint * (1.0 + energy);
+    return color + gDynamicDropWeatherFogColor * glint;
+}
+
 float4 main(PS_IN pin)
 {
     bool surfaceMicroPattern = pin.Tex.x < -2.5;
@@ -619,6 +651,35 @@ float4 main(PS_IN pin)
                 * centerOffsetPixels.x
             - float2(0.0, gDynamicDropInvScreenSize.y * shotScale.y)
                 * centerOffsetPixels.y;
+        if (gDynamicDropMicroWaterLens > 0.5)
+        {
+            // Micro disks with the head lens rule (docs/RAINFX_MICRO_PATTERN.md):
+            // the same dome h = 1 - (r / kernelScale)^2 in visor UV, its
+            // gradient mapped to screen through the UV Jacobian, times the
+            // projected radius. No rotation parameter: inversion comes from
+            // looking past the centre, exactly as for the heads.
+            float microRadiusUVs = microRadiusCells
+                / max(gDynamicDropMicroPatternGrid, 1.0);
+            float kernelScale = max(gDynamicDropWFKernelScale, 1.0);
+            float2 lensGradUV = -2.0 * lensLocal
+                / (kernelScale * kernelScale * max(microRadiusUVs, 1e-7));
+            float microRadiusPx = microRadiusUVs
+                / sqrt(max(abs(determinant), 1e-14));
+            float2 lensSlope = float2(dot(lensGradUV, uvDx),
+                dot(lensGradUV, uvDy)) * microRadiusPx
+                * gDynamicDropMicroWaterLensSlope;
+            float3 lensColor = rainWaterLensColor(sceneUV, lensSlope, 0.0,
+                gDynamicDropWFRefraction * gDynamicDropMicroWaterLensRefraction);
+            if (microOutline)
+                lensColor *= 1.0 - gDynamicDropMicroOutlineDark;
+            float lensAlpha = saturate(gDynamicDropMicroOpacity
+                * microVisibility);
+            float4 lensHaze = rainHazeEval(pin.PosH.xy, patternUV);
+            float lensOut = lensAlpha + (1.0 - lensAlpha) * lensHaze.a;
+            return float4((lensAlpha * lensColor
+                + (1.0 - lensAlpha) * lensHaze.a * lensHaze.rgb)
+                / max(lensOut, 1e-4), lensOut);
+        }
         // Rotate the view around each disk's center, preserving its
         // orientation at zero degrees instead of mirroring it.
         float2 centerDelta = sceneUV - centerSceneUV;

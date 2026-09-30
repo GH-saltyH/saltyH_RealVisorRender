@@ -210,3 +210,46 @@ first:
 ## 8. Next implemented step
 
 Haze / condensation film: see `RAINFX_HAZE.md`.
+
+## Backlog added by the user (2026-10-01)
+
+1. **[DONE 2026-10-01] Wipe and clear width from the drop size.** "Clear micro circles along
+   drop paths" and the related wipe paths currently use a fixed width. Change
+   it to the moving drop's own radius plus an additive offset, with the
+   offset exposed in the UI for debugging.
+2. **(NEXT) Direction change by absorption, with the mass-merge stage.** A drop
+   flowing down absorbs drops in its path and turns toward them. Slow drops
+   therefore meander left and right. Plan and optimise this together with
+   true mass coalescence:
+   - deterministic survivor, mass/radius update in both GPU state passes,
+   - velocity bias toward the absorbed neighbour.
+3. **High contrast outside the sky (detailed tuning stage).** It is not a
+   problem in most situations. When many large drops land together, however,
+   the refracted non-sky scene reads too metallic. Reserved for the
+   detailed-tuning pass, together with the "blurry / turbid" direction above.
+
+### Backlog item 1: implementation notes (2026-10-01)
+
+The wipe mask (`updateTrailMask`, R = liquid ridge, G = wiped film) used a
+fixed width:
+- a line of 1.5 R and a head circle of R, with a 1.4-texel radius floor;
+- a ridge of 0.75 R.
+
+At the default 512 mask (0.67 mm per texel), almost every drop hit the floor
+and drew the same width.
+
+The path width now comes from the drop's own diameter:
+- `wipe  = diameter × WIPE_WIDTH_SCALE (1.0) + WIPE_WIDTH_OFFSET_MM (0.4)`
+- `ridge = diameter × RIDGE_WIDTH_SCALE (0.45) + RIDGE_WIDTH_OFFSET_MM (0)`
+
+Both are floored to `MIN_WIDTH_TEXELS` (1.0), and the head circle uses half
+the width. For a 1 mm drop at 512, the wipe is ≈ 2.1 texels, the same as
+legacy, so existing tuning carries over.
+
+UI (Trail mask section, under "Micro clearing strength"):
+- scale and offset for wipe and ridge, and the minimum width;
+- mask resolution (256–2048, powers of two);
+- a readout of mm per texel and the mean wipe width in texels.
+
+The drop-size dependence only becomes visible when the mask resolves drop
+diameters. Raise the mask to 1024 (0.33 mm/texel) or 2048 when judging it.
