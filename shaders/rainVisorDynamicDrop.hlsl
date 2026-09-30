@@ -80,6 +80,124 @@ float4 rainWaterFieldTap(float2 uv)
     return head;
 }
 
+// Haze / condensation film (docs/RAINFX_HAZE.md). Procedural in visor UV
+// (no texture binding): R = mist density, B = reveal order, G/A = speckle
+// refraction vector. Rain reveals it; wipes and water tracks clear lanes.
+float rainHazeHash(float2 p)
+{
+    p = frac(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return frac(p.x * p.y);
+}
+
+float rainHazeNoise(float2 x)
+{
+    float2 i = floor(x);
+    float2 f = frac(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(rainHazeHash(i), rainHazeHash(i + float2(1.0, 0.0)), f.x),
+        lerp(rainHazeHash(i + float2(0.0, 1.0)),
+            rainHazeHash(i + float2(1.0, 1.0)), f.x), f.y);
+}
+
+float rainHazeFbm(float2 x)
+{
+    float sum = 0.0;
+    float total = 0.0;
+    float a = 0.5;
+    [unroll] for (int o = 0; o < 4; ++o)
+    {
+        sum += a * rainHazeNoise(x);
+        total += a;
+        x = x * 2.03 + 17.1;
+        a *= 0.5;
+    }
+    return sum / total;
+}
+
+float4 rainHazeField(float2 uv)
+{
+    float mist = saturate((rainHazeFbm(uv * gDynamicDropHazeMistCells)
+        - 0.25) / 0.5);
+    float2 cell = floor(uv * gDynamicDropHazeSpeckleCells);
+    float order = saturate((rainHazeFbm(uv * gDynamicDropHazeOrderCells
+        + 31.7) - 0.25) / 0.5 * 0.85 + rainHazeHash(cell + 11.3) * 0.15);
+    return float4(mist, rainHazeHash(cell + 3.1), order,
+        rainHazeHash(cell + 7.7));
+}
+// Returns premultiplied-ready (rgb, amount). amount = 0 where no haze.
+float4 rainHazeEval(float2 posH, float2 patternUV)
+{
+    float amount = 0.0;
+    float4 hz = float4(0.0, 0.5, 1.0, 0.5);
+    if (gDynamicDropHazeEnabled > 0.5)
+    {
+        hz = rainHazeField(patternUV);
+        float soft = max(gDynamicDropHazeRevealSoft, 0.001);
+        float reveal = smoothstep(hz.b - soft, hz.b + soft,
+            gDynamicDropHazeRain);
+        amount = reveal * lerp(1.0, hz.r, gDynamicDropHazeMottle)
+            * gDynamicDropHazeStrength;
+        if (gDynamicDropTrailMaskWipeEnabled > 0.5)
+        {
+            float wipe = txDynamicTrailMask.SampleLevel(samLinearClamp,
+                patternUV, 0.0).g;
+            amount *= 1.0 - smoothstep(0.05, 0.60,
+                saturate(wipe * gDynamicDropTrailMaskWipeStrength));
+        }
+        if (gDynamicDropWFTrail > 0.5)
+        {
+            float water = txDynamicWaterTrail.SampleLevel(samLinearClamp,
+                patternUV, 0.0).g;
+            amount *= 1.0 - gDynamicDropHazeTrailClear * smoothstep(0.03,
+                max(gDynamicDropWFThreshold, 0.05), water);
+        }
+    }
+    if (amount < 0.003)
+        return float4(0.0, 0.0, 0.0, 0.0);
+    if (gDynamicDropHazeDebug > 0.5)
+        return float4(0.15, 0.55, 1.0, saturate(amount * 1.5));
+    float2 resolutionRatio = gDynamicDropInvRenderTargetSize
+        / gDynamicDropInvScreenSize;
+    float2 sceneUV = posH * gDynamicDropInvScreenSize
+        * lerp(float2(1.0, 1.0), resolutionRatio, 0.98);
+    // Condensation beads: tiny per-cell refraction, then scattering blur.
+    float2 speck = (hz.ga * 2.0 - 1.0) * gDynamicDropHazeSpecklePixels
+        * gDynamicDropInvRenderTargetSize;
+    float2 uv = saturate(sceneUV + speck);
+    float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp, uv,
+        gDynamicDropHazeMip).rgb;
+    if (gDynamicDropHazeSkyCorrection > 0.5)
+        color = rainDynamicWeatherSkyTone(color, uv);
+    // Forward scattering lifts the film toward the ambient fog tone.
+    color = lerp(color, gDynamicDropWeatherFogColor, gDynamicDropHazeVeil);
+    return float4(color, saturate(amount));
+}
+
+// Gap pixels (no micro disk): haze alone, or nothing.
+float4 rainHazeOrClip(float2 posH, float2 patternUV)
+{
+    float4 haze = rainHazeEval(posH, patternUV);
+    clip(haze.a - 0.003);
+    return haze;
+}
+
+// Micro pattern v2 decode (docs/RAINFX_MICRO_PATTERN.md): B packs the
+// winner's gate (high 4 bits) and radius (low 4 bits). Point-sampled only.
+float rainMicroGate(float packedB)
+{
+    float code = floor(packedB * 255.0 + 0.5);
+    return (floor(code / 16.0) + 0.5) / 16.0;
+}
+
+float rainMicroRadiusCells(float packedB)
+{
+    float code = floor(packedB * 255.0 + 0.5);
+    float q = code - floor(code / 16.0) * 16.0;
+    return lerp(gDynamicDropMicroRadiusMin, gDynamicDropMicroRadiusMax,
+        (q + 0.5) / 16.0);
+}
+
 float4 main(PS_IN pin)
 {
     bool surfaceMicroPattern = pin.Tex.x < -2.5;
@@ -110,6 +228,9 @@ float4 main(PS_IN pin)
         clip(gDynamicDropMicroPatternEnabled - 0.5);
         float2 patternUV = saturate(float2(
             pin.Tex.x + 4.0, pin.Tex.y + 1.0));
+        // Hoisted before any per-pixel return (haze exits early).
+        float2 hoistPatternDx = ddx(patternUV);
+        float2 hoistPatternDy = ddy(patternUV);
         if (gDynamicDropWaterField > 0.5)
         {
             // Water field (docs/RAINFX_WATER_FIELD.md). G = union height of
@@ -351,20 +472,20 @@ float4 main(PS_IN pin)
             {
                 float4 filmPattern = txDynamicMicroPattern.SampleLevel(
                     samLinearClamp, patternUV, 0.0);
-                bool filmHasDisk = filmPattern.a > 0.005
+                float4 filmPoint = txDynamicMicroPattern.SampleLevel(
+                    samPointMicroMask, patternUV, 0.0);
+                bool filmHasDisk = filmPoint.a > 0.25
                     && gDynamicDropMicroRain > 0.001;
                 if (filmHasDisk && gDynamicDropMicroRain < 0.999)
-                {
-                    float filmGate = txDynamicMicroPattern.SampleLevel(
-                        samPointMicroMask, patternUV, 0.0).b;
-                    filmHasDisk = gDynamicDropMicroRain >= filmGate;
-                }
+                    filmHasDisk = gDynamicDropMicroRain
+                        >= rainMicroGate(filmPoint.b);
                 if (filmHasDisk
                     && gDynamicDropTrailMaskWipeEnabled > 0.5)
                 {
                     float2 filmLocal = filmPattern.xy * 2.0 - 1.0;
                     float2 diskCenterUV = patternUV - filmLocal
-                        * (0.56 / max(gDynamicDropMicroPatternGrid, 1.0));
+                        * (rainMicroRadiusCells(filmPoint.b)
+                            / max(gDynamicDropMicroPatternGrid, 1.0));
                     float diskClearance = txDynamicTrailMask.SampleLevel(
                         samLinearClamp, saturate(diskCenterUV), 0.0).g;
                     float visibleDisk = 1.0 - smoothstep(0.08, 0.70,
@@ -410,26 +531,41 @@ float4 main(PS_IN pin)
                         * gDynamicDropTrailFilmOpacity
                         + ridgeCoverage
                             * gDynamicDropTrailRidgeOpacity;
-                    return float4(filmScene + ridgeAccent,
-                        saturate(opacity));
+                    // The wiped film lies over the (recovering) haze.
+                    float filmAlpha = saturate(opacity);
+                    float4 filmHaze = rainHazeEval(pin.PosH.xy, patternUV);
+                    float filmOut = filmAlpha
+                        + (1.0 - filmAlpha) * filmHaze.a;
+                    return float4((filmAlpha * (filmScene + ridgeAccent)
+                        + (1.0 - filmAlpha) * filmHaze.a * filmHaze.rgb)
+                        / max(filmOut, 1e-4), filmOut);
                 }
             }
         }
         // At zero rain, skip the entire static pattern.
         clip(gDynamicDropMicroRain - 0.001);
+        // Haze debug shows the film over the whole visor, disks hidden.
+        if (gDynamicDropHazeDebug > 0.5)
+            return rainHazeOrClip(pin.PosH.xy, patternUV);
         float4 pattern = txDynamicMicroPattern.SampleLevel(
             samLinearClamp, patternUV, 0.0);
-        // Alpha stores only the disk silhouette, independent of rain.
-        // The selection threshold lives in the blue channel.
-        clip(pattern.a - 0.005);
-        if (gDynamicDropMicroRain < 0.999)
-        {
-            // Point sampling by normalized UV keeps coverage and gate
-            // aligned even if the canvas is internally capped or resized.
-            float maskGate = txDynamicMicroPattern.SampleLevel(
-                samPointMicroMask, patternUV, 0.0).b;
-            clip(gDynamicDropMicroRain - maskGate);
-        }
+        // Class, gate and radius are point-sampled: A = 1 interior,
+        // 0.5 outline ring, 0 empty. Crisp texel steps are intended (the
+        // low-resolution look reads as natural glitter from a distance).
+        float4 patternPoint = txDynamicMicroPattern.SampleLevel(
+            samPointMicroMask, patternUV, 0.0);
+        if (patternPoint.a < 0.25)
+            return rainHazeOrClip(pin.PosH.xy, patternUV);
+        if (gDynamicDropMicroRain < 0.999
+            && gDynamicDropMicroRain < rainMicroGate(patternPoint.b))
+            return rainHazeOrClip(pin.PosH.xy, patternUV);
+        bool microOutline = patternPoint.a < 0.75;
+        // Invisible cut line (default): the winner's thin outer ring shows
+        // the unrefracted scene / haze, so every fragment reads as its own
+        // lens instead of merging into one chrome sheet.
+        if (microOutline && gDynamicDropMicroOutlineDark <= 0.001)
+            return rainHazeOrClip(pin.PosH.xy, patternUV);
+        float microRadiusCells = rainMicroRadiusCells(patternPoint.b);
         float2 lensLocal = pattern.xy * 2.0 - 1.0;
         float microVisibility = 1.0;
         if (gDynamicDropTrailMaskWipeEnabled > 0.5)
@@ -437,23 +573,24 @@ float4 main(PS_IN pin)
             // All pixels of a winning disk share one clearance sample.
             // Keep its existing baked, pixelated silhouette intact.
             float2 diskCenterUV = patternUV - lensLocal
-                * (0.56 / max(gDynamicDropMicroPatternGrid, 1.0));
+                * (microRadiusCells / max(gDynamicDropMicroPatternGrid, 1.0));
             float clearance = txDynamicTrailMask.SampleLevel(
                 samLinearClamp, saturate(diskCenterUV), 0.0).g;
             microVisibility = 1.0 - smoothstep(0.08, 0.70,
                 saturate(clearance
                     * gDynamicDropTrailMaskWipeStrength));
-            clip(microVisibility - 0.01);
+            if (microVisibility < 0.01)
+                return rainHazeOrClip(pin.PosH.xy, patternUV);
         }
         float lensRadius = saturate(length(lensLocal));
         // The baked alpha owns the silhouette, including its pixelated rim.
         // The winning disk owns the pixel; its outer ring also marks
         // boundaries where a newer disk hides an older one.
-        float rim = smoothstep(0.65, 0.79, lensRadius);
+        float rim = smoothstep(0.70, 0.95, lensRadius);
         if (gDynamicDropMicroDebug > 0.5)
         {
             float3 diagnostic = lerp(float3(0.13, 0.22, 0.28),
-                float3(0.83, 0.95, 1.0), rim);
+                float3(0.83, 0.95, 1.0), microOutline ? 1.0 : rim * 0.4);
             return float4(diagnostic, 0.83);
         }
         float2 resolutionRatio = gDynamicDropInvRenderTargetSize
@@ -465,11 +602,11 @@ float4 main(PS_IN pin)
         // Recover the screen-space center of this disk from the smooth
         // visor UV derivatives. A fixed pixel offset cannot invert disks
         // whose projected sizes change across the curved visor or with DLSS.
-        float2 uvDx = ddx(patternUV);
-        float2 uvDy = ddy(patternUV);
+        float2 uvDx = hoistPatternDx;
+        float2 uvDy = hoistPatternDy;
         float determinant = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
         float2 radiusUV = lensLocal
-            * (0.56 / max(gDynamicDropMicroPatternGrid, 1.0));
+            * (microRadiusCells / max(gDynamicDropMicroPatternGrid, 1.0));
         float2 centerOffsetPixels = float2(0.0, 0.0);
         if (abs(determinant) > 1e-9)
             centerOffsetPixels = float2(
@@ -478,8 +615,10 @@ float4 main(PS_IN pin)
                 (uvDx.x * radiusUV.y - uvDx.y * radiusUV.x)
                     / determinant);
         float2 centerSceneUV = sceneUV
-            - ddx(sceneUV) * centerOffsetPixels.x
-            - ddy(sceneUV) * centerOffsetPixels.y;
+            - float2(gDynamicDropInvScreenSize.x * shotScale.x, 0.0)
+                * centerOffsetPixels.x
+            - float2(0.0, gDynamicDropInvScreenSize.y * shotScale.y)
+                * centerOffsetPixels.y;
         // Rotate the view around each disk's center, preserving its
         // orientation at zero degrees instead of mirroring it.
         float2 centerDelta = sceneUV - centerSceneUV;
@@ -567,8 +706,22 @@ float4 main(PS_IN pin)
         // pattern texels are clipped above and reveal the live scene.
         // The baked mask clips the topmost disk's entire thin rim, so
         // underlying scene appears even when another disk lies below it.
-        return float4(sceneColor + lightAccent,
-            saturate(gDynamicDropMicroOpacity * microVisibility));
+        // The condensation film lies under every micro disk too: composite
+        // disk over haze in one output (premultiplied "over").
+        // Outline ring of the winning disk: a fine darker cut line that keeps
+        // overlapping fragments visibly separate.
+        if (microOutline)
+        {
+            sceneColor *= 1.0 - gDynamicDropMicroOutlineDark;
+            lightAccent *= 0.5;
+        }
+        float microAlpha = saturate(gDynamicDropMicroOpacity * microVisibility);
+        float4 underHaze = rainHazeEval(pin.PosH.xy, patternUV);
+        float outAlpha = microAlpha + (1.0 - microAlpha) * underHaze.a;
+        float3 outColor = (microAlpha * (sceneColor + lightAccent)
+            + (1.0 - microAlpha) * underHaze.a * underHaze.rgb)
+            / max(outAlpha, 1e-4);
+        return float4(outColor, outAlpha);
     }
 
     if (microLayer)

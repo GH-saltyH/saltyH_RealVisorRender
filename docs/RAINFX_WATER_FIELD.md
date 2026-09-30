@@ -122,14 +122,91 @@ The first attempt showed hollow rings because heads were accumulating (see
    - GPU: 5 head + 5 trail taps on covered pixels.
    - Memory: +16 MB (fp16 birth mask) + 8 MB (trail A/B).
 
-## 6. Not done yet / next
+## 6. In-game result (user, 2026-09-30)
 
-- Fog/haze noise layer (user note 3). Planned as a static baked noise canvas
-  revealed by rain intensity and wiped by the trail mask.
-- Using the same refraction rule on the micro pattern, for full consistency.
-  It is deliberately left untouched for now.
+- The shape, refracted image and highlights of moving drops all reached the
+  goal, at an acceptable cost. The user committed this state to Git.
+- **Tears were almost never visible, even above 150 km/h.** Diagnosis from the
+  code:
+  1. Finger kernels were `R × (0.15–0.40)`. For a 1.2 mm drop on the 2048
+     mask (R ≈ 3.6 texels) that is 0.5–1.4 texels. Kernels that small never
+     reach the 0.35 threshold on the texel grid, so they were invisible.
+  2. Fingers started 0.8–1.9 R away from the body, so they were detached.
+  3. They were sized from the *growing* birth stamp (0.28 → 1.0 R over the
+     first 0.12 s), which made them smaller still.
+  4. The window was only 0.35 s, and only about 30 % of births at rain 0.5 are
+     ≥ 1.2 mm.
+  The generation change coincides with the pending → alive transition (state
+  shader), so the timing clock itself was correct.
+- **Fix:**
+  - The tear is now a spread, irregular sheet (3 kernels) with attached
+    radial fingers and tip beads.
+  - Pieces use the full state radius and are clamped to
+    `TEAR_MIN_KERNEL_TEXELS = 1.6`.
+  - Window 0.55 s, minimum diameter 1.0 mm.
+  - The UI shows "WF kernels | tearing heads | km/h" for direct checking.
+
+### Tear follow-up: the "throwing star" artifact (2026-09-30)
+
+The tear pieces were drawn around the *moving head* every frame. After the
+impact the head started to flow, and the whole torn shape travelled with it
+unchanged, like a spinning throwing star. Physically, the splash fragments
+are separate water that stays where it landed; only the main body moves on.
+
+Fix:
+- At the first eligible frame, the impact origin (position, full radius,
+  seeds, strength, angle) is frozen per slot and generation.
+- With trails on (the default), the splash is stamped **once** into the
+  persistent trail canvas at that origin. It then thins and breaks into beads
+  with the normal trail decay and noise. Its minimum piece size is enforced
+  in trail texels.
+- With trails off, the pieces are drawn at the frozen origin for the tear
+  window.
+- The head is never decorated with fingers.
+
+### Impact follow-up: pressed pancake (2026-09-30)
+
+The user found the frozen torn pattern visually poor: fixed and star-like.
+The target is a pressed pancake: a wide circle that spreads, with a torn
+edge and a little splatter around it, sized to the drop, with random tearing.
+
+Implementation (`waterFieldTearPieces`):
+- A flat core ellipse of radius
+  `P = Rf·(1.4+0.9·amount)·(0.85..1.15 per life)`.
+- 14–24 small rim kernels at 0.86–1.08 P, with random angles and sizes. About
+  18 % are skipped to make notches, and about 15 % are stretched into short
+  tongues.
+- 2–7 satellite droplets at 1.2–1.9 P.
+- It spreads in 4 stamps over about 0.12 s (P × 0.625 → 1.0). The satellites
+  come with the last stamp.
+- Everything is stamped at the frozen impact origin into the trail canvas, so
+  it then thins and beads there.
+- In the offline harness, earlier ratios (a small core with long rim pieces)
+  still read as stars. The final ratios read as round, torn-edged pancakes:
+  `docs/images/water_field/impact_pancake.png`.
+
+## Future direction (user, 2026-09-30)
+
+After the micro-pattern rework is evaluated: make drops overall **blurrier
+and more turbid**. There is still a slightly chrome feel, probably from the
+fairly high resolution of the image inside the drops. Available knobs to try
+first:
+- `WATER_FIELD_SCENE_MIP` 3 → 4–5 and `SLOPE_MIP` 1.5 → 2.5.
+- A lower `REFRACTION` (smaller minified field).
+- A small milky lift toward the fog tone, like the haze veil.
+
+## 7. Backlog (after the planned order)
+
+- **Fast-flow sheet film (user request, deferred).** Fast runs currently leave
+  a noisy beaded track (the bead noise is applied at full strength). For fast
+  heads, stamp a wider, lower-amplitude trail kernel and scale the decay noise
+  down with the stamping speed. That leaves a thick, blurry, spray-like water
+  sheet instead of beads. The speed could be stored in trail B and used in
+  the decay shader: `noise *= 1 - saturate(speed / fast)`.
+- Using the same refraction rule on the micro pattern.
 - The wipe (trail mask G) does not clear the water-field trail canvas yet.
-- The visual union is not mass transfer. True coalescence in GPU state is
-  still a separate task.
-- Parameter values come from the synthetic harness scene. Absolute tone must
-  be tuned in game.
+- The visual union is not mass transfer. True coalescence is a separate task.
+
+## 8. Next implemented step
+
+Haze / condensation film: see `RAINFX_HAZE.md`.

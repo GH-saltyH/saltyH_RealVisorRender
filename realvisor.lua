@@ -295,11 +295,11 @@ local cfg = scriptSettings:mapConfig({
         ------------------------------------------------------------
         RAIN_FORCE_GRAVITY_ENABLED = true,
         RAIN_FORCE_INERTIA_ENABLED = true,
-        RAIN_FORCE_AIRFLOW_ENABLED = false,
+        RAIN_FORCE_AIRFLOW_ENABLED = true,
         -- false: original signed tangent airflow, true: downward visor
         -- runoff with the original left/right tangent component.
         RAIN_AIRFLOW_DOWNWARD_MODE = true,
-        RAIN_AIRFLOW_DOWNWARD_GAIN = 1.5,
+        RAIN_AIRFLOW_DOWNWARD_GAIN = 1.25,
 
         -- All external accelerations enter the GPU in SI m/s^2 and
         -- share this compact surface-force conversion.
@@ -315,7 +315,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Drop dynamics
         -- Acceleration after surface adhesion is exceeded.
-        RAIN_FLOW_ACCELERATION = 0.0756,
+        RAIN_FLOW_ACCELERATION = 0.0251,
 
         -- Post-adhesion flow intensity multiplier. Default 1.0 preserves
         -- the current physical calibration; later tuning must still respect
@@ -323,12 +323,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FLOW_SPEED_SCALE = 1.0,
 
         -- Linear air/viscous drag coefficient.
-        RAIN_FLOW_DRAG = 7.0,
+        RAIN_FLOW_DRAG = 0.91,           -- Default 7.00     *Fine Tuned
 
         -- Adhesion threshold range. A drop remains attached while the
         -- effective tangential force is below its own threshold.
-        RAIN_ADHESION_MIN = 0.65,
-        RAIN_ADHESION_MAX = 2.20,
+        RAIN_ADHESION_MIN = 0.308,       -- Default 0.65   *Fine Tuned
+        RAIN_ADHESION_MAX = 0.541,       -- Default 2.20   *Fine Tuned
 
         ------------------------------------------------------------
         -- v0.6.1 RainFX persistent GPU state validation
@@ -336,7 +336,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 2048,
+        RAIN_GPU_STATE_COUNT = 3072,
 
         -- Persistent state:
         -- 0 = disabled
@@ -354,6 +354,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Persistent lifecycle: explicit surface exit/death/respawn. No edge wrapping.
         RAIN_GPU_STATE_LIFECYCLE = true,
+        RAIN_GPU_STATE_LIFECYCLE_LOG = true,
         -- -1: live CSP rain intensity. 0..1: deterministic test weather.
         RAIN_GPU_STATE_RAIN_OVERRIDE = -1.0,
         -- At r=0.03 / 0.08 / 0.50, approximate eligible fractions are
@@ -361,29 +362,28 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
         RAIN_GPU_STATE_CAPACITY_RAMP_POWER = 1.0,
         -- Live birth-size keyframes in mm; a slot samples these at birth.
-        RAIN_GPU_SIZE_MIN_DRY = 0.60,                   -- Default 0.35mm
-        RAIN_GPU_SIZE_MIN_LIGHT = 0.83,                 -- Default 0.35mm
-        RAIN_GPU_SIZE_MIN_RAIN = 0.91,                  -- Default 0.91mm    
-        RAIN_GPU_SIZE_MIN_HEAVY = 1.19,                 -- Default 1.15mm
-        RAIN_GPU_SIZE_MIN_RARE = 2.30,                  -- Default 5mm
-        RAIN_GPU_SIZE_MAX_DRY = 1.01,                   -- Default 1.40mm
-        RAIN_GPU_SIZE_MAX_LIGHT = 1.09,                 -- Default 2.53mm
-        RAIN_GPU_SIZE_MAX_RAIN = 1.53,                  -- Default 4.10mm
-        RAIN_GPU_SIZE_MAX_HEAVY = 1.86,                 -- Default 4.10mm
-        RAIN_GPU_SIZE_MAX_RARE = 3.50,                  -- Default 6mm            
+        RAIN_GPU_SIZE_MIN_DRY = 0.32,                   -- Default 0.35mm
+        RAIN_GPU_SIZE_MAX_DRY = 0.38,                   -- Default 1.40mm
+        RAIN_GPU_SIZE_MIN_LIGHT = 0.35,                 -- Default 0.35mm
+        RAIN_GPU_SIZE_MAX_LIGHT = 0.49,                 -- Default 2.53mm
+        RAIN_GPU_SIZE_MIN_RAIN = 0.50,                  -- Default 0.91mm    
+        RAIN_GPU_SIZE_MAX_RAIN = 0.82,                  -- Default 4.10mm
+        RAIN_GPU_SIZE_MIN_HEAVY = 0.75,                 -- Default 1.15mm
+        RAIN_GPU_SIZE_MAX_HEAVY = 1.42,                 -- Default 4.10mm
+        RAIN_GPU_SIZE_MIN_RARE = 1.25,                  -- Default 5mm
+        RAIN_GPU_SIZE_MAX_RARE = 2.03,                  -- Default 6mm            
         RAIN_GPU_SIZE_BIAS = 2.0,
-        RAIN_GPU_SIZE_RARECHANCE_DRY = 0.001,
-        RAIN_GPU_SIZE_RARECHANCE_HEAVY = 0.008,
+        RAIN_GPU_SIZE_RARECHANCE_DRY = 0.003,           -- Rare-size drop chance at dry
+        RAIN_GPU_SIZE_RARECHANCE_HEAVY = 0.028,         -- Rare-size drop chance at heavy
         -- Add encounters from vehicle speed without changing surface flow.
-        RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,
-        RAIN_GPU_STATE_AGE_MIN_SECONDS = 8.0,
-        RAIN_GPU_STATE_AGE_MAX_SECONDS = 18.0,
-        RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER = 24.0,
-        RAIN_GPU_STATE_MOBILE_DRAG = 1.59,
-        RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION = 0.08,
-        RAIN_GPU_STATE_MOVING_FORCE_GAIN = 16.0,
-        RAIN_GPU_STATE_MOBILE_THRESHOLD_UV = 0.015,
-        RAIN_GPU_STATE_LIFECYCLE_LOG = true,
+        RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,           -- Driving rain exposure gain, default: 1.00
+        RAIN_GPU_STATE_AGE_MIN_SECONDS = 5.0,               -- Moving drop minimum age (seconds), default: 8.0
+        RAIN_GPU_STATE_AGE_MAX_SECONDS = 10.0,              -- Moving drop maximum age (seconds), default: 18.0
+        RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER = 3.9,       -- Moving drop speed / calibrated cap, 
+        RAIN_GPU_STATE_MOBILE_DRAG = 0.62,                  -- Moving drop drag,  Default : 1.59
+        RAIN_GPU_STATE_KINETIC_ADHESION_FRACTION = 0.044,   -- Kinetic adhesion / static  default : 0.08
+        RAIN_GPU_STATE_MOVING_FORCE_GAIN = 5.64,            -- Flow force gain in motion
+        RAIN_GPU_STATE_MOBILE_THRESHOLD_UV = 0.0011,        -- Movement threshold (UV/s)
         RAIN_GPU_STATE_BOUNDARY_MARGIN = 0.005,
         RAIN_GPU_STATE_RESPAWN_GAP_MIN = 0.15,
         RAIN_GPU_STATE_RESPAWN_GAP_MAX = 0.75,
@@ -392,7 +392,7 @@ local cfg = scriptSettings:mapConfig({
         -- 1 mm diameter occupies exactly 0.0029296875 visor UV in the
         -- calibrated Debug 50 mesh measurement.
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
-        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.016,
+        RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.1000,      -- Default 0.016
         -- Atlas/Ulbrich-style size exponent used as the first-order
         -- size-dependent max-speed curve.
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_EXPONENT = 0.67,
@@ -502,7 +502,7 @@ local cfg = scriptSettings:mapConfig({
         -- Static micro droplets share the main mesh and scene shot.
         RAIN_DYNAMIC_MICRO_LAYER_ENABLED = true,
         RAIN_DYNAMIC_MICRO_PATTERN_ENABLED = true,
-        RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.7,
+        RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.46,           -- Fine Tuned for New micro pattern: 0.46
         RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 12288,
         RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE = 4096,
         RAIN_DYNAMIC_MICRO_NORMAL_BUMP = 0.90,
@@ -513,14 +513,30 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.25,
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
         RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 15.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 18.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 165.3,
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 21.4,      
+        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 180.0,
         RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 1.23,
         RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 1.16,
         RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.92,
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
-        RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03,
+        RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03, -- legacy (unused)
+        -- Micro pattern v2 (docs/RAINFX_MICRO_PATTERN.md). Bake-time values;
+        -- changes need a Lua reload.
+        RAIN_DYNAMIC_MICRO_PATTERN_STRATA = 6,
+        RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE = 0.55,
+        RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE = 0.77,
+        RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN = 0.32, -- cells, FINE TUNED
+        RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX = 0.55, -- cells, FINE TUNED
+        RAIN_DYNAMIC_MICRO_PATTERN_RIM_CELLS = 0.07, -- superseded by RIM_TEXELS
+        -- Invisible cut line: the winner's outer ring (in pattern texels)
+        -- shows the unrefracted scene/haze, separating fragments.
+        RAIN_DYNAMIC_MICRO_PATTERN_RIM_TEXELS = 1.43,       -- FINE TUNED
+        -- Pattern texels per grid cell (legacy look 2048 / 546 = 3.75).
+        RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL = 12.00,     --FINE TUNED
+        -- 0 = invisible cut line (gap). > 0 = draw the ring refracted but
+        -- darkened by this amount instead.
+        RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.0,
         RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
         -- Persistent UV wipe mask composited with the static micro layer.
@@ -596,15 +612,37 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED = true,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH = 50.0,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH = 150.0,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.35,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 1.2,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.44,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 0.70,
+        -- Kernels below ~1.5 texels never cross the silhouette threshold
+        -- on the texel grid; tear pieces are clamped to this size.
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS = 0.85,
         RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED = true,
         RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE = 1024,
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 1.4,
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.45,
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.9,
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 450.0,
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 0.46,      -- FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.78,        -- FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.75,        -- FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 203.0, -- FINE TUNED
         RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED = 0.004, -- visor UV / s
+
+        -- Haze / condensation film (docs/RAINFX_HAZE.md). Procedural in
+        -- visor UV (no texture); revealed by rain in a stable order, cleared
+        -- by wipes and water-field tracks; composited under micro disks.
+        RAIN_DYNAMIC_HAZE_ENABLED = true,
+        RAIN_DYNAMIC_HAZE_DEBUG = false,
+        RAIN_DYNAMIC_HAZE_TEXTURE_SIZE = 1024,
+        RAIN_DYNAMIC_HAZE_MIST_CELLS = 31.7,
+        RAIN_DYNAMIC_HAZE_ORDER_CELLS = 30.0,
+        RAIN_DYNAMIC_HAZE_SPECKLE_CELLS = 1500.0,
+        RAIN_DYNAMIC_HAZE_STRENGTH = 0.87,
+        RAIN_DYNAMIC_HAZE_MOTTLE = 0.70,
+        RAIN_DYNAMIC_HAZE_RAIN_POWER = 0.80,
+        RAIN_DYNAMIC_HAZE_REVEAL_SOFT = 0.40,
+        RAIN_DYNAMIC_HAZE_MIP = 4.5,
+        RAIN_DYNAMIC_HAZE_VEIL = 0.12,
+        RAIN_DYNAMIC_HAZE_SPECKLE_PIXELS = 2.0,
+        RAIN_DYNAMIC_HAZE_TRAIL_CLEAR = 0.90,
+        RAIN_DYNAMIC_HAZE_SKY_CORRECTION = true,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.11,
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
@@ -6185,172 +6223,222 @@ local function initializeRainDynamicSurfaceTest()
                 baseVertex + indices:get(i))
         end
 
-        local patternSize = math.max(256,
-            math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE))
-        local patternGrid = math.max(4, math.floor(
-            1.12 / math.max(0.01,
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM)
-                / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
-                + 0.5))
-        rainDynamicSceneCopyState.microPatternGrid = patternGrid
-        -- A threefold linear increase uses nine times the texture memory.
-        -- Fall back if a large allocation is unavailable on the active GPU.
-        for _, size in ipairs({ patternSize, 8192, 4096 }) do
-            local canvasOk, canvas = pcall(function()
-                return ui.ExtraCanvas(vec2(size, size), 1,
-                    render.TextureFormat.R8G8B8A8.UNorm)
-            end)
-            if canvasOk and canvas then
-                patternSize = size
-                rainDynamicSceneCopyState.microPatternCanvas = canvas
-                    :setName('RainFX static micro pattern')
-                break
+        -- Re-runnable bake (UI: diameter, pixelation, rim, strata ...).
+        rainDynamicSceneCopyState.bakeMicroPattern = function()
+            local patternGrid = math.max(4, math.floor(
+                1.12 / math.max(0.01,
+                    cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM)
+                    / cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+                    + 0.5))
+            -- Texture size follows the disk grid: few texels per cell is the
+            -- intended low-resolution look (legacy 2048 / 546 = 3.75).
+            local patternSize = math.max(256, math.min(16384, math.floor(
+                patternGrid * math.max(1.0,
+                    cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL)
+                + 0.5)))
+            rainDynamicSceneCopyState.microPatternGrid = patternGrid
+            if rainDynamicSceneCopyState.microPatternCanvas then
+                rainDynamicSceneCopyState.microPatternCanvas:dispose()
+                rainDynamicSceneCopyState.microPatternCanvas = nil
             end
-        end
-        if rainDynamicSceneCopyState.microPatternCanvas then
-            local maskOk, maskResult = pcall(function()
-                return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
-                    values = {
-                        gMicroPatternGrid = patternGrid,
-                        gMicroMaskRadius = 0.81
-                            - cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH
-                    },
-                    shader = [[
-                        float3 hashMicroCell(float2 cell)
-                        {
-                            float3 p = frac(float3(cell.x, cell.y, cell.x)
-                                * 0.1031);
-                            p += dot(p, p.yzx + 33.33);
-                            return frac((p.xxy + p.yzz) * p.zyx);
-                        }
-                        float4 main(PS_IN pin)
-                        {
-                            float2 p = pin.Tex * gMicroPatternGrid;
-                            float2 baseCell = floor(p);
-                            float best = -1.0;
-                            float2 chosen = float2(0.0, 0.0);
-                            float baseGate = 0.5;
-                            // Two independently seeded, sparse strata avoid
-                            // a visible grid; later disks always win overlaps.
-                            [unroll] for (int layer = 0; layer < 2; ++layer)
+            rainDynamicSceneCopyState.microPatternReady = false
+            -- A threefold linear increase uses nine times the texture memory.
+            -- Fall back if a large allocation is unavailable on the active GPU.
+            for _, size in ipairs({ patternSize, math.min(patternSize, 8192),
+                math.min(patternSize, 4096) }) do
+                local canvasOk, canvas = pcall(function()
+                    return ui.ExtraCanvas(vec2(size, size), 1,
+                        render.TextureFormat.R8G8B8A8.UNorm)
+                end)
+                if canvasOk and canvas then
+                    patternSize = size
+                    rainDynamicSceneCopyState.microPatternCanvas = canvas
+                        :setName('RainFX static micro pattern')
+                    break
+                end
+            end
+            if rainDynamicSceneCopyState.microPatternCanvas then
+                local maskOk, maskResult = pcall(function()
+                    return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
+                        -- Opaque: the rim class (A = 0.5) must not be
+                        -- premultiplied into the stored lens coordinates.
+                        blendMode = render.BlendMode.Opaque,
+                        values = {
+                            gMicroPatternGrid = patternGrid,
+                            gMicroStrata = math.max(1, math.min(6, math.floor(
+                                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_STRATA + 0.5))),
+                            gMicroPresence =
+                                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE,
+                            gMicroFirstPresence =
+                                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE,
+                            gMicroRadiusMin =
+                                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN,
+                            gMicroRadiusMax =
+                                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX,
+                            -- Invisible cut line: a ring of fixed TEXEL width.
+                            gMicroRimCells =
+                                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_TEXELS
+                                * patternGrid / math.max(patternSize, 1),
+                        },
+                        shader = [[
+                            float3 hashMicroCell(float2 cell)
                             {
-                                [unroll] for (int y = -1; y <= 1; ++y)
+                                float3 p = frac(float3(cell.x, cell.y, cell.x)
+                                    * 0.1031);
+                                p += dot(p, p.yzx + 33.33);
+                                return frac((p.xxy + p.yzz) * p.zyx);
+                            }
+                            // Micro pattern v2 (docs/RAINFX_MICRO_PATTERN.md).
+                            // Several strata of jittered disks with varying
+                            // radius. Priority = 1 - gate: the earliest disk to
+                            // appear with rain stays on top, later disks only
+                            // show as crescents, half-moons and dots around it,
+                            // so rising rain never cuts holes into visible disks.
+                            // RG = lens-local coords of the winner (unit disk),
+                            // B = gate (4 bit) * 16 + radius (4 bit), A = class:
+                            // 1 interior, 0.5 outline rim, 0 empty.
+                            float4 main(PS_IN pin)
+                            {
+                                float2 p = pin.Tex * gMicroPatternGrid;
+                                float2 baseCell = floor(p);
+                                float best = -1.0;
+                                float2 chosen = float2(0.0, 0.0);
+                                float chosenRadius = gMicroRadiusMin;
+                                float chosenGate = 0.99;
+                                int strata = (int)gMicroStrata;
+                                [loop] for (int layer = 0; layer < 6; ++layer)
                                 {
-                                    [unroll] for (int x = -1; x <= 1; ++x)
+                                    if (layer >= strata) break;
+                                    float fl = (float)layer;
+                                    float presenceLimit = layer == 0
+                                        ? gMicroFirstPresence : gMicroPresence;
+                                    [unroll] for (int y = -1; y <= 1; ++y)
                                     {
-                                        float2 cell = baseCell
-                                            + float2((float)x, (float)y);
-                                        float3 h = hashMicroCell(cell
-                                            + float2(137.31, 417.73)
-                                                * (float)layer);
-                                        float2 center = cell + 0.5
-                                            + (h.xy - 0.5) * 0.90;
-                                        float2 local = (p - center) / 0.56;
-                                        float priority = (float)layer
-                                            + h.z * 0.5;
-                                        // Different probability on each
-                                        // stratum keeps clusters irregular.
-                                        float presence = frac(h.x * 13.71
-                                            + h.y * 7.17);
-                                        if (presence < 0.63
-                                            && dot(local, local) < 1.0
-                                            && priority > best)
+                                        [unroll] for (int x = -1; x <= 1; ++x)
                                         {
-                                            best = priority;
-                                            chosen = local;
-                                            baseGate = frac(h.x * 3.19
-                                                + h.y * 7.83 + h.z * 11.71);
+                                            float2 cell = baseCell
+                                                + float2((float)x, (float)y);
+                                            float3 h = hashMicroCell(cell
+                                                + float2(137.31, 417.73) * fl);
+                                            float3 g = hashMicroCell(cell
+                                                + float2(59.17 * fl + 11.0,
+                                                    23.9 * fl + 7.0));
+                                            float2 center = cell + 0.5
+                                                + (h.xy - 0.5) * 0.90;
+                                            float radius = lerp(gMicroRadiusMin,
+                                                gMicroRadiusMax, g.x);
+                                            float2 local = (p - center) / radius;
+                                            float presence = frac(h.x * 13.71
+                                                + h.y * 7.17);
+                                            float gate = clamp((fl + g.y)
+                                                / (float)strata, 0.01, 0.99);
+                                            float priority = 1.0 - gate;
+                                            if (presence < presenceLimit
+                                                && dot(local, local) < 1.0
+                                                && priority > best)
+                                            {
+                                                best = priority;
+                                                chosen = local;
+                                                chosenRadius = radius;
+                                                chosenGate = gate;
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            float radius = saturate(length(chosen));
-                            // The topmost disk punches out its own thin rim.
-                            // Do not reveal an older disk beneath that rim.
-                            float interior = best >= 0.0
-                                && radius < gMicroMaskRadius ? 1.0 : 0.0;
-                            // One activation threshold belongs to the
-                            // winning original disk. Erasing that disk never
-                            // cuts a new circle through an existing image.
-                            float gate = 0.01 + 0.98 * baseGate;
-                            // B stores selection order, A stores only
-                            // geometry. Changing rain cannot shrink A.
-                            return float4(chosen * 0.5 + 0.5,
-                                gate, interior);
-                        }
-                    ]]
-                })
-            end)
-            rainDynamicSceneCopyState.microPatternReady =
-                maskOk and maskResult ~= false
-            if not maskOk then
-                ac.warn(appNameDebug .. ' Micro pattern shader: '
-                    .. tostring(maskResult))
-            end
-        else
-            rainDynamicSceneCopyState.microPatternReady = false
-        end
-        if rainDynamicSceneCopyState.microNormalCanvas then
-            rainDynamicSceneCopyState.microNormalCanvas:dispose()
-            rainDynamicSceneCopyState.microNormalCanvas = nil
-        end
-        rainDynamicSceneCopyState.microNormalReady = false
-        if rainDynamicSceneCopyState.microPatternReady then
-            local normalSize = math.max(256,
-                math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE))
-            local canvasOk, normalCanvas = pcall(function()
-                return ui.ExtraCanvas(vec2(normalSize, normalSize), 6,
-                    render.TextureFormat.R8G8B8A8.UNorm)
-                    :setName('RainFX static micro normals')
-            end)
-            if canvasOk and normalCanvas then
-                local bakeOk, bakeResult = pcall(function()
-                    local updated = normalCanvas:updateWithShader({
-                        textures = {
-                            txMicroMask = rainDynamicSceneCopyState.microPatternCanvas
-                        },
-                        shader = [[
-                            SamplerState samLinearMicroBake
-                            {
-                                Filter = MIN_MAG_MIP_LINEAR;
-                                AddressU = CLAMP;
-                                AddressV = CLAMP;
-                                AddressW = CLAMP;
-                            };
-                            float4 main(PS_IN pin)
-                            {
-                                float4 disk = txMicroMask.SampleLevel(
-                                    samLinearMicroBake, pin.Tex, 0.0);
-                                float2 xy = disk.xy * 2.0 - 1.0;
-                                float z = sqrt(saturate(1.0 - dot(xy, xy)));
-                                float3 normal = normalize(float3(xy, z));
-                                return float4(normal * 0.5 + 0.5, 1.0);
+                                float dist = saturate(length(chosen));
+                                // The winner keeps a thin outline ring of fixed
+                                // width in cells: fragments stay separated.
+                                float rimStart = 1.0 - gMicroRimCells
+                                    / max(chosenRadius, 0.05);
+                                float cls = best < 0.0 ? 0.0
+                                    : (dist < rimStart ? 1.0 : 0.5);
+                                float gateQ = floor(chosenGate * 15.999);
+                                float radiusQ = floor(saturate((chosenRadius
+                                    - gMicroRadiusMin) / max(gMicroRadiusMax
+                                    - gMicroRadiusMin, 1e-4)) * 15.999);
+                                return float4(chosen * 0.5 + 0.5,
+                                    (gateQ * 16.0 + radiusQ + 0.5) / 255.0, cls);
                             }
                         ]]
                     })
-                    if updated ~= false then
-                        normalCanvas:mipsUpdate()
-                    end
-                    return updated
                 end)
-                rainDynamicSceneCopyState.microNormalReady =
-                    bakeOk and bakeResult ~= false
-                if rainDynamicSceneCopyState.microNormalReady then
-                    rainDynamicSceneCopyState.microNormalCanvas = normalCanvas
-                else
-                    normalCanvas:dispose()
-                    ac.warn(appNameDebug .. ' Micro normal bake: '
-                        .. tostring(bakeResult))
+                rainDynamicSceneCopyState.microPatternReady =
+                    maskOk and maskResult ~= false
+                if not maskOk then
+                    ac.warn(appNameDebug .. ' Micro pattern shader: '
+                        .. tostring(maskResult))
                 end
             else
-                ac.warn(appNameDebug .. ' Micro normal canvas: '
-                    .. tostring(normalCanvas))
+                rainDynamicSceneCopyState.microPatternReady = false
             end
-            ac.log(appNameDebug .. ' Micro normals: '
-                .. tostring(normalSize) .. 'x' .. tostring(normalSize)
-                .. ' ready='
-                .. tostring(rainDynamicSceneCopyState.microNormalReady))
+            if rainDynamicSceneCopyState.microNormalCanvas then
+                rainDynamicSceneCopyState.microNormalCanvas:dispose()
+                rainDynamicSceneCopyState.microNormalCanvas = nil
+            end
+            rainDynamicSceneCopyState.microNormalReady = false
+            if rainDynamicSceneCopyState.microPatternReady then
+                local normalSize = math.max(256,
+                    math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE))
+                local canvasOk, normalCanvas = pcall(function()
+                    return ui.ExtraCanvas(vec2(normalSize, normalSize), 6,
+                        render.TextureFormat.R8G8B8A8.UNorm)
+                        :setName('RainFX static micro normals')
+                end)
+                if canvasOk and normalCanvas then
+                    local bakeOk, bakeResult = pcall(function()
+                        local updated = normalCanvas:updateWithShader({
+                            textures = {
+                                txMicroMask = rainDynamicSceneCopyState.microPatternCanvas
+                            },
+                            shader = [[
+                                SamplerState samLinearMicroBake
+                                {
+                                    Filter = MIN_MAG_MIP_LINEAR;
+                                    AddressU = CLAMP;
+                                    AddressV = CLAMP;
+                                    AddressW = CLAMP;
+                                };
+                                float4 main(PS_IN pin)
+                                {
+                                    float4 disk = txMicroMask.SampleLevel(
+                                        samLinearMicroBake, pin.Tex, 0.0);
+                                    float2 xy = disk.xy * 2.0 - 1.0;
+                                    float z = sqrt(saturate(1.0 - dot(xy, xy)));
+                                    float3 normal = normalize(float3(xy, z));
+                                    return float4(normal * 0.5 + 0.5, 1.0);
+                                }
+                            ]]
+                        })
+                        if updated ~= false then
+                            normalCanvas:mipsUpdate()
+                        end
+                        return updated
+                    end)
+                    rainDynamicSceneCopyState.microNormalReady =
+                        bakeOk and bakeResult ~= false
+                    if rainDynamicSceneCopyState.microNormalReady then
+                        rainDynamicSceneCopyState.microNormalCanvas = normalCanvas
+                    else
+                        normalCanvas:dispose()
+                        ac.warn(appNameDebug .. ' Micro normal bake: '
+                            .. tostring(bakeResult))
+                    end
+                else
+                    ac.warn(appNameDebug .. ' Micro normal canvas: '
+                        .. tostring(normalCanvas))
+                end
+                ac.log(appNameDebug .. ' Micro normals: '
+                    .. tostring(normalSize) .. 'x' .. tostring(normalSize)
+                    .. ' ready='
+                    .. tostring(rainDynamicSceneCopyState.microNormalReady))
+            end
+            rainDynamicSceneCopyState.microPatternSize = patternSize
+            rainDynamicSceneCopyState.microBakeKey =
+                rainDynamicSceneCopyState.microBakeKeyNow()
+            return patternSize, patternGrid
         end
+        local patternSize, patternGrid =
+            rainDynamicSceneCopyState.bakeMicroPattern()
         ac.log(appNameDebug .. ' Micro pattern: '
             .. tostring(patternSize) .. 'x' .. tostring(patternSize)
             .. ' grid=' .. tostring(patternGrid)
@@ -7158,6 +7246,8 @@ render.onSceneReady(function()
                 .. tostring(maskError))
             rainDynamicSceneCopyState.maskWarned = true
         end
+        rainDynamicSceneCopyState.microRebakeIfNeeded(
+            rainDynamicSceneCopyState)
         if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED then
             local birthOk, birthError = pcall(
                 rainDynamicSceneCopyState.updateBirthMask, sim)
@@ -7318,6 +7408,48 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
 end
 
 
+-- Micro pattern bake key: any change triggers a debounced re-bake.
+rainDynamicSceneCopyState.microBakeKeyNow = function()
+    local r = cfg.RUNTIME
+    return string.format('%.3f|%.2f|%.2f|%d|%.2f|%.2f|%.2f|%.2f',
+        r.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM,
+        r.RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL,
+        r.RAIN_DYNAMIC_MICRO_PATTERN_RIM_TEXELS,
+        math.floor(r.RAIN_DYNAMIC_MICRO_PATTERN_STRATA + 0.5),
+        r.RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE,
+        r.RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE,
+        r.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN,
+        r.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX)
+end
+
+-- Called from onSceneReady (never from UI): re-bake 0.4 s after the last
+-- change of any bake setting, so dragging a slider does not re-bake per frame.
+rainDynamicSceneCopyState.microRebakeIfNeeded = function(state)
+    if not state.bakeMicroPattern then return end
+    local key = state.microBakeKeyNow()
+    if key == state.microBakeKey then
+        state.microPendingKey = nil
+        return
+    end
+    local now = rainDynamicStateRenderClock
+    if state.microPendingKey ~= key then
+        state.microPendingKey = key
+        state.microPendingSince = now
+        return
+    end
+    if now - (state.microPendingSince or now) < 0.4 then return end
+    local ok, err = pcall(state.bakeMicroPattern)
+    if not ok then
+        ac.warn(appNameDebug .. ' Micro pattern re-bake failed: '
+            .. tostring(err))
+        state.microBakeKey = key
+    else
+        ac.log(appNameDebug .. ' Micro pattern re-baked: ' .. key
+            .. ' size=' .. tostring(state.microPatternSize))
+    end
+    state.microPendingKey = nil
+end
+
 -- Water field helpers (docs/RAINFX_WATER_FIELD.md). Stored on the shared
 -- state table instead of new chunk-level locals (Lua local/upvalue limits).
 rainDynamicSceneCopyState.waterKernel = function(state)
@@ -7338,6 +7470,66 @@ rainDynamicSceneCopyState.waterKernel = function(state)
     })
     state.waterKernelCanvas = canvas
     return canvas
+end
+
+-- Impact splash (docs/RAINFX_WATER_FIELD.md): a pressed "pancake" that
+-- spreads to a wide flat disk sized from the drop, with a torn rim of
+-- random lobes/notches/tongues and a few small satellite droplets.
+-- Everything is random per life (seeds), nothing is evenly spaced.
+-- `stage` 1..4 grows the pancake (drawn once per stage into the persistent
+-- trail canvas); satellites appear at the last stage. `scale` maps head
+-- texels to the target canvas; radius codes stay in head texels.
+rainDynamicSceneCopyState.waterFieldTearPieces = function(quad, origin,
+    scale, stage, minKernel)
+    local frac = rainDynamicSurfaceFrac
+    local Rf = origin.radius
+    local amount = origin.amount
+    local sa0, sb0 = origin.seedA, origin.seedB
+    local x, y = origin.x, origin.y
+    local grow = 0.5 + 0.125 * math.min(stage, 4)
+    local pancake = Rf * (1.4 + 0.9 * amount) * (0.85 + 0.3 * frac(sa0 * 9.1))
+        * grow
+    local count = 0
+    -- Flat core: a big, low-slope body (thin film, clear interior).
+    local ox = (frac(sb0 * 5.3) - 0.5) * 0.2 * pancake
+    local oy = (frac(sa0 * 6.7) - 0.5) * 0.2 * pancake
+    quad((x + ox) * scale, (y + oy) * scale, pancake * 0.95 * scale,
+        pancake * (0.86 + 0.12 * frac(sb0 * 2.9)) * scale,
+        math.cos(sa0 * 6.28), math.sin(sa0 * 6.28), pancake / 32.0, 1.0)
+    count = count + 1
+    -- Torn rim: random angles, random radial reach, some missing (notches),
+    -- some stretched outward (tongues).
+    local rimCount = 14 + math.floor(10 * amount * frac(sb0 * 3.7) + 0.5)
+    for k = 1, rimCount do
+        local h1 = frac(sa0 * 17.13 + k * 0.7548776662)
+        local h2 = frac(sb0 * 11.71 + k * 0.5698402911)
+        local h3 = frac((sa0 + sb0) * 7.77 + k * 0.4142135623)
+        if h3 > 0.18 then
+            local a = h1 * math.pi * 2.0
+            local ca, sn = math.cos(a), math.sin(a)
+            local reach = pancake * (0.86 + 0.22 * h2)
+            local rr = math.max(minKernel, pancake * (0.07 + 0.10 * h3))
+            local tongue = h2 > 0.85 and (1.5 + 1.0 * h3) or 1.0
+            quad((x + ca * reach) * scale, (y + sn * reach) * scale,
+                rr * tongue * scale, rr * scale, ca, sn, rr / 32.0, 1.0)
+            count = count + 1
+        end
+    end
+    -- Satellites: a few small droplets thrown clear of the rim.
+    if stage >= 4 then
+        local satellites = math.floor(2 + 5 * amount * frac(sa0 * 4.9) + 0.5)
+        for k = 1, satellites do
+            local h1 = frac(sb0 * 13.3 + k * 0.6180339887)
+            local h2 = frac(sa0 * 19.9 + k * 0.3819660113)
+            local a = h1 * math.pi * 2.0
+            local d = pancake * (1.2 + 0.7 * h2)
+            local rr = math.max(minKernel, Rf * (0.10 + 0.22 * h2))
+            quad((x + math.cos(a) * d) * scale, (y + math.sin(a) * d) * scale,
+                rr * scale, rr * scale, 1.0, 0.0, rr / 32.0, 1.0)
+            count = count + 1
+        end
+    end
+    return count
 end
 
 -- Draws every head stamp as soft kernels. Called inside canvas:update().
@@ -7374,7 +7566,10 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
     local tearMinRadiusUV =
         cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM * 0.5
         * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+    local tearMinKernel = math.max(0.5,
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS)
     local drawn = 0
+    local tearing = 0
     for _, stamp in ipairs(stamps) do
         local R = stamp.radius or 0.0
         if R > 0.25 then
@@ -7441,31 +7636,46 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                 end
                 drawn = drawn + count
             end
-            -- Impact at speed: torn sheet with radial fingers, briefly.
+            -- Impact at speed: a torn splash that stays WHERE IT LANDED.
+            -- The pieces are separate water; only the head keeps moving.
+            -- With trails on, the splash is stamped once into the
+            -- persistent trail canvas (it then thins and beads there).
+            -- Without trails it is drawn at the frozen impact origin.
             local birthAt = state.birthSeenAt and state.birthSeenAt[index]
             local age = birthAt and rainDynamicStateRenderClock - birthAt
             if tearAmount > 0.0 and age and age >= 0.0 and age < tearSeconds
                 and (rainDynamicStateRadius[index] or 0.0) >= tearMinRadiusUV
             then
-                local life = age / tearSeconds
-                local fingers = math.floor(3 + 6 * tearAmount)
-                for k = 1, fingers do
-                    local f1 = rainDynamicSurfaceFrac(seedA * 3.1 + k * 0.618)
-                    local f2 = rainDynamicSurfaceFrac(seedB * 4.7 + k * 0.414)
-                    local a = math.atan2(uy, ux) + (f1 * 2.0 - 1.0) * 2.2
-                    local ca, sa = math.cos(a), math.sin(a)
-                    local d = R * (0.8 + 1.1 * f2) * (0.7 + tearAmount)
-                        * (1.0 + 0.6 * life)
-                    local rr = R * (0.15 + 0.25 * f1) * (1.0 - 0.5 * life)
-                    kernelQuad(stamp.x + ca * d, stamp.y + sa * d,
-                        rr * (1.0 + 1.6 * f2), rr, ca, sa, rr * 1.2 / 32.0,
-                        1.0)
+                local Rf = math.max(R,
+                    (rainDynamicStateRadius[index] or 0.0) * size)
+                state.tearOrigin = state.tearOrigin or {}
+                local origin = state.tearOrigin[index]
+                if not origin or origin.generation ~= generation then
+                    origin = { generation = generation, x = stamp.x,
+                        y = stamp.y, radius = Rf, seedA = seedA,
+                        seedB = seedB, amount = tearAmount, stage = 0 }
+                    state.tearOrigin[index] = origin
                 end
-                drawn = drawn + fingers
+                -- Spread in 4 steps over ~0.12 s (one stamp per step).
+                local targetStage = math.min(4, math.floor(age / 0.03) + 1)
+                if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED then
+                    state.pendingSplash = state.pendingSplash or {}
+                    while origin.stage < targetStage do
+                        origin.stage = origin.stage + 1
+                        state.pendingSplash[#state.pendingSplash + 1] =
+                            { origin = origin, stage = origin.stage }
+                    end
+                else
+                    origin.stage = targetStage
+                    drawn = drawn + state.waterFieldTearPieces(kernelQuad,
+                        origin, 1.0, targetStage, tearMinKernel)
+                end
+                tearing = tearing + 1
             end
         end
     end
     state.waterFieldKernels = drawn
+    state.waterFieldTearHeads = tearing
 end
 
 -- Persistent, noisily decaying trail canvas (thinner copies of moving heads).
@@ -7551,9 +7761,36 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
     local kernel = state.waterKernel(state)
     local ks = math.max(1.0, cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
     local p1, p2 = vec2(), vec2()
+    local q1, q2, q3, q4 = vec2(), vec2(), vec2(), vec2()
     local color = rgbm(0.0, 1.0, 0.0, 1.0)
+    local function trailQuad(cx, cy, rx, ry, ux, uy, code, energy)
+        local ax, ay = rx * ks, ry * ks
+        local vx, vy = -uy, ux
+        q1.x, q1.y = cx - ux * ax - vx * ay, cy - uy * ax - vy * ay
+        q2.x, q2.y = cx + ux * ax - vx * ay, cy + uy * ax - vy * ay
+        q3.x, q3.y = cx + ux * ax + vx * ay, cy + uy * ax + vy * ay
+        q4.x, q4.y = cx - ux * ax + vx * ay, cy - uy * ax + vy * ay
+        color.r = math.min(code, 1.0)
+        color.g = 1.0
+        color.b = energy
+        color.mult = 1.0
+        ui.drawImageQuad(kernel, q1, q2, q3, q4, color)
+    end
     local trails = 0
+    local pending = state.pendingSplash
+    state.pendingSplash = nil
+    local tearMinKernel = math.max(0.5,
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS)
     target:update(function()
+        -- One-shot torn splashes at their impact origin.
+        if pending then
+            for _, item in ipairs(pending) do
+                -- Minimum piece size is enforced in trail texels.
+                trails = trails + state.waterFieldTearPieces(trailQuad,
+                    item.origin, scale, item.stage,
+                    tearMinKernel / math.max(scale, 0.05))
+            end
+        end
         for _, stamp in ipairs(stamps) do
             local index = stamp.index
             local vu = rainDynamicStateVelocityU[index] or 0.0
@@ -8546,6 +8783,12 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
             gDynamicDropMicroPatternGrid =
                 rainDynamicSceneCopyState.microPatternGrid or 1,
+            gDynamicDropMicroRadiusMin =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN,
+            gDynamicDropMicroRadiusMax =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX,
+            gDynamicDropMicroOutlineDark =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK,
             gDynamicDropMicroImageScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
             gDynamicDropMicroImageRotation = vec2(
@@ -8703,6 +8946,34 @@ float4 main(PS_IN pin)
             gDynamicDropWFNormalStep =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
+            gDynamicDropHazeEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED and 1.0 or 0.0,
+            gDynamicDropHazeMistCells = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_MIST_CELLS,
+            gDynamicDropHazeOrderCells =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ORDER_CELLS,
+            gDynamicDropHazeSpeckleCells =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_SPECKLE_CELLS,
+            gDynamicDropHazeDebug =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_DEBUG and 1.0 or 0.0,
+            gDynamicDropHazeRain = math.max(0.0, math.min(1.0,
+                cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0
+                    and cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+                    or sim.rainIntensity or 0.0))
+                ^ cfg.RUNTIME.RAIN_DYNAMIC_HAZE_RAIN_POWER,
+            gDynamicDropHazeStrength = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_STRENGTH,
+            gDynamicDropHazeMottle = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_MOTTLE,
+            gDynamicDropHazeRevealSoft =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_REVEAL_SOFT,
+            gDynamicDropHazeMip = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_MIP,
+            gDynamicDropHazeVeil = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_VEIL,
+            gDynamicDropHazeSpecklePixels =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_SPECKLE_PIXELS,
+            gDynamicDropHazeTrailClear =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_TRAIL_CLEAR,
+            gDynamicDropHazeSkyCorrection =
+                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_SKY_CORRECTION
+                and rainDynamicSceneCopyState.shotWithDepth
+                and 1.0 or 0.0,
             gDynamicDropWFInvMaskSize = 1.0
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
             gDynamicDropWaveDirection = waveDirection,
@@ -11579,6 +11850,77 @@ function windowMain(dt)
             'RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE', 0.0, 1.5, '%.2f')
         wfSlider('WF trail noise cells',
             'RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS', 50.0, 1500.0, '%.0f')
+        ui.text('Micro pattern bake (re-bakes 0.4 s after a change)')
+        wfSlider('Micro disk diameter (mm)',
+            'RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM', 0.2, 3.0, '%.2f')
+        wfSlider('Micro pixelation (texels per cell)',
+            'RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL', 1.5, 12.0, '%.2f')
+        wfSlider('Micro cut line (texels)',
+            'RAIN_DYNAMIC_MICRO_PATTERN_RIM_TEXELS', 0.0, 2.0, '%.2f')
+        wfSlider('Micro strata',
+            'RAIN_DYNAMIC_MICRO_PATTERN_STRATA', 1.0, 6.0, '%.0f')
+        wfSlider('Micro first stratum presence',
+            'RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE', 0.0, 1.0, '%.2f')
+        wfSlider('Micro stratum presence',
+            'RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE', 0.0, 1.0, '%.2f')
+        wfSlider('Micro radius min (cells)',
+            'RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN', 0.15, 0.85, '%.2f')
+        wfSlider('Micro radius max (cells)',
+            'RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX', 0.3, 0.95, '%.2f')
+        ui.text(string.format('Micro pattern %dx%d, grid %d',
+            rainDynamicSceneCopyState.microPatternSize or 0,
+            rainDynamicSceneCopyState.microPatternSize or 0,
+            rainDynamicSceneCopyState.microPatternGrid or 0))
+        wfSlider('Micro outline (0 = invisible cut line)',
+            'RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK', 0.0, 1.0, '%.2f')
+        wfSlider('WF tear min diameter (mm)',
+            'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM', 0.3, 4.0, '%.2f')
+        wfSlider('WF tear min piece (texels)',
+            'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS', 0.5, 4.0, '%.2f')
+        local car = ac.getCar(0)
+        ui.text(string.format('WF kernels %d | tearing heads %d | %.0f km/h',
+            rainDynamicSceneCopyState.waterFieldKernels or 0,
+            rainDynamicSceneCopyState.waterFieldTearHeads or 0,
+            car and car.speedKmh or 0.0))
+    end
+
+    ui.separator()
+    ui.text('Haze / condensation film')
+    do
+        local function hzSlider(label, key, minV, maxV, fmt)
+            local value, changed = ui.slider(label,
+                cfg.RUNTIME[key], minV, maxV, fmt)
+            if changed then cfg.RUNTIME[key] = value end
+        end
+        if ui.checkbox('Haze enabled',
+            cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED) then
+            cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED
+        end
+        if ui.checkbox('Haze debug (blue = amount)',
+            cfg.RUNTIME.RAIN_DYNAMIC_HAZE_DEBUG) then
+            cfg.RUNTIME.RAIN_DYNAMIC_HAZE_DEBUG =
+                not cfg.RUNTIME.RAIN_DYNAMIC_HAZE_DEBUG
+        end
+        hzSlider('Haze strength', 'RAIN_DYNAMIC_HAZE_STRENGTH',
+            0.0, 1.0, '%.2f')
+        hzSlider('Haze mottle', 'RAIN_DYNAMIC_HAZE_MOTTLE', 0.0, 1.0, '%.2f')
+        hzSlider('Haze rain power', 'RAIN_DYNAMIC_HAZE_RAIN_POWER',
+            0.2, 3.0, '%.2f')
+        hzSlider('Haze reveal softness', 'RAIN_DYNAMIC_HAZE_REVEAL_SOFT',
+            0.01, 0.4, '%.2f')
+        hzSlider('Haze blur mip', 'RAIN_DYNAMIC_HAZE_MIP', 0.0, 8.0, '%.1f')
+        hzSlider('Haze veil', 'RAIN_DYNAMIC_HAZE_VEIL', 0.0, 0.6, '%.2f')
+        hzSlider('Haze speckle (px)', 'RAIN_DYNAMIC_HAZE_SPECKLE_PIXELS',
+            0.0, 8.0, '%.1f')
+        hzSlider('Haze cleared by water tracks',
+            'RAIN_DYNAMIC_HAZE_TRAIL_CLEAR', 0.0, 1.0, '%.2f')
+        hzSlider('Haze mist cells', 'RAIN_DYNAMIC_HAZE_MIST_CELLS',
+            2.0, 40.0, '%.1f')
+        hzSlider('Haze reveal cells',
+            'RAIN_DYNAMIC_HAZE_ORDER_CELLS', 1.0, 30.0, '%.1f')
+        hzSlider('Haze speckle cells',
+            'RAIN_DYNAMIC_HAZE_SPECKLE_CELLS', 100.0, 1500.0, '%.0f')
     end
 
     ui.separator()
