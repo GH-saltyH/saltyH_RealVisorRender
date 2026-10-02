@@ -336,7 +336,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 3072,
+        RAIN_GPU_STATE_COUNT = 2048,
 
         -- Persistent state:
         -- 0 = disabled
@@ -362,22 +362,22 @@ local cfg = scriptSettings:mapConfig({
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
         RAIN_GPU_STATE_CAPACITY_RAMP_POWER = 1.0,
         -- Live birth-size keyframes in mm; a slot samples these at birth.
-        RAIN_GPU_SIZE_MIN_DRY = 0.32,                   -- Default 0.35mm
-        RAIN_GPU_SIZE_MAX_DRY = 0.38,                   -- Default 1.40mm
-        RAIN_GPU_SIZE_MIN_LIGHT = 0.35,                 -- Default 0.35mm
-        RAIN_GPU_SIZE_MAX_LIGHT = 0.49,                 -- Default 2.53mm
-        RAIN_GPU_SIZE_MIN_RAIN = 0.50,                  -- Default 0.91mm    
-        RAIN_GPU_SIZE_MAX_RAIN = 0.82,                  -- Default 4.10mm
-        RAIN_GPU_SIZE_MIN_HEAVY = 0.75,                 -- Default 1.15mm
-        RAIN_GPU_SIZE_MAX_HEAVY = 1.42,                 -- Default 4.10mm
-        RAIN_GPU_SIZE_MIN_RARE = 1.25,                  -- Default 5mm
-        RAIN_GPU_SIZE_MAX_RARE = 2.03,                  -- Default 6mm            
+        RAIN_GPU_SIZE_MIN_DRY = 0.24,                   -- Default 0.35mm
+        RAIN_GPU_SIZE_MAX_DRY = 0.30,                   -- Default 1.40mm
+        RAIN_GPU_SIZE_MIN_LIGHT = 0.28,                 -- Default 0.35mm
+        RAIN_GPU_SIZE_MAX_LIGHT = 0.36,                 -- Default 2.53mm
+        RAIN_GPU_SIZE_MIN_RAIN = 0.35,                  -- Default 0.91mm    
+        RAIN_GPU_SIZE_MAX_RAIN = 0.49,                  -- Default 4.10mm
+        RAIN_GPU_SIZE_MIN_HEAVY = 0.50,                 -- Default 1.15mm
+        RAIN_GPU_SIZE_MAX_HEAVY = 0.66,                 -- Default 4.10mm
+        RAIN_GPU_SIZE_MIN_RARE = 0.65,                  -- Default 5mm
+        RAIN_GPU_SIZE_MAX_RARE = 0.93,                  -- Default 6mm            
         RAIN_GPU_SIZE_BIAS = 2.0,
         RAIN_GPU_SIZE_RARECHANCE_DRY = 0.003,           -- Rare-size drop chance at dry
         RAIN_GPU_SIZE_RARECHANCE_HEAVY = 0.028,         -- Rare-size drop chance at heavy
         -- Add encounters from vehicle speed without changing surface flow.
         RAIN_GPU_STATE_SPEED_EXPOSURE_GAIN = 1.0,           -- Driving rain exposure gain, default: 1.00
-        RAIN_GPU_STATE_AGE_MIN_SECONDS = 5.0,               -- Moving drop minimum age (seconds), default: 8.0
+        RAIN_GPU_STATE_AGE_MIN_SECONDS = 2.1,               -- Moving drop minimum age (seconds), default: 8.0
         RAIN_GPU_STATE_AGE_MAX_SECONDS = 10.0,              -- Moving drop maximum age (seconds), default: 18.0
         RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER = 3.9,       -- Moving drop speed / calibrated cap, 
         RAIN_GPU_STATE_MOBILE_DRAG = 0.62,                  -- Moving drop drag,  Default : 1.59
@@ -392,6 +392,40 @@ local cfg = scriptSettings:mapConfig({
         -- 1 mm diameter occupies exactly 0.0029296875 visor UV in the
         -- calibrated Debug 50 mesh measurement.
         RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
+
+        -- Coalescence + absorption steering (docs/RAINFX_COALESCENCE.md).
+        -- Pairs come from the async readback on the CPU (uniform grid);
+        -- both GPU state passes validate them identically on current data.
+        -- Compile-time: false removes all merge code from both state shaders
+        -- (exactly the pre-merge shaders). Needs a Lua reload.
+        RAIN_GPU_STATE_MERGE_SHADER = true,
+        RAIN_GPU_STATE_MERGE_ENABLED = true,
+        RAIN_GPU_STATE_MERGE_REACH = 0.85,     -- merge when d < reach*(r1+r2)
+        RAIN_GPU_STATE_MERGE_MAX_DIAMETER_MM = 5.0,
+        RAIN_GPU_STATE_MERGE_MAX_PAIRS = 256,  -- per readback snapshot
+        RAIN_GPU_STATE_ATTRACT_ENABLED = true,
+        RAIN_GPU_STATE_ATTRACT_REACH = 1.6,    -- steer when d < reach*(r1+r2)
+        RAIN_GPU_STATE_ATTRACT_GAIN = 0.03,    -- visor UV / s^2 at contact
+        RAIN_GPU_STATE_ATTRACT_MIN_SPEED = 0.002, -- only moving drops steer
+        RAIN_GPU_STATE_ATTRACT_CONE = 0.0,     -- cos: 0 = forward half-plane
+        -- Wet-path steering (docs/RAINFX_TRAIL_FLOW.md): moving drops are
+        -- pulled sideways into existing wet tracks (water-field trail
+        -- canvas), so later drops follow earlier paths and form rivulets.
+        -- Compile-time define like MERGE_SHADER (needs a Lua reload).
+        RAIN_GPU_STATE_WETPATH_SHADER = true,
+        RAIN_GPU_STATE_WETPATH_ENABLED = true,
+        RAIN_GPU_STATE_WETPATH_GAIN = 0.6,      -- visor UV / s^2 per unit slope
+        RAIN_GPU_STATE_WETPATH_MIN_SPEED = 0.010, -- visor UV / s
+        -- Worm fix (docs/RAINFX_IMPACT_SPLASH.md): the wet-path gradient is
+        -- read AHEAD of the drop (its own trail is behind it), and wet-path
+        -- and attraction steering may turn a drop at most TURN_RATE rad/s,
+        -- so slow drops can no longer circle and wriggle.
+        RAIN_GPU_STATE_WETPATH_AHEAD = 1.5,     -- drop radii ahead
+        RAIN_GPU_STATE_STEER_TURN_RATE = 1.5,   -- rad / s
+        -- Birth hold: a fresh drop rests HOLD s (jittered 0.6-1.4x), then its
+        -- time step ramps in over RAMP s, so it starts slowly.
+        RAIN_GPU_STATE_BIRTH_HOLD_SECONDS = 0.6,
+        RAIN_GPU_STATE_BIRTH_RAMP_SECONDS = 1.2,
         RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM = 0.1000,      -- Default 0.016
         -- Atlas/Ulbrich-style size exponent used as the first-order
         -- size-dependent max-speed curve.
@@ -523,20 +557,20 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03, -- legacy (unused)
         -- Micro pattern v2 (docs/RAINFX_MICRO_PATTERN.md). Bake-time values;
         -- changes need a Lua reload.
-        RAIN_DYNAMIC_MICRO_PATTERN_STRATA = 6,
-        RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE = 0.55,
-        RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE = 0.77,
+        RAIN_DYNAMIC_MICRO_PATTERN_STRATA = 1,          -- Micro strata
+        RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE = 0.55,   -- Micro fist stratum presence
+        RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE = 0.77,     -- Micro stratum presence
         RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN = 0.32, -- cells, FINE TUNED
         RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX = 0.55, -- cells, FINE TUNED
         RAIN_DYNAMIC_MICRO_PATTERN_RIM_CELLS = 0.07, -- superseded by RIM_TEXELS
         -- Invisible cut line: the winner's outer ring (in pattern texels)
         -- shows the unrefracted scene/haze, separating fragments.
-        RAIN_DYNAMIC_MICRO_PATTERN_RIM_TEXELS = 1.43,       -- FINE TUNED
+        RAIN_DYNAMIC_MICRO_PATTERN_RIM_TEXELS = 1.43,       -- Micro cut line, FINE TUNED
         -- Pattern texels per grid cell (legacy look 2048 / 546 = 3.75).
         RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL = 12.00,     --FINE TUNED
         -- 0 = invisible cut line (gap). > 0 = draw the ring refracted but
         -- darkened by this amount instead.
-        RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.0,
+        RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.65,     -- Micro outline, FINE TUNED
         -- A/B: false = legacy micro optics (image scale + rotation), true =
         -- the water-field head lens rule. Compare before deciding.
         RAIN_DYNAMIC_MICRO_WATER_LENS = true,
@@ -551,22 +585,22 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.5,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION = true,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.36,
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 6.8,
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.11,    -- Thin film opacity, FINE TUNED
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 2.6,      -- Thin film refraction, FIND TUNED
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 1.30,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.36,
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.22,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS = 11.2,
-        RAIN_DYNAMIC_TRAIL_MASK_SIZE = 512,
+        RAIN_DYNAMIC_TRAIL_MASK_SIZE = 2048,            -- FINE TUNED (no fps dropping)
         -- Wipe / liquid-ridge path width from the drop's own diameter:
         -- width = diameter * scale + offset (mm), floored to MIN texels.
         -- Legacy was a fixed 1.5 R / 0.75 R with a 1.4-texel radius floor,
         -- which at 512 made most drops the same width.
-        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE = 1.0,
-        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM = 0.4,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE = 0.60,
-        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM = 0.0,
-        RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS = 1.0,
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE = 0.0,     -- Wipe width, FINE TUNED
+        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM = 0.0, -- Wipe width offset, FINE TUNED
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE = 0.00,   -- Liquid ridge width, FINE TUNED
+        RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM = 0.0,    -- Liquid ridge offset, FINE TUNED
+        RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS = 0.25,        -- Path min width, FINE TUNED
         RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
         RAIN_DYNAMIC_BIRTH_MASK_DEBUG = false,
         RAIN_DYNAMIC_BIRTH_MASK_OPTICS = true,
@@ -609,7 +643,7 @@ local cfg = scriptSettings:mapConfig({
         -- like metaballs; the slope of G drives one screen-space refraction
         -- rule for every shape (round, lobed, torn, trail). false = legacy.
         RAIN_DYNAMIC_WATER_FIELD_ENABLED = true,
-        RAIN_DYNAMIC_WATER_FIELD_DEBUG = 0, -- 1 height/silhouette, 2 slope
+        RAIN_DYNAMIC_WATER_FIELD_DEBUG = 0, -- 1 height/silhouette, 2 slope, 3 large-drop weight
         RAIN_DYNAMIC_WATER_FIELD_THRESHOLD = 0.35,
         RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE = 1.24,
         RAIN_DYNAMIC_WATER_FIELD_REFRACTION = 0.35, -- shot heights at slope 1
@@ -624,21 +658,125 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_WATER_FIELD_LOBES = true,
         RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH = 0.35,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED = true,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH = 50.0,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH = 150.0,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.44,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH = 111.0,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH = 205.0,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.12,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 0.70,
         -- Kernels below ~1.5 texels never cross the silhouette threshold
         -- on the texel grid; tear pieces are clamped to this size.
         RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS = 0.85,
+        -- Impact splash v2 (docs/RAINFX_IMPACT_SPLASH.md): animated in the
+        -- head canvas at the frozen impact point. Centre pressed flat then
+        -- emptied, mass pushed into a rim ring that grows, breaks up and
+        -- scatters. Energy = speed term x size term. false = old pancake.
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2 = true,
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS = 0.45, -- x (0.6 + 0.8 size)
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_SIZE_REF = 8.0, -- head texels = size 1
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPREAD = 1.8,   -- rim radius growth
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_HOLLOW_AT = 0.45, -- centre empty by t
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_BREAK_AT = 0.55, -- rim breaks from t
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_SCATTER = 1.4,  -- break-up throw (radii)
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_RESIDUAL = 0.65, -- remaining drop size
         RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED = true,
         RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE = 1024,
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 0.46,      -- FINE TUNED
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.78,        -- FINE TUNED
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.75,        -- FINE TUNED
-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 203.0, -- FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 0.46,      -- WF trail lifetime, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.78,        -- WF trail width, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.75,        -- WF trail bead noise, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 203.0, -- WF trail noise cells FINE TUNED
         RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED = 0.004, -- visor UV / s
+        -- Fast-flow sheet (docs/RAINFX_WATER_FIELD.md): fast heads lay a
+        -- wider, flatter, continuous track that decays smoothly (no beads)
+        -- and renders blurrier/milkier, like a thick spray film. Trail B/G
+        -- stores the sheet factor 0..1.
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED = true,
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_START_SPEED = 0.03, -- UV / s
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_FULL_SPEED = 0.10,  -- UV / s
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_WIDEN = 2.34,   -- + x trail width FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_THIN = 0.80,   -- amplitude loss, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_PERSIST = 0.25, -- slower decay, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_BLUR = 2.25,    -- extra mip, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_VEIL = 0.00,   -- milky lift, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_SHEET = 0.35, -- splash in trail
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_ALPHA = 1.00,  -- film opacity, FINE TUNED
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT = 0.24, -- soft film edge, FINE TUNED
+        -- Trail flow (docs/RAINFX_TRAIL_FLOW.md).
+        -- Surface-tension levelling: per-frame 4-neighbour diffusion of the
+        -- trail canvas, so beads/segments merge into one smooth film.
+        RAIN_DYNAMIC_WATER_FIELD_TRAIL_DIFFUSE = 0.05,
+        -- Fast-flow sheets: a ribbon (constant along the path) instead of a
+        -- stretched dome per frame, which left a chain of bumps.
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_RIBBON = true,
+        -- Slope taps at least one trail texel apart: a sub-texel step on the
+        -- bilinear 1024 trail gives a per-texel constant slope (grid look).
+        RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS = 1.0,
+        -- Anti-chrome tone limiter (heads, trails, micro water lens): the
+        -- refracted image is compressed toward the blurred view behind the
+        -- drop, and its luminance is held inside a ratio window of it.
+        RAIN_DYNAMIC_WATER_TONE_ENABLED = false,
+        RAIN_DYNAMIC_WATER_TONE_CONTRAST = 0.50, -- 1 = off, 0 = flat
+        RAIN_DYNAMIC_WATER_TONE_RATIO_MIN = 0.55,
+        RAIN_DYNAMIC_WATER_TONE_RATIO_MAX = 1.45,
+        RAIN_DYNAMIC_WATER_TONE_BG_MIP = 4.5,
+        -- Floor of the ratio window's reference, x fog luminance. Without it
+        -- the window collapsed to ~0 over black backgrounds (windscreen,
+        -- cockpit) and every drop there disappeared.
+        RAIN_DYNAMIC_WATER_TONE_FLOOR = 0.25,
+        -- Heads/trails use the v1 limiter (size-weighted v2 reverted, see
+        -- docs/RAINFX_TRAIL_FLOW.md §v3). Micro water lens: own switch.
+        RAIN_DYNAMIC_WATER_TONE_MICRO = false,
+        -- Large drops: low-res, imperfect inner image with a soft boundary.
+        RAIN_DYNAMIC_WATER_LARGE_START_PX = 8.0,
+        RAIN_DYNAMIC_WATER_LARGE_FULL_PX = 30.0,
+        RAIN_DYNAMIC_WATER_LARGE_BLUR_MIP = 1.5,  -- extra mip at full size
+        RAIN_DYNAMIC_WATER_LARGE_WARP_PIXELS = 4.0,
+        RAIN_DYNAMIC_WATER_LARGE_WARP_CELLS = 0.6, -- warp cell / drop radius
+        RAIN_DYNAMIC_WATER_LARGE_EDGE_SOFT = 0.10, -- height band (soft edge)
+        
 
+        -- Smear mask v3 (docs/RAINFX_SMEAR_MASK.md §v3, user design).
+        -- density = rain x (|car velocity - wind| / REF_KMH)
+        -- trigger = TRIGGER_OVERRIDE or density >= TRIGGER
+        -- reveal  = REVEAL_OVERRIDE (>= 0) or
+        --           min(1, density / FULL) x max(0, dot(cameraLook, airDir))
+        -- Texture R: region shows where R <= reveal (low R first).
+        -- Texture G: blend degree inside the region (micro visible+turbid
+        -- by G, drops turbid by G, trails/paths weakened by G).
+        RAIN_DYNAMIC_SMEAR_ENABLED = true,
+        RAIN_DYNAMIC_SMEAR_DEBUG = 0,          -- 1 region/G, 2 raw R, 3 raw G
+        RAIN_DYNAMIC_SMEAR_TEXTURE = 'texture/smear_mask.dds', -- app-relative
+        RAIN_DYNAMIC_SMEAR_USE_TEXTURE = true, -- false = procedural test mask
+        RAIN_DYNAMIC_SMEAR_REF_KMH = 200.0,    -- airspeed giving amplification 1
+        RAIN_DYNAMIC_SMEAR_TRIGGER = 0.30,     -- density that starts the effect
+        RAIN_DYNAMIC_SMEAR_FULL = 0.90,        -- density giving full reveal
+        RAIN_DYNAMIC_SMEAR_TRIGGER_OVERRIDE = false,
+        RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE_ON = false,
+        RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE = 0.0, -- manual reveal 0..1
+        RAIN_DYNAMIC_SMEAR_FACING_POWER = 1.0,
+        RAIN_DYNAMIC_SMEAR_ATTACK_SECONDS = 2.0,
+        RAIN_DYNAMIC_SMEAR_RELEASE_SECONDS = 6.0,
+        RAIN_DYNAMIC_SMEAR_EDGE_SOFT = 0.04,   -- R band around the reveal front
+        RAIN_DYNAMIC_SMEAR_MICRO_HIDE = 1.0,   -- micro visibility -> G in region
+        RAIN_DYNAMIC_SMEAR_MICRO_TURBID = 0.70, -- micro turbid x G
+        RAIN_DYNAMIC_SMEAR_DROP_TURBID = 0.60, -- GPU drops turbid x G
+        -- v4 fixed region rules (no G): inside the region WF trails and
+        -- heads are laid OVER the micro pattern with these strengths.
+        -- v5: water keeps its own silhouette, rim and glint (flow stays
+        -- visible) and its colour MIXES with the micro/haze beneath.
+        RAIN_DYNAMIC_SMEAR_TRAIL_MIX = 0.55,   -- trail colour -> layer beneath
+        RAIN_DYNAMIC_SMEAR_TRAIL_TURBID = 0.45, -- trail -> turbid colour
+        RAIN_DYNAMIC_SMEAR_TRAIL_BLUR = 1.5,   -- extra trail mip in region
+        RAIN_DYNAMIC_SMEAR_HEAD_MIX = 0.35,    -- head colour -> layer beneath
+        RAIN_DYNAMIC_SMEAR_PATH_WEAKEN = 0.85, -- wipe paths, film, ridge x region
+        RAIN_DYNAMIC_SMEAR_WIND_MODE = 1,      -- 0 ignore, 1 (x,z), 2 (x,-z), 3 (-x,-z)
+        RAIN_DYNAMIC_SMEAR_MIP = 5.0,          -- turbid colour blur
+        RAIN_DYNAMIC_SMEAR_VEIL = 0.45,        -- turbid colour -> fog
+        -- Procedural test mask (used without texture).
+        RAIN_DYNAMIC_SMEAR_MASK_CELLS = 5.0,
+        RAIN_DYNAMIC_SMEAR_MASK_WARP = 0.6,
+        RAIN_DYNAMIC_SMEAR_FILL_CELLS = 420.0,
+        RAIN_DYNAMIC_SMEAR_FILL_PATCH_CELLS = 40.0,
+        
+        
         -- Haze / condensation film (docs/RAINFX_HAZE.md). Procedural in
         -- visor UV (no texture); revealed by rain in a stable order, cleared
         -- by wipes and water-field tracks; composited under micro disks.
@@ -662,7 +800,7 @@ local cfg = scriptSettings:mapConfig({
         -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
         -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
         RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = false,
-
+        
         -- Stage 4B.2F: compare possible interpretations of mesh.fx ScreenPos.
         RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = false,
         -- Test whether track-stage HDR works without the extra scene copy.
@@ -672,7 +810,30 @@ local cfg = scriptSettings:mapConfig({
         -- Verified: this stage excludes sharp rain streaks from dynamic
         -- drops. Other KN5 transparent visor regions still show the artifact
         -- and require a separate visor-wide rendering/order investigation.
-        RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG = true,
+        -- 2026-10-02 (user test): with the geometry shot as the refraction
+        -- source, the track stage no longer mixes rain streaks in, so the
+        -- smoke-stage workaround is not needed any more.
+        RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG = false,
+        -- Depth test off for drops. Rejected in game (2026-10-02): drops of
+        -- overlapping visor parts showed through each other. Kept as a
+        -- diagnostic toggle only (docs/RAINFX_IMPACT_SPLASH.md §6).
+        RAIN_DYNAMIC_DROP_DEPTH_OFF = false,
+        -- Refraction source (geometry shot) completeness: the transparent
+        -- pass adds car glass / interior transparent parts, so the image a
+        -- drop refracts matches what is really behind the visor. The near
+        -- clip keeps the helmet visor itself out of its own source.
+        RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT = true,
+        -- Car glass is drawn after every stage we can hook (track / root /
+        -- smoke tested) and blends over the drops. A second, cheap pass
+        -- writes visor depth where water or micro drops are, so that later
+        -- glass behind the visor fails its depth test there. Its tint is
+        -- still in the drops, since they refract the shot (with glass).
+        -- It also gives TAA/DLSS a near (head-locked) depth there.
+        RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE = true,
+        -- Visor KN5 motion stencil (CSP: 1 = reduced TAA, 0.5 = extra TAA,
+        -- < 0 = untouched). Anti-ghosting test for fast camera motion.
+        RAIN_VISOR_MOTION_STENCIL = -1.0,
+        RAIN_DYNAMIC_DROP_SHOT_NEAR = 0.10, -- metres (>= camera near clip)
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
         RAIN_DYNAMIC_DROP_SPARSE_FRAME_DEBUG = false,
@@ -684,26 +845,26 @@ local cfg = scriptSettings:mapConfig({
         -- Keep the best empirical scale as a reference against projection.
         RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
         RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG = true,
-
+        
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.05,
-
+        
         -- accessData() currently returns with a measured fixed ~10-frame
         -- latency on the target CSP build. Keep more slots than that latency
         -- so one asynchronous readback can be issued every render frame.
         RAIN_DYNAMIC_STATE_READBACK_RING_SIZE = 16,
-
+        
         -- Cadence instrumentation is validated (10-frame async latency with
         -- one completed snapshot and one mesh update every frame). Keep the
         -- counters available but silence periodic logging for normal testing.
         RAIN_DYNAMIC_STATE_CADENCE_DEBUG = false,
-
+        
         RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM = 1.50,
         RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M = 0.00005,
         RAIN_DYNAMIC_SURFACE_TEST_UV_BUCKETS = 32,
-
+        
         RAIN_DEBUG = 0,
-
+        
     },
 })
 
@@ -715,7 +876,7 @@ local cfg = scriptSettings:mapConfig({
 ------------------------------------------------------------
 
 local DEFAULT_PROFILE1 = {
-
+    
     PITCH = 0.0000,
     YAW   = 0.0000,
     ROLL  = 0.0000,
@@ -933,16 +1094,27 @@ local RAIN_GPU_STATE_MODE_OPTIONS = {
 
 
 local rainStateUpdateParams = {
-    defines = { RAIN_GPU_STATE_PASS = true },
+    defines = { RAIN_GPU_STATE_PASS = true,
+        RAIN_MERGE_CODE = cfg.RUNTIME.RAIN_GPU_STATE_MERGE_SHADER,
+        RAIN_WETPATH_CODE = cfg.RUNTIME.RAIN_GPU_STATE_WETPATH_SHADER },
 
     textures = {
         txRainState = false,
         txRainStateMeta = false,
         txRainSurfaceNormal = false,
         txRainBoundaryMask = false,
+        txRainMergeCmd = false,
+        txRainWetPath = false,
     },
 
     values = {
+        gRainWetPathGain = 0.0,
+        gRainWetPathMinSpeed = 0.004,
+        gRainWetPathTexel = 1.0 / 1024.0,
+        gRainWetPathAhead = 1.5,
+        gRainSteerTurnRate = 1.5,
+        gRainBirthHold = 0.6,
+        gRainBirthRamp = 1.2,
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
         gRainAcceleration = vec3(0.0, 0.0, 0.0),
@@ -994,6 +1166,11 @@ local rainStateUpdateParams = {
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_X,
             cfg.RUNTIME.RAIN_GPU_STATE_SINGLE_DROP_Y
         ),
+        gRainMergeEnabled = 0.0,
+        gRainMergeReach = 0.85,
+        gRainAttractReach = 1.6,
+        gRainAttractGain = 0.03,
+        gRainMergeMaxDiameterMM = 5.0,
     },
 
     shader = [[
@@ -1071,7 +1248,7 @@ local rainStateUpdateParams = {
             // Only about a fifth of the boundary texture is usable visor.
             // Stop after eight valid choices; a hard cap also handles an
             // absent or malformed mask without an unbounded shader loop.
-            for (int attempt = 0; attempt < 128; ++attempt)
+            [loop] for (int attempt = 0; attempt < 128; ++attempt)
             {
                 float2 anchor = frac(float2(
                     (stateIndex + 0.5) * 0.61803398875
@@ -1099,7 +1276,7 @@ local rainStateUpdateParams = {
 
                 float clearance = 1.0;
                 float count = max(gRainStateCount, 1.0);
-                for (int probe = 0; probe < 16; ++probe)
+                [loop] for (int probe = 0; probe < 16; ++probe)
                 {
                     float otherIndex = fmod(
                         stateIndex + 1.0 + (float)probe * 37.0
@@ -1664,6 +1841,81 @@ local rainStateUpdateParams = {
             );
         }
 
+
+        // Mass coalescence + absorption steering (docs/RAINFX_COALESCENCE.md).
+        // Compiled only with RAIN_MERGE_CODE (cfg RAIN_GPU_STATE_MERGE_SHADER).
+        // Per-slot command texel written by Lua from the async readback:
+        // R,G = partner index (hi, lo byte), B = type * 64 + generation % 64
+        // of the PARTNER (type 1 = mutual merge, 2 = attract to partner).
+        // Straight-line (no early returns): FXC overflowed its stack on the
+        // first, branch-heavy version inside the already large state shader.
+#ifdef RAIN_MERGE_CODE
+        float rainMergePartner(float4 cmd)
+        {
+            return floor(cmd.r * 255.0 + 0.5) * 256.0
+                + floor(cmd.g * 255.0 + 0.5);
+        }
+
+        // Returns x = type (0 none), y = partner, z = valid, w = survivor.
+        float4 rainMergeDecode(float index, float count, float selfGen,
+            float2 selfP, float selfR, out float4 pState, out float4 pMeta)
+        {
+            float4 cmd = txRainMergeCmd.SampleLevel(samPointRain,
+                float2((index + 0.5) / count, 0.5), 0.0);
+            float code = floor(cmd.b * 255.0 + 0.5);
+            float type = floor(code / 64.0);
+            float genLow = code - type * 64.0;
+            float partner = clamp(rainMergePartner(cmd), 0.0, count - 1.0);
+            float2 puv = float2((partner + 0.5) / count, 0.5);
+            pMeta = txRainStateMeta.SampleLevel(samPointRain, puv, 0.0);
+            pState = txRainState.SampleLevel(samPointRain, puv, 0.0);
+            float4 pCmd = txRainMergeCmd.SampleLevel(samPointRain, puv, 0.0);
+            float pGen = floor(pMeta.a * 0.25);
+            float pStatus = pMeta.a - pGen * 4.0;
+            float pCode = floor(pCmd.b * 255.0 + 0.5);
+            float pType = floor(pCode / 64.0);
+            float pGenLow = pCode - pType * 64.0;
+            float dist = length(pState.rg - selfP);
+            float sumR = selfR + pMeta.r;
+            float ok = (type > 0.5 ? 1.0 : 0.0)
+                * (abs(partner - index) > 0.5 ? 1.0 : 0.0)
+                * (abs(pStatus - 1.0) < 0.5 ? 1.0 : 0.0)
+                * (abs(fmod(pGen, 64.0) - genLow) < 0.5 ? 1.0 : 0.0)
+                * (gRainMergeEnabled > 0.5 ? 1.0 : 0.0);
+            float mutual = (abs(pType - 1.0) < 0.5 ? 1.0 : 0.0)
+                * (abs(rainMergePartner(pCmd) - index) < 0.5 ? 1.0 : 0.0)
+                * (abs(fmod(selfGen, 64.0) - pGenLow) < 0.5 ? 1.0 : 0.0);
+            float mergeValid = ok * mutual
+                * (type < 1.5 ? 1.0 : 0.0)
+                * (dist <= sumR * gRainMergeReach ? 1.0 : 0.0);
+            float attractValid = ok
+                * (type > 1.5 ? 1.0 : 0.0)
+                * (dist > 1e-7 ? 1.0 : 0.0)
+                * (dist < sumR * gRainAttractReach ? 1.0 : 0.0);
+            float survivor = (selfR > pMeta.r
+                || (selfR == pMeta.r && index < partner)) ? 1.0 : 0.0;
+            return float4(type, partner, max(mergeValid, attractValid),
+                survivor);
+        }
+
+        float rainMergeRadius(float selfR, float partnerR)
+        {
+            // Same contact angle: footprint radius scales with volume^(1/3).
+            float merged = pow(max(selfR * selfR * selfR
+                + partnerR * partnerR * partnerR, 1e-15), 1.0 / 3.0);
+            return min(merged, gRainMergeMaxDiameterMM * 0.00146484375);
+        }
+
+        float rainMergeMassProfile(float diameterMM)
+        {
+            float volumeMin = 0.5 * 0.5 * 0.5;
+            float volumeMax = 6.0 * 6.0 * 6.0;
+            float volume = diameterMM * diameterMM * diameterMM;
+            return lerp(1.0, 9.0, saturate((volume - volumeMin)
+                / (volumeMax - volumeMin)));
+        }
+#endif
+
         float4 main(PS_IN pin) {
             float count = max(gRainStateCount, 1.0);
             float index = min(floor(pin.Tex.x * count), count - 1.0);
@@ -1791,6 +2043,92 @@ local rainStateUpdateParams = {
                 }
             }
 
+            // Birth hold (docs/RAINFX_IMPACT_SPLASH.md): a fresh drop rests
+            // for a jittered HOLD, then its time step ramps in over RAMP, so
+            // it accelerates gradually. Meta.B is the age while alive.
+            {
+                float holdJitter = frac(sin(index * 12.9898 + 78.233)
+                    * 43758.5453);
+                float holdT = gRainBirthHold * (0.6 + 0.8 * holdJitter);
+                float holdK = gRainStateLifecycle > 0.5
+                    ? saturate((meta.b - holdT) / max(gRainBirthRamp, 1e-3))
+                    : 1.0;
+                holdK = holdK * holdK * (3.0 - 2.0 * holdK);
+                dt *= holdK;
+                v *= holdK > 0.0 ? 1.0 : 0.0;
+            }
+
+#ifdef RAIN_MERGE_CODE
+            if (gRainMergeEnabled > 0.5 && gRainStateLifecycle > 0.5)
+            {
+                float4 pState, pMeta;
+                float4 merge = rainMergeDecode(index, count,
+                    floor(meta.a * 0.25), p, radius, pState, pMeta);
+                float isMerge = merge.z * (merge.x < 1.5 ? 1.0 : 0.0);
+                float isAttract = merge.z * (merge.x > 1.5 ? 1.0 : 0.0);
+                if (isMerge > 0.5 && merge.w < 0.5)
+                    return float4(p, 0.0, 0.0); // absorbed
+                // Survivor: volume-weighted centre and momentum (weights are
+                // zero when not merging), so it is pulled toward the drop it
+                // swallowed and changes course.
+                float selfV = radius * radius * radius;
+                float otherV = pMeta.r * pMeta.r * pMeta.r * isMerge;
+                float total = max(selfV + otherV, 1e-15);
+                p = (p * selfV + pState.rg * otherV) / total;
+                v = (v * selfV + pState.ba * otherV) / total;
+                radius = lerp(radius, rainMergeRadius(radius, pMeta.r),
+                    isMerge);
+                mass = lerp(mass, max(rainMergeMassProfile(
+                    radius / 0.00146484375), 1.0), isMerge);
+                // Absorption steering toward a drop ahead.
+                float2 toOther = pState.rg - p;
+                float dist = length(toOther);
+                float reach = max((radius + pMeta.r) * gRainAttractReach,
+                    1e-7);
+                float2 attractDv = toOther / max(dist, 1e-7)
+                    * gRainAttractGain * saturate(1.0 - dist / reach) * dt
+                    * isAttract;
+                // Worm fix: at most TURN_RATE rad/s of course change.
+                float attractMax = length(v) * gRainSteerTurnRate * dt;
+                v += attractDv * min(1.0, attractMax
+                    / max(length(attractDv), 1e-9));
+            }
+#endif
+
+#ifdef RAIN_WETPATH_CODE
+            // Wet-path steering (docs/RAINFX_TRAIL_FLOW.md): a pre-wetted
+            // track has lower contact-angle hysteresis, so a moving drop
+            // slides into it. Only the component across the motion is
+            // applied (no braking, and a drop's own trail behind it is
+            // symmetric). Straight-line code: no branches, no loops.
+            {
+                float wsp0 = length(v);
+                float2 wdir0 = v / max(wsp0, 1e-7);
+                // Read AHEAD of the drop: its own fresh trail lies behind.
+                float wt = gRainWetPathTexel;
+                float2 wuv = float2(p.x, p.y + 1.0) + wdir0
+                    * (radius * gRainWetPathAhead + 2.0 * wt);
+                float2 wg = float2(
+                    txRainWetPath.SampleLevel(samLinearRain,
+                        wuv + float2(wt, 0.0), 0.0).g
+                    - txRainWetPath.SampleLevel(samLinearRain,
+                        wuv - float2(wt, 0.0), 0.0).g,
+                    txRainWetPath.SampleLevel(samLinearRain,
+                        wuv + float2(0.0, wt), 0.0).g
+                    - txRainWetPath.SampleLevel(samLinearRain,
+                        wuv - float2(0.0, wt), 0.0).g) * 0.5;
+                float wsp = length(v);
+                float2 wdir = v / max(wsp, 1e-7);
+                float2 wlat = wg - dot(wg, wdir) * wdir;
+                float wOn = saturate(wsp / max(gRainWetPathMinSpeed, 1e-6)
+                    - 1.0);
+                float2 wetDv = wlat * (gRainWetPathGain * dt * wOn);
+                // Worm fix: at most TURN_RATE rad/s of course change.
+                float wetMax = wsp * gRainSteerTurnRate * dt;
+                v += wetDv * min(1.0, wetMax / max(length(wetDv), 1e-9));
+            }
+#endif
+
             if (gRainStatePhysics > 0.5) {
                 return rainStateUpdatePhysics(
                     p,
@@ -1808,10 +2146,12 @@ local rainStateUpdateParams = {
 }
 
 local rainStateMetaUpdateParams = {
+    defines = { RAIN_MERGE_CODE = cfg.RUNTIME.RAIN_GPU_STATE_MERGE_SHADER },
     textures = {
         txRainStateMeta = false,
         txRainState = false,
         txRainBoundaryMask = false,
+        txRainMergeCmd = false,
     },
     values = {
         gRainStateDeltaTime = 0.0,
@@ -1842,6 +2182,11 @@ local rainStateMetaUpdateParams = {
         gRainStateAgeMin = 8.0,
         gRainStateAgeMax = 18.0,
         gRainStateSingleDropTest = 0.0,
+        gRainMergeEnabled = 0.0,
+        gRainMergeReach = 0.85,
+        gRainAttractReach = 1.6,
+        gRainAttractGain = 0.03,
+        gRainMergeMaxDiameterMM = 5.0,
     },
 
     shader = [[
@@ -1953,6 +2298,72 @@ local rainStateMetaUpdateParams = {
             ).r;
         }
         
+
+        // Mass coalescence + absorption steering (docs/RAINFX_COALESCENCE.md).
+        // Compiled only with RAIN_MERGE_CODE (cfg RAIN_GPU_STATE_MERGE_SHADER).
+        // Per-slot command texel written by Lua from the async readback:
+        // R,G = partner index (hi, lo byte), B = type * 64 + generation % 64
+        // of the PARTNER (type 1 = mutual merge, 2 = attract to partner).
+        // Straight-line (no early returns): FXC overflowed its stack on the
+        // first, branch-heavy version inside the already large state shader.
+#ifdef RAIN_MERGE_CODE
+        float rainMergePartner(float4 cmd)
+        {
+            return floor(cmd.r * 255.0 + 0.5) * 256.0
+                + floor(cmd.g * 255.0 + 0.5);
+        }
+
+        // Returns x = type (0 none), y = partner, z = valid, w = survivor.
+        float4 rainMergeDecode(float index, float count, float selfGen,
+            float2 selfP, float selfR, out float4 pState, out float4 pMeta)
+        {
+            float4 cmd = txRainMergeCmd.SampleLevel(samPointRainMeta,
+                float2((index + 0.5) / count, 0.5), 0.0);
+            float code = floor(cmd.b * 255.0 + 0.5);
+            float type = floor(code / 64.0);
+            float genLow = code - type * 64.0;
+            float partner = clamp(rainMergePartner(cmd), 0.0, count - 1.0);
+            float2 puv = float2((partner + 0.5) / count, 0.5);
+            pMeta = txRainStateMeta.SampleLevel(samPointRainMeta, puv, 0.0);
+            pState = txRainState.SampleLevel(samPointRainMeta, puv, 0.0);
+            float4 pCmd = txRainMergeCmd.SampleLevel(samPointRainMeta, puv, 0.0);
+            float pGen = floor(pMeta.a * 0.25);
+            float pStatus = pMeta.a - pGen * 4.0;
+            float pCode = floor(pCmd.b * 255.0 + 0.5);
+            float pType = floor(pCode / 64.0);
+            float pGenLow = pCode - pType * 64.0;
+            float dist = length(pState.rg - selfP);
+            float sumR = selfR + pMeta.r;
+            float ok = (type > 0.5 ? 1.0 : 0.0)
+                * (abs(partner - index) > 0.5 ? 1.0 : 0.0)
+                * (abs(pStatus - 1.0) < 0.5 ? 1.0 : 0.0)
+                * (abs(fmod(pGen, 64.0) - genLow) < 0.5 ? 1.0 : 0.0)
+                * (gRainMergeEnabled > 0.5 ? 1.0 : 0.0);
+            float mutual = (abs(pType - 1.0) < 0.5 ? 1.0 : 0.0)
+                * (abs(rainMergePartner(pCmd) - index) < 0.5 ? 1.0 : 0.0)
+                * (abs(fmod(selfGen, 64.0) - pGenLow) < 0.5 ? 1.0 : 0.0);
+            float mergeValid = ok * mutual
+                * (type < 1.5 ? 1.0 : 0.0)
+                * (dist <= sumR * gRainMergeReach ? 1.0 : 0.0);
+            float attractValid = ok
+                * (type > 1.5 ? 1.0 : 0.0)
+                * (dist > 1e-7 ? 1.0 : 0.0)
+                * (dist < sumR * gRainAttractReach ? 1.0 : 0.0);
+            float survivor = (selfR > pMeta.r
+                || (selfR == pMeta.r && index < partner)) ? 1.0 : 0.0;
+            return float4(type, partner, max(mergeValid, attractValid),
+                survivor);
+        }
+
+        float rainMergeRadius(float selfR, float partnerR)
+        {
+            // Same contact angle: footprint radius scales with volume^(1/3).
+            float merged = pow(max(selfR * selfR * selfR
+                + partnerR * partnerR * partnerR, 1e-15), 1.0 / 3.0);
+            return min(merged, gRainMergeMaxDiameterMM * 0.00146484375);
+        }
+#endif
+
         float4 main(PS_IN pin) {
             float count = max(gRainStateCount, 1.0);
             float index = min(floor(pin.Tex.x * count), count - 1.0);
@@ -2045,6 +2456,26 @@ local rainStateMetaUpdateParams = {
 
                 float2 p = state.rg;
                 float2 v = state.ba;
+#ifdef RAIN_MERGE_CODE
+                if (gRainMergeEnabled > 0.5)
+                {
+                    float4 pState, pMeta;
+                    float4 merge = rainMergeDecode(index, count, generation,
+                        p, meta.r, pState, pMeta);
+                    float isMerge = merge.z * (merge.x < 1.5 ? 1.0 : 0.0);
+                    if (isMerge > 0.5 && merge.w < 0.5)
+                    {
+                        // Absorbed: dead now, normal respawn gap later.
+                        meta.a = generation * 4.0;
+                        meta.b = 0.0;
+                        return meta;
+                    }
+                    meta.r = lerp(meta.r, rainMergeRadius(meta.r, pMeta.r),
+                        isMerge);
+                    meta.g = lerp(meta.g, rainStatePhysicalMassProfile(
+                        meta.r / 0.00146484375), isMerge);
+                }
+#endif
                 float2 predicted = p + v * dt;
                 float2 midpoint = lerp(
                     p,
@@ -5098,6 +5529,8 @@ local function initializeRainGPUState()
     rainStateMetaUpdateParams.textures.txRainStateMeta = false
     rainStateMetaUpdateParams.textures.txRainState = false
     rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+    rainStateUpdateParams.values.gRainMergeEnabled = 0.0
+    rainStateMetaUpdateParams.values.gRainMergeEnabled = 0.0
 
     local initPasses = {
         { rainStateA, rainStateUpdateParams, 'state A' },
@@ -5135,6 +5568,152 @@ local function initializeRainGPUState()
         .. ' physical droplets'
     )
 
+    return true
+end
+
+-- Coalescence / steering commands (docs/RAINFX_COALESCENCE.md). Built once
+-- per readback snapshot with a uniform grid, drawn into a count x 1 RGBA8
+-- canvas: R,G = partner index bytes, B = type * 64 + partner generation % 64.
+rainDynamicSceneCopyState.updateMergeCommands = function(count, lifecycleOn)
+    local state = rainDynamicSceneCopyState
+    local r = cfg.RUNTIME
+    if not state.mergeCmd or state.mergeCmdCount ~= count then
+        if state.mergeCmd then state.mergeCmd:dispose() end
+        state.mergeCmd = ui.ExtraCanvas(vec2(count, 1), 1,
+            render.TextureFormat.R8G8B8A8.UNorm)
+            :setName('RainFX merge commands')
+        state.mergeCmd:clear(rgbm.colors.transparent)
+        state.mergeCmdCount = count
+        state.mergeSnapshot = nil
+    end
+    local wantMerge = r.RAIN_GPU_STATE_MERGE_ENABLED
+    local wantAttract = r.RAIN_GPU_STATE_ATTRACT_ENABLED
+    if not lifecycleOn or not rainDynamicStateHasSnapshot
+        or not (wantMerge or wantAttract) then
+        if state.mergeActive then
+            state.mergeCmd:clear(rgbm.colors.transparent)
+            state.mergeActive = false
+        end
+        state.mergePairs, state.mergeAttracts = 0, 0
+        return false
+    end
+    if state.mergeSnapshot == rainDynamicStateSnapshotTime then return true end
+    state.mergeSnapshot = rainDynamicStateSnapshotTime
+
+    local n = math.min(count, rainDynamicStateReadbackCount)
+    local age = math.min(math.max(
+        rainDynamicStateRenderClock - rainDynamicStateSnapshotTime, 0.0),
+        r.RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS)
+    local px, py = state.mergePX or {}, state.mergePY or {}
+    state.mergePX, state.mergePY = px, py
+    local maxR = 0.0
+    for i = 1, n do
+        if (rainDynamicStateAlive[i] or 0.0) > 0.5 then
+            px[i] = (rainDynamicStateU[i] or 0.0)
+                + (rainDynamicStateVelocityU[i] or 0.0) * age
+            py[i] = (rainDynamicStateV[i] or -1.0)
+                + (rainDynamicStateVelocityV[i] or 0.0) * age
+            maxR = math.max(maxR, rainDynamicStateRadius[i] or 0.0)
+        else
+            px[i] = nil
+        end
+    end
+    local mergeReach = r.RAIN_GPU_STATE_MERGE_REACH
+    local attractReach = r.RAIN_GPU_STATE_ATTRACT_REACH
+    local cell = math.max(2.0 * maxR * math.max(mergeReach, attractReach),
+        1e-4)
+    local grid = {}
+    for i = 1, n do
+        if px[i] then
+            local key = math.floor(px[i] / cell) * 65536
+                + math.floor((py[i] + 1.0) / cell)
+            local bucket = grid[key]
+            if not bucket then bucket = {}; grid[key] = bucket end
+            bucket[#bucket + 1] = i
+        end
+    end
+    local partner = {}
+    local kind = {}
+    local pairCount = 0
+    local attracts = 0
+    local maxPairs = math.max(0, math.floor(r.RAIN_GPU_STATE_MERGE_MAX_PAIRS))
+    local minSpeed = r.RAIN_GPU_STATE_ATTRACT_MIN_SPEED
+    local cone = r.RAIN_GPU_STATE_ATTRACT_CONE
+    for i = 1, n do
+        local xi = px[i]
+        if xi and not partner[i] then
+            local yi = py[i]
+            local ri = rainDynamicStateRadius[i] or 0.0
+            local cx = math.floor(xi / cell)
+            local cy = math.floor((yi + 1.0) / cell)
+            local bestJ, bestD = nil, math.huge
+            local vu = rainDynamicStateVelocityU[i] or 0.0
+            local vv = rainDynamicStateVelocityV[i] or 0.0
+            local speed = math.sqrt(vu * vu + vv * vv)
+            local steerJ, steerD = nil, math.huge
+            for gx = cx - 1, cx + 1 do
+                for gy = cy - 1, cy + 1 do
+                    local bucket = grid[gx * 65536 + gy]
+                    if bucket then
+                        for _, j in ipairs(bucket) do
+                            if j ~= i then
+                                local dx, dy = px[j] - xi, py[j] - yi
+                                local d = math.sqrt(dx * dx + dy * dy)
+                                local rs = ri + (rainDynamicStateRadius[j]
+                                    or 0.0)
+                                if wantMerge and not partner[j]
+                                    and d < rs * mergeReach and d < bestD
+                                then
+                                    bestJ, bestD = j, d
+                                end
+                                if wantAttract and speed >= minSpeed
+                                    and d < rs * attractReach and d < steerD
+                                    and (dx * vu + dy * vv)
+                                        > cone * d * speed
+                                then
+                                    steerJ, steerD = j, d
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            if bestJ and pairCount < maxPairs then
+                partner[i], kind[i] = bestJ, 1
+                partner[bestJ], kind[bestJ] = i, 1
+                pairCount = pairCount + 1
+            elseif steerJ then
+                partner[i], kind[i] = steerJ, 2
+                attracts = attracts + 1
+            end
+        end
+    end
+    local generation = state.generation or {}
+    state.mergeCmd:clear(rgbm.colors.transparent)
+    if pairCount + attracts > 0 then
+        local color = rgbm(0.0, 0.0, 0.0, 1.0)
+        local p1, p2 = vec2(), vec2()
+        state.mergeCmd:update(function()
+            for i = 1, n do
+                local j = partner[i]
+                if j then
+                    local slot = j - 1 -- shader index is 0-based
+                    local genLow = (generation[j] or 0) % 64
+                    color.r = math.floor(slot / 256) / 255.0
+                    color.g = (slot % 256) / 255.0
+                    color.b = (kind[i] * 64 + genLow) / 255.0
+                    color.mult = 1.0
+                    p1.x, p1.y = i - 1, 0
+                    p2.x, p2.y = i, 1
+                    ui.drawRectFilled(p1, p2, color)
+                end
+            end
+        end)
+    end
+    state.mergeActive = true
+    state.mergePairs = pairCount
+    state.mergeAttracts = attracts
+    state.mergePairsTotal = (state.mergePairsTotal or 0) + pairCount
     return true
 end
 
@@ -5376,6 +5955,51 @@ local function updateRainGPUState(sim)
     rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
     rainStateMetaUpdateParams.textures.txRainState = readState
     rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+
+    local lifecycleOn =
+        rainStateMetaUpdateParams.values.gRainStateLifecycle > 0.5
+    local mergeOk, mergeReady = pcall(
+        rainDynamicSceneCopyState.updateMergeCommands, count, lifecycleOn)
+    if not mergeOk and not rainDynamicSceneCopyState.mergeWarned then
+        ac.warn(appNameDebug .. ' Merge commands failed: '
+            .. tostring(mergeReady))
+        rainDynamicSceneCopyState.mergeWarned = true
+    end
+    local mergeOn = mergeOk and mergeReady and 1.0 or 0.0
+    local mergeCmd = mergeOn > 0.5 and rainDynamicSceneCopyState.mergeCmd
+        or false
+    for _, params in ipairs({ rainStateUpdateParams,
+        rainStateMetaUpdateParams }) do
+        params.textures.txRainMergeCmd = mergeCmd
+        params.values.gRainMergeEnabled = mergeOn
+        params.values.gRainMergeReach = cfg.RUNTIME.RAIN_GPU_STATE_MERGE_REACH
+        params.values.gRainAttractReach =
+            cfg.RUNTIME.RAIN_GPU_STATE_ATTRACT_REACH
+        params.values.gRainAttractGain =
+            cfg.RUNTIME.RAIN_GPU_STATE_ATTRACT_ENABLED
+            and cfg.RUNTIME.RAIN_GPU_STATE_ATTRACT_GAIN or 0.0
+        params.values.gRainMergeMaxDiameterMM =
+            cfg.RUNTIME.RAIN_GPU_STATE_MERGE_MAX_DIAMETER_MM
+    end
+    -- Wet-path steering reads last frame's water-field trail canvas.
+    local wetPath = cfg.RUNTIME.RAIN_GPU_STATE_WETPATH_ENABLED
+        and rainDynamicSceneCopyState.waterTrailReady
+        and rainDynamicSceneCopyState.waterTrailRead or false
+    rainStateUpdateParams.textures.txRainWetPath = wetPath
+    rainStateUpdateParams.values.gRainWetPathGain =
+        wetPath and cfg.RUNTIME.RAIN_GPU_STATE_WETPATH_GAIN or 0.0
+    rainStateUpdateParams.values.gRainWetPathMinSpeed =
+        cfg.RUNTIME.RAIN_GPU_STATE_WETPATH_MIN_SPEED
+    rainStateUpdateParams.values.gRainWetPathTexel =
+        1.0 / math.max(rainDynamicSceneCopyState.waterTrailSize or 1024, 1)
+    rainStateUpdateParams.values.gRainWetPathAhead =
+        cfg.RUNTIME.RAIN_GPU_STATE_WETPATH_AHEAD
+    rainStateUpdateParams.values.gRainSteerTurnRate =
+        cfg.RUNTIME.RAIN_GPU_STATE_STEER_TURN_RATE
+    rainStateUpdateParams.values.gRainBirthHold =
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_HOLD_SECONDS
+    rainStateUpdateParams.values.gRainBirthRamp =
+        cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_RAMP_SECONDS
 
     writeState:updateWithShader(rainStateUpdateParams)
     writeMeta:updateWithShader(rainStateMetaUpdateParams)
@@ -7482,6 +8106,80 @@ rainDynamicSceneCopyState.microRebakeIfNeeded = function(state)
     state.microPendingKey = nil
 end
 
+-- Smear mask trigger (docs/RAINFX_SMEAR_MASK.md §v3): rain x relative
+-- airspeed, facing term from the camera look vs incoming air; smoothed and
+-- advanced once per frame. Also resolves the mask texture once.
+rainDynamicSceneCopyState.appFolder = appFolder
+rainDynamicSceneCopyState.smearUpdate = function(state, sim)
+    local r = cfg.RUNTIME
+    if sim.frame ~= nil and state.smearFrame == sim.frame then
+        return state.smearLevel or 0.0
+    end
+    state.smearFrame = sim.frame
+    if state.smearTexturePathKey ~= r.RAIN_DYNAMIC_SMEAR_TEXTURE then
+        state.smearTexturePathKey = r.RAIN_DYNAMIC_SMEAR_TEXTURE
+        local path = state.appFolder .. '/' .. r.RAIN_DYNAMIC_SMEAR_TEXTURE
+        state.smearTexturePath = io.fileExists(path) and path or nil
+    end
+    local dt = math.min(math.max(sim.dt or 0.0, 0.0), 0.1)
+    local rain = math.max(0.0, math.min(1.0,
+        r.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 and r.RAIN_GPU_STATE_RAIN_OVERRIDE
+        or sim.rainIntensity or 0.0))
+    -- Incoming air in world space: car velocity (m/s) minus wind. The wind
+    -- vec2 is taken as game-space (x, z) km/h (assumption, see doc).
+    local car = ac.getCar(0)
+    local vx, vy, vz = 0.0, 0.0, 0.0
+    if car and car.velocity then
+        vx, vy, vz = car.velocity.x, car.velocity.y, car.velocity.z
+    end
+    local carKmh = math.sqrt(vx * vx + vy * vy + vz * vz) * 3.6
+    local facingNoWind = 0.0
+    local look = sim.cameraLook
+    if carKmh > 1.0 and look then
+        facingNoWind = math.max(0.0, (look.x * vx + look.y * vy
+            + look.z * vz) / (carKmh / 3.6))
+    end
+    local w = sim.windVelocityKmh
+    local mode = math.floor(r.RAIN_DYNAMIC_SMEAR_WIND_MODE + 0.5)
+    if w and mode > 0 then
+        local wx, wz = w.x, w.y
+        if mode == 2 then wz = -wz elseif mode == 3 then wx, wz = -wx, -wz end
+        vx = vx - wx / 3.6
+        vz = vz - wz / 3.6
+    end
+    state.smearCarKmh, state.smearFacingNoWind = carKmh, facingNoWind
+    state.smearWindX, state.smearWindY = w and w.x or 0.0, w and w.y or 0.0
+    local airKmh = math.sqrt(vx * vx + vy * vy + vz * vz) * 3.6
+    local amp = airKmh / math.max(r.RAIN_DYNAMIC_SMEAR_REF_KMH, 1.0)
+    local density = rain * amp
+    local facing = 0.0
+    if airKmh > 1.0 and look then
+        local inv = 1.0 / (airKmh / 3.6)
+        facing = math.max(0.0, (look.x * vx + look.y * vy + look.z * vz) * inv)
+        facing = facing ^ math.max(r.RAIN_DYNAMIC_SMEAR_FACING_POWER, 0.05)
+    end
+    local triggered = r.RAIN_DYNAMIC_SMEAR_TRIGGER_OVERRIDE
+        or density >= r.RAIN_DYNAMIC_SMEAR_TRIGGER
+    local target = triggered and math.min(1.0, density
+        / math.max(r.RAIN_DYNAMIC_SMEAR_FULL, 1e-3)) * facing or 0.0
+    -- Explicit switch: a slider parked at -0.00 used to count as >= 0 and
+    -- forced the reveal to zero.
+    if r.RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE_ON then
+        target = math.max(0.0, math.min(1.0, r.RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE))
+    end
+    if not r.RAIN_DYNAMIC_SMEAR_ENABLED then target = 0.0 end
+    local level = state.smearLevel or 0.0
+    local tau = target > level and r.RAIN_DYNAMIC_SMEAR_ATTACK_SECONDS
+        or r.RAIN_DYNAMIC_SMEAR_RELEASE_SECONDS
+    level = level + (target - level) * (1.0 - math.exp(-dt / math.max(tau, 0.05)))
+    if level < 0.0005 and target <= 0.0 then level = 0.0 end
+    state.smearRain, state.smearAirKmh, state.smearAmp = rain, airKmh, amp
+    state.smearDensity, state.smearFacing = density, facing
+    state.smearTriggered, state.smearTarget = triggered, target
+    state.smearLevel = level
+    return level
+end
+
 -- Water field helpers (docs/RAINFX_WATER_FIELD.md). Stored on the shared
 -- state table instead of new chunk-level locals (Lua local/upvalue limits).
 rainDynamicSceneCopyState.waterKernel = function(state)
@@ -7501,6 +8199,29 @@ rainDynamicSceneCopyState.waterKernel = function(state)
         ]]
     })
     state.waterKernelCanvas = canvas
+    return canvas
+end
+
+-- Ribbon kernel (docs/RAINFX_TRAIL_FLOW.md): straight-alpha profile
+-- h = 1 - v^2 across, constant along. Consecutive sheet segments drawn from
+-- the previous to the current point abut exactly, so a fast path is one
+-- continuous film instead of a chain of stretched domes.
+rainDynamicSceneCopyState.waterRibbonKernel = function(state)
+    if state.waterRibbonCanvas then return state.waterRibbonCanvas end
+    local canvas = ui.ExtraCanvas(vec2(8, 64), 1,
+        render.TextureFormat.R8G8B8A8.UNorm)
+        :setName('RainFX water ribbon kernel')
+    canvas:updateWithShader({
+        blendMode = render.BlendMode.Opaque,
+        shader = [[
+            float4 main(PS_IN pin)
+            {
+                float v = pin.Tex.y * 2.0 - 1.0;
+                return float4(1.0, 1.0, 1.0, saturate(1.0 - v * v));
+            }
+        ]]
+    })
+    state.waterRibbonCanvas = canvas
     return canvas
 end
 
@@ -7564,6 +8285,84 @@ rainDynamicSceneCopyState.waterFieldTearPieces = function(quad, origin,
     return count
 end
 
+-- Impact splash v2 (docs/RAINFX_IMPACT_SPLASH.md). State at t = 0..1 of
+-- its life, drawn as union kernels at the frozen impact point:
+--   centre: pressed flat (amplitude falls), then empty after HOLLOW_AT;
+--   rim: kernels on a ring of radius Rf (1 + SPREAD E s(t)) carry the mass
+--        moved out of the centre (slope, i.e. the 3D look, moves with it);
+--   break-up after BREAK_AT: rim kernels fly outward, shrink and vanish
+--        one by one; small satellites are thrown beyond the rim.
+-- `quad(cx, cy, rx, ry, ux, uy, code, energy, amp)`; amp scales height.
+rainDynamicSceneCopyState.waterFieldSplashV2 = function(quad, origin, scale,
+    t, minKernel, ampScale)
+    local r = cfg.RUNTIME
+    local frac = rainDynamicSurfaceFrac
+    local function sstep(a, b, x)
+        local k = math.max(0.0, math.min(1.0, (x - a) / math.max(b - a, 1e-4)))
+        return k * k * (3.0 - 2.0 * k)
+    end
+    local Rf, E = origin.radius, origin.energy or origin.amount
+    local sa, sb = origin.seedA, origin.seedB
+    local x, y = origin.x, origin.y
+    local amp0 = ampScale or 1.0
+    t = math.max(0.0, math.min(1.0, t))
+    local s = 1.0 - (1.0 - t) * (1.0 - t)
+    local Rp = Rf * (1.0 + r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPREAD * E * s)
+    local count = 0
+    -- Pressed centre: flattens (lower dome), then drops below threshold.
+    local ac = (1.0 - sstep(0.05, r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_HOLLOW_AT,
+        t)) * (1.0 - 0.45 * s)
+    if ac > 0.02 then
+        quad(x * scale, y * scale, Rp * 0.80 * scale,
+            Rp * 0.80 * (0.88 + 0.12 * frac(sb * 2.9)) * scale,
+            math.cos(sa * 6.28), math.sin(sa * 6.28), Rp / 32.0, 0.5 * E,
+            ac * amp0)
+        count = count + 1
+    end
+    -- Rim ring, then break-up.
+    local ringOn = sstep(0.0, 0.18, t)
+    local breakAt = r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_BREAK_AT
+    local brk = math.max(0.0, math.min(1.0, (t - breakAt)
+        / math.max(1.0 - breakAt, 1e-3)))
+    local n = math.floor(10 + 12 * E * (0.5 + 0.5 * frac(sb * 3.7)) + 0.5)
+    for k = 1, n do
+        local h1 = frac(sa * 17.13 + k * 0.7548776662)
+        local h2 = frac(sb * 11.71 + k * 0.5698402911)
+        local h3 = frac((sa + sb) * 7.77 + k * 0.4142135623)
+        -- Pieces vanish one by one while the ring breaks up.
+        if h3 >= brk * 0.6 then
+            local a = (k + 0.6 * (h1 - 0.5)) / n * math.pi * 2.0 + sa * 6.28
+            local ca, sn = math.cos(a), math.sin(a)
+            local d = Rp * (0.88 + 0.24 * h2) + Rf
+                * r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SCATTER * E * brk
+                * (0.4 + h2)
+            local rr = math.max(minKernel, Rf * (0.30 + 0.18 * h1)
+                * (1.0 - 0.55 * brk) * (0.8 + 0.4 * E))
+            -- Intact ring: stretched along the rim; broken: round beads.
+            local along = rr * (1.0 + (0.8 + 0.6 * h2) * (1.0 - brk))
+            quad((x + ca * d) * scale, (y + sn * d) * scale, along * scale,
+                rr * scale, -sn, ca, rr / 32.0, 1.0, ringOn * amp0)
+            count = count + 1
+        end
+    end
+    -- Satellites thrown beyond the rim.
+    if t > 0.25 then
+        local m = math.floor(2 + 6 * E * frac(sa * 4.9) + 0.5)
+        local fly = (t - 0.25) / 0.75
+        for k = 1, m do
+            local h1 = frac(sb * 13.3 + k * 0.6180339887)
+            local h2 = frac(sa * 19.9 + k * 0.3819660113)
+            local a = h1 * math.pi * 2.0
+            local d = Rp * (1.05 + 0.9 * h2 * fly)
+            local rr = math.max(minKernel, Rf * (0.08 + 0.14 * h2))
+            quad((x + math.cos(a) * d) * scale, (y + math.sin(a) * d) * scale,
+                rr * scale, rr * scale, 1.0, 0.0, rr / 32.0, 1.0, amp0)
+            count = count + 1
+        end
+    end
+    return count
+end
+
 -- Draws every head stamp as soft kernels. Called inside canvas:update().
 rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
     size, sim)
@@ -7571,7 +8370,9 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
     local ks = math.max(1.0, cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
     local q1, q2, q3, q4 = vec2(), vec2(), vec2(), vec2()
     local color = rgbm(0.0, 1.0, 0.0, 1.0)
-    local function kernelQuad(cx, cy, rx, ry, ux, uy, code, energy)
+    -- Body amplitude of the current stamp (0 while its splash is hollow).
+    local bodyAmp = 1.0
+    local function kernelQuad(cx, cy, rx, ry, ux, uy, code, energy, amp)
         local ax, ay = rx * ks, ry * ks
         local vx, vy = -uy, ux
         q1.x, q1.y = cx - ux * ax - vx * ay, cy - uy * ax - vy * ay
@@ -7581,10 +8382,13 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
         color.r = math.min(code, 1.0)
         color.g = 1.0
         color.b = energy
-        color.mult = 1.0
-        ui.drawImageQuad(kernel, q1, q2, q3, q4, color)
+        color.mult = amp or bodyAmp
+        if color.mult > 0.005 then
+            ui.drawImageQuad(kernel, q1, q2, q3, q4, color)
+        end
     end
     local lobes = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES
+    local splashV2 = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2
     local stretchGain = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH
     local car = ac.getCar(0)
     local kmh = car and car.speedKmh or 0.0
@@ -7622,6 +8426,61 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                 local angle = seedA * math.pi
                 ux, uy = math.cos(angle), math.sin(angle)
             end
+            -- Impact splash v2: animated at the frozen impact point. While
+            -- it runs, the body is hidden (hollow centre) and comes back as
+            -- a smaller residual drop at the end.
+            bodyAmp = 1.0
+            local splashScale = 1.0
+            local birthAt2 = state.birthSeenAt and state.birthSeenAt[index]
+            local age2 = birthAt2 and rainDynamicStateRenderClock - birthAt2
+            if splashV2 and tearAmount > 0.0 and age2 and age2 >= 0.0
+                and (rainDynamicStateRadius[index] or 0.0) >= tearMinRadiusUV
+            then
+                state.tearOrigin = state.tearOrigin or {}
+                local origin = state.tearOrigin[index]
+                if not origin or origin.generation ~= generation then
+                    local Rf = math.max(R,
+                        (rainDynamicStateRadius[index] or 0.0) * size)
+                    local sizeF = math.min(1.0, Rf / math.max(
+                        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SIZE_REF,
+                        0.5))
+                    origin = { generation = generation, x = stamp.x,
+                        y = stamp.y, radius = Rf, seedA = seedA,
+                        seedB = seedB, amount = tearAmount,
+                        energy = tearAmount * (0.55 + 0.45 * sizeF),
+                        duration = math.max(0.05,
+                            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS
+                            * (0.6 + 0.8 * sizeF)),
+                        stage = 0, inked = false }
+                    state.tearOrigin[index] = origin
+                end
+                local st = age2 / origin.duration
+                if st < 1.0 then
+                    drawn = drawn + state.waterFieldSplashV2(kernelQuad,
+                        origin, 1.0, st, tearMinKernel, 1.0)
+                    local back = math.max(0.0, math.min(1.0, (st - 0.7) / 0.3))
+                    bodyAmp = back * back * (3.0 - 2.0 * back)
+                    splashScale = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_RESIDUAL
+                    tearing = tearing + 1
+                elseif not origin.inked then
+                    -- Leave the scattered beads in the persistent trail.
+                    origin.inked = true
+                    if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED then
+                        state.pendingSplash = state.pendingSplash or {}
+                        state.pendingSplash[#state.pendingSplash + 1] =
+                            { origin = origin, v2 = true }
+                    end
+                end
+                if age2 < origin.duration * 3.0 then
+                    -- The residual drop grows back to full size slowly.
+                    splashScale = splashScale + (1.0 - splashScale)
+                        * math.max(0.0, math.min(1.0,
+                            (age2 / origin.duration - 1.0) / 2.0))
+                else
+                    splashScale = 1.0
+                end
+            end
+            R = R * splashScale
             -- Body: mild stretch along motion, radius-relative.
             local stretch = math.min(0.6, speed * stretchGain
                 / math.max(R / size, 1e-6) * 0.05)
@@ -7675,7 +8534,8 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
             -- Without trails it is drawn at the frozen impact origin.
             local birthAt = state.birthSeenAt and state.birthSeenAt[index]
             local age = birthAt and rainDynamicStateRenderClock - birthAt
-            if tearAmount > 0.0 and age and age >= 0.0 and age < tearSeconds
+            if not splashV2 and tearAmount > 0.0 and age and age >= 0.0
+                and age < tearSeconds
                 and (rainDynamicStateRadius[index] or 0.0) >= tearMinRadiusUV
             then
                 local Rf = math.max(R,
@@ -7747,7 +8607,13 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
         blendMode = render.BlendMode.Opaque,
         textures = { txTrailPrevious = source },
         values = {
+            gTrailTexel = 1.0 / size,
+            -- 0.25 is the stability limit of the explicit 4-tap step.
+            gTrailDiffuse = math.max(0.0, math.min(0.25,
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_DIFFUSE)),
             gTrailDecay = decay,
+            gTrailSheetPersist =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_PERSIST,
             gTrailNoise = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE,
             gTrailNoiseCells =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS,
@@ -7774,11 +8640,26 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
             {
                 float4 previous = txTrailPrevious.SampleLevel(
                     samLinearClamp, pin.Tex, 0.0);
+                // Surface-tension levelling: all channels diffuse together,
+                // so the R/G and B/G ratio codes are preserved.
+                float4 around = txTrailPrevious.SampleLevel(samLinearClamp,
+                        pin.Tex + float2(gTrailTexel, 0.0), 0.0)
+                    + txTrailPrevious.SampleLevel(samLinearClamp,
+                        pin.Tex - float2(gTrailTexel, 0.0), 0.0)
+                    + txTrailPrevious.SampleLevel(samLinearClamp,
+                        pin.Tex + float2(0.0, gTrailTexel), 0.0)
+                    + txTrailPrevious.SampleLevel(samLinearClamp,
+                        pin.Tex - float2(0.0, gTrailTexel), 0.0);
+                previous += (around * 0.25 - previous) * (4.0 * gTrailDiffuse);
                 // Spatially varying decay: thinning tracks break into
                 // beads where the noise keeps water longer.
                 float n = trailNoise(pin.Tex * gTrailNoiseCells);
+                // Sheet water (B/G) thins smoothly and lasts longer.
+                float sheet = saturate(previous.b / max(previous.g, 1e-3));
                 float k = pow(gTrailDecay,
-                    max(0.05, 1.0 + gTrailNoise * (n * 2.0 - 1.0)));
+                    max(0.05, (1.0 + gTrailNoise * (1.0 - sheet)
+                        * (n * 2.0 - 1.0))
+                        * (1.0 - gTrailSheetPersist * sheet)));
                 float4 next = previous * k;
                 return next.g < 0.02 ? float4(0.0, 0.0, 0.0, 0.0) : next;
             }
@@ -7791,11 +8672,13 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
     local minSpeed = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED
     local width = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH
     local kernel = state.waterKernel(state)
+    local ribbon = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_RIBBON
+        and state.waterRibbonKernel(state) or nil
     local ks = math.max(1.0, cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
     local p1, p2 = vec2(), vec2()
     local q1, q2, q3, q4 = vec2(), vec2(), vec2(), vec2()
     local color = rgbm(0.0, 1.0, 0.0, 1.0)
-    local function trailQuad(cx, cy, rx, ry, ux, uy, code, energy)
+    local function trailQuad(cx, cy, rx, ry, ux, uy, code, energy, amp)
         local ax, ay = rx * ks, ry * ks
         local vx, vy = -uy, ux
         q1.x, q1.y = cx - ux * ax - vx * ay, cy - uy * ax - vy * ay
@@ -7805,9 +8688,28 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
         color.r = math.min(code, 1.0)
         color.g = 1.0
         color.b = energy
-        color.mult = 1.0
+        if amp then color.mult = amp end
         ui.drawImageQuad(kernel, q1, q2, q3, q4, color)
     end
+    local splashSheet = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SHEET
+    local function splashQuad(cx, cy, rx, ry, ux, uy, code, energy, amp)
+        trailQuad(cx, cy, rx, ry, ux, uy, code, energy * splashSheet,
+            amp or 1.0)
+    end
+    local sheetOn = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED
+    local sheetStart = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_START_SPEED
+    local sheetSpan = math.max(
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_FULL_SPEED - sheetStart,
+        1e-5)
+    local widen = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_WIDEN
+    local thin = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_THIN
+    state.waterTrailLastX = state.waterTrailLastX or {}
+    state.waterTrailLastY = state.waterTrailLastY or {}
+    state.waterTrailLastGen = state.waterTrailLastGen or {}
+    local lastX, lastY = state.waterTrailLastX, state.waterTrailLastY
+    local lastGen = state.waterTrailLastGen
+    local maxSpeed = 0.0
+    local sheets = 0
     local trails = 0
     local pending = state.pendingSplash
     state.pendingSplash = nil
@@ -7818,10 +8720,18 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
         if pending then
             for _, item in ipairs(pending) do
                 -- Minimum piece size is enforced in trail texels.
-                trails = trails + state.waterFieldTearPieces(trailQuad,
-                    item.origin, scale, item.stage,
-                    tearMinKernel / math.max(scale, 0.05))
+                if item.v2 then
+                    -- Final scattered beads only (no centre, broken rim).
+                    trails = trails + state.waterFieldSplashV2(splashQuad,
+                        item.origin, scale, 1.0,
+                        tearMinKernel / math.max(scale, 0.05), 0.85)
+                else
+                    trails = trails + state.waterFieldTearPieces(splashQuad,
+                        item.origin, scale, item.stage,
+                        tearMinKernel / math.max(scale, 0.05))
+                end
             end
+            color.mult = 1.0
         end
         for _, stamp in ipairs(stamps) do
             local index = stamp.index
@@ -7829,7 +8739,62 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
             local vv = rainDynamicStateVelocityV[index] or 0.0
             local speed = math.sqrt(vu * vu + vv * vv)
             local R = stamp.radius or 0.0
-            if speed >= minSpeed and R > 0.5 then
+            maxSpeed = math.max(maxSpeed, speed)
+            local fast = sheetOn and math.max(0.0, math.min(1.0,
+                (speed - sheetStart) / sheetSpan)) or 0.0
+            local generation = state.generation
+                and state.generation[index] or 0
+            if speed >= minSpeed and R > 0.5 and fast > 0.0 then
+                -- Fast flow: a wide, flat, continuous sheet segment from
+                -- the previous trail point to just behind the head.
+                local back = R * 0.9 / speed
+                local x = (stamp.x - vu * back) * scale
+                local y = (stamp.y - vv * back) * scale
+                local rr = R * width * (1.0 + widen * fast)
+                local fx, fy = x, y
+                if lastGen[index] == generation and lastX[index] then
+                    local dx, dy = x - lastX[index], y - lastY[index]
+                    -- Ignore teleports (respawn / readback jumps).
+                    if dx * dx + dy * dy < (8.0 * R * scale) ^ 2 then
+                        fx, fy = lastX[index], lastY[index]
+                    end
+                end
+                local sx, sy = x - fx, y - fy
+                local len = math.sqrt(sx * sx + sy * sy)
+                local ux, uy = 1.0, 0.0
+                if len > 1e-4 then ux, uy = sx / len, sy / len end
+                -- Lower amplitude = flatter film; ratios R/G, B/G survive.
+                color.mult = 1.0 - thin * fast
+                if ribbon then
+                    -- Exact segment previous -> current point (no along
+                    -- taper), plus a round cap only where the path starts.
+                    local hw = rr * scale * ks
+                    local vx, vy = -uy, ux
+                    q1.x, q1.y = fx - vx * hw, fy - vy * hw
+                    q2.x, q2.y = x - vx * hw, y - vy * hw
+                    q3.x, q3.y = x + vx * hw, y + vy * hw
+                    q4.x, q4.y = fx + vx * hw, fy + vy * hw
+                    color.r = math.min(rr / 32.0, 1.0)
+                    color.g = 1.0
+                    color.b = fast
+                    if len > 1e-3 then
+                        ui.drawImageQuad(ribbon, q1, q2, q3, q4, color)
+                    end
+                    if fx == x and fy == y then
+                        trailQuad(x, y, rr * scale, rr * scale,
+                            ux, uy, rr / 32.0, fast)
+                    end
+                else
+                    local ax = (len * 0.5 / ks + rr * scale)
+                    trailQuad((x + fx) * 0.5, (y + fy) * 0.5, ax, rr * scale,
+                        ux, uy, rr / 32.0, fast)
+                end
+                color.mult = 1.0
+                lastX[index], lastY[index] = x, y
+                lastGen[index] = generation
+                sheets = sheets + 1
+                trails = trails + 1
+            elseif speed >= minSpeed and R > 0.5 then
                 -- Just behind the head, so the head itself stays crisp.
                 local back = R * 0.9 / speed
                 local x = (stamp.x - vu * back) * scale
@@ -7843,11 +8808,17 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
                 color.b = 0.0
                 color.mult = 1.0
                 ui.drawImage(kernel, p1, p2, color)
+                lastX[index], lastY[index] = x, y
+                lastGen[index] = generation
                 trails = trails + 1
+            else
+                lastX[index] = nil
             end
         end
     end)
     state.waterTrailStamps = trails
+    state.waterTrailSheets = sheets
+    state.waterTrailMaxSpeed = maxSpeed
 end
 
 -- Birth probes use a separate small canvas so their growth cannot erase the
@@ -8115,8 +9086,11 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         end
     end
     if waterField then
-        -- Bake the kernel outside any canvas:update() callback.
+        -- Bake the kernels outside any canvas:update() callback.
         state.waterKernel(state)
+        if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_RIBBON then
+            state.waterRibbonKernel(state)
+        end
         if #stamps > 0 then
             target:update(function()
                 state.waterFieldDrawStamps(state, stamps, size, sim)
@@ -8255,8 +9229,16 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.shotWithDepth = shotWithDepth
         rainDynamicSceneCopyState.shotMips = shotMips
     end
+    if rainDynamicSceneCopyState.shotTransparent
+        ~= cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT or shotResized then
+        rainDynamicSceneCopyState.shotTransparent =
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT
+        rainDynamicSceneCopyState.geometryShot:setTransparentPass(
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT)
+    end
     rainDynamicSceneCopyState.geometryShot:setClippingPlanes(
-        sim.cameraClipNear,
+        math.max(sim.cameraClipNear or 0.05,
+            cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHOT_NEAR),
         sim.cameraClipFar
     )
     local shotOk, shotResult = pcall(function()
@@ -8438,7 +9420,8 @@ float4 main(PS_IN pin)
     -- RG quad-UV gradient from both normal directions if this callback is the
     -- final visible custom-shader path.
     render.setDepthMode(
-        cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+        (cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
+            or cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OFF)
         and render.DepthMode.Off
         or render.DepthMode.ReadOnly
     )
@@ -8643,7 +9626,7 @@ float4 main(PS_IN pin)
         rainDynamicManualPreDrawLogged = true
     end
 
-    local dynamicDrawn = render.mesh({
+    local dropMeshParams = {
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
         textures = {
@@ -8657,8 +9640,14 @@ float4 main(PS_IN pin)
                 and rainDynamicSceneCopyState.geometryShot:depth()
                 or false,
             txDynamicScreen = 'dynamic::screen',
+            -- Shared slot: the smear mask texture takes it when loaded
+            -- (only the screen-source compare debug reads it otherwise;
+            -- a 12th texture binding is avoided, see RAINFX_HAZE.md).
             txDynamicWeatherScreen =
-                rainDynamicSceneCopyState.weatherScreenCanvas
+                (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
+                    and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_USE_TEXTURE
+                    and rainDynamicSceneCopyState.smearTexturePath)
+                or rainDynamicSceneCopyState.weatherScreenCanvas
                 or 'dynamic::screen',
             txDynamicControl = textureRainSurfaceNormal,
             txDynamicMicroPattern =
@@ -8983,9 +9972,63 @@ float4 main(PS_IN pin)
             gDynamicDropWFGlint = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GLINT,
             gDynamicDropWFOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_OPACITY,
-            gDynamicDropWFNormalStep =
+            gDynamicDropWFNormalStep = math.max(
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
+                    / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
+                (cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED
+                    and cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS
+                    or 0.0)
+                    / math.max(rainDynamicSceneCopyState.waterTrailSize or 1024, 1)),
+            gDynamicDropWFHeadStep =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
+            gDynamicDropWFTrailStep = math.max(
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS
+                    / math.max(rainDynamicSceneCopyState.waterTrailSize or 1024, 1),
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
+                    / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1)),
+            gDynamicDropWaterToneMicro =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_MICRO and 1.0 or 0.0,
+            gDynamicDropLargeStartPx = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_START_PX,
+            gDynamicDropLargeFullPx = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_FULL_PX,
+            gDynamicDropLargeBlurMip = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_BLUR_MIP,
+            gDynamicDropLargeWarpPx = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_WARP_PIXELS,
+            gDynamicDropLargeWarpCells = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_WARP_CELLS,
+            gDynamicDropLargeEdgeSoft = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_EDGE_SOFT,
+            gDynamicDropSmearIntensity = rainDynamicSceneCopyState.smearUpdate(
+                rainDynamicSceneCopyState, sim),
+            gDynamicDropSmear = (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
+                and ((rainDynamicSceneCopyState.smearLevel or 0.0) > 0.001
+                    or cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG > 0))
+                and 1.0 or 0.0,
+            -- 1 only while the shared slot really holds the mask texture.
+            gDynamicDropSmearTexture = (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_USE_TEXTURE
+                and rainDynamicSceneCopyState.smearTexturePath)
+                and 1.0 or 0.0,
+            gDynamicDropSmearDebug = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG,
+            gDynamicDropSmearEdgeSoft = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_EDGE_SOFT,
+            gDynamicDropSmearMicroHide = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MICRO_HIDE,
+            gDynamicDropSmearMicroTurbid = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MICRO_TURBID,
+            gDynamicDropSmearDropTurbid = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DROP_TURBID,
+            gDynamicDropSmearTrailMix = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_MIX,
+            gDynamicDropSmearTrailTurbid = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_TURBID,
+            gDynamicDropSmearTrailBlur = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_BLUR,
+            gDynamicDropSmearHeadMix = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_HEAD_MIX,
+            gDynamicDropWaterToneFloor = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_FLOOR,
+            gDynamicDropSmearPathWeaken = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_PATH_WEAKEN,
+            gDynamicDropSmearMip = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MIP,
+            gDynamicDropSmearVeil = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_VEIL,
+            gDynamicDropSmearMaskCells = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MASK_CELLS,
+            gDynamicDropSmearMaskWarp = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MASK_WARP,
+            gDynamicDropSmearFillCells = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_FILL_CELLS,
+            gDynamicDropSmearFillPatchCells =
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_FILL_PATCH_CELLS,
+            gDynamicDropWaterToneEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_ENABLED and 1.0 or 0.0,
+            gDynamicDropWaterToneContrast = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_CONTRAST,
+            gDynamicDropWaterToneRatioMin = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_RATIO_MIN,
+            gDynamicDropWaterToneRatioMax = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_RATIO_MAX,
+            gDynamicDropWaterToneBgMip = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_BG_MIP,
             gDynamicDropHazeEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED and 1.0 or 0.0,
             gDynamicDropHazeMistCells = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_MIST_CELLS,
@@ -9014,14 +10057,37 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_HAZE_SKY_CORRECTION
                 and rainDynamicSceneCopyState.shotWithDepth
                 and 1.0 or 0.0,
+            gDynamicDropWFSheetBlur =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_BLUR,
+            gDynamicDropWFSheetVeil =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_VEIL,
+            gDynamicDropWFSheetAlpha =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_ALPHA,
+            gDynamicDropWFSheetEdgeSoft =
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT,
             gDynamicDropWFInvMaskSize = 1.0
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
             gDynamicDropWaveDirection = waveDirection,
             gDynamicDropWaveEnvelope = waveEnvelope,
             gDynamicDropWavePhase = wavePhase,
+            gDynamicDropDepthOnly = 0.0,
         },
         shader = rainDynamicDropShader.HLSL
-    })
+    }
+    local dynamicDrawn = render.mesh(dropMeshParams)
+    -- Depth occlusion pass (docs/RAINFX_IMPACT_SPLASH.md §7): same mesh and
+    -- shader in depth-only mode (alpha 0 output, clipped where the visor is
+    -- bare), so car glass drawn later cannot blend over the drops.
+    if dynamicDrawn and cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE
+        and not cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OFF
+        and not cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG then
+        dropMeshParams.values.gDynamicDropDepthOnly = 1.0
+        render.setBlendMode(render.BlendMode.AlphaBlend)
+        render.setDepthMode(render.DepthMode.Normal)
+        render.mesh(dropMeshParams)
+        render.setDepthMode(render.DepthMode.ReadOnly)
+        render.setBlendMode(render.BlendMode.BlendAccurate)
+    end
     if cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
         and dynamicDrawn
     then
@@ -9496,6 +10562,10 @@ local function initializeScene()
             forceRenderableOn = true
         })
 
+
+    if visor and cfg.RUNTIME.RAIN_VISOR_MOTION_STENCIL >= 0.0 then
+        visor:setMotionStencil(cfg.RUNTIME.RAIN_VISOR_MOTION_STENCIL)
+    end
 
     if not visor then
 
@@ -11850,6 +12920,144 @@ function windowMain(dt)
     end
 
     ui.separator()
+    ui.text('Coalescence and absorption steering')
+    do
+        local function coSlider(label, key, minV, maxV, fmt)
+            local value, changed = ui.slider(label,
+                cfg.RUNTIME[key], minV, maxV, fmt)
+            if changed then cfg.RUNTIME[key] = value end
+        end
+        if ui.checkbox('Merge overlapping drops (mass/volume)',
+            cfg.RUNTIME.RAIN_GPU_STATE_MERGE_ENABLED) then
+            cfg.RUNTIME.RAIN_GPU_STATE_MERGE_ENABLED =
+                not cfg.RUNTIME.RAIN_GPU_STATE_MERGE_ENABLED
+        end
+        coSlider('Merge reach (x r1+r2)',
+            'RAIN_GPU_STATE_MERGE_REACH', 0.3, 1.5, '%.2f')
+        coSlider('Merge max diameter (mm)',
+            'RAIN_GPU_STATE_MERGE_MAX_DIAMETER_MM', 1.0, 10.0, '%.1f')
+        coSlider('Merge pairs per snapshot',
+            'RAIN_GPU_STATE_MERGE_MAX_PAIRS', 0, 1024, '%.0f')
+        if ui.checkbox('Steer moving drops toward neighbours',
+            cfg.RUNTIME.RAIN_GPU_STATE_ATTRACT_ENABLED) then
+            cfg.RUNTIME.RAIN_GPU_STATE_ATTRACT_ENABLED =
+                not cfg.RUNTIME.RAIN_GPU_STATE_ATTRACT_ENABLED
+        end
+        coSlider('Steer reach (x r1+r2)',
+            'RAIN_GPU_STATE_ATTRACT_REACH', 1.0, 4.0, '%.2f')
+        coSlider('Steer gain (UV/s^2)',
+            'RAIN_GPU_STATE_ATTRACT_GAIN', 0.0, 0.3, '%.3f')
+        coSlider('Steer min speed (UV/s)',
+            'RAIN_GPU_STATE_ATTRACT_MIN_SPEED', 0.0, 0.02, '%.4f')
+        coSlider('Steer cone (cos, 0 = half-plane)',
+            'RAIN_GPU_STATE_ATTRACT_CONE', -1.0, 0.95, '%.2f')
+        ui.text(string.format('Snapshot: %d merge pairs, %d steering | total pairs %d',
+            rainDynamicSceneCopyState.mergePairs or 0,
+            rainDynamicSceneCopyState.mergeAttracts or 0,
+            rainDynamicSceneCopyState.mergePairsTotal or 0))
+    end
+
+    ui.separator()
+    ui.text('Trail flow and anti-chrome tone (RAINFX_TRAIL_FLOW.md)')
+    do
+        local function tfSlider(label, key, minV, maxV, fmt)
+            local value, changed = ui.slider(label,
+                cfg.RUNTIME[key], minV, maxV, fmt)
+            if changed then cfg.RUNTIME[key] = value end
+        end
+        local function tfCheck(label, key)
+            if ui.checkbox(label, cfg.RUNTIME[key]) then
+                cfg.RUNTIME[key] = not cfg.RUNTIME[key]
+            end
+        end
+        tfCheck('Anti-chrome tone limiter', 'RAIN_DYNAMIC_WATER_TONE_ENABLED')
+        tfSlider('Tone contrast (1 = off)', 'RAIN_DYNAMIC_WATER_TONE_CONTRAST', 0.0, 1.0, '%.2f')
+        tfSlider('Tone ratio min', 'RAIN_DYNAMIC_WATER_TONE_RATIO_MIN', 0.0, 1.0, '%.2f')
+        tfSlider('Tone ratio max', 'RAIN_DYNAMIC_WATER_TONE_RATIO_MAX', 1.0, 4.0, '%.2f')
+        tfSlider('Tone background mip', 'RAIN_DYNAMIC_WATER_TONE_BG_MIP', 0.0, 9.0, '%.1f')
+        tfCheck('Tone limiter on micro water lens', 'RAIN_DYNAMIC_WATER_TONE_MICRO')
+        ui.separator()
+        ui.text('Smear mask v3 (RAINFX_SMEAR_MASK.md)')
+        tfCheck('Smear mask enabled', 'RAIN_DYNAMIC_SMEAR_ENABLED')
+        do
+            local value, changed = ui.slider('Smear debug (1 region/G, 2 raw R, 3 raw G)',
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG, 0, 3, '%.0f')
+            if changed then
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG = math.floor(value + 0.5)
+            end
+        end
+        local sm = rainDynamicSceneCopyState
+        ui.text(string.format('Texture: %s', sm.smearTexturePath
+            and (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_USE_TEXTURE and 'loaded' or 'off')
+            or 'not found (procedural)'))
+        ui.text(string.format('rain %.2f  air %.0f km/h  amp %.2f  density %.2f',
+            sm.smearRain or 0.0, sm.smearAirKmh or 0.0, sm.smearAmp or 0.0,
+            sm.smearDensity or 0.0))
+        ui.text(string.format('trigger %s  facing %.2f  target %.2f  level %.2f',
+            sm.smearTriggered and 'ON' or 'off', sm.smearFacing or 0.0,
+            sm.smearTarget or 0.0, sm.smearLevel or 0.0))
+        tfCheck('Use mask texture', 'RAIN_DYNAMIC_SMEAR_USE_TEXTURE')
+        tfCheck('Trigger override', 'RAIN_DYNAMIC_SMEAR_TRIGGER_OVERRIDE')
+        tfCheck('Reveal override on', 'RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE_ON')
+        tfSlider('Reveal override value', 'RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE', 0.0, 1.0, '%.2f')
+        ui.text(string.format('car %.0f km/h  wind (%.1f, %.1f) km/h  facing(no wind) %.2f',
+            sm.smearCarKmh or 0.0, sm.smearWindX or 0.0, sm.smearWindY or 0.0,
+            sm.smearFacingNoWind or 0.0))
+        do
+            local value, changed = ui.slider('Wind axes (0 off, 1 x,z, 2 x,-z, 3 -x,-z)',
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_WIND_MODE, 0, 3, '%.0f')
+            if changed then
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_WIND_MODE = math.floor(value + 0.5)
+            end
+        end
+        tfSlider('Airspeed for amp 1 (km/h)', 'RAIN_DYNAMIC_SMEAR_REF_KMH', 10.0, 400.0, '%.0f')
+        tfSlider('Trigger density', 'RAIN_DYNAMIC_SMEAR_TRIGGER', 0.0, 3.0, '%.2f')
+        tfSlider('Full-reveal density', 'RAIN_DYNAMIC_SMEAR_FULL', 0.05, 5.0, '%.2f')
+        tfSlider('Facing power', 'RAIN_DYNAMIC_SMEAR_FACING_POWER', 0.1, 8.0, '%.2f')
+        tfSlider('Attack (s)', 'RAIN_DYNAMIC_SMEAR_ATTACK_SECONDS', 0.05, 20.0, '%.2f')
+        tfSlider('Release (s)', 'RAIN_DYNAMIC_SMEAR_RELEASE_SECONDS', 0.05, 60.0, '%.2f')
+        tfSlider('Reveal edge soft (R)', 'RAIN_DYNAMIC_SMEAR_EDGE_SOFT', 0.0, 0.3, '%.3f')
+        tfSlider('Micro hide (visible = G)', 'RAIN_DYNAMIC_SMEAR_MICRO_HIDE', 0.0, 1.0, '%.2f')
+        tfSlider('Micro turbid x G', 'RAIN_DYNAMIC_SMEAR_MICRO_TURBID', 0.0, 1.0, '%.2f')
+        tfSlider('Drop turbid x G', 'RAIN_DYNAMIC_SMEAR_DROP_TURBID', 0.0, 1.0, '%.2f')
+        tfSlider('Region: WF trail mix with beneath', 'RAIN_DYNAMIC_SMEAR_TRAIL_MIX', 0.0, 1.0, '%.2f')
+        tfSlider('Region: WF trail turbid', 'RAIN_DYNAMIC_SMEAR_TRAIL_TURBID', 0.0, 1.0, '%.2f')
+        tfSlider('Region: WF trail blur (mip)', 'RAIN_DYNAMIC_SMEAR_TRAIL_BLUR', 0.0, 4.0, '%.2f')
+        tfSlider('Region: head mix with beneath', 'RAIN_DYNAMIC_SMEAR_HEAD_MIX', 0.0, 1.0, '%.2f')
+        tfSlider('Region: paths/film/ridge weaken', 'RAIN_DYNAMIC_SMEAR_PATH_WEAKEN', 0.0, 1.0, '%.2f')
+        tfSlider('Turbid blur (mip)', 'RAIN_DYNAMIC_SMEAR_MIP', 0.0, 9.0, '%.1f')
+        tfSlider('Turbid veil', 'RAIN_DYNAMIC_SMEAR_VEIL', 0.0, 1.0, '%.2f')
+        ui.text('Procedural test mask (no texture)')
+        tfSlider('Blob cells (per UV)', 'RAIN_DYNAMIC_SMEAR_MASK_CELLS', 0.5, 30.0, '%.1f')
+        tfSlider('Blob warp', 'RAIN_DYNAMIC_SMEAR_MASK_WARP', 0.0, 2.0, '%.2f')
+        tfSlider('G noise cells', 'RAIN_DYNAMIC_SMEAR_FILL_CELLS', 20.0, 2000.0, '%.0f')
+        tfSlider('G patch cells', 'RAIN_DYNAMIC_SMEAR_FILL_PATCH_CELLS', 2.0, 300.0, '%.0f')
+        ui.separator()
+        ui.text('Large drops (low-res inner image, soft edge)')
+        tfSlider('Large from radius (px)', 'RAIN_DYNAMIC_WATER_LARGE_START_PX', 0.0, 60.0, '%.1f')
+        tfSlider('Large full at radius (px)', 'RAIN_DYNAMIC_WATER_LARGE_FULL_PX', 1.0, 120.0, '%.1f')
+        tfSlider('Large extra blur (mip)', 'RAIN_DYNAMIC_WATER_LARGE_BLUR_MIP', 0.0, 4.0, '%.2f')
+        tfSlider('Large inner warp (px)', 'RAIN_DYNAMIC_WATER_LARGE_WARP_PIXELS', 0.0, 20.0, '%.1f')
+        tfSlider('Large warp cell (x radius)', 'RAIN_DYNAMIC_WATER_LARGE_WARP_CELLS', 0.1, 3.0, '%.2f')
+        tfSlider('Large soft edge', 'RAIN_DYNAMIC_WATER_LARGE_EDGE_SOFT', 0.0, 0.3, '%.3f')
+        tfSlider('Trail levelling (diffusion)', 'RAIN_DYNAMIC_WATER_FIELD_TRAIL_DIFFUSE', 0.0, 0.25, '%.3f')
+        tfCheck('Fast sheets as ribbons', 'RAIN_DYNAMIC_WATER_FIELD_SHEET_RIBBON')
+        tfSlider('Slope step (trail texels)', 'RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS', 0.0, 3.0, '%.2f')
+        tfCheck('Wet-path steering (needs WETPATH_SHADER)', 'RAIN_GPU_STATE_WETPATH_ENABLED')
+        tfSlider('Wet-path gain', 'RAIN_GPU_STATE_WETPATH_GAIN', 0.0, 4.0, '%.2f')
+        tfSlider('Wet-path min speed', 'RAIN_GPU_STATE_WETPATH_MIN_SPEED', 0.0, 0.05, '%.4f')
+        tfSlider('Wet-path look-ahead (radii)', 'RAIN_GPU_STATE_WETPATH_AHEAD', 0.0, 5.0, '%.2f')
+        tfSlider('Steering max turn rate (rad/s)', 'RAIN_GPU_STATE_STEER_TURN_RATE', 0.0, 10.0, '%.2f')
+        tfSlider('Birth hold (s)', 'RAIN_GPU_STATE_BIRTH_HOLD_SECONDS', 0.0, 5.0, '%.2f')
+        tfSlider('Birth ramp (s)', 'RAIN_GPU_STATE_BIRTH_RAMP_SECONDS', 0.0, 5.0, '%.2f')
+        tfSlider('Tone window floor (x fog)', 'RAIN_DYNAMIC_WATER_TONE_FLOOR', 0.0, 1.0, '%.2f')
+        tfCheck('Drops ignore scene depth (diagnostic only)', 'RAIN_DYNAMIC_DROP_DEPTH_OFF')
+        tfCheck('Drops occlude later car glass (depth pass)', 'RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE')
+        tfCheck('Refraction source: transparent pass (glass)', 'RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT')
+        tfSlider('Refraction source near clip (m)', 'RAIN_DYNAMIC_DROP_SHOT_NEAR', 0.01, 0.5, '%.2f')
+    end
+
+    ui.separator()
     ui.text('Water field heads (soft kernels + threshold)')
     do
         local function wfSlider(label, key, minV, maxV, fmt)
@@ -11863,8 +13071,8 @@ function windowMain(dt)
                 not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
         end
         local debug, debugChanged = ui.slider(
-            'Water field debug (1 height, 2 slope)',
-            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG, 0, 2, '%.0f')
+            'Water field debug (1 height, 2 slope, 3 large)',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG, 0, 3, '%.0f')
         if debugChanged then
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG =
                 math.floor(debug + 0.5)
@@ -11909,6 +13117,25 @@ function windowMain(dt)
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH', 10.0, 300.0, '%.0f')
         wfSlider('WF tear duration (s)',
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS', 0.05, 1.5, '%.2f')
+        if ui.checkbox('Impact splash v2 (press, ring, scatter)',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2 =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2
+        end
+        wfSlider('Splash v2 duration (s)',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS', 0.05, 2.0, '%.2f')
+        wfSlider('Splash v2 size ref (head texels)',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SIZE_REF', 1.0, 32.0, '%.1f')
+        wfSlider('Splash v2 spread',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPREAD', 0.0, 5.0, '%.2f')
+        wfSlider('Splash v2 hollow at (t)',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_HOLLOW_AT', 0.1, 1.0, '%.2f')
+        wfSlider('Splash v2 break at (t)',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_BREAK_AT', 0.1, 0.95, '%.2f')
+        wfSlider('Splash v2 scatter',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SCATTER', 0.0, 5.0, '%.2f')
+        wfSlider('Splash v2 residual drop',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_RESIDUAL', 0.0, 1.0, '%.2f')
         if ui.checkbox('WF trails',
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED) then
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED =
@@ -11954,6 +13181,35 @@ function windowMain(dt)
             'RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION', 0.0, 2.0, '%.2f')
         wfSlider('Micro lens slope scale',
             'RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE', 0.0, 2.0, '%.2f')
+        if ui.checkbox('WF fast-flow sheet film',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED
+        end
+        wfSlider('Sheet start speed (UV/s)',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_START_SPEED', 0.0, 0.3, '%.3f')
+        wfSlider('Sheet full speed (UV/s)',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_FULL_SPEED', 0.005, 0.5, '%.3f')
+        wfSlider('Sheet widen (x trail width)',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_WIDEN', 0.0, 4.0, '%.2f')
+        wfSlider('Sheet thinning (amplitude)',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_THIN', 0.0, 0.8, '%.2f')
+        wfSlider('Sheet persistence',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_PERSIST', 0.0, 0.9, '%.2f')
+        wfSlider('Sheet blur (extra mip)',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_BLUR', 0.0, 5.0, '%.2f')
+        wfSlider('Sheet milky veil',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_VEIL', 0.0, 0.8, '%.2f')
+        wfSlider('Splash sheet factor',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SHEET', 0.0, 1.0, '%.2f')
+        wfSlider('Sheet opacity (transparent film)',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_ALPHA', 0.0, 1.0, '%.2f')
+        wfSlider('Sheet edge softness',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT', 0.0, 0.35, '%.2f')
+        ui.text(string.format('Trail: %d stamps, %d sheet, max head speed %.3f UV/s',
+            rainDynamicSceneCopyState.waterTrailStamps or 0,
+            rainDynamicSceneCopyState.waterTrailSheets or 0,
+            rainDynamicSceneCopyState.waterTrailMaxSpeed or 0.0))
         wfSlider('WF tear min diameter (mm)',
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM', 0.3, 4.0, '%.2f')
         wfSlider('WF tear min piece (texels)',

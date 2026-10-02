@@ -197,7 +197,7 @@ first:
 
 ## 7. Backlog (after the planned order)
 
-- **Fast-flow sheet film (user request, deferred).** Fast runs currently leave
+- **[IMPLEMENTED 2026-10-01, see below] Fast-flow sheet film (user request, deferred).** Fast runs currently leave
   a noisy beaded track (the bead noise is applied at full strength). For fast
   heads, stamp a wider, lower-amplitude trail kernel and scale the decay noise
   down with the stamping speed. That leaves a thick, blurry, spray-like water
@@ -217,7 +217,7 @@ Haze / condensation film: see `RAINFX_HAZE.md`.
    drop paths" and the related wipe paths currently use a fixed width. Change
    it to the moving drop's own radius plus an additive offset, with the
    offset exposed in the UI for debugging.
-2. **(NEXT) Direction change by absorption, with the mass-merge stage.** A drop
+2. **[IMPLEMENTED 2026-10-01, see RAINFX_COALESCENCE.md] Direction change by absorption, with the mass-merge stage.** A drop
    flowing down absorbs drops in its path and turns toward them. Slow drops
    therefore meander left and right. Plan and optimise this together with
    true mass coalescence:
@@ -253,3 +253,64 @@ UI (Trail mask section, under "Micro clearing strength"):
 
 The drop-size dependence only becomes visible when the mask resolves drop
 diameters. Raise the mask to 1024 (0.33 mm/texel) or 2048 when judging it.
+
+### Fast-flow sheet film: implementation (2026-10-01)
+
+The user's request from the earlier review: fast runs left a noisy beaded
+track. For fast flow they should leave a thick, blurry, spray-like water
+sheet instead.
+
+Trail canvas (`waterFieldUpdateTrail`):
+- **Sheet factor** `fast = saturate((speed - SHEET_START_SPEED) /
+  (SHEET_FULL_SPEED - SHEET_START_SPEED))`. The defaults are 0.03 and
+  0.10 UV/s. The UI shows the current maximum head speed so the thresholds
+  can be set from real values.
+- **Continuous segment:** fast heads stamp one stretched kernel from their
+  previous trail point to the point just behind the head. That leaves no
+  gaps at high speed. Teleports above 8 R (respawn, readback jump) are
+  ignored.
+- **Width:** `R · TRAIL_WIDTH · (1 + SHEET_WIDEN · fast)`.
+- **Amplitude:** `1 - SHEET_THIN · fast`. A lower dome gives a smaller slope,
+  so the sheet is a flatter film.
+- **B/G = sheet factor.** Splash pieces are stamped with `SPLASH_SHEET`
+  (0.35) instead of 1, so they still bead partly.
+
+Decay pass:
+- Bead noise is scaled by `1 - sheet`.
+- The decay rate is scaled by `1 - SHEET_PERSIST · sheet` (0.35), so sheets
+  thin smoothly and last longer.
+
+Shading (WF branch):
+- Extra mip `SHEET_BLUR · sheet` (2.0).
+- A milky lift toward the fog tone, `SHEET_VEIL · sheet` (0.20).
+- Heads have B = 0 except during the tear window, so the head look is
+  unchanged.
+
+Cost: one quad per moving head, as before, plus one extra division in the
+decay pass.
+
+### Sheet follow-up: transparent, blurry spray film (2026-10-01)
+
+User request: render the fast-flow sheet as a transparent, blurry
+spray-like film. The user gave a YouTube reference
+(`-bpfpJrrJ2o`), but it could not be fetched from the development
+environment (the proxy rate-limited it), so the change follows the request
+text and the physics.
+
+Physics: a thin sheet of flowing water has no steep contact line, so there is
+no dark rim or glint outline. It is mostly transparent. It shows up as a
+blurred, slightly milky, gently distorted view of the scene.
+
+Changes (WF shading, all weighted by the sheet factor B/G):
+- **Opacity:** `lerp(WF_OPACITY, SHEET_ALPHA 0.35, sheet)`. The live scene
+  shows through. The sheet also returns before the micro pattern, so it reads
+  as a cleared, wetted lane.
+- **Soft silhouette:** the threshold band widens by `SHEET_EDGE_SOFT · sheet`
+  (0.15), so the film fades out instead of being outlined.
+- **No rim darkening:** the edge loss is scaled by `1 - sheet`, and the lower
+  rim glint by `1 - 0.7·sheet`.
+- The existing sheet blur (+2 mip) and milky veil (0.20) stay.
+- Splash pieces (B = 0.35) become slightly softer and more transparent.
+  Heads are unchanged (B = 0).
+
+UI: "Sheet opacity (transparent film)" and "Sheet edge softness".
