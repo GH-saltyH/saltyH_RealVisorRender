@@ -132,3 +132,172 @@ What to compare: the same view, heavy rain, toggled back and forth.
 - Inversion must agree between micro disks and heads.
 - Check whether the dense field turns chrome. If so, try a lower micro
   refraction or a higher `WATER_FIELD_SCENE_MIP` / `SLOPE_MIP`.
+
+## Pop-in: random landing of micro drops (2026-10-02)
+
+**Goal.** The baked pattern looks static. Making drops appear would help,
+but if too many disks blink in the same frame, the bake becomes visible.
+So each disk gets its own clock, and only a picked share takes part.
+
+**Disk id.** `centre = patternUV - (pointSample.xy * 2 - 1) * radius / grid`.
+This uses the *point*-sampled local offset, so every pixel of one disk agrees
+on the centre. `cell = floor(centre * grid * ID_SCALE)` is hashed with a
+PCG-style integer hash into three values `h0`, `h1`, `h2`.
+
+**Schedule.**
+
+| Step | Formula |
+|---|---|
+| Pick (pickup range) | `h0 < POP_PICK`. Disks that are not picked are always visible. |
+| Period | `P = POP_PERIOD × (0.5 + h1)` |
+| Phase | `t = frac(time / P + h2)` |
+| Absent | `t < POP_OFF`: the disk is clipped, and haze shows. |
+| Landing | at `t = POP_OFF` the disk appears at once, with a short flash `POP_FLASH × fog` that lasts 8 % of its life. |
+| Fade | for the last `POP_FADE` of its life, visibility goes smoothly to 0. |
+
+`time` is `state.smearTime`, which accumulates `dt` and wraps at 65536 s.
+
+**Rate.** About `disks × PICK / POP_PERIOD` landings per second, spread
+evenly over frames. With the defaults (0.35 and 9 s), about 4 % of the disks
+land in any second.
+
+**Interaction with other layers.**
+
+- `microVisibility` is multiplied by the pop value, so it combines with the
+  wipe and with the smear micro hide.
+- The trail-film path treats an absent disk as no disk, so the film is
+  drawn there.
+- The cheap depth gate (mode 1) ignores pop-in. Exact mode follows it
+  through `gSolidA`.
+
+**Config.** `RAIN_DYNAMIC_MICRO_POP_*`:
+
+| Key | Default |
+|---|---|
+| `ENABLED` | true |
+| `PICK` | 0.35 |
+| `PERIOD` | 9 s |
+| `OFF` | 0.30 |
+| `FADE` | 0.15 |
+| `FLASH` | 0.25 |
+| `ID_SCALE` | 1 |
+
+The controls are in the trail-flow UI section under "Micro pop-in", with
+tooltips.
+
+**Known limit.** Two disks whose centres fall into the same id cell pop
+together. If that shows, raise `ID_SCALE`. If a disk shows a seam (its
+centre sits on a cell border), the fix is to bake a disk id into the
+pattern. There is no free channel today: RGB is used and A holds the class.
+
+## Legacy "scene optics" removed; turbidity review (2026-10-02)
+
+### Removed
+
+The micro disks keep only the head lens rule (`rainWaterLensColor`, the
+former `MICRO_WATER_LENS = true`). The old mode is gone:
+
+- **Shader:** image scale and rotation around the disk centre, visor-normal
+  scene shift (`txDynamicControl`), concave profile, cap normals
+  (`txDynamicMicroNormal`), angle light/shadow and rim accent. With them
+  went the screen-centre reconstruction, which only that mode used.
+- **Lua:**
+  - the micro normal bake: a 4096² canvas with 6 mips, baked whenever the
+    pattern bakes;
+  - the legacy per-disk micro quads (`MICRO_LAYER_COUNT`, `MIN/MAX_DIAMETER`);
+  - 12 uniforms and 2 textures;
+  - the A/B checkbox and the "Micro droplets: scene optics" UI block;
+  - five dead quad-debug uniforms (`DebugUV`, `HDRCopy`, `Refraction`,
+    `SceneSource`, `ScreenUV`).
+- **Removed cfg:** `MICRO_NORMAL_TEXTURE_SIZE/BUMP/MIP`,
+  `MICRO_CONCAVE_OPTICS`, `MICRO_LAYER_COUNT/MIN_DIAMETER_MM/MAX_DIAMETER_MM`,
+  `MICRO_PATTERN_IMAGE_SCALE/IMAGE_ROTATION_DEGREES/ANGLE_LIGHT/ANGLE_SHADOW/NORMAL_SCENE_GAIN/RIM_STRENGTH/EXTRA_RIM_WIDTH/SKY_CORRECTION`,
+  `MICRO_WATER_LENS`, `MICRO_LAYER_SCENE_MIP`, and
+  `DROP_HDR_COPY/REFRACTION/SCENE_SOURCE/SCREEN_UV_DEBUG`.
+- **Kept, because the lens path uses them:**
+  - `MICRO_LAYER_OPACITY` (now in the WF section as "Micro opacity");
+  - `MICRO_LAYER_ENABLED`, which still gates the 10-mip shot;
+  - `MICRO_WATER_LENS_REFRACTION` and `MICRO_WATER_LENS_SLOPE`;
+  - `MICRO_PATTERN_OUTLINE_DARK`;
+  - the WF scene mip, slope mip, edge loss and glint, shared with the
+    heads.
+
+**Check made before removing.** Every uniform the shader reads is supplied
+by Lua, and Lua supplies nothing the shader does not read (script diff,
+both sets empty). The cleanup in §10 removed nothing the lens path used.
+
+### Why the micro pattern looks less sparkly (user, 2026-10-02)
+
+The micro shader code of the lens path did not change between 10-01 and
+now. Diffs s5 → s15 show only these additions: the tone floor (it applies
+only when `WATER_TONE_MICRO` is on, and it is off), smear terms (region
+only), `gSolidA` and pop-in. What did change is **configuration** and the
+**refraction source**.
+
+| When | Change | Effect on micro |
+|---|---|---|
+| between s12 and s14 (fine-tuned values in the committed build) | `MICRO_PATTERN_OUTLINE_DARK` 0.0 → **0.65** | Every disk's outline ring is drawn at 35 % brightness instead of being an invisible cut line. Densely packed disks then carry a dark mesh of rims everywhere, which looks murky. This is the most likely main cause. |
+| same | `MICRO_PATTERN_STRATA` 6 → **1** | One stratum instead of six. Fewer small disks on top of larger ones, which gives larger and flatter coverage and less glitter variety. |
+| s12 | `DROP_SHOT_TRANSPARENT` = true | The refraction shot now contains car glass and windscreen (tint, dirt, reflections), so the micro images get lower contrast through them. |
+| s15 (user) | `visor:setDepthMode(Normal)` + `setMotionStencil(1)` on the whole KN5 | The visor glass now writes depth and uses reduced TAA. It did not help the shimmer. Remove it again to rule out depth interaction with the drop pass. |
+| s15 | pop-in (35 % of disks cycle, 30 % of the cycle absent) | About 10 % fewer disks are visible at any moment. |
+
+**Suggested A/B order:**
+
+1. `OUTLINE_DARK` 0;
+2. `STRATA` 6 (needs a reload, because it is a bake value);
+3. "Refraction source: transparent pass" off;
+4. remove the two KN5 lines;
+5. pop-in off.
+
+## Point reads: `Load()` instead of the custom point sampler (2026-10-02)
+
+**Problem (latent).**
+
+- `SamplerState samPointMicroMask { Filter = MIN_MAG_MIP_POINT; … }` is an
+  effect-syntax state block. Compilers ignore it outside the effects
+  framework: DXC warns "effect state block ignored", and FXC ps_5_0 drops
+  it the same way.
+- The sampler slot then gets whatever is bound there. With nothing bound,
+  D3D11 uses its default sampler, which is **linear / clamp**.
+- So the reads meant to be "point" (class A, packed gate/radius B) were
+  most likely **bilinear**. At every disk border, the codes of neighbouring
+  disks were blended:
+  - the outline/interior class blurred;
+  - mixed gate codes made a disk appear partly at the wrong rain level;
+  - mixed radius codes gave a wrong lens slope on the rim.
+- The same bug made the smear tiling clamp (`RAINFX_SMEAR_MASK.md`, v8 fix).
+
+**Fix.** `rainMicroPoint(uv)` reads the texel with `GetDimensions` +
+`Load(int3(texel, 0))`. That is point-exact whatever samplers are bound.
+All three point reads use it:
+
+- the cheap depth gate;
+- the trail-film disk test;
+- the main micro path (`patternPoint`).
+
+DXC now compiles without the effects warning.
+
+**Possible visible change.** Disk rims, outline rings and gate steps may
+look crisper and slightly different. The class and code reads are now what
+the bake intended. The local offset `pattern.xy` stays linear on purpose
+(a smooth dome inside a disk).
+
+**Other custom samplers checked.** The GPU state shaders in `realvisor.lua`
+(`samPointRain`, `samPointRainMeta`, `samLinearRain`) have the same
+ignored-state-block issue, but every point read there uses texel centres:
+`((i + 0.5) / count, 0.5)`, or the rasterised `pin.Tex` of a count×1
+target. At an exact texel centre the bilinear weights are 0/1, so linear
+and point give the same value. This is not a bug today. If a read ever
+moves off-centre, convert it to `Load()` as well.
+
+**Inner image size of a micro disk.** Since the legacy mode was removed,
+the image inside a disk is set by the lens rule:
+
+- `MICRO_WATER_LENS_REFRACTION` (× the WF refraction) sets how far the disk
+  looks past its centre, which is the size and inversion of the image.
+- `MICRO_WATER_LENS_SLOPE` sets the dome steepness.
+- `WATER_FIELD_KERNEL_SCALE` sets the dome profile, shared with the heads.
+
+A dedicated "image scale" can be added on top of the refraction if a
+separate control is needed.

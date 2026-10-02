@@ -314,3 +314,123 @@ Changes (WF shading, all weighted by the sheet factor B/G):
   Heads are unchanged (B = 0).
 
 UI: "Sheet opacity (transparent film)" and "Sheet edge softness".
+
+## 9. Water field is the only drop renderer; legacy birth optics removed (2026-10-02)
+
+The user's instruction: drops are now centred on the water field, and the
+old birth implementation that WF overrode and never evaluated is to be
+removed.
+
+**What was dead while WF was on.** WF returns before the birth branch is
+reached, so none of the following ever ran:
+
+- **HLSL:** the whole `else if (gDynamicDropBirthMaskDebug || BirthMaskOptics)`
+  branch, i.e. the old birth-mask optics: image mapping and rotation, wide
+  normal, relief/highlight/shadow, cyan debug.
+- **Lua `updateBirthMask`:**
+  - the RGBA8 canvas format;
+  - the non-full-redraw path (a second canvas B plus a decay pass);
+  - the stamp budget and the recent-stamp budget;
+  - the legacy `drawCircleFilled` / `drawLine` stamp drawing with centre
+    encoding.
+- **Config, uniforms and UI** that only fed those parts:
+  `RAIN_DYNAMIC_BIRTH_MASK_DEBUG / OPTICS / REFRACTION_PIXELS / HIGHLIGHT /
+  OPACITY / SCENE_MIP / IMAGE_* / SHADOW / RELIEF / EDGE_GAIN /
+  WIDE_NORMAL / NORMAL_REACH_TEXELS / FULL_REDRAW / SECONDS / MAX_STAMPS /
+  RECENT_STAMPS`, with their 16 `gDynamicDropBirth*` uniforms and 18 UI
+  widgets.
+
+**Kept, still used by WF:**
+
+- `RAIN_DYNAMIC_BIRTH_MASK_ENABLED`, the stamp source switch;
+- `ONLY`, mesh build without the old per-drop quads;
+- `SIZE`;
+- `BODY_STRETCH`, `BODY_LOOKBACK_SECONDS`, `BODY_MAX_RADII` (tails);
+- `SHAPE_VARIATION`, `SHAPE_STRENGTH` (lobes);
+- `PUDDLE_*`;
+- `GROW_SECONDS`, the fresh-birth growth;
+- `SKY_CORRECTION`, which `gDynamicDropBirthSkyCorrection` uses for the WF
+  lens.
+
+The canvas is always fp16 and fully redrawn every frame. Every live drop is
+stamped every frame. `RAIN_DYNAMIC_WATER_FIELD_ENABLED = false` now simply
+means no heads.
+
+**Still in the files, next cleanup candidate:** the per-drop quad-head
+shader (everything after the visor-surface block in `main`, from
+`BirthMaskOnly` clip onward). It has had no vertices since
+`BIRTH_MASK_ONLY = true`. Removing it would shrink the shader a lot, which
+also lowers FXC risk. It was not removed now because its debug views
+(UV/screen/scene source) are still referenced by several diagnostic flags.
+
+### Fast-flow sheet now needs water
+
+`SHEET_DENSITY_GATE` (default on) scales the fast-flow factor by the visor
+water density, the same model as the smear mask:
+
+```
+density = rain * |car velocity - track wind| / SMEAR_REF_KMH
+gate    = sat((density - SHEET_DENSITY_MIN 0.15) / (SHEET_DENSITY_FULL 0.60 - 0.15))
+```
+
+Fast drops in light rain, or with little airspeed, keep thin trails. Sheets
+form only when enough water reaches the visor. UI "WF fast-flow sheet": a
+checkbox and min/full sliders, with a readout of gate and density. The
+density comes from the previous frame's `smearUpdate`.
+
+## 10. Legacy per-drop quad shader removed (2026-10-02)
+
+With §9 the water field is the only drop renderer. The quad paths were dead
+code, so they are removed.
+
+**HLSL.**
+
+- `rainDropMain` starts with `clip(surfaceMicroPattern ? 1 : -1)`. Only the
+  visor surface layer is drawn.
+- Removed:
+  - the legacy quad-head path;
+  - the legacy micro-layer quad path;
+  - the DebugUV, HDR-copy, refraction and split diagnostics;
+  - the `encodedTex` / `quadTex` / local / r variables;
+  - the non-surface depth clip.
+- The obsolete "Stage 4A/4B" header comment is replaced by a layer
+  contract.
+- Size: 1582 → about 1015 lines.
+
+**Lua.**
+
+- 51 unused `gDynamicDrop*` values are removed from `dropMeshParams`. They
+  include:
+  - Sky, Orb and Wide debugs, SplitCompare, ScreenSourceCompare;
+  - GeometryUVScaleA, PixelUV, RefractionPixels, Shape*;
+  - MicroLayerEnabled, MicroRefractionPixels, BirthMaskOnly,
+    WFNormalStep;
+  - Wave*;
+  - the v6 sheet values.
+- Unused textures removed: `txDynamicScene`, `txDynamicScreen`.
+- The legacy optical wave block is removed, together with
+  `RAIN_DYNAMIC_DROP_WAVE_ENABLED`. It computed the envelope, phase and
+  direction that the shader no longer reads.
+- 25 dead cfg keys are removed, with their log lines.
+
+**Debug flags kept**, because they matter for the current stage:
+
+| Flag | Shows |
+|---|---|
+| WF debug 1-3 | height, slope, large-drop mix |
+| Smear debug 1-4 | region, R, G, classes |
+| Micro debug | micro disks |
+| Haze debug | haze film |
+| Trail-mask debug | trail mask coverage |
+| `SCREEN_SOURCE_COMPARE`, `UV_DEBUG`, `HDR_COPY_DEBUG`, `REFRACTION_DEBUG` | Lua capture and draw-state paths |
+| `IMPACT_SHAPE_*` | impact shape |
+
+**Re-adding a quad.** Do not. New drop visuals go into the WF canvases.
+
+**Addendum (2026-10-02, later).**
+
+- The legacy micro "scene optics" mode, the micro normal bake and the
+  legacy micro quads are removed (`RAINFX_MICRO_PATTERN.md`).
+- Five dead quad-debug uniforms are removed from Lua, with their cfg keys
+  and log fields.
+- Shader: about 918 lines.

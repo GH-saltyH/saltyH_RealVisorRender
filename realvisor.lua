@@ -296,6 +296,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_FORCE_GRAVITY_ENABLED = true,
         RAIN_FORCE_INERTIA_ENABLED = true,
         RAIN_FORCE_AIRFLOW_ENABLED = true,
+        -- Add track wind (sim.windVelocityKmh, axes per SMEAR_WIND_MODE) to
+        -- the airflow the drops feel.
+        RAIN_FORCE_AIRFLOW_INCLUDE_WIND = true,
         -- false: original signed tangent airflow, true: downward visor
         -- runoff with the original left/right tangent component.
         RAIN_AIRFLOW_DOWNWARD_MODE = true,
@@ -315,15 +318,15 @@ local cfg = scriptSettings:mapConfig({
 
         -- Drop dynamics
         -- Acceleration after surface adhesion is exceeded.
-        RAIN_FLOW_ACCELERATION = 0.0251,
+        RAIN_FLOW_ACCELERATION = 0.0021,    -- Flow acceleration
 
         -- Post-adhesion flow intensity multiplier. Default 1.0 preserves
         -- the current physical calibration; later tuning must still respect
         -- the absolute physical max-speed clamp.
-        RAIN_FLOW_SPEED_SCALE = 1.0,
+        RAIN_FLOW_SPEED_SCALE = 1.0,    -- Flow speed scale
 
         -- Linear air/viscous drag coefficient.
-        RAIN_FLOW_DRAG = 0.91,           -- Default 7.00     *Fine Tuned
+        RAIN_FLOW_DRAG = 7.00,           -- Flow drag when pinned Default 7.00     *Fine Tuned
 
         -- Adhesion threshold range. A drop remains attached while the
         -- effective tangential force is below its own threshold.
@@ -453,81 +456,22 @@ local cfg = scriptSettings:mapConfig({
         -- the validated KN5 UV -> 3D mapping using asynchronous readback.
         RAIN_DYNAMIC_SURFACE_STATE_ENABLED = true,
 
-        -- Temporary Stage 4A transport diagnostic:
-        -- when true, dynamic-drop shader shows quad UV directly and bypasses
-        -- circular clipping. This isolates shader binding/UV interpolation
-        -- from the later droplet silhouette.
-        RAIN_DYNAMIC_DROP_UV_DEBUG = false,
-
-        -- Stage 4B.1: copy the HDR scene at pin.ScreenPos into each clipped
-        -- droplet footprint without offset. A correct result should be nearly
-        -- invisible and proves scene-texture/screen-UV alignment before
-        -- refraction is introduced.
-        RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG = false,
-
-        -- Stage 4B.2: controlled screen-space radial refraction. Keep the HDR
-        -- copy debug disabled while testing this branch.
-        RAIN_DYNAMIC_DROP_REFRACTION_DEBUG = true,
-        RAIN_DYNAMIC_DROP_REFRACTION_PIXELS = 48.0,
-        -- Retire the opaque diagnostic and its bright center seam; 48px
-        -- above preserves the established left-hand lens displacement.
-        RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG = false,
-        -- Compare the clean GeometryShot against the final screen on sky.
-        RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG = false,
-        -- Keep the shot in HDR until the same final post-process as the frame.
-        RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = false,
-        -- Visualize independent-shot depth in the visible right half:
-        -- magenta for far/sky, cyan for geometry. Visible left stays HDR.
+        -- Refraction-source (geometry shot) settings. The former Stage 4B
+        -- per-drop-quad diagnostics were removed with the quad shader
+        -- (docs/RAINFX_WATER_FIELD.md §10); these names stay for settings
+        -- compatibility, but they are functional, not debug:
+        --   SKY_DEPTH / SKY_FOG_COLOR / SKY_CLOUD_DETAIL: the shot carries
+        --   depth (sky tone needs it) and a mip chain (blur needs it).
+        --   SHOT_YEBIS*: tonemapped shot (off: HDR shot).
         RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG = false,
-        -- Replace shot sky tone with the current weather fog color.
         RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG = true,
-        -- Recover restrained cloud brightness using the shot's broad mip.
         RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG = true,
-        -- Right half tests a monotonic concave lens with a softer rim.
-        -- Keep the former inverted source available as a disabled control.
-        RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG = false,
-        RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG = true,
-        -- Fade the right-hand lens toward the real scene at the edge.
-        RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG = true,
-        -- Compare a low-cost wide-field, high-contrast light response on the
-        -- concave half without widening its seam-free base scene mapping.
-        RAIN_DYNAMIC_DROP_WIDE_GLINT_DEBUG = false,
-        -- Right-hand lens samples roughly one third of the full scene;
-        -- compare image content against the unchanged left-hand control.
-        RAIN_DYNAMIC_DROP_WIDE_SCENE_DEBUG = true,
-        -- Use the projected visor surface tangent for the wide image axis;
-        -- retain a small stable per-drop residual angle in radians.
-        RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG = true,
-        RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS = 0.45,
-        -- Right-only orb probe: broad forward image with low-detail mips.
-        RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG = true,
-        -- Orb field radius in screen UV: lower values show a closer scene.
-        RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS = 0.48,
-        -- Limit GPU drop optics to the scene directly ahead of each drop.
-        RAIN_DYNAMIC_DROP_FORWARD_SCENE_ONLY = true,
-        RAIN_DYNAMIC_DROP_FORWARD_SCENE_RADIUS = 0.24,
-        -- Flip both projected surface axes for a 180-degree lens image test.
-        RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE = false,
-        -- Source direction follows the projected drop position on the visor.
-        RAIN_DYNAMIC_DROP_ORB_POSITION_BEND = 0.72,
-        RAIN_DYNAMIC_DROP_ORB_SIDE_UPSHIFT = 0.72,
-        RAIN_DYNAMIC_DROP_ORB_GLOW = 0.12,
-        -- Keep the accepted wide orb on both sides while scene tone is
-        -- investigated. Re-enable only for explicit optical A/B tests.
-        RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG = false,
-        -- Keep the low-detail center; make its visible edge about half as
-        -- blurred using the same existing GeometryShot mip chain.
-        RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP = 3.5,
-        -- The screen copy did not fix the rain overlay or tone mismatch;
-        -- disable its per-frame allocation/copy/mips before testing stages.
-        RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
-        -- Full-size YEBIS verifies refraction after the half-size fog test.
+        RAIN_DYNAMIC_DROP_SHOT_YEBIS_DEBUG = false,
         RAIN_DYNAMIC_DROP_SHOT_YEBIS_SCALE = 1.0,
-        -- Retain force-driven wave code for later optical tuning.
-        RAIN_DYNAMIC_DROP_WAVE_ENABLED = false,
-        -- Compare an uneven right-half outline with the circular left half.
-        RAIN_DYNAMIC_DROP_SHAPE_DEBUG = true,
-        RAIN_DYNAMIC_DROP_SHAPE_STRENGTH = 1.0,
+        -- Lua-only capture path (main.track.opaque screen copy); keep off.
+        RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG = false,
+        -- Still referenced by the Lua draw-state / impact code:
+        RAIN_DYNAMIC_DROP_UV_DEBUG = false,
         RAIN_DYNAMIC_DROP_IMPACT_SHAPE_ENABLED = false,
         RAIN_DYNAMIC_DROP_IMPACT_SHAPE_SECONDS = 0.14,
         RAIN_DYNAMIC_DROP_IMPACT_LARGE_DIAMETER_MM = 3.0,
@@ -538,23 +482,18 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_ENABLED = true,
         RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM = 0.46,           -- Fine Tuned for New micro pattern: 0.46
         RAIN_DYNAMIC_MICRO_PATTERN_TEXTURE_SIZE = 12288,
-        RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE = 4096,
-        RAIN_DYNAMIC_MICRO_NORMAL_BUMP = 0.90,
-        RAIN_DYNAMIC_MICRO_NORMAL_MIP = 1.5,
-        RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = 1.60,
-        RAIN_DYNAMIC_MICRO_LAYER_COUNT = 4096,
-        RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM = 0.035,
-        RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM = 0.25,
         RAIN_DYNAMIC_MICRO_LAYER_DEBUG = false,
-        RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS = 15.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = 21.4,      
-        RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = 180.0,
-        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = 1.23,
-        RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = 1.16,
-        RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = 0.02,
         RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER = 0.92,
-        RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = 0.12,
-        RAIN_DYNAMIC_MICRO_PATTERN_EXTRA_RIM_WIDTH = 0.03, -- legacy (unused)
+        -- Micro pop-in (docs/RAINFX_MICRO_PATTERN.md): a picked share of the
+        -- baked disks cycles absent -> lands -> lives -> fades, each with its
+        -- own period and phase (no synchronised blinking).
+        RAIN_DYNAMIC_MICRO_POP_ENABLED = true,
+        RAIN_DYNAMIC_MICRO_POP_PICK = 0.35,     -- share of disks that cycle
+        RAIN_DYNAMIC_MICRO_POP_PERIOD = 5.0,    -- s, x 0.5..1.5 per disk
+        RAIN_DYNAMIC_MICRO_POP_OFF = 0.30,      -- share of the cycle absent
+        RAIN_DYNAMIC_MICRO_POP_FADE = 0.08,     -- share of the life fading out
+        RAIN_DYNAMIC_MICRO_POP_FLASH = 0.11,    -- landing highlight (x fog)
+        RAIN_DYNAMIC_MICRO_POP_ID_SCALE = 1.0,  -- id cells per pattern cell
         -- Micro pattern v2 (docs/RAINFX_MICRO_PATTERN.md). Bake-time values;
         -- changes need a Lua reload.
         RAIN_DYNAMIC_MICRO_PATTERN_STRATA = 1,          -- Micro strata
@@ -571,12 +510,10 @@ local cfg = scriptSettings:mapConfig({
         -- 0 = invisible cut line (gap). > 0 = draw the ring refracted but
         -- darkened by this amount instead.
         RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.65,     -- Micro outline, FINE TUNED
-        -- A/B: false = legacy micro optics (image scale + rotation), true =
-        -- the water-field head lens rule. Compare before deciding.
-        RAIN_DYNAMIC_MICRO_WATER_LENS = true,
+        -- Micro disks use the water-field head lens rule only (the legacy
+        -- "scene optics" mode was removed 2026-10-02, RAINFX_MICRO_PATTERN.md).
         RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION = 1.0, -- x WF refraction
         RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE = 0.8,      -- FINE TUNED
-        RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = 4.1,
         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
         -- Persistent UV wipe mask composited with the static micro layer.
         RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,
@@ -601,25 +538,12 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE = 0.00,   -- Liquid ridge width, FINE TUNED
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM = 0.0,    -- Liquid ridge offset, FINE TUNED
         RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS = 0.25,        -- Path min width, FINE TUNED
+        -- Head stamp source for the water field (legacy birth-mask optics,
+        -- its RGBA8 encoding and its decay path were removed 2026-10-02;
+        -- docs/RAINFX_WATER_FIELD.md §7).
         RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
-        RAIN_DYNAMIC_BIRTH_MASK_DEBUG = false,
-        RAIN_DYNAMIC_BIRTH_MASK_OPTICS = true,
         RAIN_DYNAMIC_BIRTH_MASK_ONLY = true,
-        RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = 32.2,
-        RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = 0.70,
-        RAIN_DYNAMIC_BIRTH_MASK_OPACITY = 0.90,
-        RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP = 5.9,
-        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING = true,
-        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE = 12.0,
-        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES = 180.0,
-        RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX = 1.0,
-        RAIN_DYNAMIC_BIRTH_MASK_SHADOW = 0.195,
-        RAIN_DYNAMIC_BIRTH_MASK_RELIEF = 0.70,
-        RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN = 11.8,
-        RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL = true,
-        RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS = 4.0,
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 2048,
-        RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW = true,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = 0.85,
@@ -628,12 +552,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM = 1.40,
         RAIN_DYNAMIC_BIRTH_PUDDLE_REACH = 0.70,
         RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION = true,
-        RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION = true,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS = 0.04,
         RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = 1.5,
-        RAIN_DYNAMIC_BIRTH_MASK_SECONDS = 1.20,
-        RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS = 64,
-        RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS = 24,
         RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = 0.12,
 
         -- Water field (docs/RAINFX_WATER_FIELD.md). Heads are drawn as soft
@@ -661,10 +581,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH = 111.0,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH = 205.0,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.12,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 0.70,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 0.30,   -- WF tear min diameter (mm), FINE TUNED 
         -- Kernels below ~1.5 texels never cross the silhouette threshold
         -- on the texel grid; tear pieces are clamped to this size.
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS = 0.85,
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS = 0.50,     -- WF tear min piece (texels), FINE TUNED
         -- Impact splash v2 (docs/RAINFX_IMPACT_SPLASH.md): animated in the
         -- head canvas at the frozen impact point. Centre pressed flat then
         -- emptied, mass pushed into a rim ring that grows, breaks up and
@@ -698,6 +618,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_WATER_FIELD_SHEET_VEIL = 0.00,   -- milky lift, FINE TUNED
         RAIN_DYNAMIC_WATER_FIELD_SPLASH_SHEET = 0.35, -- splash in trail
         RAIN_DYNAMIC_WATER_FIELD_SHEET_ALPHA = 1.00,  -- film opacity, FINE TUNED
+        -- Sheets need water: the fast-flow factor is also scaled by the
+        -- visor water density (rain x airspeed incl. wind, smear model).
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_GATE = true,
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_MIN = 0.15,
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_FULL = 0.60,
         RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT = 0.24, -- soft film edge, FINE TUNED
         -- Trail flow (docs/RAINFX_TRAIL_FLOW.md).
         -- Surface-tension levelling: per-frame 4-neighbour diffusion of the
@@ -742,8 +667,8 @@ local cfg = scriptSettings:mapConfig({
         -- Texture G: blend degree inside the region (micro visible+turbid
         -- by G, drops turbid by G, trails/paths weakened by G).
         RAIN_DYNAMIC_SMEAR_ENABLED = true,
-        RAIN_DYNAMIC_SMEAR_DEBUG = 0,          -- 1 region/G, 2 raw R, 3 raw G
-        RAIN_DYNAMIC_SMEAR_TEXTURE = 'texture/smear_mask.dds', -- app-relative
+        RAIN_DYNAMIC_SMEAR_DEBUG = 0,          -- 1 region/G, 2 raw R, 3 raw G, 4 classes
+        RAIN_DYNAMIC_SMEAR_TEXTURE = 'texture/smear_mask_v7_template_2048.png', -- app-relative
         RAIN_DYNAMIC_SMEAR_USE_TEXTURE = true, -- false = procedural test mask
         RAIN_DYNAMIC_SMEAR_REF_KMH = 200.0,    -- airspeed giving amplification 1
         RAIN_DYNAMIC_SMEAR_TRIGGER = 0.30,     -- density that starts the effect
@@ -766,9 +691,33 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_SMEAR_TRAIL_TURBID = 0.45, -- trail -> turbid colour
         RAIN_DYNAMIC_SMEAR_TRAIL_BLUR = 1.5,   -- extra trail mip in region
         RAIN_DYNAMIC_SMEAR_HEAD_MIX = 0.35,    -- head colour -> layer beneath
-        RAIN_DYNAMIC_SMEAR_PATH_WEAKEN = 0.85, -- wipe paths, film, ridge x region
+        -- v8: inside the region every feature follows G' (low = invisible).
+        RAIN_DYNAMIC_SMEAR_HEAD_HIDE = 1.0,    -- moving drops: visibility -> G'
+        RAIN_DYNAMIC_SMEAR_TRAIL_HIDE = 1.0,   -- WF trails (+ their haze clear)
+        -- v8 pattern density: tiles of the mask over the visor UV.
+        RAIN_DYNAMIC_SMEAR_R_TILING = 1.0,     -- region blobs
+        RAIN_DYNAMIC_SMEAR_G_TILING = 2.5,     -- class patches (denser)
+        RAIN_DYNAMIC_SMEAR_PATH_WEAKEN = 0.85, -- v8: wipe paths/film/ridge follow G' by this
         RAIN_DYNAMIC_SMEAR_WIND_MODE = 1,      -- 0 ignore, 1 (x,z), 2 (x,-z), 3 (-x,-z)
         RAIN_DYNAMIC_SMEAR_MIP = 5.0,          -- turbid colour blur
+        -- v6 G processing: G' = sat((G - PIVOT) * CONTRAST + PIVOT)^GAMMA
+        RAIN_DYNAMIC_SMEAR_G_CONTRAST = 1.8,
+        RAIN_DYNAMIC_SMEAR_G_PIVOT = 0.55,
+        RAIN_DYNAMIC_SMEAR_G_GAMMA = 1.0,
+        -- v7 class facets (docs/RAINFX_SMEAR_MASK.md v7, replaces the v6
+        -- region water sheet): G' -> N classes, each its own refraction
+        -- image / tone / blur; erased one by one as the state weakens.
+        RAIN_DYNAMIC_SMEAR_CLASSES = 5,
+        RAIN_DYNAMIC_SMEAR_CLASS_SOFT = 0.35,      -- boundary blend (class share)
+        RAIN_DYNAMIC_SMEAR_CLASS_SEED = 0.0,
+        RAIN_DYNAMIC_SMEAR_FACET_PIXELS = 10.0,    -- per-class image offset (px)
+        RAIN_DYNAMIC_SMEAR_TONE_RANGE = 0.18,      -- per-class tone +-
+        RAIN_DYNAMIC_SMEAR_CLASS_MIP_RANGE = 1.5,  -- per-class blur +- (mip)
+        RAIN_DYNAMIC_SMEAR_ERASE_SPAN = 0.60,      -- reveal below this erases classes
+        RAIN_DYNAMIC_SMEAR_CLASS_WIPE = 0.80,      -- wiping erases classes
+        RAIN_DYNAMIC_SMEAR_LINE_STRENGTH = 0.12,   -- soft boundary line darkening
+        RAIN_DYNAMIC_SMEAR_LINE_WIDTH = 0.06,      -- in class units
+        RAIN_DYNAMIC_SMEAR_FACET_ALPHA = 0.18,     -- facet film on bare glass
         RAIN_DYNAMIC_SMEAR_VEIL = 0.45,        -- turbid colour -> fog
         -- Procedural test mask (used without texture).
         RAIN_DYNAMIC_SMEAR_MASK_CELLS = 5.0,
@@ -797,12 +746,6 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_HAZE_SKY_CORRECTION = true,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.11,
-        -- Stage 4B.2D: compare HDR/LDR dynamic scene textures using both
-        -- pin.ScreenPos and a fixed screen-center UV after a late Lua reload.
-        RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG = false,
-        
-        -- Stage 4B.2F: compare possible interpretations of mesh.fx ScreenPos.
-        RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG = false,
         -- Test whether track-stage HDR works without the extra scene copy.
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
@@ -823,6 +766,34 @@ local cfg = scriptSettings:mapConfig({
         -- drop refracts matches what is really behind the visor. The near
         -- clip keeps the helmet visor itself out of its own source.
         RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT = true,
+        -- Refraction-source tone pass (docs/RAINFX_SHOT_TONE.md). The shot is
+        -- rendered without the frame's weather fog, so far geometry kept its
+        -- raw (brown) colour while sky texels were swapped to the fog tone
+        -- per sample, AFTER blurring: hard "paint" edges in every blurred
+        -- drop / trail. The pass tones every shot texel once (continuous
+        -- aerial fog by depth, sky = fog with bounded cloud contrast) and the
+        -- mips are built from the toned image, so blur stays consistent.
+        RAIN_DYNAMIC_SHOT_TONE_ENABLED = false,
+        RAIN_DYNAMIC_SHOT_TONE_AERIAL_DENSITY = 0.004, -- 1/m: 1-exp(-d*k)
+        RAIN_DYNAMIC_SHOT_TONE_AERIAL_MAX = 0.85,  -- cap for geometry
+        RAIN_DYNAMIC_SHOT_TONE_SATURATION = 0.75,  -- geometry chroma kept
+        RAIN_DYNAMIC_SHOT_TONE_CLOUD_CONTRAST = 0.25, -- sky detail (old rule)
+        RAIN_DYNAMIC_SHOT_TONE_PREVIEW = false,    -- UI preview of the result
+        -- v2 (docs/RAINFX_SHOT_TONE.md §v2): match the shot to THIS frame.
+        -- 1 = aerial fog toward the fog colour (v1), 2 = frame match: the
+        -- shot is multiplied by the low-frequency ratio frame / shot, read
+        -- from dynamic::hdr inside the drop callback (before car glass and
+        -- before our drops). Hue, fog and exposure come from the real frame,
+        -- detail from the shot. v1 read too blue: fog colour is not the sky.
+        RAIN_DYNAMIC_SHOT_TONE_MODE = 2,
+        RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP = 5,      -- shot mip of the ratio
+        RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH = 1.0,
+        RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA = 1.0, -- 0 = luminance ratio only
+        RAIN_DYNAMIC_SHOT_TONE_RATIO_MIN = 0.25,
+        RAIN_DYNAMIC_SHOT_TONE_RATIO_MAX = 4.0,
+        -- Veil / glint / flash colour (was the raw fog colour, too blue):
+        -- fog colour with this much of its chroma kept (luminance kept).
+        RAIN_DYNAMIC_FOG_TONE_SATURATION = 0.37,
         -- Car glass is drawn after every stage we can hook (track / root /
         -- smoke tested) and blends over the drops. A second, cheap pass
         -- writes visor depth where water or micro drops are, so that later
@@ -830,9 +801,28 @@ local cfg = scriptSettings:mapConfig({
         -- still in the drops, since they refract the shot (with glass).
         -- It also gives TAA/DLSS a near (head-locked) depth there.
         RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE = true,
+        -- 2 = exact (the depth pass shades like the colour pass and writes
+        -- depth where alpha >= ALPHA_MIN; follows wipes, recovery, films,
+        -- region sheets; costs a second full shading of the visor layer),
+        -- 1 = cheap gate (water height / micro class only).
+        RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE = 2,
+        RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN = 0.35,
         -- Visor KN5 motion stencil (CSP: 1 = reduced TAA, 0.5 = extra TAA,
         -- < 0 = untouched). Anti-ghosting test for fast camera motion.
         RAIN_VISOR_MOTION_STENCIL = -1.0,
+        -- DLSS shimmer diagnosis (docs/RAINFX_VISOR_GLASS.md §6). Every KN5
+        -- mesh of the visor shimmers, even a plain diffuse one, while the
+        -- render.mesh drops do not: the suspect is the per-node motion
+        -- (previous world transform) of the camera-locked hierarchy.
+        -- T1: clear the stored motion of the whole chain every frame.
+        RAIN_VISOR_MOTION_TEST_CLEAR = false,
+        -- T2: re-apply the camera transform at render time
+        -- ('main.track.opaque'), after every camera script has run.
+        RAIN_VISOR_MOTION_TEST_LATE = false,
+        -- T3: draw this one KN5 mesh ourselves with render.mesh (flat lit
+        -- test shader) and hide it in the normal pass. '' = off.
+        -- Example: 'GLASS_COATING_REFL'. Compare it with its neighbours under DLSS.
+        RAIN_VISOR_REDRAW_TEST_MESH = 'GLASS_COATING_REFL',
         RAIN_DYNAMIC_DROP_SHOT_NEAR = 0.10, -- metres (>= camera near clip)
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
@@ -843,8 +833,6 @@ local cfg = scriptSettings:mapConfig({
         -- a source that cannot contain previous droplet draws.
         RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG = true,
         -- Keep the best empirical scale as a reference against projection.
-        RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A = 20.5,
-        RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG = true,
         
         RAIN_DYNAMIC_STATE_VELOCITY_ENCODE_RANGE = 0.125,
         RAIN_DYNAMIC_STATE_PREDICTION_MAX_SECONDS = 0.05,
@@ -5817,11 +5805,22 @@ local function updateRainGPUState(sim)
         cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_MODE and 1.0 or 0.0
     rainStateUpdateParams.values.gRainAirflowDownwardGain =
         cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN
-    rainStateUpdateParams.values.gRainAirVelocityWorld:set(
-        -ac.getCar(0).velocity.x,
-        -ac.getCar(0).velocity.y,
-        -ac.getCar(0).velocity.z
-    )
+    -- Air relative to the car: track wind minus car velocity (wind is
+    -- optional, RAIN_FORCE_AIRFLOW_INCLUDE_WIND).
+    do
+        local awx, awz = 0.0, 0.0
+        if cfg.RUNTIME.RAIN_FORCE_AIRFLOW_INCLUDE_WIND then
+            awx, awz = rainDynamicSceneCopyState.windWorldMS(
+                rainDynamicSceneCopyState, ac.getSim())
+        end
+        rainDynamicSceneCopyState.airflowWindX = awx
+        rainDynamicSceneCopyState.airflowWindZ = awz
+        rainStateUpdateParams.values.gRainAirVelocityWorld:set(
+            awx - ac.getCar(0).velocity.x,
+            -ac.getCar(0).velocity.y,
+            awz - ac.getCar(0).velocity.z
+        )
+    end
     rainStateUpdateParams.values.gRainAirDensity =
         cfg.RUNTIME.RAIN_AIR_DENSITY
     rainStateUpdateParams.values.gRainAirDragCoeff =
@@ -6706,10 +6705,9 @@ local function initializeRainDynamicSurfaceTest()
         and 0 or rainStateCountForMode()
     local useMicroPattern = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
         and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
-    local microCount = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED
-        and not useMicroPattern
-        and math.max(0, math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_COUNT))
-        or 0
+    -- Legacy per-disk micro quads removed (the shader draws only the
+    -- surface layer, docs/RAINFX_WATER_FIELD.md §10).
+    local microCount = 0
     local patternVertexCount = useMicroPattern and #vertices or 0
     local patternIndexCount = useMicroPattern and #indices or 0
     local meshVertices = ac.VertexBuffer(
@@ -6783,68 +6781,6 @@ local function initializeRainDynamicSurfaceTest()
 
     -- A fixed, area-stratified micro-droplet field uses the same visor lookup.
     -- Its indices are first so moving drops composite over this base layer.
-    local microVertexIndex = count * 4 + 1
-    local microMapped = 0
-    local microClusters = math.max(1, math.ceil(microCount / 3))
-    for i = 0, microCount - 1 do
-        local cluster = math.floor(i / 3)
-        local anchor = rainDynamicSurfaceAreaWeightedUV(
-            rainDynamicSurfaceLookup, cluster, microClusters)
-        local diameterMM = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM
-            + rainDynamicSurfaceFrac((i + 0.5) * 0.61803398875)
-                * (cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM
-                    - cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
-        local spreadUV = diameterMM
-            * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.90
-        local uv = anchor and vec2(
-            anchor.x + (rainDynamicSurfaceFrac((i + 0.5) * 0.7548776662) - 0.5) * spreadUV,
-            anchor.y + (rainDynamicSurfaceFrac((i + 0.5) * 0.5698402911) - 0.5) * spreadUV)
-            or nil
-        local sample = uv and rainDynamicSurfaceSample(
-            rainDynamicSurfaceLookup, vertices, uv) or nil
-        if not sample and anchor then
-            sample = rainDynamicSurfaceSample(
-                rainDynamicSurfaceLookup, vertices, anchor)
-        end
-        if sample then microMapped = microMapped + 1 end
-        local seed = 2048 + (i % 1021)
-        local microRadiusUV = diameterMM
-            * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.5
-        local indexBase = (i + 1) * 6 - 5
-        local center = sample and sample.position
-            + sample.normal * cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M
-            or vec3(0, 0, 0)
-        local normal = sample and sample.normal or vec3(0, 0, 1)
-        local uOffset = sample and sample.tangentU
-            * (microRadiusUV * sample.metersPerUVU) or vec3(0, 0, 0)
-        local vOffset = sample and sample.tangentV
-            * (microRadiusUV * sample.metersPerUVV) or vec3(0, 0, 0)
-        meshVertices:set(microVertexIndex, ac.MeshVertex.new(
-            center - uOffset - vOffset, normal, vec2(seed * 2, 0)))
-        meshVertices:set(microVertexIndex + 1, ac.MeshVertex.new(
-            center + uOffset - vOffset, normal, vec2(seed * 2 + 1, 0)))
-        meshVertices:set(microVertexIndex + 2, ac.MeshVertex.new(
-            center + uOffset + vOffset, normal, vec2(seed * 2 + 1, 1)))
-        meshVertices:set(microVertexIndex + 3, ac.MeshVertex.new(
-            center - uOffset + vOffset, normal, vec2(seed * 2, 1)))
-        local microBase = count * 4 + i * 4
-        meshIndices:set(indexBase, microBase)
-        meshIndices:set(indexBase + 1, microBase + 1)
-        meshIndices:set(indexBase + 2, microBase + 2)
-        meshIndices:set(indexBase + 3, microBase)
-        meshIndices:set(indexBase + 4, microBase + 2)
-        meshIndices:set(indexBase + 5, microBase + 3)
-        microVertexIndex = microVertexIndex + 4
-    end
-    if not useMicroPattern then
-        ac.log(appNameDebug .. ' Micro layer mesh: mapped='
-            .. tostring(microMapped) .. '/' .. tostring(microCount)
-            .. ' clusters=' .. tostring(microClusters)
-            .. ' diameterMM='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MIN_DIAMETER_MM)
-            .. '..'
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_MAX_DIAMETER_MM))
-    end
 
     if useMicroPattern then
         local baseVertex = count * 4 + microCount * 4
@@ -7008,67 +6944,6 @@ local function initializeRainDynamicSurfaceTest()
                 end
             else
                 rainDynamicSceneCopyState.microPatternReady = false
-            end
-            if rainDynamicSceneCopyState.microNormalCanvas then
-                rainDynamicSceneCopyState.microNormalCanvas:dispose()
-                rainDynamicSceneCopyState.microNormalCanvas = nil
-            end
-            rainDynamicSceneCopyState.microNormalReady = false
-            if rainDynamicSceneCopyState.microPatternReady then
-                local normalSize = math.max(256,
-                    math.floor(cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_TEXTURE_SIZE))
-                local canvasOk, normalCanvas = pcall(function()
-                    return ui.ExtraCanvas(vec2(normalSize, normalSize), 6,
-                        render.TextureFormat.R8G8B8A8.UNorm)
-                        :setName('RainFX static micro normals')
-                end)
-                if canvasOk and normalCanvas then
-                    local bakeOk, bakeResult = pcall(function()
-                        local updated = normalCanvas:updateWithShader({
-                            textures = {
-                                txMicroMask = rainDynamicSceneCopyState.microPatternCanvas
-                            },
-                            shader = [[
-                                SamplerState samLinearMicroBake
-                                {
-                                    Filter = MIN_MAG_MIP_LINEAR;
-                                    AddressU = CLAMP;
-                                    AddressV = CLAMP;
-                                    AddressW = CLAMP;
-                                };
-                                float4 main(PS_IN pin)
-                                {
-                                    float4 disk = txMicroMask.SampleLevel(
-                                        samLinearMicroBake, pin.Tex, 0.0);
-                                    float2 xy = disk.xy * 2.0 - 1.0;
-                                    float z = sqrt(saturate(1.0 - dot(xy, xy)));
-                                    float3 normal = normalize(float3(xy, z));
-                                    return float4(normal * 0.5 + 0.5, 1.0);
-                                }
-                            ]]
-                        })
-                        if updated ~= false then
-                            normalCanvas:mipsUpdate()
-                        end
-                        return updated
-                    end)
-                    rainDynamicSceneCopyState.microNormalReady =
-                        bakeOk and bakeResult ~= false
-                    if rainDynamicSceneCopyState.microNormalReady then
-                        rainDynamicSceneCopyState.microNormalCanvas = normalCanvas
-                    else
-                        normalCanvas:dispose()
-                        ac.warn(appNameDebug .. ' Micro normal bake: '
-                            .. tostring(bakeResult))
-                    end
-                else
-                    ac.warn(appNameDebug .. ' Micro normal canvas: '
-                        .. tostring(normalCanvas))
-                end
-                ac.log(appNameDebug .. ' Micro normals: '
-                    .. tostring(normalSize) .. 'x' .. tostring(normalSize)
-                    .. ' ready='
-                    .. tostring(rainDynamicSceneCopyState.microNormalReady))
             end
             rainDynamicSceneCopyState.microPatternSize = patternSize
             rainDynamicSceneCopyState.microBakeKey =
@@ -7865,6 +7740,143 @@ render.on('main.track.opaque', function()
     rainDynamicSceneCopyState.captureFrame = sim.frame
 end)
 
+-- Refraction-source tone pass (docs/RAINFX_SHOT_TONE.md). Runs inside the
+-- drop draw callback (main.track.transparent): dynamic::hdr then holds this
+-- frame without car glass and without our drops. updateSceneWithShader is
+-- the API meant for passes in the middle of the scene render.
+rainDynamicSceneCopyState.shotToneUpdate = function(sim)
+    local st = rainDynamicSceneCopyState
+    local r = cfg.RUNTIME
+    st.toneReady = false
+    if not r.RAIN_DYNAMIC_SHOT_TONE_ENABLED or not st.geometryShot
+        or st.shotFrame ~= sim.frame then
+        return
+    end
+    local width, height = st.shotWidth or 1, st.shotHeight or 1
+    local mips, withDepth = st.shotMips or 1, st.shotWithDepth
+    local mode = math.floor((r.RAIN_DYNAMIC_SHOT_TONE_MODE or 2) + 0.5)
+    if not st.toneCanvas or st.toneWidth ~= width
+        or st.toneHeight ~= height or st.toneMips ~= mips then
+        if st.toneCanvas then st.toneCanvas:dispose() end
+        if st.toneFrame then st.toneFrame:dispose() end
+        st.toneCanvas = ui.ExtraCanvas(vec2(width, height), mips,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        st.toneCanvas:setName('RainFX toned refraction source')
+        -- Frame copy at 1/4 size: its mip (MATCH_MIP - 2) has the same
+        -- footprint as shot mip MATCH_MIP.
+        st.toneFrame = ui.ExtraCanvas(
+            vec2(math.max(8, math.floor(width / 4)),
+                math.max(8, math.floor(height / 4))), 8,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        st.toneFrame:setName('RainFX frame tone reference')
+        st.toneWidth, st.toneHeight, st.toneMips = width, height, mips
+    end
+    local near = math.max(sim.cameraClipNear or 0.05,
+        r.RAIN_DYNAMIC_DROP_SHOT_NEAR)
+    local matchMip = math.max(2, math.min(mips - 1,
+        math.floor(r.RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP + 0.5)))
+    local ok, res = pcall(function()
+        if mode == 2 then
+            local copied = st.toneFrame:updateSceneWithShader({
+                async = true,
+                textures = { txInput = 'dynamic::hdr' },
+                shader = [[
+                    float4 main(PS_IN pin)
+                    {
+                        return float4(txInput.SampleLevel(samLinearClamp,
+                            pin.Tex, 0.0).rgb, 1.0);
+                    }
+                ]]
+            })
+            if copied == false then return false end
+            st.toneFrame:mipsUpdate()
+        end
+        local updated = st.toneCanvas:updateSceneWithShader({
+            async = true,
+            textures = {
+                txShot = st.geometryShot,
+                txShotDepth = withDepth and st.geometryShot:depth() or false,
+                txFrame = st.toneFrame,
+            },
+            values = {
+                gMode = mode,
+                gHasDepth = withDepth and 1.0 or 0.0,
+                gNear = near,
+                gFar = math.max(sim.cameraClipFar or 5000.0, near + 1.0),
+                gDensity = r.RAIN_DYNAMIC_SHOT_TONE_AERIAL_DENSITY,
+                gAerialMax = r.RAIN_DYNAMIC_SHOT_TONE_AERIAL_MAX,
+                gSaturation = r.RAIN_DYNAMIC_SHOT_TONE_SATURATION,
+                gCloudContrast = r.RAIN_DYNAMIC_SHOT_TONE_CLOUD_CONTRAST,
+                gFog = st.fogTone or sim.fogColor,
+                gBroadMip = math.max(0, mips - 1),
+                gMatchMip = matchMip,
+                gFrameMip = matchMip - 2,
+                gMatch = r.RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH,
+                gChroma = r.RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA,
+                gRatioMin = r.RAIN_DYNAMIC_SHOT_TONE_RATIO_MIN,
+                gRatioMax = r.RAIN_DYNAMIC_SHOT_TONE_RATIO_MAX,
+            },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    float2 uv = pin.Tex;
+                    float3 w = float3(0.2126, 0.7152, 0.0722);
+                    float3 c = txShot.SampleLevel(samLinearClamp, uv, 0.0).rgb;
+                    if (gMode > 1.5)
+                    {
+                        // v2 frame match: low-frequency ratio frame / shot.
+                        float3 sLow = txShot.SampleLevel(samLinearClamp, uv,
+                            gMatchMip).rgb;
+                        float3 fLow = txFrame.SampleLevel(samLinearClamp, uv,
+                            gFrameMip).rgb;
+                        float valid = dot(fLow, w) > 1e-5 ? 1.0 : 0.0;
+                        float3 ratio = clamp(fLow / max(sLow, 1e-4),
+                            gRatioMin, gRatioMax);
+                        float lr = clamp(dot(fLow, w) / max(dot(sLow, w), 1e-4),
+                            gRatioMin, gRatioMax);
+                        float3 m = lerp(float3(lr, lr, lr), ratio,
+                            saturate(gChroma));
+                        c *= lerp(float3(1.0, 1.0, 1.0), m,
+                            saturate(gMatch) * valid);
+                        return float4(c, 1.0);
+                    }
+                    // v1 aerial fog toward the (desaturated) fog tone.
+                    float d = gHasDepth > 0.5
+                        ? txShotDepth.SampleLevel(samLinearClamp, uv, 0.0).r
+                        : 0.0;
+                    bool sky = gHasDepth > 0.5 && d > 0.99999;
+                    float lin = gNear * gFar
+                        / max(gFar - d * (gFar - gNear), 1e-4);
+                    float aerial = sky ? 1.0
+                        : (1.0 - exp(-lin * max(gDensity, 0.0)))
+                            * saturate(gAerialMax);
+                    float l = dot(c, w);
+                    float far01 = sky ? 1.0 : saturate(1.0
+                        - exp(-lin * max(gDensity, 0.0)));
+                    c = lerp(float3(l, l, l), c,
+                        lerp(1.0, saturate(gSaturation), far01));
+                    float3 broad = txShot.SampleLevel(samLinearClamp, uv,
+                        gBroadMip).rgb;
+                    float contrast = clamp(1.0 + (l / max(dot(broad, w), 0.02)
+                        - 1.0) * gCloudContrast, 0.95, 1.12);
+                    c = lerp(c, gFog * contrast, saturate(aerial));
+                    return float4(c, 1.0);
+                }
+            ]]
+        })
+        if updated == false then return false end
+        if mips > 1 then st.toneCanvas:mipsUpdate() end
+        return true
+    end)
+    st.toneReady = ok and res and true or false
+    if not ok and not st.toneWarned then
+        ac.warn(appNameDebug .. ' Shot tone pass: ' .. tostring(res))
+        st.toneWarned = true
+    end
+end
+
 -- Complete GPU and transport preparation before transparent callbacks.
 -- These callbacks only consume resources prepared for this exact frame.
 render.onSceneReady(function()
@@ -8109,6 +8121,89 @@ end
 -- Smear mask trigger (docs/RAINFX_SMEAR_MASK.md §v3): rain x relative
 -- airspeed, facing term from the camera look vs incoming air; smoothed and
 -- advanced once per frame. Also resolves the mask texture once.
+-- UI tooltips (hover) for the trail-flow / smear section.
+rainDynamicSceneCopyState.uiHelp = {
+    RAIN_DYNAMIC_SMEAR_ENABLED = 'Master switch of the smear region (fingerprint-like turbid patches revealed by water density).',
+    RAIN_DYNAMIC_SMEAR_USE_TEXTURE = 'Use the mask texture (R reveal order, G blend). Off: procedural stand-in with the same meaning.',
+    RAIN_DYNAMIC_SMEAR_TRIGGER_OVERRIDE = 'Force the trigger ON regardless of density.',
+    RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE_ON = 'Use the manual reveal value instead of the density x facing result.',
+    RAIN_DYNAMIC_SMEAR_REVEAL_OVERRIDE = 'Manual reveal 0..1: region = pixels with R <= this value.',
+    RAIN_DYNAMIC_SMEAR_REF_KMH = 'Airspeed (car minus wind) that counts as amplification 1. density = rain x airspeed / this.',
+    RAIN_DYNAMIC_SMEAR_TRIGGER = 'Density at which the effect starts.',
+    RAIN_DYNAMIC_SMEAR_FULL = 'Density giving full reveal (reveal = min(1, density / this) x facing).',
+    RAIN_DYNAMIC_SMEAR_FACING_POWER = 'Sharpens the facing term (camera look vs incoming air). Higher = only head-on air reveals.',
+    RAIN_DYNAMIC_SMEAR_ATTACK_SECONDS = 'Time constant while the reveal rises.',
+    RAIN_DYNAMIC_SMEAR_RELEASE_SECONDS = 'Time constant while the reveal falls (region dries away).',
+    RAIN_DYNAMIC_SMEAR_EDGE_SOFT = 'Width of the R band around the reveal front (soft region edge).',
+    RAIN_DYNAMIC_SMEAR_MICRO_HIDE = 'Inside the region micro drops show only by G (1 = fully, low G hides them).',
+    RAIN_DYNAMIC_SMEAR_MICRO_TURBID = 'Micro drops turn turbid by region x G x this.',
+    RAIN_DYNAMIC_SMEAR_DROP_TURBID = 'GPU drop heads turn turbid by region x G x this.',
+    RAIN_DYNAMIC_SMEAR_TRAIL_MIX = 'WF trails keep their shape; their colour mixes with the layer beneath by this (region only).',
+    RAIN_DYNAMIC_SMEAR_TRAIL_TURBID = 'WF trails turn turbid by this inside the region.',
+    RAIN_DYNAMIC_SMEAR_TRAIL_BLUR = 'Extra blur (mip) of WF trails inside the region.',
+    RAIN_DYNAMIC_SMEAR_HEAD_MIX = 'GPU heads keep their shape; colour mixes with the layer beneath by this.',
+    RAIN_DYNAMIC_SMEAR_PATH_WEAKEN = 'Wipe paths, thin film and ridge inside the region follow G by this: low G = weak wipe, high G = full (v8).',
+    RAIN_DYNAMIC_SMEAR_MIP = 'Blur of the turbid colour (mip of the refraction source).',
+    RAIN_DYNAMIC_SMEAR_VEIL = 'Turbid colour drifts toward the fog colour by this.',
+    RAIN_DYNAMIC_SMEAR_HEAD_HIDE = 'Moving drops inside the region: visibility goes to G (1 = low G hides them fully).',
+    RAIN_DYNAMIC_SMEAR_TRAIL_HIDE = 'WF trails inside the region: visibility goes to G, and so does their haze clearing.',
+    RAIN_DYNAMIC_SMEAR_R_TILING = 'How many times the mask R (region blobs) repeats over the visor. The texture must tile.',
+    RAIN_DYNAMIC_SMEAR_G_TILING = 'How many times the mask G (class patches) repeats over the visor. Higher = denser pattern.',
+    RAIN_DYNAMIC_SMEAR_CLASSES = 'Number of facet classes G is cut into. Each class bends and tones the scene its own way.',
+    RAIN_DYNAMIC_SMEAR_CLASS_SOFT = 'How blurred the class boundaries are (share of a class blending into the next).',
+    RAIN_DYNAMIC_SMEAR_CLASS_SEED = 'Reshuffles the class offsets, tones and erase order.',
+    RAIN_DYNAMIC_SMEAR_FACET_PIXELS = 'How far each class shifts its refraction image (render pixels).',
+    RAIN_DYNAMIC_SMEAR_TONE_RANGE = 'Brightness spread between classes (+-).',
+    RAIN_DYNAMIC_SMEAR_CLASS_MIP_RANGE = 'Blur spread between classes (+- mip around the turbid blur).',
+    RAIN_DYNAMIC_SMEAR_ERASE_SPAN = 'Below this reveal level the classes are erased one by one (random fixed order).',
+    RAIN_DYNAMIC_SMEAR_CLASS_WIPE = 'How strongly wiping/flowing water erases classes on its path.',
+    RAIN_DYNAMIC_SMEAR_LINE_STRENGTH = 'Faint darkening on the boundaries between classes.',
+    RAIN_DYNAMIC_SMEAR_LINE_WIDTH = 'Width of the boundary lines, in class units.',
+    RAIN_DYNAMIC_SMEAR_FACET_ALPHA = 'Opacity of the class facet film on bare glass (no depth write, like haze).',
+    RAIN_DYNAMIC_MICRO_POP_ENABLED = 'Micro drops randomly vanish and land again, each on its own clock.',
+    RAIN_DYNAMIC_MICRO_POP_PICK = 'Share of micro disks that take part in the pop-in cycle (pickup range).',
+    RAIN_DYNAMIC_MICRO_POP_PERIOD = 'Mean cycle length in seconds (each disk x 0.5..1.5).',
+    RAIN_DYNAMIC_MICRO_POP_OFF = 'Share of its cycle a picked disk is absent before it lands.',
+    RAIN_DYNAMIC_MICRO_POP_FADE = 'Share of its life a disk spends fading out at the end.',
+    RAIN_DYNAMIC_MICRO_POP_FLASH = 'Short highlight when a disk lands.',
+    RAIN_DYNAMIC_MICRO_POP_ID_SCALE = 'Disk id cells per pattern cell. Raise if neighbouring disks pop together.',
+    RAIN_DYNAMIC_SMEAR_G_CONTRAST = 'G contrast around PIVOT: higher cuts the pattern away more raggedly.',
+    RAIN_DYNAMIC_SMEAR_G_PIVOT = 'G value that the contrast keeps fixed.',
+    RAIN_DYNAMIC_SMEAR_G_GAMMA = 'Gamma after contrast: > 1 darkens G (more hidden micro).',
+    RAIN_DYNAMIC_SMEAR_MASK_CELLS = 'Procedural mask only: blob scale.',
+    RAIN_DYNAMIC_SMEAR_MASK_WARP = 'Procedural mask only: blob outline warp.',
+    RAIN_DYNAMIC_SMEAR_FILL_CELLS = 'Procedural mask only: G noise scale.',
+    RAIN_DYNAMIC_SMEAR_FILL_PATCH_CELLS = 'Procedural mask only: G patch scale.',
+    RAIN_VISOR_MOTION_TEST_CLEAR = 'Calls clearMotion() on the visor node chain every frame (stored previous transform = current).',
+    RAIN_VISOR_MOTION_TEST_LATE = 'Re-applies the camera-locked transform in the render callback, after the camera scripts. Tests a one-frame lag.',
+    RAIN_DYNAMIC_SHOT_TONE_ENABLED = 'Tones the refraction source once per frame before its mips: far geometry gets aerial fog by depth, sky becomes the fog tone. Removes the paint-like edges in blurred drops.',
+    RAIN_DYNAMIC_SHOT_TONE_AERIAL_DENSITY = 'Aerial fog per metre: amount = 1 - exp(-distance x density). 0.004 = 33 % at 100 m, 86 % at 500 m.',
+    RAIN_DYNAMIC_SHOT_TONE_AERIAL_MAX = 'Upper limit of the aerial fog on geometry (sky always gets the full fog tone).',
+    RAIN_DYNAMIC_SHOT_TONE_SATURATION = 'Colour kept on far geometry in the refraction source (scaled by distance; the near cockpit keeps its colour). Lower = greyer, closer to the fogged frame.',
+    RAIN_DYNAMIC_SHOT_TONE_CLOUD_CONTRAST = 'Cloud detail kept in the fog-toned sky (luminance ratio to the broad sky, bounded 0.95..1.12).',
+    RAIN_DYNAMIC_SHOT_TONE_MODE = '1 = aerial fog toward the fog colour (v1). 2 = match the shot to this frame (dynamic::hdr before car glass): hue, fog and exposure from the real frame, detail from the shot.',
+    RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP = 'Blur level of the frame/shot ratio. Higher = smoother tone transfer, lower = follows smaller objects.',
+    RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH = 'How much of the frame tone is applied to the refraction source.',
+    RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA = '1 = per-channel ratio (hue matched), 0 = luminance ratio only (shot hue kept).',
+    RAIN_DYNAMIC_SHOT_TONE_RATIO_MIN = 'Lower clamp of the frame/shot ratio.',
+    RAIN_DYNAMIC_SHOT_TONE_RATIO_MAX = 'Upper clamp of the frame/shot ratio.',
+    RAIN_DYNAMIC_FOG_TONE_SATURATION = 'Chroma kept in the colour used for veils, glints, turbid smear and pop flashes (the raw fog colour was too blue).',
+    RAIN_DYNAMIC_SHOT_TONE_PREVIEW = 'Shows the toned refraction source next to the raw shot in this window.',
+    RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE = 'Second pass writes visor depth where drops are, so car glass drawn later cannot cover them.',
+    RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN = 'Exact depth pass: only pixels at least this opaque occlude the glass.',
+}
+
+-- Track wind in world m/s (x, z), per RAIN_DYNAMIC_SMEAR_WIND_MODE axes
+-- (0 = ignore). Shared by the smear density and the GPU airflow force.
+rainDynamicSceneCopyState.windWorldMS = function(state, sim)
+    local w = sim and sim.windVelocityKmh
+    local mode = math.floor(cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_WIND_MODE + 0.5)
+    if not w or mode <= 0 then return 0.0, 0.0 end
+    local wx, wz = w.x, w.y
+    if mode == 2 then wz = -wz elseif mode == 3 then wx, wz = -wx, -wz end
+    return wx / 3.6, wz / 3.6
+end
+
 rainDynamicSceneCopyState.appFolder = appFolder
 rainDynamicSceneCopyState.smearUpdate = function(state, sim)
     local r = cfg.RUNTIME
@@ -8140,13 +8235,9 @@ rainDynamicSceneCopyState.smearUpdate = function(state, sim)
             + look.z * vz) / (carKmh / 3.6))
     end
     local w = sim.windVelocityKmh
-    local mode = math.floor(r.RAIN_DYNAMIC_SMEAR_WIND_MODE + 0.5)
-    if w and mode > 0 then
-        local wx, wz = w.x, w.y
-        if mode == 2 then wz = -wz elseif mode == 3 then wx, wz = -wx, -wz end
-        vx = vx - wx / 3.6
-        vz = vz - wz / 3.6
-    end
+    local wx, wz = state.windWorldMS(state, sim)
+    vx = vx - wx
+    vz = vz - wz
     state.smearCarKmh, state.smearFacingNoWind = carKmh, facingNoWind
     state.smearWindX, state.smearWindY = w and w.x or 0.0, w and w.y or 0.0
     local airKmh = math.sqrt(vx * vx + vy * vy + vz * vz) * 3.6
@@ -8174,6 +8265,8 @@ rainDynamicSceneCopyState.smearUpdate = function(state, sim)
     level = level + (target - level) * (1.0 - math.exp(-dt / math.max(tau, 0.05)))
     if level < 0.0005 and target <= 0.0 then level = 0.0 end
     state.smearRain, state.smearAirKmh, state.smearAmp = rain, airKmh, amp
+    -- Shared clock (micro pop-in). Long wrap: a wrap re-phases every disk.
+    state.smearTime = ((state.smearTime or 0.0) + dt) % 65536.0
     state.smearDensity, state.smearFacing = density, facing
     state.smearTriggered, state.smearTarget = triggered, target
     state.smearLevel = level
@@ -8701,6 +8794,15 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
     local sheetSpan = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_FULL_SPEED - sheetStart,
         1e-5)
+    local sheetDensity = 1.0
+    if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_GATE then
+        local dmin = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_MIN
+        sheetDensity = math.max(0.0, math.min(1.0,
+            ((state.smearDensity or 0.0) - dmin) / math.max(
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_FULL - dmin,
+                1e-3)))
+    end
+    state.waterSheetDensity = sheetDensity
     local widen = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_WIDEN
     local thin = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_THIN
     state.waterTrailLastX = state.waterTrailLastX or {}
@@ -8741,7 +8843,7 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
             local R = stamp.radius or 0.0
             maxSpeed = math.max(maxSpeed, speed)
             local fast = sheetOn and math.max(0.0, math.min(1.0,
-                (speed - sheetStart) / sheetSpan)) or 0.0
+                (speed - sheetStart) / sheetSpan)) * sheetDensity or 0.0
             local generation = state.generation
                 and state.generation[index] or 0
             if speed >= minSpeed and R > 0.5 and fast > 0.0 then
@@ -8828,16 +8930,14 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     local state = rainDynamicSceneCopyState
     local size = math.max(128, math.floor(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE))
-    -- The water field needs fp16 height and radius channels.
+    -- Water field only (legacy RGBA8 birth optics removed): fp16 height
+    -- and radius channels, fully redrawn every frame.
     local waterField = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
-    local birthFormat = waterField
-        and render.TextureFormat.R16G16B16A16.Float
-        or render.TextureFormat.R8G8B8A8.UNorm
-    if not state.birthMaskA or state.birthMaskSize ~= size
-        or state.birthMaskWaterField ~= waterField then
+    local birthFormat = render.TextureFormat.R16G16B16A16.Float
+    if not state.birthMaskA or state.birthMaskSize ~= size then
         if state.birthMaskA then state.birthMaskA:dispose() end
         if state.birthMaskB then state.birthMaskB:dispose() end
-        state.birthMaskWaterField = waterField
+        state.birthMaskWaterField = true
         state.birthMaskA = ui.ExtraCanvas(vec2(size, size), 1,
             birthFormat)
             :setName('RainFX Birth Mask A')
@@ -8859,57 +8959,16 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     if state.birthMaskFrame == sim.frame then return end
     -- Water-field heads redraw every frame; the separate trail canvas keeps
     -- history. Self-accumulating heads would flatten into plateaus.
-    local fullRedraw = cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW
-        or waterField
-    local target
-    local seconds = math.max(
-        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS, 0.05)
-    if fullRedraw then
-        if state.birthMaskB then
-            state.birthMaskRead = state.birthMaskA
-            state.birthMaskB:dispose()
-            state.birthMaskB = nil
-        end
-        target = state.birthMaskA
-        target:clear(rgbm.colors.transparent)
-    else
-        if not state.birthMaskB then
-            state.birthMaskB = ui.ExtraCanvas(vec2(size, size), 1,
-                birthFormat)
-                :setName('RainFX Birth Mask B')
-            state.birthMaskB:clear(rgbm.colors.transparent)
-        end
-        local source = state.birthMaskRead
-        target = source == state.birthMaskA
-            and state.birthMaskB or state.birthMaskA
-        local decay = math.exp(
-            -math.min(math.max(sim.dt or 0.0, 0.0), 0.05)
-            * 2.0 / seconds)
-        local copied = target:updateWithShader({
-            async = true,
-            textures = { txBirthPrevious = source },
-            values = { gBirthDecay = decay },
-            shader = [[
-                float4 main(PS_IN pin)
-                {
-                    float4 previous = txBirthPrevious.SampleLevel(
-                        samLinearClamp, pin.Tex, 0.0);
-                    return float4(previous.rgb * gBirthDecay,
-                        previous.r * gBirthDecay);
-                }
-            ]]
-        })
-        if copied == false then return end
-    end
+    local fullRedraw = true
+    local target = state.birthMaskA
+    state.birthMaskRead = state.birthMaskA
+    target:clear(rgbm.colors.transparent)
 
     local stamps = {}
     local count = rainDynamicStateReadbackCount
-    local budget = math.max(1, math.floor(
-        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS))
-    if fullRedraw then budget = math.max(budget, count) end
-    local recentBudget = fullRedraw and count
-        or math.min(budget, math.max(0, math.floor(
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RECENT_STAMPS)))
+    -- Every live drop is stamped every frame (full redraw).
+    local budget = math.max(1, count)
+    local recentBudget = count
     local growTime = math.max(
         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS, 0.01)
     local predictedAge = math.min(math.max(
@@ -9097,40 +9156,6 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             end)
         end
         state.waterFieldUpdateTrail(state, stamps, size, sim)
-    elseif #stamps > 0 then
-        target:update(function()
-            for _, stamp in ipairs(stamps) do
-                -- R: footprint, G/B: the unwarped droplet center in
-                -- normalized visor UV. One lifetime keeps one scene pivot.
-                local bodyColor = rgbm(1.0,
-                    stamp.x / size, stamp.y / size, 1.0)
-                if stamp.tailX then
-                    ui.drawLine(
-                        vec2(stamp.tailX, stamp.tailY),
-                        vec2(stamp.x, stamp.y),
-                        bodyColor,
-                        stamp.radius * 2.0)
-                    ui.drawCircleFilled(
-                        vec2(stamp.tailX, stamp.tailY),
-                        stamp.radius,
-                        bodyColor, 12)
-                end
-                if stamp.puddleX then
-                    ui.drawCircleFilled(vec2(stamp.puddleX, stamp.puddleY),
-                        stamp.puddleRadius, bodyColor, 12)
-                    ui.drawCircleFilled(vec2(stamp.puddle2X, stamp.puddle2Y),
-                        stamp.puddle2Radius, bodyColor, 12)
-                end
-                if stamp.lobeX then
-                    ui.drawCircleFilled(
-                        vec2(stamp.lobeX, stamp.lobeY),
-                        stamp.lobeRadius, bodyColor, 12)
-                end
-                ui.drawCircleFilled(
-                    vec2(stamp.x, stamp.y), stamp.radius,
-                    bodyColor, 16)
-            end
-        end)
     end
     state.birthMaskRead = target
     state.birthMaskFrame = sim.frame
@@ -9153,8 +9178,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
             .. ' maxMotionRadii='
             .. string.format('%.2f', state.birthMaskMaxMotion)
             .. ' budget=' .. tostring(budget)
-            .. ' fullRedraw=' .. tostring(fullRedraw)
-            .. ' recovery=' .. tostring(seconds))
+            .. ' waterField=' .. tostring(waterField))
         state.birthMaskStamps = 0
         state.birthMaskFresh = 0
         state.birthMaskStretched = 0
@@ -9438,105 +9462,8 @@ float4 main(PS_IN pin)
     -- keep the attached mesh hidden between callbacks so the ordinary scene
     -- pass cannot render its black fallback material. Enable it only while
     -- render.mesh() consumes the SceneReference, then hide it again.
-    local waveDirection = vec2(0.0, 0.0)
-    local waveEnvelope = 0.0
-    local wavePhase = 0.0
-    if cfg.RUNTIME.RAIN_DYNAMIC_DROP_WAVE_ENABLED then
-    -- Scope the complete diagnostic force pipeline to the enabled case.
-    local waveState = rainDynamicSceneCopyState.waveState
-    if not waveState then
-        waveState = { envelope = 0.0, previousForce = 0.0, phase = 0.0 }
-        rainDynamicSceneCopyState.waveState = waveState
-    end
-    local car = ac.getCar(0)
-    local inertiaEnabled = cfg.RUNTIME.RAIN_FORCE_INERTIA_ENABLED
-    local airflowEnabled = cfg.RUNTIME.RAIN_FORCE_AIRFLOW_ENABLED
-    local waveSourceMask = (inertiaEnabled and 2 or 0)
-        + (airflowEnabled and 4 or 0)
-    if waveState.sourceMask ~= waveSourceMask then
-        waveState.sourceMask = waveSourceMask
-        waveState.envelope = 0.0
-        waveState.previousForce = 0.0
-        waveState.triggerLogged = false
-    end
-    local externalAcceleration = rainAccelerationCurrent
-    local forceX = inertiaEnabled and car and car.side and (
-        externalAcceleration.x * car.side.x
-        + externalAcceleration.y * car.side.y
-        + externalAcceleration.z * car.side.z
-    ) * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE or 0.0
-    local forceY = inertiaEnabled and car and car.look and (
-        externalAcceleration.x * car.look.x
-        + externalAcceleration.y * car.look.y
-        + externalAcceleration.z * car.look.z
-    ) * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE or 0.0
-    -- The physics shader evaluates airflow separately for each drop's size
-    -- and surface normal. This shared optical test uses one representative
-    -- diameter and the car's forward axis as the visor-front normal.
-    local airflowMagnitude = 0.0
-    if airflowEnabled and car and car.velocity and car.look then
-        local velocity = car.velocity
-        local speed = math.sqrt(velocity.x * velocity.x
-            + velocity.y * velocity.y + velocity.z * velocity.z)
-        if speed > 0.0001 then
-            local incidence = math.max(0.0, math.min(1.0,
-                (velocity.x * car.look.x + velocity.y * car.look.y
-                    + velocity.z * car.look.z) / speed))
-            local radiusM = math.max(0.000001,
-                cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_DROPLET_DIAMETER_MM
-                    * 0.0005)
-            -- Exact area/mass ratio of the physics shader's water sphere:
-            -- (pi*r^2) / ((4/3)*pi*r^3*1000) = 3/(4000*r).
-            airflowMagnitude = 0.5 * math.max(0.0, cfg.RUNTIME.RAIN_AIR_DENSITY)
-                * speed * speed
-                * math.max(0.0, cfg.RUNTIME.RAIN_AIR_DRAG_COEFF)
-                * 3.0 / (4000.0 * radiusM) * incidence
-                * cfg.RUNTIME.RAIN_PHYSICS_ACCEL_SCALE
-            forceX = forceX - velocity.x / speed * airflowMagnitude
-                * car.side.x - velocity.y / speed * airflowMagnitude
-                * car.side.y - velocity.z / speed * airflowMagnitude
-                * car.side.z
-            forceY = forceY - velocity.x / speed * airflowMagnitude
-                * car.look.x - velocity.y / speed * airflowMagnitude
-                * car.look.y - velocity.z / speed * airflowMagnitude
-                * car.look.z
-        end
-    end
-    local forceMagnitude = math.sqrt(forceX * forceX + forceY * forceY)
-    local waveDT = math.min(math.max(sim.dt or 0.0, 0.0), 0.1)
-    local waveDrive = math.min(1.0, math.max(0.0,
-        (forceMagnitude - 0.05) * 3.5))
-    local waveImpulse = math.min(1.0, math.max(0.0,
-        (forceMagnitude - waveState.previousForce) * 7.0))
-    waveState.envelope = math.max(
-        waveState.envelope * math.exp(-4.0 * waveDT),
-        waveDrive,
-        waveImpulse
-    )
-    waveState.previousForce = forceMagnitude
-    waveState.phase = (waveState.phase + waveDT * 9.0) % (math.pi * 2.0)
-    if not inertiaEnabled and not airflowEnabled then
-        waveState.envelope = 0.0
-        waveState.previousForce = 0.0
-        waveState.triggerLogged = false
-    end
-    if waveState.envelope > 0.15 and not waveState.triggerLogged then
-        ac.log(appNameDebug .. ' Dynamic drop wave force: inertia='
-            .. tostring(inertiaEnabled)
-            .. ' airflow=' .. tostring(airflowEnabled)
-            .. ' source=rainAccelerationCurrent+airflow magnitude='
-            .. string.format('%.3f', forceMagnitude)
-            .. ' airflowMagnitude=' .. string.format('%.3f', airflowMagnitude)
-            .. ' envelope=' .. string.format('%.3f', waveState.envelope))
-        waveState.triggerLogged = true
-    end
-    waveDirection = vec2(
-        forceX / math.max(forceMagnitude, 0.001),
-        forceY / math.max(forceMagnitude, 0.001)
-    )
-    waveEnvelope = waveState.envelope
-    wavePhase = waveState.phase
-    end
+    -- (Legacy optical wave test removed 2026-10-02: its uniforms were no
+    -- longer read by the shader. docs/RAINFX_WATER_FIELD.md §10.)
     rainDynamicSurfaceMesh:setVisible(true, false)
 
     if not rainDynamicManualPreDrawLogged then
@@ -9545,12 +9472,6 @@ float4 main(PS_IN pin)
             appNameDebug
             .. ' Dynamic drop Stage 4B.2 pre-draw: uvDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG)
-            .. ' refractionDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG)
-            .. ' sceneSourceDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG)
-            .. ' screenUVDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG)
             .. ' prepass='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS)
             .. ' drawStage='
@@ -9571,34 +9492,12 @@ float4 main(PS_IN pin)
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG)
             .. ' skyCloudDetailDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG)
-            .. ' invertedFootprintDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG)
-            .. ' concaveLensDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG)
-            .. ' softCompositeDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG)
-            .. ' wideGlintDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_GLINT_DEBUG)
-            .. ' wideSceneDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SCENE_DEBUG)
-            .. ' wideRotationRadians='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS)
-            .. ' wideSurfaceRotationDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG)
-            .. ' wideOrbDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG)
-            .. ' splitCompareDebug='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG)
-            .. ' wideOrbEdgeMip='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP)
             .. ' screenSourceCompareDebug='
             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG)
             .. ' weatherScreenFrame='
             .. tostring(rainDynamicSceneCopyState.weatherFrame)
             .. ' fogColor='
             .. tostring(sim.fogColor)
-            .. ' pixelUV='
-            .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG)
             .. ' whiteReferencePoint='
             .. tostring(sim.whiteReferencePoint)
             .. ' postProcessing='
@@ -9626,12 +9525,23 @@ float4 main(PS_IN pin)
         rainDynamicManualPreDrawLogged = true
     end
 
+    -- Fog tone for veils / glints / flashes: fog colour with its chroma
+    -- reduced (luminance kept). The raw fog colour read far too blue.
+    do
+        local f = sim.fogColor
+        local l = f.r * 0.2126 + f.g * 0.7152 + f.b * 0.0722
+        local k = math.max(0.0, cfg.RUNTIME.RAIN_DYNAMIC_FOG_TONE_SATURATION)
+        rainDynamicSceneCopyState.fogTone = rgb(l + (f.r - l) * k,
+            l + (f.g - l) * k, l + (f.b - l) * k)
+    end
+    rainDynamicSceneCopyState.shotToneUpdate(sim)
     local dropMeshParams = {
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
         textures = {
-            txDynamicScene = 'dynamic::hdr',
-            txDynamicSnapshot = rainDynamicSceneCopyState.geometryShot
+            txDynamicSnapshot = (rainDynamicSceneCopyState.toneReady
+                    and rainDynamicSceneCopyState.toneCanvas)
+                or rainDynamicSceneCopyState.geometryShot
                 or rainDynamicSceneCopyState.canvas
                 or 'dynamic::hdr',
             txDynamicShotDepth =
@@ -9639,7 +9549,6 @@ float4 main(PS_IN pin)
                 and rainDynamicSceneCopyState.geometryShot
                 and rainDynamicSceneCopyState.geometryShot:depth()
                 or false,
-            txDynamicScreen = 'dynamic::screen',
             -- Shared slot: the smear mask texture takes it when loaded
             -- (only the screen-source compare debug reads it otherwise;
             -- a 12th texture binding is avoided, see RAINFX_HAZE.md).
@@ -9649,11 +9558,8 @@ float4 main(PS_IN pin)
                     and rainDynamicSceneCopyState.smearTexturePath)
                 or rainDynamicSceneCopyState.weatherScreenCanvas
                 or 'dynamic::screen',
-            txDynamicControl = textureRainSurfaceNormal,
             txDynamicMicroPattern =
                 rainDynamicSceneCopyState.microPatternCanvas or false,
-            txDynamicMicroNormal =
-                rainDynamicSceneCopyState.microNormalCanvas or false,
             txDynamicTrailMask =
                 rainDynamicSceneCopyState.trailMaskRead or false,
             txDynamicBirthMask =
@@ -9662,114 +9568,8 @@ float4 main(PS_IN pin)
                 rainDynamicSceneCopyState.waterTrailRead or false,
         },
         values = {
-            gDynamicDropDebugUV =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
-                and 1.0
-                or 0.0,
-
-            gDynamicDropHDRCopyDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_COPY_DEBUG
-                and 1.0
-                or 0.0,
-
-            gDynamicDropRefractionDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_DEBUG
-                and 1.0
-                or 0.0,
-            gDynamicDropSkySourceDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_SOURCE_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropOpaqueRefractionSplitDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_OPAQUE_REFRACTION_SPLIT_DEBUG
-                and 1.0 or 0.0,
-
-            gDynamicDropSceneSourceDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCENE_SOURCE_DEBUG
-                and 1.0
-                or 0.0,
-
-            gDynamicDropScreenUVDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_UV_DEBUG
-                and 1.0
-                or 0.0,
-
-            gDynamicDropSnapshotDebug =
-                (cfg.RUNTIME.RAIN_DYNAMIC_DROP_HDR_SNAPSHOT_DEBUG
-                    or cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG)
-                and 1.0
-                or 0.0,
-
-            gDynamicDropGeometryShotDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_SHOT_DEBUG
-                and 1.0
-                or 0.0,
-            gDynamicDropSkyDepthDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_DEPTH_DEBUG
-                and rainDynamicSceneCopyState.shotWithDepth
-                and 1.0 or 0.0,
-            gDynamicDropSkyFogColorDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_FOG_COLOR_DEBUG
-                and rainDynamicSceneCopyState.shotWithDepth
-                and 1.0 or 0.0,
-            gDynamicDropSkyCloudDetailDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SKY_CLOUD_DETAIL_DEBUG
-                and rainDynamicSceneCopyState.shotWithDepth
-                and 1.0 or 0.0,
-            gDynamicDropInvertedFootprintDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_INVERTED_FOOTPRINT_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropConcaveLensDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_CONCAVE_LENS_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropSoftCompositeDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SOFT_COMPOSITE_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropWideGlintDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_GLINT_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropWideSceneDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SCENE_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropWideRotationRadians =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ROTATION_RADIANS,
-            gDynamicDropWideSurfaceRotationDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_SURFACE_ROTATION_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropWideOrbDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropOrbFieldRadius =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_FIELD_RADIUS,
-            gDynamicDropForwardSceneOnly =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_FORWARD_SCENE_ONLY
-                and 1.0 or 0.0,
-            gDynamicDropForwardSceneRadius =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_FORWARD_SCENE_RADIUS,
-            gDynamicDropOrbInvertImage =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_INVERT_IMAGE
-                and 1.0 or 0.0,
-            gDynamicDropOrbPositionBend =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_POSITION_BEND,
-            gDynamicDropOrbSideUpshift =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_SIDE_UPSHIFT,
-            gDynamicDropOrbGlow =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_ORB_GLOW,
-            gDynamicDropSplitCompareDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SPLIT_COMPARE_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropWideOrbEdgeMip =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_WIDE_ORB_EDGE_MIP,
-            gDynamicDropScreenSourceCompareDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SCREEN_SOURCE_COMPARE_DEBUG
-                and 1.0 or 0.0,
-            gDynamicDropWeatherFogColor = sim.fogColor,
-
-            gDynamicDropGeometryUVScaleA =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_GEOMETRY_UV_SCALE_A,
-            gDynamicDropPixelUVDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_PIXEL_UV_DEBUG
-                and 1.0
-                or 0.0,
+            gDynamicDropWeatherFogColor =
+                rainDynamicSceneCopyState.fogTone or sim.fogColor,
 
             gDynamicDropInvScreenSize = vec2(
                 1.0 / math.max(sim.windowWidth or 1, 1),
@@ -9781,14 +9581,6 @@ float4 main(PS_IN pin)
                 1.0 / math.max(dynamicRenderTargetSize.y, 1)
             ),
 
-            gDynamicDropRefractionPixels =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_REFRACTION_PIXELS,
-            gDynamicDropShapeDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_DEBUG and 1.0 or 0.0,
-            gDynamicDropShapeStrength =
-                cfg.RUNTIME.RAIN_DYNAMIC_DROP_SHAPE_STRENGTH,
-            gDynamicDropMicroLayerEnabled =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and 1.0 or 0.0,
             gDynamicDropMicroPatternEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
                 and rainDynamicSceneCopyState.microPatternReady
@@ -9800,8 +9592,6 @@ float4 main(PS_IN pin)
                     and cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
                     or sim.rainIntensity or 0.0))
                 ^ cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RAIN_POWER,
-            gDynamicDropMicroRefractionPixels =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_REFRACTION_PIXELS,
             gDynamicDropMicroPatternGrid =
                 rainDynamicSceneCopyState.microPatternGrid or 1,
             gDynamicDropMicroRadiusMin =
@@ -9810,100 +9600,19 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX,
             gDynamicDropMicroOutlineDark =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK,
-            gDynamicDropMicroWaterLens =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS and 1.0 or 0.0,
             gDynamicDropMicroWaterLensRefraction =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION,
             gDynamicDropMicroWaterLensSlope =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE,
             gDynamicDropWFKernelScale =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE,
-            gDynamicDropMicroImageScale =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
-            gDynamicDropMicroImageRotation = vec2(
-                math.cos(math.rad(
-                    cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES)),
-                math.sin(math.rad(
-                    cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES))),
-            gDynamicDropMicroAngleLight =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT,
-            gDynamicDropMicroAngleShadow =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW,
-            gDynamicDropMicroNormalReady =
-                rainDynamicSceneCopyState.microNormalReady and 1.0 or 0.0,
-            gDynamicDropMicroNormalBump =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP,
-            gDynamicDropMicroNormalMip =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_MIP,
-            gDynamicDropMicroConcaveOptics =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS,
-            gDynamicDropMicroLightWorld = sim.lightDirection,
-            gDynamicDropMicroNormalGain =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
-            gDynamicDropObjectToWorld =
-                rainDynamicSurfaceParent:getWorldTransformationRaw(),
             gDynamicDropCameraSide = sim.cameraSide,
             gDynamicDropCameraUp = sim.cameraUp,
-            gDynamicDropCameraLook = sim.cameraLook,
-            gDynamicDropMicroRimStrength =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
-            gDynamicDropBirthMaskDebug =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
-                and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG
-                and rainDynamicSceneCopyState.birthMaskRead
-                and 1.0 or 0.0,
-            gDynamicDropBirthMaskOptics =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
-                and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS
-                and rainDynamicSceneCopyState.birthMaskRead
-                and 1.0 or 0.0,
             gDynamicDropBirthSkyCorrection =
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION
                 and rainDynamicSceneCopyState.shotWithDepth
+                and not rainDynamicSceneCopyState.toneReady
                 and 1.0 or 0.0,
-            gDynamicDropMicroSkyCorrection =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION
-                and rainDynamicSceneCopyState.shotWithDepth
-                and 1.0 or 0.0,
-            gDynamicDropBirthMaskOnly =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
-                and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
-                and rainDynamicSceneCopyState.birthMaskRead
-                and 1.0 or 0.0,
-            gDynamicDropBirthRefractionPixels =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
-            gDynamicDropBirthHighlight =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT,
-            gDynamicDropBirthOpacity =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
-            gDynamicDropBirthSceneMip =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP,
-            gDynamicDropBirthImageMapping =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING
-                and 1.0 or 0.0,
-            gDynamicDropBirthImageScale =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE,
-            gDynamicDropBirthImageRotation = vec2(
-                math.cos(math.rad(
-                    cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES)),
-                math.sin(math.rad(
-                    cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES))),
-            gDynamicDropBirthImageMix =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX,
-            gDynamicDropBirthShadow =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW,
-            gDynamicDropBirthRelief =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RELIEF,
-            gDynamicDropBirthEdgeGain =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN,
-            gDynamicDropBirthWideNormal =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL
-                and 1.0 or 0.0,
-            gDynamicDropBirthNormalReach =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS,
-            gDynamicDropBirthInvMaskSize =
-                1.0 / math.max(
-                    rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
             gDynamicDropTrailMaskDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_DEBUG
@@ -9924,6 +9633,7 @@ float4 main(PS_IN pin)
             gDynamicDropTrailSkyCorrection =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION
                 and rainDynamicSceneCopyState.shotWithDepth
+                and not rainDynamicSceneCopyState.toneReady
                 and 1.0 or 0.0,
             gDynamicDropTrailFilmOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY,
@@ -9938,15 +9648,12 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY,
             gDynamicDropTrailRidgePixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_PIXELS,
-            gDynamicDropMicroSceneMip =
-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
             gDynamicDropMicroOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
             gDynamicDropWaterField =
                 cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
                 and rainDynamicSceneCopyState.birthMaskRead
-                and rainDynamicSceneCopyState.birthMaskWaterField
                 and 1.0 or 0.0,
             gDynamicDropWFTrail =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED
@@ -9972,13 +9679,6 @@ float4 main(PS_IN pin)
             gDynamicDropWFGlint = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GLINT,
             gDynamicDropWFOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_OPACITY,
-            gDynamicDropWFNormalStep = math.max(
-                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
-                    / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
-                (cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED
-                    and cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS
-                    or 0.0)
-                    / math.max(rainDynamicSceneCopyState.waterTrailSize or 1024, 1)),
             gDynamicDropWFHeadStep =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
@@ -10014,10 +9714,38 @@ float4 main(PS_IN pin)
             gDynamicDropSmearTrailTurbid = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_TURBID,
             gDynamicDropSmearTrailBlur = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_BLUR,
             gDynamicDropSmearHeadMix = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_HEAD_MIX,
+            gDynamicDropSmearHeadHide = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_HEAD_HIDE,
+            gDynamicDropSmearTrailHide = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_HIDE,
+            gDynamicDropSmearRTiling = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_R_TILING,
+            gDynamicDropSmearGTiling = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_G_TILING,
             gDynamicDropWaterToneFloor = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_FLOOR,
             gDynamicDropSmearPathWeaken = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_PATH_WEAKEN,
             gDynamicDropSmearMip = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MIP,
+            gDynamicDropSmearGContrast = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_G_CONTRAST,
+            gDynamicDropSmearGPivot = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_G_PIVOT,
+            gDynamicDropSmearGGamma = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_G_GAMMA,
             gDynamicDropSmearVeil = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_VEIL,
+            gDynamicDropSmearClasses = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASSES,
+            gDynamicDropSmearClassSoft = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASS_SOFT,
+            gDynamicDropSmearClassSeed = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASS_SEED,
+            gDynamicDropSmearFacetPixels = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_FACET_PIXELS,
+            gDynamicDropSmearToneRange = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TONE_RANGE,
+            gDynamicDropSmearClassMipRange = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASS_MIP_RANGE,
+            gDynamicDropSmearEraseSpan = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ERASE_SPAN,
+            gDynamicDropSmearClassWipe = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASS_WIPE,
+            gDynamicDropSmearLineStrength = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_LINE_STRENGTH,
+            gDynamicDropSmearLineWidth = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_LINE_WIDTH,
+            gDynamicDropSmearFacetAlpha = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
+                and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_FACET_ALPHA or 0.0,
+            gDynamicDropMicroPopEnabled =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_ENABLED and 1.0 or 0.0,
+            gDynamicDropMicroPopPick = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_PICK,
+            gDynamicDropMicroPopPeriod = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_PERIOD,
+            gDynamicDropMicroPopOff = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_OFF,
+            gDynamicDropMicroPopFade = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_FADE,
+            gDynamicDropMicroPopFlash = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_FLASH,
+            gDynamicDropMicroPopIdScale = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_ID_SCALE,
+            gDynamicDropMicroPopTime = rainDynamicSceneCopyState.smearTime or 0.0,
             gDynamicDropSmearMaskCells = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MASK_CELLS,
             gDynamicDropSmearMaskWarp = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_MASK_WARP,
             gDynamicDropSmearFillCells = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_FILL_CELLS,
@@ -10056,6 +9784,7 @@ float4 main(PS_IN pin)
             gDynamicDropHazeSkyCorrection =
                 cfg.RUNTIME.RAIN_DYNAMIC_HAZE_SKY_CORRECTION
                 and rainDynamicSceneCopyState.shotWithDepth
+                and not rainDynamicSceneCopyState.toneReady
                 and 1.0 or 0.0,
             gDynamicDropWFSheetBlur =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_BLUR,
@@ -10067,10 +9796,11 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT,
             gDynamicDropWFInvMaskSize = 1.0
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
-            gDynamicDropWaveDirection = waveDirection,
-            gDynamicDropWaveEnvelope = waveEnvelope,
-            gDynamicDropWavePhase = wavePhase,
             gDynamicDropDepthOnly = 0.0,
+            gDynamicDropDepthExact =
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE >= 2
+                and 1.0 or 0.0,
+            gDynamicDropDepthAlphaMin = cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN,
         },
         shader = rainDynamicDropShader.HLSL
     }
@@ -10085,6 +9815,7 @@ float4 main(PS_IN pin)
         render.setBlendMode(render.BlendMode.AlphaBlend)
         render.setDepthMode(render.DepthMode.Normal)
         render.mesh(dropMeshParams)
+        dropMeshParams.values.gDynamicDropDepthOnly = 0.0
         render.setDepthMode(render.DepthMode.ReadOnly)
         render.setBlendMode(render.BlendMode.BlendAccurate)
     end
@@ -10565,6 +10296,7 @@ local function initializeScene()
 
     if visor and cfg.RUNTIME.RAIN_VISOR_MOTION_STENCIL >= 0.0 then
         visor:setMotionStencil(cfg.RUNTIME.RAIN_VISOR_MOTION_STENCIL)
+        -- visor:setDepthMode(render.DepthMode.Normal)
     end
 
     if not visor then
@@ -11266,6 +10998,65 @@ end
 
 
 ------------------------------------------------------------
+-- DLSS shimmer tests (docs/RAINFX_VISOR_GLASS.md §6)
+------------------------------------------------------------
+
+rainDynamicSceneCopyState.visorClearMotion = function()
+    local chain = { cameraAnchor, cameraRoot, offsetNode, motionNode,
+        scaleNode, axisPitchNode, axisYawNode, axisRollNode, visor }
+    for i = 1, 9 do
+        if chain[i] then chain[i]:clearMotion() end
+    end
+end
+
+render.on('main.track.opaque', function()
+    if not visor or activeEnableMode ~= 1 or not cameraAnchor then
+        return
+    end
+    local r = cfg.RUNTIME
+    if r.RAIN_VISOR_MOTION_TEST_LATE then
+        updateVisorTransform()
+        if r.RAIN_VISOR_MOTION_TEST_CLEAR then
+            rainDynamicSceneCopyState.visorClearMotion()
+        end
+    end
+    local st = rainDynamicSceneCopyState
+    local name = r.RAIN_VISOR_REDRAW_TEST_MESH or ''
+    if st.visorRedrawName ~= name then
+        if st.visorRedrawRef then st.visorRedrawRef:setVisible(true) end
+        st.visorRedrawName = name
+        st.visorRedrawRef = name ~= '' and visor:findMeshes(name) or nil
+        if st.visorRedrawRef and #st.visorRedrawRef == 0 then
+            ac.warn(appNameDebug .. ' Redraw test: mesh not found: ' .. name)
+            st.visorRedrawRef = nil
+        end
+    end
+    if st.visorRedrawRef then
+        st.visorRedrawRef:setVisible(true, false)
+        render.setBlendMode(render.BlendMode.Opaque)
+        render.setDepthMode(render.DepthMode.Normal)
+        render.setCullMode(render.CullMode.None)
+        render.mesh({
+            mesh = st.visorRedrawRef,
+            transform = 'original',
+            textures = {},
+            values = { gTestLight = sim.lightDirection },
+            shader = [[
+                float4 main(PS_IN pin) {
+                    float3 n = normalize(pin.NormalW);
+                    float l = 0.30 + 0.70 * saturate(dot(n, gTestLight));
+                    return pin.ApplyFog(float4(
+                        gWhiteRefPoint * float3(0.55, 0.50, 0.45) * l, 1.0));
+                }
+            ]]
+        })
+        st.visorRedrawRef:setVisible(false, false)
+        -- Opaque-stage defaults back for whatever draws next here.
+        render.setCullMode(render.CullMode.Back)
+    end
+end)
+
+------------------------------------------------------------
 -- Main update
 ------------------------------------------------------------
 
@@ -11362,6 +11153,10 @@ function script.update(dt)
     applyScale()
 
     applyAxisCorrection()
+
+    if cfg.RUNTIME.RAIN_VISOR_MOTION_TEST_CLEAR then
+        rainDynamicSceneCopyState.visorClearMotion()
+    end
 
 end
 
@@ -12576,25 +12371,13 @@ function windowMain(dt)
     ui.text('Driving blend: stopped below 2 m/s; full at 18 m/s.')
 
     ui.separator()
-    ui.text('GPU birth mask: growth probe')
+    ui.text('GPU head stamps (water-field source)')
     do
         local changed = ui.checkbox('GPU birth mask enabled',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
-        end
-        changed = ui.checkbox('Show cyan birth mask',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG)
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG =
-                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_DEBUG
-        end
-        changed = ui.checkbox('Birth mask optical scene',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS)
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS =
-                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPTICS
         end
         changed = ui.checkbox('Birth mask only (hide old GPU heads)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY)
@@ -12603,12 +12386,6 @@ function windowMain(dt)
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY
         end
         ui.text('Changing birth mask only requires game restart to rebuild mesh.')
-        changed = ui.checkbox('Birth mask full redraw (no ghost)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW)
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW =
-                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_FULL_REDRAW
-        end
         changed = ui.checkbox('Moving drop body stretch',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH)
         if changed then
@@ -12627,29 +12404,11 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED
         end
-        changed = ui.checkbox('Birth mask weather sky tone',
+        changed = ui.checkbox('Water-field heads weather sky tone',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION =
                 not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SKY_CORRECTION
-        end
-        changed = ui.checkbox('Wide mask normal (compare)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL)
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL =
-                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_WIDE_NORMAL
-        end
-        changed = ui.checkbox('Birth scene center mapping (compare)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING)
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING =
-                not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MAPPING
-        end
-        changed = ui.checkbox('Micro circles weather sky tone',
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION)
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION =
-                not cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_SKY_CORRECTION
         end
         local value
         value, changed = ui.slider('Asymmetric outline strength',
@@ -12688,83 +12447,11 @@ function windowMain(dt)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII = value
         end
-        value, changed = ui.slider('Birth scene area scale',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE,
-            0.5, 80.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_SCALE = value
-        end
-        value, changed = ui.slider('Birth scene rotation (degrees)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES,
-            -180.0, 180.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_ROTATION_DEGREES = value
-        end
-        value, changed = ui.slider('Birth scene mapping mix',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX,
-            0.0, 1.0, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_IMAGE_MIX = value
-        end
-        value, changed = ui.slider('Birth scene blur / mip level',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP,
-            0.0, 6.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SCENE_MIP = value
-        end
-        value, changed = ui.slider('Birth normal reach (mask texels)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS,
-            0.5, 4.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_NORMAL_REACH_TEXELS = value
-        end
-        value, changed = ui.slider('Birth normal relief',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RELIEF,
-            0.0, 2.5, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_RELIEF = value
-        end
-        value, changed = ui.slider('Birth refraction edge gain',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN,
-            0.0, 40.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_EDGE_GAIN = value
-        end
-        value, changed = ui.slider('Birth refraction (pixels)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS,
-            0.0, 40.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_REFRACTION_PIXELS = value
-        end
-        value, changed = ui.slider('Birth angle highlight',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT,
-            0.0, 0.7, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_HIGHLIGHT = value
-        end
-        value, changed = ui.slider('Birth angle shadow',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW,
-            0.0, 0.50, '%.3f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHADOW = value
-        end
-        value, changed = ui.slider('Birth scene opacity',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY,
-            0.0, 1.0, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_OPACITY = value
-        end
         value, changed = ui.slider('Birth growth time (seconds)',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS,
             0.03, 0.35, '%.2f')
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = value
-        end
-        value, changed = ui.slider('Birth mask recovery (seconds)',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS,
-            0.20, 3.0, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SECONDS = value
         end
         value, changed = ui.combo('Birth mask resolution',
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 2048 and 3
@@ -12774,13 +12461,6 @@ function windowMain(dt)
         if changed then
             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE =
                 ({ 512, 1024, 2048 })[value]
-        end
-        value, changed = ui.slider('Birth mask stamps per frame',
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS,
-            16.0, 512.0, '%.0f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_MAX_STAMPS =
-                math.floor(value + 0.5)
         end
     end
 
@@ -12960,15 +12640,18 @@ function windowMain(dt)
     ui.separator()
     ui.text('Trail flow and anti-chrome tone (RAINFX_TRAIL_FLOW.md)')
     do
+        local help = rainDynamicSceneCopyState.uiHelp
         local function tfSlider(label, key, minV, maxV, fmt)
             local value, changed = ui.slider(label,
                 cfg.RUNTIME[key], minV, maxV, fmt)
+            if help[key] and ui.itemHovered() then ui.setTooltip(help[key]) end
             if changed then cfg.RUNTIME[key] = value end
         end
         local function tfCheck(label, key)
             if ui.checkbox(label, cfg.RUNTIME[key]) then
                 cfg.RUNTIME[key] = not cfg.RUNTIME[key]
             end
+            if help[key] and ui.itemHovered() then ui.setTooltip(help[key]) end
         end
         tfCheck('Anti-chrome tone limiter', 'RAIN_DYNAMIC_WATER_TONE_ENABLED')
         tfSlider('Tone contrast (1 = off)', 'RAIN_DYNAMIC_WATER_TONE_CONTRAST', 0.0, 1.0, '%.2f')
@@ -12981,7 +12664,7 @@ function windowMain(dt)
         tfCheck('Smear mask enabled', 'RAIN_DYNAMIC_SMEAR_ENABLED')
         do
             local value, changed = ui.slider('Smear debug (1 region/G, 2 raw R, 3 raw G)',
-                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG, 0, 3, '%.0f')
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG, 0, 4, '%.0f')
             if changed then
                 cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG = math.floor(value + 0.5)
             end
@@ -13024,9 +12707,45 @@ function windowMain(dt)
         tfSlider('Region: WF trail turbid', 'RAIN_DYNAMIC_SMEAR_TRAIL_TURBID', 0.0, 1.0, '%.2f')
         tfSlider('Region: WF trail blur (mip)', 'RAIN_DYNAMIC_SMEAR_TRAIL_BLUR', 0.0, 4.0, '%.2f')
         tfSlider('Region: head mix with beneath', 'RAIN_DYNAMIC_SMEAR_HEAD_MIX', 0.0, 1.0, '%.2f')
-        tfSlider('Region: paths/film/ridge weaken', 'RAIN_DYNAMIC_SMEAR_PATH_WEAKEN', 0.0, 1.0, '%.2f')
+        tfSlider('Region: paths/film/ridge follow G', 'RAIN_DYNAMIC_SMEAR_PATH_WEAKEN', 0.0, 1.0, '%.2f')
+        tfSlider('Region: moving drops follow G', 'RAIN_DYNAMIC_SMEAR_HEAD_HIDE', 0.0, 1.0, '%.2f')
+        tfSlider('Region: WF trails follow G', 'RAIN_DYNAMIC_SMEAR_TRAIL_HIDE', 0.0, 1.0, '%.2f')
+        tfSlider('Mask R tiling (region blobs)', 'RAIN_DYNAMIC_SMEAR_R_TILING', 0.25, 8.0, '%.2f')
+        tfSlider('Mask G tiling (pattern density)', 'RAIN_DYNAMIC_SMEAR_G_TILING', 0.25, 12.0, '%.2f')
         tfSlider('Turbid blur (mip)', 'RAIN_DYNAMIC_SMEAR_MIP', 0.0, 9.0, '%.1f')
+        tfSlider('G contrast', 'RAIN_DYNAMIC_SMEAR_G_CONTRAST', 0.2, 6.0, '%.2f')
+        tfSlider('G pivot', 'RAIN_DYNAMIC_SMEAR_G_PIVOT', 0.0, 1.0, '%.2f')
+        tfSlider('G gamma', 'RAIN_DYNAMIC_SMEAR_G_GAMMA', 0.2, 4.0, '%.2f')
         tfSlider('Turbid veil', 'RAIN_DYNAMIC_SMEAR_VEIL', 0.0, 1.0, '%.2f')
+        ui.text('Class facets v7 (debug 4 = class / presence / blend)')
+        do
+            local value, changed = ui.slider('Facet classes',
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASSES, 1, 8, '%.0f')
+            if help.RAIN_DYNAMIC_SMEAR_CLASSES and ui.itemHovered() then
+                ui.setTooltip(help.RAIN_DYNAMIC_SMEAR_CLASSES)
+            end
+            if changed then
+                cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASSES = math.floor(value + 0.5)
+            end
+        end
+        tfSlider('Class boundary blur', 'RAIN_DYNAMIC_SMEAR_CLASS_SOFT', 0.0, 1.0, '%.2f')
+        tfSlider('Class seed', 'RAIN_DYNAMIC_SMEAR_CLASS_SEED', 0.0, 10.0, '%.2f')
+        tfSlider('Facet image offset (px)', 'RAIN_DYNAMIC_SMEAR_FACET_PIXELS', 0.0, 60.0, '%.1f')
+        tfSlider('Facet tone range', 'RAIN_DYNAMIC_SMEAR_TONE_RANGE', 0.0, 0.6, '%.2f')
+        tfSlider('Facet blur range (mip)', 'RAIN_DYNAMIC_SMEAR_CLASS_MIP_RANGE', 0.0, 4.0, '%.2f')
+        tfSlider('Class erase span (reveal)', 'RAIN_DYNAMIC_SMEAR_ERASE_SPAN', 0.01, 1.0, '%.2f')
+        tfSlider('Class erase by wiping', 'RAIN_DYNAMIC_SMEAR_CLASS_WIPE', 0.0, 2.0, '%.2f')
+        tfSlider('Boundary line strength', 'RAIN_DYNAMIC_SMEAR_LINE_STRENGTH', 0.0, 0.6, '%.2f')
+        tfSlider('Boundary line width', 'RAIN_DYNAMIC_SMEAR_LINE_WIDTH', 0.005, 0.5, '%.3f')
+        tfSlider('Facet film on bare glass', 'RAIN_DYNAMIC_SMEAR_FACET_ALPHA', 0.0, 1.0, '%.2f')
+        ui.text('Micro pop-in (random landing)')
+        tfCheck('Micro pop-in', 'RAIN_DYNAMIC_MICRO_POP_ENABLED')
+        tfSlider('Pop pickup share', 'RAIN_DYNAMIC_MICRO_POP_PICK', 0.0, 1.0, '%.2f')
+        tfSlider('Pop period (s)', 'RAIN_DYNAMIC_MICRO_POP_PERIOD', 0.5, 60.0, '%.1f')
+        tfSlider('Pop absent share', 'RAIN_DYNAMIC_MICRO_POP_OFF', 0.0, 0.95, '%.2f')
+        tfSlider('Pop fade-out share', 'RAIN_DYNAMIC_MICRO_POP_FADE', 0.0, 1.0, '%.2f')
+        tfSlider('Pop landing flash', 'RAIN_DYNAMIC_MICRO_POP_FLASH', 0.0, 2.0, '%.2f')
+        tfSlider('Pop id cells', 'RAIN_DYNAMIC_MICRO_POP_ID_SCALE', 0.25, 4.0, '%.2f')
         ui.text('Procedural test mask (no texture)')
         tfSlider('Blob cells (per UV)', 'RAIN_DYNAMIC_SMEAR_MASK_CELLS', 0.5, 30.0, '%.1f')
         tfSlider('Blob warp', 'RAIN_DYNAMIC_SMEAR_MASK_WARP', 0.0, 2.0, '%.2f')
@@ -13053,7 +12772,60 @@ function windowMain(dt)
         tfSlider('Tone window floor (x fog)', 'RAIN_DYNAMIC_WATER_TONE_FLOOR', 0.0, 1.0, '%.2f')
         tfCheck('Drops ignore scene depth (diagnostic only)', 'RAIN_DYNAMIC_DROP_DEPTH_OFF')
         tfCheck('Drops occlude later car glass (depth pass)', 'RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE')
+        ui.text('DLSS shimmer tests (RAINFX_VISOR_GLASS.md §6)')
+        tfCheck('T1: clear visor motion every frame', 'RAIN_VISOR_MOTION_TEST_CLEAR')
+        tfCheck('T2: re-apply visor transform at render', 'RAIN_VISOR_MOTION_TEST_LATE')
+        do
+            local v = cfg.RUNTIME.RAIN_VISOR_REDRAW_TEST_MESH or ''
+            if ui.checkbox('T3: redraw GLASS_COATING_REFL via render.mesh', v == 'GLASS_COATING_REFL') then
+                cfg.RUNTIME.RAIN_VISOR_REDRAW_TEST_MESH = v == 'GLASS_COATING_REFL' and '' or 'GLASS_COATING_REFL'
+            end
+            if ui.itemHovered() then
+                ui.setTooltip('Hides GLASS_COATING_REFL in the normal pass and draws it with a flat lit test shader in our pass. If it stops shimmering, the KN5 render path is the cause.')
+            end
+        end
+        do
+            local value, changed = ui.slider('Depth pass mode (1 cheap, 2 exact)',
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE, 1, 2, '%.0f')
+            if changed then
+                cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE = math.floor(value + 0.5)
+            end
+        end
+        tfSlider('Depth pass alpha min (exact)', 'RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN', 0.02, 0.95, '%.2f')
         tfCheck('Refraction source: transparent pass (glass)', 'RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT')
+        ui.text('Refraction source tone (RAINFX_SHOT_TONE.md)')
+        tfCheck('Tone pass (before blur)', 'RAIN_DYNAMIC_SHOT_TONE_ENABLED')
+        do
+            local value, changed = ui.slider('Tone mode (1 aerial fog, 2 frame match)',
+                cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_MODE, 1, 2, '%.0f')
+            if help.RAIN_DYNAMIC_SHOT_TONE_MODE and ui.itemHovered() then
+                ui.setTooltip(help.RAIN_DYNAMIC_SHOT_TONE_MODE)
+            end
+            if changed then cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_MODE = math.floor(value + 0.5) end
+        end
+        tfSlider('Match: ratio mip (shot)', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP', 2, 8, '%.0f')
+        tfSlider('Match: strength', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH', 0.0, 1.0, '%.2f')
+        tfSlider('Match: chroma (0 = luminance only)', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA', 0.0, 1.0, '%.2f')
+        tfSlider('Match: ratio min', 'RAIN_DYNAMIC_SHOT_TONE_RATIO_MIN', 0.05, 1.0, '%.2f')
+        tfSlider('Match: ratio max', 'RAIN_DYNAMIC_SHOT_TONE_RATIO_MAX', 1.0, 10.0, '%.2f')
+        tfSlider('Veil / glint fog chroma', 'RAIN_DYNAMIC_FOG_TONE_SATURATION', 0.0, 1.0, '%.2f')
+        tfSlider('Aerial fog density (1/m)', 'RAIN_DYNAMIC_SHOT_TONE_AERIAL_DENSITY', 0.0, 0.03, '%.4f')
+        tfSlider('Aerial fog max (geometry)', 'RAIN_DYNAMIC_SHOT_TONE_AERIAL_MAX', 0.0, 1.0, '%.2f')
+        tfSlider('Geometry saturation', 'RAIN_DYNAMIC_SHOT_TONE_SATURATION', 0.0, 1.5, '%.2f')
+        tfSlider('Sky cloud contrast', 'RAIN_DYNAMIC_SHOT_TONE_CLOUD_CONTRAST', 0.0, 1.0, '%.2f')
+        tfCheck('Preview toned source', 'RAIN_DYNAMIC_SHOT_TONE_PREVIEW')
+        if cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_PREVIEW then
+            local st = rainDynamicSceneCopyState
+            ui.text(st.toneReady and 'toned (left) / raw shot (right)'
+                or 'tone pass not ready')
+            if st.toneReady and st.toneCanvas and st.geometryShot then
+                local w = 240
+                local h = w * (st.toneHeight or 9) / math.max(st.toneWidth or 16, 1)
+                ui.image(st.toneCanvas, vec2(w, h))
+                ui.sameLine()
+                ui.image(st.geometryShot, vec2(w, h))
+            end
+        end
         tfSlider('Refraction source near clip (m)', 'RAIN_DYNAMIC_DROP_SHOT_NEAR', 0.01, 0.5, '%.2f')
     end
 
@@ -13172,11 +12944,8 @@ function windowMain(dt)
             rainDynamicSceneCopyState.microPatternGrid or 0))
         wfSlider('Micro outline (0 = invisible cut line)',
             'RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK', 0.0, 1.0, '%.2f')
-        if ui.checkbox('Micro optics: head lens rule (A/B vs legacy)',
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS) then
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS =
-                not cfg.RUNTIME.RAIN_DYNAMIC_MICRO_WATER_LENS
-        end
+        wfSlider('Micro opacity',
+            'RAIN_DYNAMIC_MICRO_LAYER_OPACITY', 0.0, 1.0, '%.2f')
         wfSlider('Micro lens refraction (x WF field)',
             'RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION', 0.0, 2.0, '%.2f')
         wfSlider('Micro lens slope scale',
@@ -13204,6 +12973,18 @@ function windowMain(dt)
             'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SHEET', 0.0, 1.0, '%.2f')
         wfSlider('Sheet opacity (transparent film)',
             'RAIN_DYNAMIC_WATER_FIELD_SHEET_ALPHA', 0.0, 1.0, '%.2f')
+        if ui.checkbox('Sheet needs water density (rain x airspeed)',
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_GATE) then
+            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_GATE =
+                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_GATE
+        end
+        wfSlider('Sheet density min',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_MIN', 0.0, 3.0, '%.2f')
+        wfSlider('Sheet density full',
+            'RAIN_DYNAMIC_WATER_FIELD_SHEET_DENSITY_FULL', 0.05, 5.0, '%.2f')
+        ui.text(string.format('Sheet density gate %.2f (density %.2f)',
+            rainDynamicSceneCopyState.waterSheetDensity or 1.0,
+            rainDynamicSceneCopyState.smearDensity or 0.0))
         wfSlider('Sheet edge softness',
             'RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT', 0.0, 0.35, '%.2f')
         ui.text(string.format('Trail: %d stamps, %d sheet, max head speed %.3f UV/s',
@@ -13261,95 +13042,7 @@ function windowMain(dt)
     end
 
     ui.separator()
-    ui.text('Micro droplets: scene optics')
-    do
-        local value, changed = ui.slider(
-            'Micro scene image scale',
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE,
-            1.0, 30.0, '%.1f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_SCALE = value
-        end
-        value, changed = ui.slider('Micro scene opacity',
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
-            0.0, 1.0, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY = value
-        end
-        value, changed = ui.slider('Micro angle rim highlight',
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH,
-            0.0, 0.60, '%.2f')
-        if changed then
-            cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_RIM_STRENGTH = value
-        end
-    end
-    local microBlur, microBlurChanged = ui.slider(
-        'Micro scene blur / mip level',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP,
-        0.0, 6.0, '%.1f'
-    )
-    if microBlurChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_SCENE_MIP = microBlur
-    end
-    local microNormalGain, microNormalChanged = ui.slider(
-        'Micro scene shift / visor normal',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN,
-        0.0, 0.20, '%.3f'
-    )
-    if microNormalChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_NORMAL_SCENE_GAIN = microNormalGain
-    end
-
-    local microRotation, microRotationChanged = ui.slider(
-        'Micro scene rotation (degrees)',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES,
-        -180.0, 180.0, '%.1f'
-    )
-    if microRotationChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_IMAGE_ROTATION_DEGREES = microRotation
-    end
-    local microAngleLight, microAngleLightChanged = ui.slider(
-        'Micro angle highlight',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT,
-        0.0, 2.0, '%.2f'
-    )
-    if microAngleLightChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_LIGHT = microAngleLight
-    end
-    local microAngleShadow, microAngleShadowChanged = ui.slider(
-        'Micro angle shadow',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW,
-        0.0, 2.0, '%.2f'
-    )
-    if microAngleShadowChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ANGLE_SHADOW = microAngleShadow
-    end
-
-    local microNormalBump, microNormalBumpChanged = ui.slider(
-        'Micro convex normal strength',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP,
-        0.25, 2.5, '%.2f'
-    )
-    if microNormalBumpChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_BUMP = microNormalBump
-    end
-
-    local microNormalMip, microNormalMipChanged = ui.slider(
-        'Micro normal softness / mip',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_MIP,
-        0.0, 4.0, '%.1f'
-    )
-    if microNormalMipChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_NORMAL_MIP = microNormalMip
-    end
-    local microConcave, microConcaveChanged = ui.slider(
-        'Micro concave scene profile',
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS,
-        0.0, 3.00, '%.2f'
-    )
-    if microConcaveChanged then
-        cfg.RUNTIME.RAIN_DYNAMIC_MICRO_CONCAVE_OPTICS = microConcave
-    end
+    ui.text('Micro droplets (lens optics: Water field section)')
 
     local microRainPower, microRainPowerChanged = ui.slider(
         'Micro circle density / rain curve',
@@ -13412,6 +13105,17 @@ function windowMain(dt)
         cfg.RUNTIME.RAIN_AIRFLOW_DOWNWARD_GAIN = airflowDownGain
     end
     ui.text('Mode affects settled moving drops only when Airflow is enabled.')
+    local windChanged = ui.checkbox('Airflow includes track wind',
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_INCLUDE_WIND)
+    if windChanged then
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_INCLUDE_WIND =
+            not cfg.RUNTIME.RAIN_FORCE_AIRFLOW_INCLUDE_WIND
+    end
+    ui.text(string.format('Airflow source: %s  wind (%.2f, %.2f) m/s',
+        cfg.RUNTIME.RAIN_FORCE_AIRFLOW_INCLUDE_WIND and 'car + track wind'
+            or 'car only',
+        rainDynamicSceneCopyState.airflowWindX or 0.0,
+        rainDynamicSceneCopyState.airflowWindZ or 0.0))
 
     local activeForceMask =
         (cfg.RUNTIME.RAIN_FORCE_GRAVITY_ENABLED and RAIN_FORCE_GRAVITY or 0)

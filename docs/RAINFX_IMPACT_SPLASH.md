@@ -240,3 +240,63 @@ visor's scene graph. The project already has a `createMesh` test node.
 Transparent scene meshes are depth-sorted, so the visor, being nearest,
 would naturally be drawn after the glass. This is a larger refactor
 because the custom drop shader would have to move into a material path.
+
+## 8. Depth pass v2: exact mode (2026-10-02)
+
+**User result.** The visor effects now cover the windscreen correctly, with
+one exception. With `RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true`:
+
+- micro drops that reappear after a wipe are not shown over the
+  windscreen;
+- even unwiped micro drops do not sit fully on the windscreen.
+
+**Cause.** The cheap gate only approximated what the colour pass draws:
+
+- it used water height and micro class;
+- it took the wipe at the pixel instead of at the disk centre;
+- it used a hard 0.08 cut, so recovering micro drops (visibility between 0
+  and 1) wrote no depth;
+- it ignored films, ridges and region sheets.
+
+Wherever no depth was written, the glass blended over our output.
+
+**Fix: `RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE = 2`, exact (default).**
+
+- The shader entry is now a wrapper. `main()` calls `rainDropMain()`, the
+  former `main`.
+- In the depth pass it does `clip(alpha - DEPTH_ALPHA_MIN 0.35)` and writes
+  depth only. The depth pass therefore shades exactly like the colour pass,
+  and every visible element occludes the glass behind it:
+  - wipes and recovery;
+  - films and ridges;
+  - smear sheets and turbid micro drops.
+- Cost: a second full shading of the visor layer.
+- Mode 1 keeps the cheap gate as a fallback if FPS matters more.
+
+UI: "Depth pass mode (1 cheap, 2 exact)" and "Depth pass alpha min
+(exact)". A lower alpha min also lets faint haze occlude the glass.
+
+## 9. Exact depth ignores haze (2026-10-02)
+
+**User result.** After §8, the haze patterns erased the yellow windscreen
+and showed the asphalt behind it.
+
+**Cause.** Exact mode clipped on the *final* alpha, and the final alpha
+includes the haze. Wherever haze was at least `DEPTH_ALPHA_MIN` opaque, the
+visor wrote near depth, so the windscreen behind it failed its depth test
+and was never drawn. Our haze refracts the geometry shot, which at that
+point holds the asphalt and not the glass, so the asphalt showed through.
+
+**Fix.** The shader keeps a second static next to `gOver`:
+
+- `gSolidA` holds the opacity of the *solid* element of the pixel: the WF
+  head or trail (`inside × wfAlpha`), the trail film (`filmAlpha`), and the
+  micro disk (`lensAlpha` / `microAlpha`).
+- Haze and the smear facet film (`RAINFX_SMEAR_MASK.md` v7) never set it.
+- The wrapper clips on `max(gSolidA, gOver.a) - DEPTH_ALPHA_MIN`.
+
+So pixels that hold only haze write no depth. The glass draws over them
+(its normal blend order), and water and micro drops still occlude it.
+
+**Rule for new layers.** A layer that should hide car glass behind the
+visor sets `gSolidA`. A veil-type layer (haze, film on bare glass) must not.

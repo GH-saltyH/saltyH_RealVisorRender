@@ -369,3 +369,305 @@ out      = over(float4(waterRgb, waterAlpha), beneath)
   `TRAIL_MIX`.
 - Ghosting with the smear on: see `RAINFX_IMPACT_SPLASH.md` §7 (depth pass,
   motion stencil).
+
+## v6 (2026-10-02): G contrast, region water sheet, wind everywhere, tooltips
+
+### Review
+
+Comparison videos: `_비교용_우리프로젝트smear영역.mp4` and
+`CSP_RAINFX_Smear영역물흐름레퍼런스.mp4`.
+
+- **Ours.** The region turns turbid well, but the micro pattern and the
+  drops stay round and flat. There are no highlights and nothing moves.
+- **CSP.** Inside the smear, water forms merged, lobed puddles whose rims
+  carry crisp light highlights and a dark embossed side, like relief. The
+  shapes creep and change slowly.
+
+### Changes
+
+1. **Region water sheet** (`SMEAR_SHEET_*`, on).
+   - Height: a domain-warped fbm in visor UV. It is advected with the
+     speed-weighted mean drop flow (readback every 4 frames, smoothed,
+     integrated offset) and churns slowly over time. G adds to it, so the
+     outlines get dirtier.
+   - Puddles: the height is thresholded by `SHEET_COVER` inside the region.
+   - Slope: taken from 2 extra height taps and projected to the screen. It
+     peaks at the lobe rims, which gives the embossed edges.
+   - Shading: `rainWaterLensColor` (refraction, rim loss, lower glint) with
+     `SHEET_GLINT` boost, then turbid by `SHEET_TURBID`.
+   - Compositing: the sheet goes into the pending water layer (`gOver`).
+     WF heads and trails stay on top of it, with their own mix. Micro drops
+     and haze stay underneath and blend in by `SHEET_MIX`.
+   - Cost inside the region: 9 value noises plus the lens taps.
+2. **G processing.** `G' = sat((G - PIVOT) * CONTRAST + PIVOT)^GAMMA`, with
+   defaults 1.8, 0.55 and 1.0. Applied to both the texture and the
+   procedural mask, so G cuts the micro pattern more raggedly.
+3. **Wind.** A shared helper, `windWorldMS` (axes per `SMEAR_WIND_MODE`),
+   now feeds:
+   - the smear density;
+   - the GPU airflow force (`RAIN_FORCE_AIRFLOW_INCLUDE_WIND`, default on;
+     air = wind − car velocity). The physics UI shows "Airflow source: car +
+     track wind / car only" and the wind vector in m/s;
+   - the WF sheet density gate (`RAINFX_WATER_FIELD.md` §9).
+4. **Tooltips.** Hovering any smear, region or depth setting in the
+   trail-flow section shows its description (`uiHelp` table).
+
+## v7: class facets replace the region water sheet (2026-10-02)
+
+### Review and decision
+
+- The v6 region water sheet is **removed**. CSP does not get its flow feel
+  from one sheet. It gets it from much denser, heavily overlapping drops
+  and trails.
+  - Removed config: all `SMEAR_SHEET_*` keys.
+  - Removed uniforms: `gDynamicDropSmearSheet*`.
+  - Removed code: the sheet UI, `rainSmearSheetHeight`, and the mean-flow
+    readback loop in `smearUpdate`.
+  - Kept: `smearTime`, now the shared clock for micro pop-in.
+- **What we see in CSP** (reference images and videos):
+  - Inside the noise pattern the *tone* changes.
+  - Boundaries are laid down blurred, not as micro-pattern reflections.
+  - The pattern is a set of a few colour classes. Each class has its own
+    brightness and its own refraction image.
+  - From far away it reads as noise. Close up it reads as patches of
+    differently bent and toned scene.
+  - The classes are erased one by one as the state changes.
+
+### Inferred model (implemented)
+
+G' is the contrast-processed G from v6. N is the number of classes
+(`SMEAR_CLASSES`, 5). For each pixel:
+
+1. Class position: `c = G' × N`, `k = min(floor(c), N - 1)`, `f = c - k`.
+2. Per-class hash: `h = frac(sin(k·(12.99, 78.23, 37.72, 93.99) + …) × 43758.5)`,
+   with the seed added to k.
+3. Facet colour C(k):
+   - offset `o_k = (h.xy·2 - 1) × FACET_PIXELS` render pixels: a
+     different refraction image per class;
+   - mip `m_k = SMEAR_MIP + (h.z·2 - 1) × CLASS_MIP_RANGE`: a different
+     blur per class;
+   - tone `t_k = (h.w·2 - 1) × TONE_RANGE`: a different brightness per
+     class;
+   - `C(k) = skyTone(scene(sceneUV + o_k, m_k)) × (1 + t_k)`.
+4. Soft boundary: `colour = lerp(C(k), C(k+1), smoothstep(1 - CLASS_SOFT, 1, f))`.
+   This blurs the boundary and does not draw a reflection line.
+5. Faint line: on internal boundaries only, where `c` is near an integer
+   in 1..N-1, the colour is multiplied by
+   `1 - LINE_STRENGTH × (1 - smoothstep(0, LINE_WIDTH, d))`.
+6. Erase order: `order_k = frac((k + 0.5) × 0.618034 + seed)`. The golden
+   ratio gives a fixed permutation that is evenly spread.
+7. Erase level: `e = max(1 - reveal / ERASE_SPAN, wipe × CLASS_WIPE)`.
+   - Here `wipe` is the trail mask G at the pixel.
+   - Presence is `smoothstep(e - 0.08, e + 0.08, order_k)`, blended between
+     k and k+1 like the colour.
+   - So when the reveal level drops below `ERASE_SPAN`, or water wipes the
+     spot, the classes disappear one by one.
+8. Presence multiplies the region mask `gSmearMask` (and so `gSmearK`).
+   An erased class cancels every region effect there: micro hide, turbid,
+   mix and path weaken.
+9. `gSmearColor = lerp(colour, fog, VEIL)` is now the per-class facet
+   colour. Drops, trails and micro disks turn turbid *toward their class
+   facet*, so the class tone shows inside them as well (soft contrast).
+10. Facet film on bare glass: in `rainHazeEval`, the facet is composited
+    over the haze with alpha `FACET_ALPHA × gSmearMask × lerp(0.5, 1, G')`.
+    It belongs to the veil layer, so it writes no depth
+    (`RAINFX_IMPACT_SPLASH.md` §9).
+
+Cost inside the region: 2 extra scene taps (2 more with sky correction),
+plus 1 trail-mask tap when wiping is enabled.
+
+### Config and UI
+
+| Key | Default |
+|---|---|
+| `SMEAR_CLASSES` | 5 |
+| `CLASS_SOFT` | 0.35 |
+| `CLASS_SEED` | 0 |
+| `FACET_PIXELS` | 10 |
+| `TONE_RANGE` | 0.18 |
+| `CLASS_MIP_RANGE` | 1.5 |
+| `ERASE_SPAN` | 0.60 |
+| `CLASS_WIPE` | 0.80 |
+| `LINE_STRENGTH` | 0.12 |
+| `LINE_WIDTH` | 0.06 |
+| `FACET_ALPHA` | 0.18 |
+
+- The controls are under "Class facets v7" in the trail-flow section, with
+  tooltips.
+- Smear debug 4: R = class code, G = presence, B = boundary blend.
+
+### Tuning hints
+
+- If it reads too much like noise from far away, lower `FACET_PIXELS` and
+  `TONE_RANGE`.
+- If close up it is too uniform, raise them, or lower `CLASS_SOFT`.
+- If the classes vanish too early when the rain weakens, lower
+  `ERASE_SPAN`.
+
+### Texture contract v7 (2026-10-02)
+
+v7 quantises G into classes, so **G is no longer a gradient but a patch
+map**. A smooth G gradient would come out as contour bands (onion rings)
+instead of patches. R keeps its v3 meaning.
+
+**File.** Square, 2048² in visor UV (the same UV as the micro pattern),
+linear data.
+
+- Format: RGBA8 PNG, or a DDS without block compression (R8G8B8A8).
+- Avoid BC1 and BC3. Their 4×4 blocks bleed between patches and create
+  one-texel fringes of a wrong class. BC7 is acceptable.
+- No mips are needed; the shader reads mip 0 with linear filtering.
+- `RAIN_DYNAMIC_SMEAR_TEXTURE` points to it.
+
+| ch | content | how to paint it |
+|---|---|---|
+| R | **Reveal order** (unchanged since v3). The region is where `R ≤ reveal`. | Large, smooth, low-frequency blobs, with values spread evenly over 0..1 (histogram-equalised). Low values appear first, and 255 appears last. Soft gradients are fine: they become the region front. |
+| G | **Class patch map.** Each patch holds one flat level: the centre of a class. | Irregular cellular patches (cracked mud, dried water stains, fingerprint lobes), each filled with **exactly one** of N levels. Borders are sharp or slightly blurred (≤ 2 texels). A sparse speckle of other levels inside patches (about 2–5 % of texels, 1–3 px) reads as noise from far away. |
+| B | unused, keep 0 | Reserved, for example for an explicit class id later. |
+| A | 255 | |
+
+**G levels.** The shader applies the G processing first:
+`G' = sat((G - PIVOT) × CONTRAST + PIVOT)^GAMMA`, then
+`class = floor(G' × N)`. Paint G so that G' falls on the class centres
+`(k + 0.5) / N`.
+
+| Settings | k=0 | k=1 | k=2 | k=3 | k=4 |
+|---|---|---|---|---|---|
+| Identity (CONTRAST 1, GAMMA 1), N=5 | 25 | 76 | 128 | 178 | 230 |
+| Current tuning (CONTRAST 1.8, PIVOT 0.55, GAMMA 1), N=5 | 76 | 105 | 133 | 162 | 190 |
+
+The general formula (GAMMA 1) is
+`G = PIVOT + ((k + 0.5) / N - PIVOT) / CONTRAST`.
+
+**Recommendation.** For a v7 texture, set `G_CONTRAST 1, G_PIVOT 0.5,
+G_GAMMA 1` and paint the identity levels. The contrast knob then has no
+effect, and the classes are exactly what you painted.
+
+**What a level also controls.** G' is still the blend degree from v3–v6:
+
+- micro visibility is `lerp(1, G', region × MICRO_HIDE)`;
+- drop turbidity scales with `region × G'`.
+
+So a **low class also hides more micro drops**, and a high class keeps them
+and makes them turbid. Choose the area share of each class with that in
+mind. A good start is about 20 % each, with slightly less of class 0 if the
+region should not look too empty.
+
+**What the classes look like is not painted.** The facet look of each class
+is not in the texture. Its image offset, tone, blur and erase order come
+from the class hash in the shader (`CLASS_SEED` reshuffles them), so the
+texture only decides *where* each class is.
+
+**Patch size.** Patches decide the close-up look and speckle decides the
+far look.
+
+- Visor UV 2048: patches 30–80 texels (about 1.5–4 % of the visor width).
+- Smaller patches turn into noise and lose the "facet" read. Bigger ones
+  look like stains.
+
+**Borders between non-neighbouring classes.** A blurred border from k=0 to
+k=4 passes through k=1..3, so a thin rim of the intermediate classes
+appears. Keep these borders sharp. Use the blur only between neighbouring
+levels, or rely on `CLASS_SOFT`, which already softens every boundary in
+the shader.
+
+**Template.** The generator is `docs/tools/smear_v7_template.py`. It writes
+cellular patches with warped borders, speckle, a 1.5 px border blur and an
+equalised fbm R:
+
+- `docs/images/smear_mask/template/smear_mask_v7_template_2048.png` uses the
+  identity levels;
+- `smear_mask_v7_template_2048_c1.8.png` is pre-inverted for CONTRAST 1.8
+  and PIVOT 0.55;
+- `_R` / `_G` hold the single channels.
+
+Options: `--classes`, `--cell` (mean patch texels), `--warp`, `--speckle`,
+`--blur`, `--contrast`, `--pivot`, `--seed`.
+
+## v8: everything follows G, denser pattern (2026-10-02)
+
+### User review of v7
+
+- Micro drops separate the G areas clearly, but WF trails and moving drops
+  stay just as strong where G is low. So the trails show no region split.
+- "Clear micro circle along drop path" acts *more* strongly in low-G
+  areas, which is the opposite of the intent.
+- **Intent:** in a weak (low-G) area, *every* feature fades by that amount.
+- The pattern looks magnified compared with the windscreen, so it should be
+  denser.
+
+### Cause
+
+From v3 to v7 only the micro drops followed G
+(`visibility = lerp(1, G', region × MICRO_HIDE)`). The other features did
+not:
+
+- WF trails and heads were only tinted (turbid, colour mix), at full
+  alpha;
+- wipe paths were weakened *evenly* in the region (`× (1 - PATH_WEAKEN ×
+  region)`).
+
+In a low-G area the micro drops vanish, but an even wipe still clears haze
+and film there. Against the emptier background, the wipe reads as
+stronger.
+
+### Rule v8: one visibility function
+
+`rainSmearVis(hide) = lerp(1, G', region × hide)` is used for:
+
+| Feature | Rule | Key (default) |
+|---|---|---|
+| Micro disks | visibility × `rainSmearVis(MICRO_HIDE)` (unchanged) | `SMEAR_MICRO_HIDE` 1 |
+| WF heads (moving drops) | `wfAlpha × rainSmearVis(HEAD_HIDE)` | `SMEAR_HEAD_HIDE` 1.0 (new) |
+| WF trails | `wfAlpha × rainSmearVis(TRAIL_HIDE)`, and the haze clearing under trails × the same factor | `SMEAR_TRAIL_HIDE` 1.0 (new) |
+| Wipe paths, thin film, ridge, haze wipe | `clearance × rainSmearVis(PATH_WEAKEN)`: weak where G' is low | `SMEAR_PATH_WEAKEN` 0.85, meaning changed |
+
+The turbid tint and the colour mix stay as they were. The depth pass
+follows the reduced alpha through `gSolidA`. These rules are visual only,
+so the GPU physics is unchanged.
+
+### Pattern density: separate tiling for R and G
+
+The texture is sampled twice with a wrap sampler (`samLinearWrapSmear`):
+
+- **R** at `patternUV × SMEAR_R_TILING` (default 1.0): the region blobs
+  keep their scale;
+- **G** at `patternUV × SMEAR_G_TILING` (default 2.5): the class patches
+  are 2.5× denser.
+
+The procedural fallback takes the same two UVs.
+
+**The texture must tile.** The v7 templates are now generated fully with
+wrap: Voronoi with a periodic box, wrapped fbm and a wrapped border blur.
+A hand-painted mask needs seamless edges, at least in G (offset filter
+check).
+
+UI tooltips: "Region: moving drops / WF trails follow G", "Mask R tiling",
+"Mask G tiling".
+
+### v8 fix: tiling ran off the visor (2026-10-02)
+
+**User report.** With tiling above 1, the pattern drifts off to other
+places. The user suspected the visor V range (-1..0).
+
+**Check.**
+
+- V is not the cause. `patternUV = saturate(Tex.x + 4, Tex.y + 1)`
+  already maps the surface layer to 0..1, and the tiling multiplies that.
+- **The real cause is the sampler.** `SamplerState samLinearWrapSmear {
+  AddressU = WRAP … }` is an effect-syntax state block, and the compiler
+  ignores it: DXC warns "effect state block ignored". The sampler in that
+  slot behaves as clamp, so every UV above 1 read the edge texels, and the
+  tiles smeared away from the visor.
+
+**Fix.** The custom sampler is removed. The wrap is now done in code, with
+`samLinearClamp` sampling `frac(patternUV × tiling)`. The only side effect
+is a possible 1-texel bilinear seam at the tile borders, which is
+invisible at mip 0 with a tileable texture.
+
+**Same risk elsewhere (open).** `samPointMicroMask` is declared the same
+way, so its POINT filter may also be ignored. Whether it is really
+point-sampled in CSP is unverified. If micro decode artefacts ever appear
+at disk borders (gate or radius codes mixing), switch those reads to
+`Texture.Load(int3(uv × size, 0))` with `GetDimensions`, which is
+point-exact by definition.
