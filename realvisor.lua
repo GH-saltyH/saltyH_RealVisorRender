@@ -488,6 +488,9 @@ local cfg = scriptSettings:mapConfig({
         -- baked disks cycles absent -> lands -> lives -> fades, each with its
         -- own period and phase (no synchronised blinking).
         RAIN_DYNAMIC_MICRO_POP_ENABLED = true,
+        -- Exact point reads of the micro pattern (Load). false = the former
+        -- bilinear read (what the ignored point sampler really did).
+        RAIN_DYNAMIC_MICRO_POINT_LOAD = false,
         RAIN_DYNAMIC_MICRO_POP_PICK = 0.35,     -- share of disks that cycle
         RAIN_DYNAMIC_MICRO_POP_PERIOD = 5.0,    -- s, x 0.5..1.5 per disk
         RAIN_DYNAMIC_MICRO_POP_OFF = 0.30,      -- share of the cycle absent
@@ -509,7 +512,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL = 12.00,     --FINE TUNED
         -- 0 = invisible cut line (gap). > 0 = draw the ring refracted but
         -- darkened by this amount instead.
-        RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.65,     -- Micro outline, FINE TUNED
+        RAIN_DYNAMIC_MICRO_PATTERN_OUTLINE_DARK = 0.001,     -- Micro outline, FINE TUNED
         -- Micro disks use the water-field head lens rule only (the legacy
         -- "scene optics" mode was removed 2026-10-02, RAINFX_MICRO_PATTERN.md).
         RAIN_DYNAMIC_MICRO_WATER_LENS_REFRACTION = 1.0, -- x WF refraction
@@ -634,6 +637,29 @@ local cfg = scriptSettings:mapConfig({
         -- Slope taps at least one trail texel apart: a sub-texel step on the
         -- bilinear 1024 trail gives a per-texel constant slope (grid look).
         RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS = 1.0,
+        -- Trail refraction v2 (docs/RAINFX_TRAIL_REFRACTION.md, T1 + T2):
+        -- trails are cylindrical lenses: sharp image shifted across the flow
+        -- by the thickness gradient instead of a blurred copy ("paint").
+        RAIN_DYNAMIC_TRAIL_REFRACT_V2 = true,
+        RAIN_DYNAMIC_TRAIL_REFRACT_PX = 14.0,      -- image shift at slope 1 (render px)
+        RAIN_DYNAMIC_TRAIL_GRAD_WIDE_TEXELS = 3.5, -- ~ half a trail width (trail canvas)
+        RAIN_DYNAMIC_TRAIL_GRAD_MIX = 0.65,        -- 0 narrow (edges) .. 1 wide (interior)
+        RAIN_DYNAMIC_TRAIL_PROFILE_RANGE = 0.35,   -- G above threshold = full thickness
+        RAIN_DYNAMIC_TRAIL_SLOPE_MAX = 1.5,
+        RAIN_DYNAMIC_TRAIL_MIP_BASE = 0.75,        -- sharp
+        RAIN_DYNAMIC_TRAIL_MIP_SLOPE = 1.0,        -- defocus with curvature
+        RAIN_DYNAMIC_TRAIL_SHEET_BLUR = 0.5,       -- fast-flow sheets (was 2.25 via WF)
+        -- T3: flowing thickness ripple (stretched along the mean drop flow)
+        RAIN_DYNAMIC_TRAIL_RIPPLE_AMP = 0.30,      -- thickness units
+        RAIN_DYNAMIC_TRAIL_RIPPLE_ALONG = 45.0,    -- cells per UV along the flow
+        RAIN_DYNAMIC_TRAIL_RIPPLE_ACROSS = 160.0,  -- cells per UV across
+        RAIN_DYNAMIC_TRAIL_RIPPLE_SPEED = 1.0,     -- x mean drop speed
+        -- T4: dramatic refraction at steep contact edges
+        RAIN_DYNAMIC_TRAIL_EDGE_BOOST = 0.8,
+        RAIN_DYNAMIC_TRAIL_EDGE_START = 0.6,       -- slope
+        RAIN_DYNAMIC_TRAIL_EDGE_END = 1.3,
+        -- T6: wiped film / ridge follow the same rule
+        RAIN_DYNAMIC_TRAIL_FILM_BOOST = 2.5,       -- x film / ridge edge pixels
         -- Anti-chrome tone limiter (heads, trails, micro water lens): the
         -- refracted image is compressed toward the blurred view behind the
         -- drop, and its luminance is held inside a ratio window of it.
@@ -688,8 +714,11 @@ local cfg = scriptSettings:mapConfig({
         -- v5: water keeps its own silhouette, rim and glint (flow stays
         -- visible) and its colour MIXES with the micro/haze beneath.
         RAIN_DYNAMIC_SMEAR_TRAIL_MIX = 0.55,   -- trail colour -> layer beneath
-        RAIN_DYNAMIC_SMEAR_TRAIL_TURBID = 0.45, -- trail -> turbid colour
-        RAIN_DYNAMIC_SMEAR_TRAIL_BLUR = 1.5,   -- extra trail mip in region
+        -- v9 (user): in the region WF trails are weak and clear, only the
+        -- moving drops stay turbid (foam carried by the drops).
+        RAIN_DYNAMIC_SMEAR_TRAIL_TURBID = 0.0,  -- trail -> turbid colour (was 0.45)
+        RAIN_DYNAMIC_SMEAR_TRAIL_BLUR = 0.0,   -- extra trail mip in region (was 1.5)
+        RAIN_DYNAMIC_SMEAR_TRAIL_CLEAR = 0.80, -- trail opacity removed in region
         RAIN_DYNAMIC_SMEAR_HEAD_MIX = 0.35,    -- head colour -> layer beneath
         -- v8: inside the region every feature follows G' (low = invisible).
         RAIN_DYNAMIC_SMEAR_HEAD_HIDE = 1.0,    -- moving drops: visibility -> G'
@@ -822,7 +851,7 @@ local cfg = scriptSettings:mapConfig({
         -- T3: draw this one KN5 mesh ourselves with render.mesh (flat lit
         -- test shader) and hide it in the normal pass. '' = off.
         -- Example: 'GLASS_COATING_REFL'. Compare it with its neighbours under DLSS.
-        RAIN_VISOR_REDRAW_TEST_MESH = 'GLASS_COATING_REFL',
+        RAIN_VISOR_REDRAW_TEST_MESH = '',     -- diagnostic only: keep '' in normal use
         RAIN_DYNAMIC_DROP_SHOT_NEAR = 0.10, -- metres (>= camera near clip)
         -- Leave three empty frames before each diagnostic draw to check
         -- whether HDR/LDR contains droplets from earlier frames.
@@ -8141,6 +8170,7 @@ rainDynamicSceneCopyState.uiHelp = {
     RAIN_DYNAMIC_SMEAR_TRAIL_MIX = 'WF trails keep their shape; their colour mixes with the layer beneath by this (region only).',
     RAIN_DYNAMIC_SMEAR_TRAIL_TURBID = 'WF trails turn turbid by this inside the region.',
     RAIN_DYNAMIC_SMEAR_TRAIL_BLUR = 'Extra blur (mip) of WF trails inside the region.',
+    RAIN_DYNAMIC_SMEAR_TRAIL_CLEAR = 'Inside the region WF trails lose this much opacity (weak, clear water); the moving drops stay turbid and carry the foam look.',
     RAIN_DYNAMIC_SMEAR_HEAD_MIX = 'GPU heads keep their shape; colour mixes with the layer beneath by this.',
     RAIN_DYNAMIC_SMEAR_PATH_WEAKEN = 'Wipe paths, thin film and ridge inside the region follow G by this: low G = weak wipe, high G = full (v8).',
     RAIN_DYNAMIC_SMEAR_MIP = 'Blur of the turbid colour (mip of the refraction source).',
@@ -8267,6 +8297,35 @@ rainDynamicSceneCopyState.smearUpdate = function(state, sim)
     state.smearRain, state.smearAirKmh, state.smearAmp = rain, airKmh, amp
     -- Shared clock (micro pop-in). Long wrap: a wrap re-phases every disk.
     state.smearTime = ((state.smearTime or 0.0) + dt) % 65536.0
+    -- Trail ripple T3 (docs/RAINFX_TRAIL_REFRACTION.md): speed-weighted
+    -- mean drop flow in visor UV (readback, every 4 frames), smoothed; the
+    -- ripple phase integrates it so the pattern travels with the water.
+    state.flowTick = ((state.flowTick or 0) + 1) % 4
+    if state.flowTick == 0 then
+        local n = rainDynamicStateReadbackCount or 0
+        local su, sv, sw = 0.0, 0.0, 0.0
+        for i = 1, n do
+            if (rainDynamicStateAlive[i] or 0.0) > 0.5 then
+                local fu = rainDynamicStateVelocityU[i] or 0.0
+                local fv = rainDynamicStateVelocityV[i] or 0.0
+                local sp = math.sqrt(fu * fu + fv * fv)
+                if sp > 0.002 then
+                    su, sv, sw = su + fu * sp, sv + fv * sp, sw + sp
+                end
+            end
+        end
+        state.flowTU = sw > 0.0 and su / sw or 0.0
+        state.flowTV = sw > 0.0 and sv / sw or 0.0
+    end
+    local fk = 1.0 - math.exp(-dt / 0.5)
+    state.flowU = (state.flowU or 0.0) + ((state.flowTU or 0.0) - (state.flowU or 0.0)) * fk
+    state.flowV = (state.flowV or 0.0) + ((state.flowTV or 0.0) - (state.flowV or 0.0)) * fk
+    local fsp = math.sqrt(state.flowU * state.flowU + state.flowV * state.flowV)
+    if fsp > 0.003 then
+        state.flowDirU, state.flowDirV = state.flowU / fsp, state.flowV / fsp
+    end
+    state.ripplePhase = ((state.ripplePhase or 0.0) + fsp * dt
+        * r.RAIN_DYNAMIC_TRAIL_RIPPLE_ALONG * r.RAIN_DYNAMIC_TRAIL_RIPPLE_SPEED) % 4096.0
     state.smearDensity, state.smearFacing = density, facing
     state.smearTriggered, state.smearTarget = triggered, target
     state.smearLevel = level
@@ -9682,6 +9741,28 @@ float4 main(PS_IN pin)
             gDynamicDropWFHeadStep =
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS
                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
+            gDynamicDropTrailRefractV2 =
+                cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_REFRACT_V2 and 1.0 or 0.0,
+            gDynamicDropTrailRefractPx = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_REFRACT_PX,
+            gDynamicDropTrailGradStep2 = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_GRAD_WIDE_TEXELS
+                / math.max(rainDynamicSceneCopyState.waterTrailSize or 1024, 1),
+            gDynamicDropTrailGradMix = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_GRAD_MIX,
+            gDynamicDropTrailProfileRange = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_PROFILE_RANGE,
+            gDynamicDropTrailSlopeMax = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_SLOPE_MAX,
+            gDynamicDropTrailMipBase = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MIP_BASE,
+            gDynamicDropTrailMipSlope = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MIP_SLOPE,
+            gDynamicDropTrailSheetBlur = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_SHEET_BLUR,
+            gDynamicDropTrailRippleAmp = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_RIPPLE_AMP,
+            gDynamicDropTrailRippleAlong = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_RIPPLE_ALONG,
+            gDynamicDropTrailRippleAcross = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_RIPPLE_ACROSS,
+            gDynamicDropTrailRipplePhase = rainDynamicSceneCopyState.ripplePhase or 0.0,
+            gDynamicDropTrailFlowDir = vec2(rainDynamicSceneCopyState.flowDirU or 0.0,
+                rainDynamicSceneCopyState.flowDirV or 1.0),
+            gDynamicDropTrailEdgeBoost = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_EDGE_BOOST,
+            gDynamicDropTrailEdgeStart = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_EDGE_START,
+            gDynamicDropTrailEdgeEnd = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_EDGE_END,
+            gDynamicDropTrailFilmBoost = cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_FILM_BOOST,
+            gDynamicDropSmearTrailClear = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_TRAIL_CLEAR,
             gDynamicDropWFTrailStep = math.max(
                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_GRADIENT_TRAIL_TEXELS
                     / math.max(rainDynamicSceneCopyState.waterTrailSize or 1024, 1),
@@ -9737,6 +9818,8 @@ float4 main(PS_IN pin)
             gDynamicDropSmearLineWidth = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_LINE_WIDTH,
             gDynamicDropSmearFacetAlpha = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_FACET_ALPHA or 0.0,
+            gDynamicDropMicroPointLoad =
+                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POINT_LOAD and 1.0 or 0.0,
             gDynamicDropMicroPopEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_ENABLED and 1.0 or 0.0,
             gDynamicDropMicroPopPick = cfg.RUNTIME.RAIN_DYNAMIC_MICRO_POP_PICK,
@@ -11032,15 +11115,20 @@ render.on('main.track.opaque', function()
         end
     end
     if st.visorRedrawRef then
+        -- 2026-10-03 fix: `sim` is not a chunk-level local here; the former
+        -- `sim.lightDirection` raised every frame AFTER the mesh was made
+        -- visible and the render state changed (cull None / opaque blend /
+        -- depth write leaked into the rest of the stage).
+        local simNow = ac.getSim()
         st.visorRedrawRef:setVisible(true, false)
         render.setBlendMode(render.BlendMode.Opaque)
         render.setDepthMode(render.DepthMode.Normal)
         render.setCullMode(render.CullMode.None)
-        render.mesh({
+        local ok, err = pcall(render.mesh, {
             mesh = st.visorRedrawRef,
             transform = 'original',
             textures = {},
-            values = { gTestLight = sim.lightDirection },
+            values = { gTestLight = simNow and simNow.lightDirection or vec3(0, 1, 0) },
             shader = [[
                 float4 main(PS_IN pin) {
                     float3 n = normalize(pin.NormalW);
@@ -11053,6 +11141,10 @@ render.on('main.track.opaque', function()
         st.visorRedrawRef:setVisible(false, false)
         -- Opaque-stage defaults back for whatever draws next here.
         render.setCullMode(render.CullMode.Back)
+        if not ok and not st.visorRedrawWarned then
+            ac.warn(appNameDebug .. ' Redraw test: ' .. tostring(err))
+            st.visorRedrawWarned = true
+        end
     end
 end)
 
@@ -12706,6 +12798,7 @@ function windowMain(dt)
         tfSlider('Region: WF trail mix with beneath', 'RAIN_DYNAMIC_SMEAR_TRAIL_MIX', 0.0, 1.0, '%.2f')
         tfSlider('Region: WF trail turbid', 'RAIN_DYNAMIC_SMEAR_TRAIL_TURBID', 0.0, 1.0, '%.2f')
         tfSlider('Region: WF trail blur (mip)', 'RAIN_DYNAMIC_SMEAR_TRAIL_BLUR', 0.0, 4.0, '%.2f')
+        tfSlider('Region: WF trail cleared (opacity)', 'RAIN_DYNAMIC_SMEAR_TRAIL_CLEAR', 0.0, 1.0, '%.2f')
         tfSlider('Region: head mix with beneath', 'RAIN_DYNAMIC_SMEAR_HEAD_MIX', 0.0, 1.0, '%.2f')
         tfSlider('Region: paths/film/ridge follow G', 'RAIN_DYNAMIC_SMEAR_PATH_WEAKEN', 0.0, 1.0, '%.2f')
         tfSlider('Region: moving drops follow G', 'RAIN_DYNAMIC_SMEAR_HEAD_HIDE', 0.0, 1.0, '%.2f')
@@ -12740,6 +12833,7 @@ function windowMain(dt)
         tfSlider('Facet film on bare glass', 'RAIN_DYNAMIC_SMEAR_FACET_ALPHA', 0.0, 1.0, '%.2f')
         ui.text('Micro pop-in (random landing)')
         tfCheck('Micro pop-in', 'RAIN_DYNAMIC_MICRO_POP_ENABLED')
+        tfCheck('Micro exact point reads (Load)', 'RAIN_DYNAMIC_MICRO_POINT_LOAD')
         tfSlider('Pop pickup share', 'RAIN_DYNAMIC_MICRO_POP_PICK', 0.0, 1.0, '%.2f')
         tfSlider('Pop period (s)', 'RAIN_DYNAMIC_MICRO_POP_PERIOD', 0.5, 60.0, '%.1f')
         tfSlider('Pop absent share', 'RAIN_DYNAMIC_MICRO_POP_OFF', 0.0, 0.95, '%.2f')
@@ -12849,6 +12943,47 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_DEBUG =
                 math.floor(debug + 0.5)
         end
+        ui.text('Trail refraction v2 (RAINFX_TRAIL_REFRACTION.md)')
+        if ui.checkbox('Trails: cylindrical lens refraction (T1+T2)',
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_REFRACT_V2) then
+            cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_REFRACT_V2 =
+                not cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_REFRACT_V2
+        end
+        wfSlider('Trail image shift at slope 1 (px)',
+            'RAIN_DYNAMIC_TRAIL_REFRACT_PX', 0.0, 60.0, '%.1f')
+        wfSlider('Trail wide gradient step (texels)',
+            'RAIN_DYNAMIC_TRAIL_GRAD_WIDE_TEXELS', 1.0, 10.0, '%.1f')
+        wfSlider('Trail gradient mix (edge .. interior)',
+            'RAIN_DYNAMIC_TRAIL_GRAD_MIX', 0.0, 1.0, '%.2f')
+        wfSlider('Trail thickness range (G above threshold)',
+            'RAIN_DYNAMIC_TRAIL_PROFILE_RANGE', 0.02, 1.0, '%.2f')
+        wfSlider('Trail slope max',
+            'RAIN_DYNAMIC_TRAIL_SLOPE_MAX', 0.2, 4.0, '%.2f')
+        wfSlider('Trail base mip (sharpness)',
+            'RAIN_DYNAMIC_TRAIL_MIP_BASE', 0.0, 4.0, '%.2f')
+        wfSlider('Trail mip by curvature',
+            'RAIN_DYNAMIC_TRAIL_MIP_SLOPE', 0.0, 4.0, '%.2f')
+        wfSlider('Trail fast-flow sheet blur (mip)',
+            'RAIN_DYNAMIC_TRAIL_SHEET_BLUR', 0.0, 4.0, '%.2f')
+        wfSlider('T3 ripple amount (thickness)',
+            'RAIN_DYNAMIC_TRAIL_RIPPLE_AMP', 0.0, 1.5, '%.2f')
+        wfSlider('T3 ripple cells along flow',
+            'RAIN_DYNAMIC_TRAIL_RIPPLE_ALONG', 5.0, 300.0, '%.0f')
+        wfSlider('T3 ripple cells across flow',
+            'RAIN_DYNAMIC_TRAIL_RIPPLE_ACROSS', 10.0, 600.0, '%.0f')
+        wfSlider('T3 ripple speed (x drop flow)',
+            'RAIN_DYNAMIC_TRAIL_RIPPLE_SPEED', 0.0, 3.0, '%.2f')
+        ui.text(string.format('Mean drop flow (UV/s): %.3f, %.3f',
+            rainDynamicSceneCopyState.flowU or 0.0,
+            rainDynamicSceneCopyState.flowV or 0.0))
+        wfSlider('T4 edge refraction boost',
+            'RAIN_DYNAMIC_TRAIL_EDGE_BOOST', 0.0, 3.0, '%.2f')
+        wfSlider('T4 edge from slope',
+            'RAIN_DYNAMIC_TRAIL_EDGE_START', 0.0, 2.0, '%.2f')
+        wfSlider('T4 edge full at slope',
+            'RAIN_DYNAMIC_TRAIL_EDGE_END', 0.1, 3.0, '%.2f')
+        wfSlider('T6 film / ridge bend boost',
+            'RAIN_DYNAMIC_TRAIL_FILM_BOOST', 0.0, 6.0, '%.2f')
         wfSlider('WF silhouette threshold',
             'RAIN_DYNAMIC_WATER_FIELD_THRESHOLD', 0.05, 0.9, '%.2f')
         wfSlider('WF kernel scale',

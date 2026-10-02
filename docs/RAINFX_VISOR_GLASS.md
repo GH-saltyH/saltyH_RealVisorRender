@@ -219,3 +219,144 @@ material group:
 
 The opaque parts are lower priority, as the user decided, but they shimmer
 too, so they will need it eventually.
+
+## 7. Shimmer inside our own render mesh since the last patches (2026-10-03)
+
+**User report.** Our added render mesh (drops, micro, trails), not only the
+KN5 meshes, has shown shimmer since the last few patches. The exact patch
+is hard to pinpoint.
+
+### Found bug (fixed): the T3 redraw diagnostic broke the render state
+
+- `RAIN_VISOR_REDRAW_TEST_MESH` was set to `'GLASS_COATING_REFL'` in the
+  build, which made the T3 diagnostic active.
+- Its callback used `sim.lightDirection`, but `sim` is not a chunk-level
+  local. So every frame the callback:
+  1. made the mesh visible;
+  2. set opaque blend, depth Normal and cull None;
+  3. then **raised an error** before drawing and before restoring
+     anything.
+- The mesh was left visible in the normal pass, and the render state leaked
+  into the rest of `main.track.opaque`. A coating at the visor surface
+  that writes depth fights with our drop mesh, which is drawn with a depth
+  test at almost the same depth. The result is shimmer inside our mesh.
+- **Fix:** `ac.getSim()` is called locally, `render.mesh` is wrapped in
+  `pcall` (one warning only), and the state is always restored. The
+  default is `''` again; the setting is a diagnostic only.
+
+### Other changes from the last patches that can shimmer under DLSS
+
+Isolate them one at a time:
+
+| Since | Change | Why it can shimmer | Toggle |
+|---|---|---|---|
+| s19 | Micro point reads by `Load()` | Exact texel switch under DLSS sub-pixel jitter. The ignored point sampler had actually been bilinear, which is smoother. | `RAIN_DYNAMIC_MICRO_POINT_LOAD` (new, UI "Micro exact point reads") |
+| s24 | Trail v2: sharp mip 0.75 with offsets of up to about 25 px | High-frequency shot detail plus jitter. The gradient of the 1024 trail canvas is piecewise linear, so the offsets step between texels. | "Trails: cylindrical lens refraction", or raise `TRAIL_MIP_BASE` to 1.5 |
+| s25 | T3 ripple | Phase from a mean flow read back every 4 frames, then smoothed. Small steps are possible. | `TRAIL_RIPPLE_AMP` = 0 |
+| s15 | Exact depth on `gSolidA ≥ 0.35` | Depth toggles at alpha edges (pop-in, wipes), and DLSS reads depth. | depth pass mode 1, or occlude off |
+| s15 | Micro pop-in | Intended blinking | `MICRO_POP_ENABLED` |
+
+**Suggested order:**
+
+1. Run with this build first; the state-leak fix alone may cure it.
+2. Then point reads.
+3. Then trail v2 and the ripple.
+4. Then the depth mode.
+
+## 8. Drops shaking with whatever lies behind them (2026-10-03)
+
+### User observations (after the §7 fix; the shimmer inside the projected image is gone)
+
+1. Where the car's wheels vibrate, the micro pattern over them moves *with
+   the wheels*.
+2. Drops over the car body stay fixed, while drops over the background
+   shake.
+3. With NeckFX off it is the reverse: the drops over the body shake and the
+   background ones stay fixed.
+4. Toggling micro exact point reads, or reloading, changes nothing.
+5. The mesh border itself is not perfectly camera-locked; it shakes (G-force
+   motion is off). Yet only some regions shake, not all of it.
+
+### Interpretation: temporal reprojection with the motion vectors of the layer BEHIND
+
+Every observation fits one mechanism:
+
+- Our drop mesh is drawn with `render.mesh` in a **transparent** stage.
+  Transparent draws do not write motion vectors. The velocity buffer under
+  our pixels still holds the motion of the **opaque surface behind**:
+  wheels, car body, track or sky.
+- DLSS (or TAA) reprojects the history of each pixel with that vector. Our
+  camera-locked drops are therefore dragged by the motion of whatever is
+  behind them:
+  - over vibrating wheels → wheel motion (1);
+  - over a car body that does not move relative to the camera → still (2);
+  - over a background that moves relative to the camera → shake (2).
+- NeckFX changes which layer moves relative to the camera. With NeckFX the
+  camera sways against the car, so the background vectors carry the head
+  motion. Without it the camera is car-locked and the body/wheel vectors
+  carry it. So the pattern flips (3).
+- Point reads cannot change any of this, because the shaking is not in our
+  shading (4).
+- The "border shakes" impression is the same history drag at the mesh
+  edge, which is why it is regional and not global (5). A real one-frame
+  transform lag would move the whole mesh at once. That can still be
+  tested with switch T2 (`RAIN_VISOR_MOTION_TEST_LATE`).
+
+**Confirming test (no code needed).** Switch the anti-aliasing to *off*
+(no DLSS, no TAA) and compare. If the regional shake disappears, the cause
+is reprojection. With TAA instead of DLSS it should also be reduced but
+present.
+
+### Why the API offers no direct fix in the current draw path
+
+- lib.lua (preview634) has no Lua access to the velocity buffer and no
+  reactive or transparency mask for upscalers. The only related knob is
+  `ac.SceneReference:setMotionStencil` (1 = reduced TAA, 0.5 = extra TAA),
+  which applies to scene-drawn meshes and did not help the KN5 (§1).
+- A `render.mesh` shader returns a single colour. It cannot write motion
+  vectors.
+- Our depth pass writes near depth only. It cannot give the pixels a
+  "camera-locked = zero motion" vector.
+
+### Proposed fix: draw the visor layer AFTER the upscaler (post overlay)
+
+The visor is the closest surface to the eye; everything else is behind it.
+It can therefore be composited on top of the final, upscaled frame:
+
+1. Render the drop mesh (same shader) into an offscreen target with the
+   main camera, every frame: an `ac.GeometryShot` built with custom draw
+   callbacks (`{reference = …, transparent = function() render.mesh(…) end}`,
+   lib.lua `ac.GeometryShot(sceneReference | {reference, opaque, transparent})`).
+   The target is at output resolution, premultiplied RGBA.
+2. Composite it full-screen in the HUD stage with `ui.onExclusiveHUD` or a
+   full-screen transparent window and `ui.drawImage`. That is after DLSS
+   and post-processing, so there is **no temporal reprojection** of our
+   pixels: no shake, no ghosting.
+3. Bonus, the project's top open item: at that point the final frame
+   (`dynamic::screen` after post, to be verified) can be the refraction
+   source. The drops then refract the **final rendered tone**, with clouds,
+   cars and post-processing, which is exactly what
+   `RAINFX_REFRACTION_SOURCE.md` and `RAINFX_SHOT_TONE.md` are after. The
+   geometry shot stays only for what the frame covers with near helmet
+   parts.
+
+**Costs and trade-offs.**
+
+- One extra offscreen render of the visor mesh, at output resolution.
+- The drops no longer receive in-scene post effects (bloom, motion blur,
+  scene exposure). Our shader then works in LDR display space; tone
+  helpers change from HDR to LDR.
+- The depth occlusion against car glass becomes unnecessary: the overlay is
+  on top by construction.
+- DLSS no longer anti-aliases our drops, so their rims need their own
+  analytic AA (smoothstep with `fwidth`). Most of it already exists.
+
+**To verify before building it:**
+
+1. That a `GeometryShot` with a `transparent` callback can run our
+   `render.mesh` (custom shader, SceneReference mesh, setVisible trick).
+2. Which texture holds the final post-processed frame at HUD time.
+3. Whether `ui.onExclusiveHUD` (or a transparent window) covers the whole
+   screen, VR excluded.
+
+A small probe can check all three.

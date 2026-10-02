@@ -25,6 +25,8 @@
 // Load() is point-exact by definition.
 float4 rainMicroPoint(float2 uv)
 {
+    if (gDynamicDropMicroPointLoad < 0.5)
+        return txDynamicMicroPattern.SampleLevel(samLinearClamp, uv, 0.0);
     uint w, h;
     txDynamicMicroPattern.GetDimensions(w, h);
     int2 p = clamp(int2(saturate(uv) * float2(w, h)), int2(0, 0),
@@ -422,6 +424,29 @@ float rainMicroPop(float2 centerUV, out float flash)
         life);
 }
 
+// Trail refraction T3 (docs/RAINFX_TRAIL_REFRACTION.md): thickness ripple
+// stretched along the mean drop flow and advected with it (phase from Lua),
+// so the refracted image waves and travels with the water.
+float rainTrailRipple(float2 uv)
+{
+    float2 d = gDynamicDropTrailFlowDir;
+    float2 n = float2(-d.y, d.x);
+    float a = dot(uv, d) * gDynamicDropTrailRippleAlong
+        - gDynamicDropTrailRipplePhase;
+    float c = dot(uv, n) * gDynamicDropTrailRippleAcross;
+    return rainHazeNoise(float2(a, c)) * 0.67
+        + rainHazeNoise(float2(a * 2.07 + 7.3, c * 1.93 + 3.1)) * 0.33;
+}
+
+// Gradient of the ripple per visor UV (central differences, step s).
+float2 rainTrailRippleGrad(float2 uv, float s)
+{
+    return float2(rainTrailRipple(uv + float2(s, 0.0))
+            - rainTrailRipple(uv - float2(s, 0.0)),
+        rainTrailRipple(uv + float2(0.0, s))
+            - rainTrailRipple(uv - float2(0.0, s))) / (2.0 * s);
+}
+
 float4 rainDropMain(PS_IN pin)
 {
     // Visor surface layer only. The legacy per-drop quad heads and the
@@ -592,6 +617,67 @@ float4 rainDropMain(PS_IN pin)
                 // (height increases inward). Shape independent.
                 float2 slope = float2(dot(gradUV, wfDx), dot(gradUV, wfDy))
                     * radiusPx;
+                // Trail refraction v2 (docs/RAINFX_TRAIL_REFRACTION.md T1):
+                // a trail is a cylindrical lens, not a head dome. Its canvas
+                // is flat-topped, so the 1-texel gradient is ~0 inside and
+                // the head radius code means nothing for it. Thickness above
+                // the silhouette threshold is differentiated at two scales:
+                // the narrow step keeps the steep contact edge, the wide
+                // step (~ half a trail width) gives the whole interior a
+                // cross-flow slope. Normalised by the wide step in pixels,
+                // the slope is ~1 at the edge of a trail of that half-width.
+                bool trailV2 = trailWins && gDynamicDropTrailRefractV2 > 0.5;
+                float2 trailOffsetPx = float2(0.0, 0.0);
+                if (trailV2)
+                {
+                    float thr = gDynamicDropWFThreshold;
+                    float invRange = 1.0 / max(gDynamicDropTrailProfileRange,
+                        0.02);
+                    float s2 = max(gDynamicDropTrailGradStep2, wfStep);
+                    float2 u2 = float2(s2, 0.0);
+                    float2 v2 = float2(0.0, s2);
+                    float tU1 = saturate((rainWaterFieldTap(patternUV + u2).g
+                        - thr) * invRange);
+                    float tU0 = saturate((rainWaterFieldTap(patternUV - u2).g
+                        - thr) * invRange);
+                    float tV1 = saturate((rainWaterFieldTap(patternUV + v2).g
+                        - thr) * invRange);
+                    float tV0 = saturate((rainWaterFieldTap(patternUV - v2).g
+                        - thr) * invRange);
+                    float2 gWide = float2(tU1 - tU0, tV1 - tV0) / (2.0 * s2);
+                    float2 gNarrow = float2(saturate((hU1 - thr) * invRange)
+                        - saturate((hU0 - thr) * invRange),
+                        saturate((hV1 - thr) * invRange)
+                        - saturate((hV0 - thr) * invRange))
+                        / (2.0 * max(wfStep, 1e-6));
+                    float2 gT = lerp(gNarrow, gWide,
+                        saturate(gDynamicDropTrailGradMix));
+                    // T3: flowing thickness ripple, only inside the trail.
+                    if (gDynamicDropTrailRippleAmp > 0.0005)
+                    {
+                        float t0 = saturate((h0 - thr) * invRange);
+                        gT += rainTrailRippleGrad(patternUV, s2)
+                            * gDynamicDropTrailRippleAmp
+                            * smoothstep(0.0, 0.35, t0);
+                    }
+                    // UV gradient -> per-pixel gradient (UV Jacobian), times
+                    // the wide step in pixels -> dimensionless slope.
+                    float s2Px = s2 / sqrt(max(abs(wfDet), 1e-14));
+                    slope = float2(dot(gT, wfDx), dot(gT, wfDy)) * s2Px;
+                    float sl = length(slope);
+                    float slMax = max(gDynamicDropTrailSlopeMax, 0.1);
+                    if (sl > slMax)
+                        slope *= slMax / sl;
+                    // T4: steep contact edges refract dramatically (the
+                    // view leaves through the side of the lens). Edge loss
+                    // and the sky glint below use the same slope.
+                    float edgeRim = smoothstep(gDynamicDropTrailEdgeStart,
+                        max(gDynamicDropTrailEdgeEnd,
+                            gDynamicDropTrailEdgeStart + 0.01),
+                        length(slope));
+                    trailOffsetPx = slope * gDynamicDropTrailRefractPx
+                        * (1.0 + gDynamicDropTrailEdgeBoost * edgeRim);
+                }
                 float slopeLen = length(slope);
                 if (gDynamicDropWFDebug > 2.5)
                     return float4(largeW, 1.0 - largeW, 0.2, inside);
@@ -616,6 +702,11 @@ float4 rainDropMain(PS_IN pin)
                     * gDynamicDropWFRefraction * float2(aspect, 1.0)
                     + warp * (2.0 * gDynamicDropLargeWarpPx * largeW)
                         * gDynamicDropInvRenderTargetSize);
+                // T1: trails shift the image toward the thick side by a
+                // pixel amount (sharp, no large-drop warp).
+                if (trailV2)
+                    sampleUV = saturate(sceneUV + trailOffsetPx
+                        * gDynamicDropInvRenderTargetSize);
                 // B/G: sheet factor (fast-flow film / splash) or impact
                 // energy. Sheets read blurrier and milkier.
                 float sheetFactor = saturate(w0.b / max(w0.g, 0.02));
@@ -625,6 +716,15 @@ float4 rainDropMain(PS_IN pin)
                     + gDynamicDropLargeBlurMip * largeW
                     + (trailWins ? gDynamicDropSmearTrailBlur * gSmearMask
                         : 0.0);
+                // T2: water does not blur; only curvature defocuses. Trails
+                // drop the head base mip, the sheet blur and the large-drop
+                // blur (smear-region turbidity blur is kept).
+                if (trailV2)
+                    wfMip = gDynamicDropTrailMipBase
+                        + gDynamicDropTrailMipSlope * saturate(slopeLen
+                            / max(gDynamicDropTrailSlopeMax, 0.1))
+                        + gDynamicDropTrailSheetBlur * sheetFactor
+                        + gDynamicDropSmearTrailBlur * gSmearMask;
                 float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp,
                     sampleUV, wfMip).rgb;
                 if (gDynamicDropBirthSkyCorrection > 0.5)
@@ -667,6 +767,12 @@ float4 rainDropMain(PS_IN pin)
                     gDynamicDropWFSheetAlpha, sheetFactor)
                     * rainSmearVis(trailWins ? gDynamicDropSmearTrailHide
                         : gDynamicDropSmearHeadHide);
+                // v9 (user): inside the smear the WF trails are weak and
+                // transparent; only the moving drops stay turbid, which reads
+                // as foam carried by the drops.
+                if (trailWins)
+                    wfAlpha *= 1.0 - saturate(gDynamicDropSmearTrailClear)
+                        * gSmearMask;
                 // Inside the region the water keeps full presence (shape,
                 // rim, glint: the flow stays visible) and its colour mixes
                 // with the micro / haze beneath (no early return).
@@ -757,16 +863,35 @@ float4 rainDropMain(PS_IN pin)
                         / max(length(ridgeGradient), 0.0001);
                     float ridgeEdge = saturate(
                         length(ridgeGradient) * 22.0);
-                    float2 offset = (filmNormal * filmEdge
+                    float2 offsetPx = filmNormal * filmEdge
                             * gDynamicDropTrailFilmPixels
                         + ridgeNormal * ridgeEdge
                             * gDynamicDropTrailRidgePixels
-                            * ridgeCoverage)
-                        * gDynamicDropInvRenderTargetSize;
+                            * ridgeCoverage;
+                    float filmMip = lerp(2.0, 1.0, ridgeCoverage);
+                    // T6 (docs/RAINFX_TRAIL_REFRACTION.md): the wiped film is
+                    // thin water too: stronger edge bend, flowing ripple,
+                    // sharp sampling.
+                    if (gDynamicDropTrailRefractV2 > 0.5)
+                    {
+                        offsetPx *= gDynamicDropTrailFilmBoost;
+                        float fs2 = max(gDynamicDropTrailGradStep2, 1e-5);
+                        float fDet = hoistPatternDx.x * hoistPatternDy.y
+                            - hoistPatternDx.y * hoistPatternDy.x;
+                        float fs2Px = fs2 / sqrt(max(abs(fDet), 1e-14));
+                        float2 fg = rainTrailRippleGrad(patternUV, fs2);
+                        float2 fSlope = float2(dot(fg, hoistPatternDx),
+                            dot(fg, hoistPatternDy)) * fs2Px
+                            * gDynamicDropTrailRippleAmp
+                            * saturate(max(filmCoverage, ridgeCoverage));
+                        offsetPx += fSlope * gDynamicDropTrailRefractPx;
+                        filmMip = gDynamicDropTrailMipBase
+                            + 0.5 * (1.0 - ridgeCoverage);
+                    }
+                    float2 offset = offsetPx * gDynamicDropInvRenderTargetSize;
                     float2 filmSampleUV = saturate(filmUV + offset);
                     float3 filmScene = txDynamicSnapshot.SampleLevel(
-                        samLinearClamp, filmSampleUV,
-                        lerp(2.0, 1.0, ridgeCoverage)).rgb;
+                        samLinearClamp, filmSampleUV, filmMip).rgb;
                     if (gDynamicDropTrailSkyCorrection > 0.5)
                         filmScene = rainDynamicWeatherSkyTone(
                             filmScene, filmSampleUV);
