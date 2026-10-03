@@ -135,6 +135,13 @@ local appFolder =
             LOADED = false,
             HLSL = nil,
         },
+
+        {
+            ID = 'RAINFXVISORLAYER',
+            PATH = appFolder .. '/shaders/rainVisorLayer.hlsl',
+            LOADED = false,
+            HLSL = nil,
+        },
     }
         
 
@@ -767,13 +774,13 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_HAZE_MIST_CELLS = 31.7,
         RAIN_DYNAMIC_HAZE_ORDER_CELLS = 30.0,
         RAIN_DYNAMIC_HAZE_SPECKLE_CELLS = 1500.0,
-        RAIN_DYNAMIC_HAZE_STRENGTH = 0.87,
-        RAIN_DYNAMIC_HAZE_MOTTLE = 0.70,
+        RAIN_DYNAMIC_HAZE_STRENGTH = 0.57,      -- Haze strength, FINE TUNED
+        RAIN_DYNAMIC_HAZE_MOTTLE = 0.65,
         RAIN_DYNAMIC_HAZE_RAIN_POWER = 0.80,
         RAIN_DYNAMIC_HAZE_REVEAL_SOFT = 0.40,
         RAIN_DYNAMIC_HAZE_MIP = 4.5,
         RAIN_DYNAMIC_HAZE_VEIL = 0.12,
-        RAIN_DYNAMIC_HAZE_SPECKLE_PIXELS = 2.0,
+        RAIN_DYNAMIC_HAZE_SPECKLE_PIXELS = 0.4,
         RAIN_DYNAMIC_HAZE_TRAIL_CLEAR = 0.90,
         RAIN_DYNAMIC_HAZE_SKY_CORRECTION = true,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 384, -- per frame (was 64: each drop
@@ -794,7 +801,7 @@ local cfg = scriptSettings:mapConfig({
         -- 2026-10-02 (user test): with the geometry shot as the refraction
         -- source, the track stage no longer mixes rain streaks in, so the
         -- smoke-stage workaround is not needed any more.
-        RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG = false,
+        RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG = true,
         -- Depth test off for drops. Rejected in game (2026-10-02): drops of
         -- overlapping visor parts showed through each other. Kept as a
         -- diagnostic toggle only (docs/RAINFX_IMPACT_SPLASH.md §6).
@@ -820,6 +827,94 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_STAGE_PROBE_SOURCE = 1,   -- 1 dynamic::hdr, 2 dynamic::screen, 3 dynamic::depth
         RAIN_DYNAMIC_STAGE_PROBE_EXPOSURE = 1.0,
         RAIN_DYNAMIC_STAGE_PROBE_WIDTH = 320,
+        -- Overlay probe (docs/RAINFX_POST_OVERLAY.md P0): renders the drop
+        -- mesh offscreen through ac.GeometryShot custom callbacks and can
+        -- draw it full-screen in ui.onExclusiveHUD (after post / DLSS).
+        -- Diagnostic only, default off. Changes nothing when off.
+        RAIN_VISOR_OVERLAY_PROBE = false,
+        RAIN_VISOR_OVERLAY_PROBE_FULLSCREEN = false, -- draw the overlay on screen
+        RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE = false, -- skip the in-scene drop draw
+        -- P1 (docs/RAINFX_POST_OVERLAY.md): the visor layer is drawn ONLY as
+        -- a post overlay: in-scene draw off, the final frame (dynamic::screen
+        -- in the HUD callback, before our draw) is the refraction source,
+        -- shader in LDR mode, composite with ui.renderShader (alpha blend).
+        RAIN_VISOR_OVERLAY = true,
+        RAIN_VISOR_OVERLAY_SOURCE_MIPS = 9,
+        RAIN_VISOR_OVERLAY_FOG_MIP = 6.0,   -- LDR veil tone: frame mean mip
+        RAIN_VISOR_OVERLAY_DEBUG_ALPHA = false, -- show overlay alpha as grey
+        -- HUD lift (docs/RAINFX_POST_OVERLAY.md "HUD order"): original AC /
+        -- Python app windows are drawn BEFORE ui.onExclusiveHUD, so the
+        -- overlay covers them. Lift = move those windows to a redirect layer
+        -- and draw that layer above the overlay. Lifted windows get no mouse
+        -- input (CSP redirect limitation): turn lift off to move/click them.
+        RAIN_VISOR_OVERLAY_HUD_LIFT = true,
+        RAIN_VISOR_OVERLAY_HUD_LAYER = 7,
+        RAIN_VISOR_OVERLAY_HUD_PREMULTIPLIED = true, -- user test: sharp text
+        -- s41: overlay resolution. 0 = main render target (DLSS input,
+        -- softer after upscale), 1 = output / window size (sharp, ~2.25x
+        -- pixels at DLSS quality). Pixel-unit params and blur mips are
+        -- rescaled so the look stays the same in screen terms.
+        RAIN_VISOR_OVERLAY_RES_SCALE = 1.0,
+        -- Visor layer V1 (docs/RAINFX_VISOR_LAYER.md): the visor KN5 parts
+        -- are hidden in the scene and drawn in the overlay with our shaders.
+        -- Housing opaque with depth, then glass back to front (coating,
+        -- rain, GLASS_EXT, GLASS_INT), premultiplied. Needs RAIN_VISOR_OVERLAY.
+        RAIN_VISOR_LAYER = true,
+        RAIN_VISOR_LAYER_AMBIENT = 0.35,      -- x frame-mean luminance (s45)
+        RAIN_VISOR_LAYER_AMBIENT_SAT = 0.35,  -- sky/horizon chroma kept
+        RAIN_VISOR_LAYER_AMBIENT_FLOOR = 0.35, -- downward faces x this
+        RAIN_VISOR_LAYER_LIGHT_FLIP = true,   -- toward light = -sim.lightDirection
+        -- s46 helmet shadow for interior parts (fabric, glass line): the
+        -- shell blocks the sun unless it shines in through the visor
+        -- opening, i.e. comes from in front of the head (camera look).
+        RAIN_VISOR_LAYER_HELMET_SHADOW = true, -- s50: off, the scene-shadow probe is the shadow source
+        RAIN_VISOR_LAYER_SHADOW_COS_LO = -0.05, -- dot(toLight, forward): dark
+        RAIN_VISOR_LAYER_SHADOW_COS_HI = 0.35,  -- fully lit through the opening
+        RAIN_VISOR_LAYER_INTERIOR_AMBIENT = 0.50, -- ambient x this inside (s47: was 0.6)
+        -- s47 scattered light inside the helmet (hard-coded estimate):
+        -- sun bounce = sun x SUN_BOUNCE x (BOUNCE_BASE + (1-BASE) x sunVis)
+        -- opening   = frame-mean luminance x OPENING (scene through the visor)
+        RAIN_VISOR_LAYER_SUN_BOUNCE = 0.27,
+        RAIN_VISOR_LAYER_BOUNCE_BASE = 0.47,
+        RAIN_VISOR_LAYER_OPENING = 0.30,
+        -- s48: interior hemisphere / opening light keep this much sky chroma
+        -- (0 = neutral grey; s47 tinted the interior with the sky tone).
+        RAIN_VISOR_LAYER_INTERIOR_SKY_CHROMA = 1.0,
+        -- s49 scene-shadow probe (docs/RAINFX_VISOR_LAYER.md §13): a second
+        -- KN5 instance, housing only, dark probe material, drawn in the
+        -- scene so CSP shadow maps (trees, poles, buildings) reach it.
+        RAIN_VISOR_LAYER_SHADOW_PROBE = true,
+        RAIN_VISOR_LAYER_PROBE_ALBEDO = 0.05,  -- ksDiffuse of the probe
+        RAIN_VISOR_LAYER_PROBE_GAIN = 1.0,     -- calibration of sun HDR
+        RAIN_VISOR_LAYER_PROBE_STRENGTH = 1.0,
+        RAIN_VISOR_LAYER_PROBE_MIN_NL = 0.12,
+        RAIN_VISOR_LAYER_PROBE_MAX_DEPTH = 0.35, -- m: farther = not the probe
+        RAIN_VISOR_LAYER_PROBE_DEBUG = false,
+        RAIN_VISOR_LAYER_AMBIENT_MIP = 6.0,
+        RAIN_VISOR_LAYER_SUN = 0.50,          -- x light colour (normalised)
+        RAIN_VISOR_LAYER_GLASS_ALPHA = 0.04,  -- faint film of the glass layers
+        RAIN_VISOR_LAYER_BAND_OPACITY = 0.92, -- top band blocks the scene
+        RAIN_VISOR_LAYER_BORDER_GREY = 0.06,  -- BODY_INT_BORDER_GLASSLINE
+        RAIN_VISOR_LAYER_CULL_FLIP = false,   -- single-sided parts: cull front
+        -- V2 housing materials (docs/RAINFX_VISOR_LAYER.md §8)
+        RAIN_VISOR_LAYER_NORMAL_FLIP_G = false,
+        RAIN_VISOR_LAYER_FRAME_NORMAL = 1.76,
+        RAIN_VISOR_LAYER_FRAME_SPEC = 01.03,
+        RAIN_VISOR_LAYER_FRAME_GLOSS = 0.72,
+        RAIN_VISOR_LAYER_RUBBER_NORMAL = 1.0,
+        RAIN_VISOR_LAYER_RUBBER_SPEC = 2.00,
+        RAIN_VISOR_LAYER_RUBBER_GLOSS = 0.32,
+        RAIN_VISOR_LAYER_FABRIC_NORMAL = 0.99,
+        RAIN_VISOR_LAYER_FABRIC_SHEEN = 0.91,
+        RAIN_VISOR_LAYER_FABRIC_SHEEN_POWER = 1.0,
+        RAIN_VISOR_LAYER_FABRIC_SPEC = 0.65,
+        RAIN_VISOR_LAYER_FABRIC_GLOSS = 0.60,
+        RAIN_VISOR_LAYER_FABRIC_LIT_LIFT = 2.58, -- s51: x spec x mask x N.L, direct light only
+        -- s51: interior mirror. Overlay-drawn visor meshes are shown in the
+        -- MIRROR pass (stock materials, coloured) and the grey shadow probe
+        -- is hidden there; in the main pass it is the other way round.
+        -- Meshes NOT drawn by the overlay always follow their Visible box.
+        RAIN_VISOR_LAYER_MIRROR_STOCK = true,
         RAIN_DYNAMIC_SHOT_TONE_AERIAL_DENSITY = 0.004, -- 1/m: 1-exp(-d*k)
         RAIN_DYNAMIC_SHOT_TONE_AERIAL_MAX = 0.85,  -- cap for geometry
         RAIN_DYNAMIC_SHOT_TONE_SATURATION = 0.75,  -- geometry chroma kept
@@ -9523,6 +9618,706 @@ end)
 -- are in the visor mesh's local coordinates; use the scene mesh's original
 -- transform when drawing it explicitly.
 --------------------------------------------------------
+-- P1 post overlay (docs/RAINFX_POST_OVERLAY.md).
+rainDynamicSceneCopyState.overlay = { status = 'off' }
+rainDynamicSceneCopyState.rainOverlayParams = function(src, w, h)
+    local base = rainDynamicSceneCopyState.lastDropMeshParams
+    if not base then return nil end
+    local ov = rainDynamicSceneCopyState.overlay
+    local p = ov.params
+    if not p then
+        p = { mesh = base.mesh, transform = base.transform,
+            shader = base.shader, textures = {}, values = {} }
+        ov.params = p
+    end
+    for k, v in pairs(base.textures) do p.textures[k] = v end
+    for k, v in pairs(base.values) do p.values[k] = v end
+    p.textures.txDynamicSnapshot = src
+    local inv = vec2(1.0 / w, 1.0 / h)
+    p.values.gDynamicDropInvScreenSize = inv
+    p.values.gDynamicDropInvRenderTargetSize = inv
+    p.values.gDynamicDropLDR = 1.0
+    p.values.gDynamicDropLdrFogMip = cfg.RUNTIME.RAIN_VISOR_OVERLAY_FOG_MIP
+    -- Final frame is already toned: no shot sky correction.
+    p.values.gDynamicDropHazeSkyCorrection = 0.0
+    p.values.gDynamicDropTrailSkyCorrection = 0.0
+    p.values.gDynamicDropBirthSkyCorrection = 0.0
+    p.values.gDynamicDropDepthOnly = 0.0
+    p.values.gDynamicDropPremulOut = cfg.RUNTIME.RAIN_VISOR_LAYER and 1.0 or 0.0
+    -- s41: same look in screen terms at any overlay resolution.
+    local mainW = math.max(1, rainDynamicSceneCopyState.mainTargetWidth or w)
+    local k = w / mainW
+    p.values.gDynamicDropMipBias = math.log(math.max(k, 1e-3)) / math.log(2)
+    for _, key in ipairs({ 'gDynamicDropHazeSpecklePixels',
+        'gDynamicDropLargeFullPx', 'gDynamicDropLargeStartPx',
+        'gDynamicDropLargeWarpPx', 'gDynamicDropSmearFacetPixels',
+        'gDynamicDropTrailFilmPixels', 'gDynamicDropTrailRefractPx',
+        'gDynamicDropTrailRidgePixels' }) do
+        if type(base.values[key]) == 'number' then
+            p.values[key] = base.values[key] * k
+        end
+    end
+    return p
+end
+rainDynamicSceneCopyState.rainOverlayEnsure = function(ov, w, h)
+    if ov.shot and ov.w == w and ov.h == h then return end
+    if ov.shot then ov.shot:dispose() end
+    if ov.src then ov.src:dispose() end
+    ov.src = ui.ExtraCanvas(vec2(w, h),
+        math.max(1, math.floor(cfg.RUNTIME.RAIN_VISOR_OVERLAY_SOURCE_MIPS)),
+        render.AntialiasingMode.None, render.TextureFormat.R16G16B16A16.Float)
+    ov.src:setName('RainFX overlay source (final frame)')
+    ov.shot = ac.GeometryShot({
+        transparent = function()
+            if cfg.RUNTIME.RAIN_VISOR_LAYER then
+                rainDynamicSceneCopyState.visorLayerDraw(ov)
+                return
+            end
+            local p = ov.drawParams
+            if not p then return end
+            rainDynamicSurfaceMesh:setVisible(true, false)
+            -- Opaque + depth: the texel keeps the shader's straight
+            -- (rgb, a); the nearest visor part wins; clipped pixels stay
+            -- (0, 0, 0, 0) from the clear.
+            render.setBlendMode(render.BlendMode.Opaque)
+            render.setCullMode(render.CullMode.None)
+            render.setDepthMode(render.DepthMode.Normal)
+            local okDraw, res = pcall(render.mesh, p)
+            rainDynamicSurfaceMesh:setVisible(false, false)
+            ov.drawn = okDraw and res and true or false
+            if not okDraw then ov.err = tostring(res) end
+        end,
+    }, vec2(w, h), 1, true, render.AntialiasingMode.None,
+        render.TextureFormat.R16G16B16A16.Float)
+    ov.shot:setName('RainFX visor overlay')
+    pcall(function() ov.shot:setSky(false) end)
+    pcall(function() ov.shot:setParticles(false) end)
+    pcall(function() ov.shot:setClearColor(rgbm(0, 0, 0, 0)) end)
+    ov.w, ov.h = w, h
+end
+rainDynamicSceneCopyState.rainOverlayRender = function(ov, sim)
+    ov.drawParams = rainDynamicSceneCopyState.rainOverlayParams(ov.src, ov.w, ov.h)
+    if not ov.drawParams then ov.status = 'waiting for drop params'; return false end
+    pcall(function() ov.shot:setClippingPlanes(
+        math.max(sim.cameraClipNear or 0.05, 0.001), sim.cameraClipFar) end)
+    local ok, res = pcall(function()
+        return ov.shot:update(sim.cameraPosition, sim.cameraLook,
+            sim.cameraUp, sim.cameraFOV)
+    end)
+    if not ok then ov.err = tostring(res) end
+    return ok
+end
+-- Fallback (one frame late) when the shot cannot update inside the HUD.
+render.onSceneReady(function()
+    local ov = rainDynamicSceneCopyState.overlay
+    if not cfg.RUNTIME.RAIN_VISOR_OVERLAY or not ov.hudUpdateFailed
+        or not ov.shot then return end
+    local sim = ac.getSim()
+    if sim then rainDynamicSceneCopyState.rainOverlayRender(ov, sim) end
+end)
+-- Visor layer V1 (docs/RAINFX_VISOR_LAYER.md).
+rainDynamicSceneCopyState.visorLayer = { hidden = false }
+rainDynamicSceneCopyState.visorLayerDefs = function()
+    local T = appFolder .. '/texture/'
+    return {
+        -- s44: all two-sided (user: single-sided parts were overdrawn by
+        -- the two-sided ones; the cost difference is negligible).
+        housing = {
+            { mesh = 'BODY_FRAME', two = true, mat = 'FRAME',
+                tex = T .. 'BODY_FRAME/BODY_FRAME_1K_txDiff.dds',
+                nrm = T .. 'BODY_FRAME/BODY_FRAME_1K_txNormal.dds' },
+            { mesh = 'BODY_FRAME_FLIP', two = true, mat = 'FRAME',
+                tex = T .. 'BODY_FRAME/BODY_FRAME_1K_txDiff.dds',
+                nrm = T .. 'BODY_FRAME/BODY_FRAME_1K_txNormal.dds' },
+            { mesh = 'BODY_INT_BORDER_GLASSLINE', two = true, grey = true, mat = 'RUBBER', interior = true,
+                nrm = T .. 'BODY_FRAME/BODY_INT_BORDER_GLASSLINE_2K_txNormal.dds' },
+            { mesh = 'BODY_INT_FABRIC', two = true, mat = 'FABRIC', interior = true,
+                tex = T .. 'BODY_FRAME/BODY_INT_FABRIC_2K_txDiff.dds',
+                nrm = T .. 'BODY_FRAME/BODY_INT_FABRIC_4K_txNormal.dds',
+                maps = T .. 'BODY_FRAME/BODY_INT_FABRIC_2K_txMaps.dds' },
+        },
+        -- back to front (outermost first, as seen from the eye)
+        glass = {
+            { mesh = 'GLASS_COATING', two = true, kind = 2 },
+            { rain = true },
+            { mesh = 'GLASS_EXT', two = true, kind = 1, tex = T .. 'GLASS/GLASS_INT_EXT_4k_txDIFF.dds' },
+            { mesh = 'GLASS_INT', two = true, kind = 2 },
+        },
+    }
+end
+rainDynamicSceneCopyState.visorLayerEditor = function(meshName)
+    for _, e in ipairs(MATERIAL_EDITORS or {}) do
+        if e.meshName == meshName then return e end
+    end
+    return nil
+end
+-- Hide (or restore) every visor KN5 mesh in the normal scene pass.
+-- s51: names of the meshes the overlay draws itself.
+rainDynamicSceneCopyState.visorLayerDrawnSet = function()
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if vl.drawnSet then return vl.drawnSet end
+    local set = {}
+    local defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
+    for _, it in ipairs(defs.housing) do if it.mesh then set[it.mesh] = true end end
+    for _, it in ipairs(defs.glass) do if it.mesh then set[it.mesh] = true end end
+    vl.drawnSet = set
+    return set
+end
+-- Hide (or restore) the overlay-drawn visor meshes in the scene pass.
+-- s51: meshes the overlay does not draw always follow their Visible box.
+rainDynamicSceneCopyState.visorLayerSceneHide = function(hide)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    local drawn = rainDynamicSceneCopyState.visorLayerDrawnSet()
+    for _, e in ipairs(MATERIAL_EDITORS or {}) do
+        if e.targetMesh and #e.targetMesh > 0 then
+            local hideThis = hide and drawn[e.meshName]
+            e.targetMesh:setVisible((not hideThis) and e.visible or false, false)
+        end
+    end
+    vl.hidden = hide
+end
+-- s51 mirror / main pass switching (render.on stages exist for both).
+rainDynamicSceneCopyState.visorLayerPassSwitch = function(mirror)
+    local r = cfg.RUNTIME
+    if not (r.RAIN_VISOR_OVERLAY and r.RAIN_VISOR_LAYER and r.RAIN_VISOR_LAYER_MIRROR_STOCK) then
+        return
+    end
+    local vl = rainDynamicSceneCopyState.visorLayer
+    local drawn = rainDynamicSceneCopyState.visorLayerDrawnSet()
+    for _, e in ipairs(MATERIAL_EDITORS or {}) do
+        if drawn[e.meshName] and e.targetMesh and #e.targetMesh > 0 then
+            e.targetMesh:setVisible(mirror and e.visible or false, false)
+        end
+    end
+    if vl.probe then
+        vl.probe:setVisible((not mirror) and r.RAIN_VISOR_LAYER_SHADOW_PROBE and true or false)
+    end
+end
+render.on('mirror.track.opaque', function()
+    pcall(rainDynamicSceneCopyState.visorLayerPassSwitch, true)
+end)
+render.on('main.track.opaque', function()
+    pcall(rainDynamicSceneCopyState.visorLayerPassSwitch, false)
+end)
+rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
+    local r = cfg.RUNTIME
+    local vl = rainDynamicSceneCopyState.visorLayer
+    local e = rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+    if not e or not e.targetMesh or #e.targetMesh == 0 or e.visible == false then
+        return
+    end
+    local shader = vl.shader
+    if not shader then return end
+    local sim = ac.getSim()
+    local lc = sim and sim.lightColor or rgb(1, 1, 1)
+    local lmax = math.max(lc.r, lc.g, lc.b, 1e-3)
+    local sun = rgb(lc.r / lmax, lc.g / lmax, lc.b / lmax)
+        * (r.RAIN_VISOR_LAYER_SUN * math.min(1.0, lmax))
+    item.params = item.params or {
+        mesh = e.targetMesh, transform = 'original', shader = shader,
+        textures = { txLayerDiffuse = false, txLayerSource = false,
+            txLayerNormal = false, txLayerMaps = false,
+            txLayerProbe = false },
+        values = {},
+    }
+    local p = item.params
+    p.mesh = e.targetMesh
+    p.textures.txLayerDiffuse = item.tex or ov.src
+    p.textures.txLayerSource = ov.src
+    p.textures.txLayerNormal = item.nrm or ov.src
+    p.textures.txLayerMaps = item.maps or ov.src
+    local v = p.values
+    local M = item.mat or 'FRAME'
+    local function mr(key, def)
+        local val = r['RAIN_VISOR_LAYER_' .. M .. '_' .. key]
+        return val == nil and def or val
+    end
+    v.gLayerMat = M == 'FABRIC' and 2.0 or (M == 'RUBBER' and 1.0 or 0.0)
+    v.gLayerUseNormal = item.nrm and 1.0 or 0.0
+    v.gLayerUseMaps = item.maps and 1.0 or 0.0
+    v.gLayerNormalFlipG = r.RAIN_VISOR_LAYER_NORMAL_FLIP_G and 1.0 or 0.0
+    v.gLayerNormalStrength = mr('NORMAL', 1.0)
+    v.gLayerSpec = mr('SPEC', 0.0)
+    v.gLayerGloss = mr('GLOSS', 0.5)
+    v.gLayerSheen = mr('SHEEN', 0.0)
+    v.gLayerSheenPower = mr('SHEEN_POWER', 3.0)
+    v.gLayerFabricLitLift = r.RAIN_VISOR_LAYER_FABRIC_LIT_LIFT or 0.6
+    v.gLayerKind = item.kind or 0
+    v.gLayerUseDiffuse = item.tex and 1.0 or 0.0
+    local g = r.RAIN_VISOR_LAYER_BORDER_GREY
+    v.gLayerColor = item.grey and rgb(g, g, g) or rgb(0.5, 0.5, 0.5)
+    local ld = sim and sim.lightDirection or vec3(0, -1, 0)
+    v.gLayerLightDir = r.RAIN_VISOR_LAYER_LIGHT_FLIP and vec3(-ld.x, -ld.y, -ld.z) or ld
+    -- hemisphere chroma: luminance-normalised, desaturated toward grey
+    local function chroma(c)
+        c = c or rgb(1, 1, 1)
+        local l = math.max(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b, 1e-4)
+        local k = math.max(0.0, r.RAIN_VISOR_LAYER_AMBIENT_SAT)
+        return rgb(1 + (c.r / l - 1) * k, 1 + (c.g / l - 1) * k, 1 + (c.b / l - 1) * k)
+    end
+    v.gLayerAmbSky = chroma(sim and sim.skyColor)
+    v.gLayerAmbHorizon = chroma(sim and (sim.horizonColor or sim.fogColor))
+    if item.interior then
+        local k = math.max(0.0, r.RAIN_VISOR_LAYER_INTERIOR_SKY_CHROMA)
+        local function toward(c)
+            return rgb(1 + (c.r - 1) * k, 1 + (c.g - 1) * k, 1 + (c.b - 1) * k)
+        end
+        v.gLayerAmbSky = toward(v.gLayerAmbSky)
+        v.gLayerAmbHorizon = toward(v.gLayerAmbHorizon)
+    end
+    v.gLayerAmbFloor = r.RAIN_VISOR_LAYER_AMBIENT_FLOOR
+    local sunVis, ambK = 1.0, 1.0
+    if item.interior and r.RAIN_VISOR_LAYER_HELMET_SHADOW and sim then
+        local L = v.gLayerLightDir
+        local f = sim.cameraLook
+        local c = L.x * f.x + L.y * f.y + L.z * f.z
+        local lo = r.RAIN_VISOR_LAYER_SHADOW_COS_LO
+        local hi = math.max(r.RAIN_VISOR_LAYER_SHADOW_COS_HI, lo + 1e-3)
+        local t = math.min(math.max((c - lo) / (hi - lo), 0.0), 1.0)
+        sunVis = t * t * (3.0 - 2.0 * t)
+        ambK = r.RAIN_VISOR_LAYER_INTERIOR_AMBIENT
+    end
+    v.gLayerSun = sun * sunVis
+    v.gLayerAmbientGain = r.RAIN_VISOR_LAYER_AMBIENT * ambK
+    if item.interior then
+        local base = math.min(math.max(r.RAIN_VISOR_LAYER_BOUNCE_BASE, 0.0), 1.0)
+        v.gLayerBounce = sun * (r.RAIN_VISOR_LAYER_SUN_BOUNCE
+            * (base + (1.0 - base) * sunVis))
+        v.gLayerBounceFrame = r.RAIN_VISOR_LAYER_OPENING
+    else
+        v.gLayerBounce = rgb(0, 0, 0)
+        v.gLayerBounceFrame = 0.0
+    end
+    v.gLayerAmbientMip = r.RAIN_VISOR_LAYER_AMBIENT_MIP
+    v.gLayerGlassAlpha = r.RAIN_VISOR_LAYER_GLASS_ALPHA
+    v.gLayerBandOpacity = r.RAIN_VISOR_LAYER_BAND_OPACITY
+    local probeOn = item.mat ~= nil
+        and r.RAIN_VISOR_LAYER_SHADOW_PROBE and vl.probeReady and vl.probeCanvas ~= nil
+    p.textures.txLayerProbe = probeOn and vl.probeCanvas or ov.src
+    v.gLayerProbeOn = probeOn and 1.0 or 0.0
+    v.gLayerInvShotSize = vec2(1.0 / math.max(ov.w or 1, 1), 1.0 / math.max(ov.h or 1, 1))
+    v.gLayerProbeAlbedo = r.RAIN_VISOR_LAYER_PROBE_ALBEDO
+    local lcH = sim and sim.lightColor or rgb(1, 1, 1)
+    v.gLayerSunHDRLum = 0.2126 * lcH.r + 0.7152 * lcH.g + 0.0722 * lcH.b
+    v.gLayerProbeGain = r.RAIN_VISOR_LAYER_PROBE_GAIN
+    v.gLayerProbeStrength = r.RAIN_VISOR_LAYER_PROBE_STRENGTH
+    v.gLayerProbeMinNL = r.RAIN_VISOR_LAYER_PROBE_MIN_NL
+    v.gLayerProbeMaxDepth = r.RAIN_VISOR_LAYER_PROBE_MAX_DEPTH
+    v.gLayerProbeDebug = (probeOn and r.RAIN_VISOR_LAYER_PROBE_DEBUG) and 1.0 or 0.0
+    render.setCullMode(item.two and render.CullMode.None
+        or (r.RAIN_VISOR_LAYER_CULL_FLIP and render.CullMode.Front
+            or render.CullMode.Back))
+    e.targetMesh:setVisible(true, false)
+    local ok, err = pcall(render.mesh, p)
+    e.targetMesh:setVisible(false, false)
+    if not ok then vl.err = item.mesh .. ': ' .. tostring(err) end
+end
+-- s49 scene-shadow probe instance.
+rainDynamicSceneCopyState.visorProbeEnsure = function()
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if vl.probe ~= nil or vl.probeFailed then return vl.probe end
+    if not axisRollNode then return nil end
+    local ok, node = pcall(function()
+        return axisRollNode:loadKN5({ filename = cfg.RUNTIME.MODEL_PATH,
+            forceRenderableOn = true })
+    end)
+    if not ok or not node then
+        vl.probeFailed = true
+        vl.probeErr = tostring(node)
+        return nil
+    end
+    pcall(function() node:ensureUniqueMaterials() end)
+    local keep = {}
+    for _, item in ipairs((vl.defs or rainDynamicSceneCopyState.visorLayerDefs()).housing) do
+        keep[item.mesh] = true
+    end
+    local refs = {}
+    for _, e in ipairs(MATERIAL_EDITORS or {}) do
+        local ref = node:findMeshes(e.meshName)
+        if ref and #ref > 0 then
+            if keep[e.meshName] then
+                refs[#refs + 1] = ref
+                pcall(function()
+                    ref:setMaterialTexture('txDiffuse', rgbm(1, 1, 1, 1))
+                    ref:setMaterialTexture('txNormal', rgbm(0.5, 0.5, 1, 1))
+                    ref:setMaterialProperty('ksAmbient', 0.0)
+                    ref:setMaterialProperty('ksSpecular', 0.0)
+                    ref:setMaterialProperty('ksEmissive', rgb(0, 0, 0))
+                end)
+                pcall(function() ref:setMaterialProperty('fresnelMaxLevel', 0.0) end)
+                pcall(function() ref:setMaterialProperty('fresnelC', 0.0) end)
+                pcall(function() ref:setMaterialProperty('ksSpecularEXP', 1.0) end)
+                -- the probe must not cast its own shadows onto anything
+                pcall(function() ref:setShadows(false) end)
+            else
+                ref:setVisible(false, false)
+            end
+        end
+    end
+    vl.probe, vl.probeRefs, vl.probeAlbedo = node, refs, nil
+    return node
+end
+rainDynamicSceneCopyState.visorProbeSet = function(on)
+    local r = cfg.RUNTIME
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not on then
+        if vl.probe then vl.probe:setVisible(false) end
+        return
+    end
+    local node = rainDynamicSceneCopyState.visorProbeEnsure()
+    if not node then return end
+    node:setVisible(true)
+    if vl.probeAlbedo ~= r.RAIN_VISOR_LAYER_PROBE_ALBEDO then
+        vl.probeAlbedo = r.RAIN_VISOR_LAYER_PROBE_ALBEDO
+        for _, ref in ipairs(vl.probeRefs or {}) do
+            pcall(function() ref:setMaterialProperty('ksDiffuse', vl.probeAlbedo) end)
+        end
+    end
+end
+-- Called in the drop callback (in-scene stage): copy the HDR frame with
+-- linear depth so the overlay can read the probe's lit pixels.
+rainDynamicSceneCopyState.visorProbeCopy = function(sim)
+    local r = cfg.RUNTIME
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not (r.RAIN_VISOR_OVERLAY and r.RAIN_VISOR_LAYER and r.RAIN_VISOR_LAYER_SHADOW_PROBE)
+        or not vl.probe then
+        vl.probeReady = false
+        return
+    end
+    local mw = math.max(64, rainDynamicSceneCopyState.mainTargetWidth or 1280)
+    local mh = math.max(64, rainDynamicSceneCopyState.mainTargetHeight or 720)
+    local w, h = math.floor(mw / 2), math.floor(mh / 2)
+    if not vl.probeCanvas or vl.probeW ~= w or vl.probeH ~= h then
+        if vl.probeCanvas then vl.probeCanvas:dispose() end
+        vl.probeCanvas = ui.ExtraCanvas(vec2(w, h), 1, render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        vl.probeCanvas:setName('RainFX visor shadow probe (HDR + depth)')
+        vl.probeW, vl.probeH = w, h
+    end
+    local n = math.max(sim.cameraClipNear or 0.05, 0.001)
+    local f = math.max(sim.cameraClipFar or 5000.0, n + 1.0)
+    local ok = pcall(function()
+        vl.probeCanvas:updateSceneWithShader({
+            async = true,
+            textures = { txInput = 'dynamic::hdr', txDepthIn = 'dynamic::depth' },
+            values = { gN = n, gF = f,
+                gReversed = r.RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED and 1.0 or 0.0 },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    float3 c = txInput.SampleLevel(samLinearClamp, pin.Tex, 0.0).rgb;
+                    float d = txDepthIn.SampleLevel(samLinearClamp, pin.Tex, 0.0).r;
+                    if (gReversed > 0.5) d = 1.0 - d;
+                    float lin = d > 0.99999 ? 10000.0
+                        : gN * gF / max(gF - d * (gF - gN), 1e-4);
+                    return float4(c, min(lin, 10000.0));
+                }
+            ]]
+        })
+    end)
+    vl.probeReady = ok
+end
+
+-- Called inside the overlay GeometryShot transparent callback.
+rainDynamicSceneCopyState.visorLayerDraw = function(ov)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not vl.shader then
+        for _, sh in ipairs(shaders) do
+            if sh.ID == 'RAINFXVISORLAYER' and sh.LOADED then vl.shader = sh.HLSL end
+        end
+    end
+    vl.defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
+    -- 1. housing: opaque, depth write
+    render.setBlendMode(render.BlendMode.Opaque)
+    render.setDepthMode(render.DepthMode.Normal)
+    for _, item in ipairs(vl.defs.housing) do
+        rainDynamicSceneCopyState.visorLayerDrawItem(item, ov)
+    end
+    -- 2. glass back to front: premultiplied, depth read-only
+    for _, item in ipairs(vl.defs.glass) do
+        render.setBlendMode(render.BlendMode.BlendPremultiplied)
+        render.setDepthMode(render.DepthMode.ReadOnly)
+        if item.rain then
+            local p = ov.drawParams
+            if p then
+                render.setCullMode(render.CullMode.None)
+                rainDynamicSurfaceMesh:setVisible(true, false)
+                local okDraw, res = pcall(render.mesh, p)
+                rainDynamicSurfaceMesh:setVisible(false, false)
+                ov.drawn = okDraw and res and true or false
+                if not okDraw then ov.err = tostring(res) end
+            end
+        else
+            rainDynamicSceneCopyState.visorLayerDrawItem(item, ov)
+        end
+    end
+    vl.status = vl.shader and 'drawn' or 'shader not loaded'
+end
+
+-- HUD lift: windows moved to a redirect layer, drawn above the overlay.
+-- Lua IMGUI windows (names starting with "IMGUI") are drawn after our
+-- callback already and keep mouse input, so they are skipped by default.
+rainDynamicSceneCopyState.hudLift = { lifted = {}, skip = {}, nextScan = 0 }
+rainDynamicSceneCopyState.hudLiftRelease = function()
+    local hl = rainDynamicSceneCopyState.hudLift
+    for name in pairs(hl.lifted) do
+        pcall(function()
+            local a = ac.accessAppWindow(name)
+            if a and a:valid() then a:setRedirectLayer(0) end
+        end)
+    end
+    hl.lifted = {}
+end
+ac.onRelease(function()
+    rainDynamicSceneCopyState.hudLiftRelease()
+    if rainDynamicSceneCopyState.visorLayer.hidden then
+        pcall(rainDynamicSceneCopyState.visorLayerSceneHide, false)
+    end
+end)
+rainDynamicSceneCopyState.hudLiftUpdate = function()
+    local r = cfg.RUNTIME
+    local hl = rainDynamicSceneCopyState.hudLift
+    local layer = math.max(1, math.floor(r.RAIN_VISOR_OVERLAY_HUD_LAYER))
+    if hl.layer and hl.layer ~= layer then
+        rainDynamicSceneCopyState.hudLiftRelease()
+    end
+    hl.layer = layer
+    local now = os.clock()
+    if now >= hl.nextScan then
+        hl.nextScan = now + 1.0
+        local okList, list = pcall(ac.getAppWindows)
+        hl.windows = okList and list or {}
+        for _, wnd in ipairs(hl.windows) do
+            local name = wnd.name
+            if hl.skip[name] == nil then
+                hl.skip[name] = name:sub(1, 5) == 'IMGUI'
+            end
+            -- Never lift our own window (it must keep mouse input).
+            local own = (tostring(wnd.title):lower():find('real visor', 1, true)
+                or name:lower():find('realvisor', 1, true)
+                or name:lower():find('real visor', 1, true)) ~= nil
+            if own then hl.skip[name] = true end
+            local want = wnd.visible and not hl.skip[name] and not own
+            local is = hl.lifted[name] ~= nil
+            -- s41: redirect only on change (s40 also re-applied when the
+            -- reported layer differed, every second: periodic flicker).
+            if want and not is then
+                pcall(function()
+                    local a = ac.accessAppWindow(name)
+                    if a and a:valid() then
+                        a:setRedirectLayer(layer)
+                        hl.lifted[name] = true
+                        hl.settle = 2
+                    end
+                end)
+            elseif not want and is then
+                pcall(function()
+                    local a = ac.accessAppWindow(name)
+                    if a and a:valid() then a:setRedirectLayer(0) end
+                end)
+                hl.lifted[name] = nil
+                hl.settle = 2
+            end
+        end
+    end
+    -- Layer content may be stale/uninitialised right after a redirect.
+    if (hl.settle or 0) > 0 then
+        hl.settle = hl.settle - 1
+        hl.status = 'settling'
+        return
+    end
+    local size = ui.windowSize()
+    local okDraw = pcall(function()
+        ui.renderShader({
+            p1 = vec2(0, 0), p2 = size,
+            blendMode = r.RAIN_VISOR_OVERLAY_HUD_PREMULTIPLIED
+                and render.BlendMode.BlendPremultiplied
+                or render.BlendMode.AlphaBlend,
+            textures = { txHud = 'dynamic::hud::redirected::' .. tostring(layer) },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    return txHud.SampleLevel(samLinearClamp, pin.Tex, 0.0);
+                }
+            ]]
+        })
+    end)
+    hl.status = okDraw and 'ok' or 'FAIL'
+end
+
+-- ui.onExclusiveHUD holds ONE callback: the P0 probe callback below calls
+-- this first.
+rainDynamicSceneCopyState.rainOverlayHud = function(mode)
+    local r = cfg.RUNTIME
+    local ov = rainDynamicSceneCopyState.overlay
+    local wantHide = r.RAIN_VISOR_OVERLAY and r.RAIN_VISOR_LAYER
+    pcall(rainDynamicSceneCopyState.visorProbeSet,
+        wantHide and r.RAIN_VISOR_LAYER_SHADOW_PROBE and true or false)
+    if wantHide then
+        -- every frame: other code (editors, profiles) may set visibility
+        rainDynamicSceneCopyState.visorLayerSceneHide(true)
+    elseif rainDynamicSceneCopyState.visorLayer.hidden then
+        rainDynamicSceneCopyState.visorLayerSceneHide(false)
+    end
+    if not r.RAIN_VISOR_OVERLAY then
+        if next(rainDynamicSceneCopyState.hudLift.lifted) then
+            rainDynamicSceneCopyState.hudLiftRelease()
+        end
+        if ov.shot then ov.shot:dispose(); ov.shot = nil end
+        if ov.src then ov.src:dispose(); ov.src = nil end
+        ov.status = 'off'
+        return
+    end
+    if not r.RAIN_ENABLED or not r.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then return end
+    local sim = ac.getSim()
+    if not sim then return end
+    local mw = math.max(64, rainDynamicSceneCopyState.mainTargetWidth or 1280)
+    local mh = math.max(64, rainDynamicSceneCopyState.mainTargetHeight or 720)
+    local ws = ui.windowSize()
+    local t = math.min(math.max(r.RAIN_VISOR_OVERLAY_RES_SCALE or 1.0, 0.0), 1.0)
+    local w = math.floor(mw + (math.max(ws.x, 64) - mw) * t + 0.5)
+    local h = math.floor(mh + (math.max(ws.y, 64) - mh) * t + 0.5)
+    rainDynamicSceneCopyState.rainOverlayEnsure(ov, w, h)
+    -- 1. Source = the final frame of THIS frame, before our overlay.
+    local okSrc = pcall(function()
+        ov.src:updateWithShader({
+            textures = { txInput = 'dynamic::screen' },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    return float4(txInput.SampleLevel(samLinearClamp,
+                        pin.Tex, 0.0).rgb, 1.0);
+                }
+            ]]
+        })
+        ov.src:mipsUpdate()
+    end)
+    -- 2. Render the visor layer now (fallback: next sceneReady).
+    if not ov.hudUpdateFailed then
+        if not rainDynamicSceneCopyState.rainOverlayRender(ov, sim) then ov.hudUpdateFailed = true end
+    end
+    -- 3. Composite over the final frame.
+    local size = ui.windowSize()
+    local okComp = pcall(function()
+        local premul = r.RAIN_VISOR_LAYER
+        ui.renderShader({
+            p1 = vec2(0, 0), p2 = size,
+            blendMode = premul and render.BlendMode.BlendPremultiplied
+                or render.BlendMode.AlphaBlend,
+            textures = { txOverlay = ov.shot },
+            values = { gDebugAlpha = r.RAIN_VISOR_OVERLAY_DEBUG_ALPHA and 1.0 or 0.0 },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    float4 c = txOverlay.SampleLevel(samLinearClamp, pin.Tex, 0.0);
+                    if (gDebugAlpha > 0.5)
+                        return float4(c.aaa, 1.0);
+                    return float4(saturate(c.rgb), saturate(c.a));
+                }
+            ]]
+        })
+    end)
+    if r.RAIN_VISOR_OVERLAY_HUD_LIFT then
+        rainDynamicSceneCopyState.hudLiftUpdate()
+    elseif next(rainDynamicSceneCopyState.hudLift.lifted) then
+        rainDynamicSceneCopyState.hudLiftRelease()
+    end
+    ov.status = string.format('src %s  render %s  composite %s  drawn %s',
+        okSrc and 'ok' or 'FAIL',
+        ov.hudUpdateFailed and 'sceneReady (1 frame late)' or 'HUD',
+        okComp and 'ok' or 'FAIL', tostring(ov.drawn))
+end
+
+-- Overlay probe P0 (docs/RAINFX_POST_OVERLAY.md). Verifies:
+--  1. a GeometryShot with a custom transparent callback can run our
+--     render.mesh (custom shader, SceneReference, setVisible trick);
+--  2. what dynamic::screen holds at UI time (current final frame? does it
+--     contain what we draw in the HUD -> feedback?);
+--  3. full-screen coverage / alignment of ui.onExclusiveHUD drawing.
+rainDynamicSceneCopyState.overlayProbe = { status = 'off' }
+render.onSceneReady(function()
+    local r = cfg.RUNTIME
+    local op = rainDynamicSceneCopyState.overlayProbe
+    if not r.RAIN_VISOR_OVERLAY_PROBE then
+        if op.shot then op.shot:dispose(); op.shot = nil end
+        op.status = 'off'
+        return
+    end
+    local sim = ac.getSim()
+    local params = rainDynamicSceneCopyState.lastDropMeshParams
+    if not sim or not params then op.status = 'waiting for drop params'; return end
+    local w = math.max(64, rainDynamicSceneCopyState.mainTargetWidth or 1280)
+    local h = math.max(64, rainDynamicSceneCopyState.mainTargetHeight or 720)
+    if not op.shot or op.w ~= w or op.h ~= h then
+        if op.shot then op.shot:dispose() end
+        op.calls, op.drawn = 0, 0
+        op.shot = ac.GeometryShot({
+            transparent = function()
+                local p = rainDynamicSceneCopyState.lastDropMeshParams
+                if not p then return end
+                op.calls = (op.calls or 0) + 1
+                rainDynamicSurfaceMesh:setVisible(true, false)
+                render.setBlendMode(render.BlendMode.AlphaBlend)
+                render.setCullMode(render.CullMode.None)
+                render.setDepthMode(render.DepthMode.Off)
+                local okDraw, res = pcall(render.mesh, p)
+                rainDynamicSurfaceMesh:setVisible(false, false)
+                if okDraw and res then op.drawn = (op.drawn or 0) + 1 end
+                if not okDraw then op.err = tostring(res) end
+            end,
+        }, vec2(w, h), 1, false, render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        op.shot:setName('RainFX overlay probe')
+        pcall(function() op.shot:setSky(false) end)
+        pcall(function() op.shot:setParticles(false) end)
+        pcall(function() op.shot:setClearColor(rgbm(0, 0, 0, 0)) end)
+        op.w, op.h = w, h
+    end
+    pcall(function() op.shot:setClippingPlanes(
+        math.max(sim.cameraClipNear or 0.05, 0.001), sim.cameraClipFar) end)
+    local ok, res = pcall(function()
+        return op.shot:update(sim.cameraPosition, sim.cameraLook,
+            sim.cameraUp, sim.cameraFOV)
+    end)
+    op.status = ok and string.format('ok  callback calls %d  mesh drawn %d',
+        op.calls or 0, op.drawn or 0) or ('FAIL ' .. tostring(res))
+end)
+ui.onExclusiveHUD(function(mode)
+    local okHud, errHud = pcall(rainDynamicSceneCopyState.rainOverlayHud, mode)
+    if not okHud then rainDynamicSceneCopyState.overlay.err = tostring(errHud) end
+    local r = cfg.RUNTIME
+    local op = rainDynamicSceneCopyState.overlayProbe
+    if not r.RAIN_VISOR_OVERLAY_PROBE or not op.shot then return end
+    -- 2: snapshot of dynamic::screen at HUD time, BEFORE our overlay draw.
+    local okCopy = pcall(function()
+        local sw = 320
+        local sh = math.floor(sw * (op.h or 9) / math.max(op.w or 16, 1))
+        if not op.screenCopy or op.scW ~= sw or op.scH ~= sh then
+            if op.screenCopy then op.screenCopy:dispose() end
+            op.screenCopy = ui.ExtraCanvas(vec2(sw, sh), 1,
+                render.AntialiasingMode.None, render.TextureFormat.R8G8B8A8.UNorm)
+            op.scW, op.scH = sw, sh
+        end
+        op.screenCopy:updateWithShader({
+            textures = { txInput = 'dynamic::screen' },
+            shader = [[
+                float4 main(PS_IN pin)
+                {
+                    return float4(txInput.SampleLevel(samLinearClamp,
+                        pin.Tex, 0.0).rgb, 1.0);
+                }
+            ]]
+        })
+    end)
+    op.screenCopyOk = okCopy
+    if r.RAIN_VISOR_OVERLAY_PROBE_FULLSCREEN then
+        -- 3: full-screen, premultiplied-ish alpha over the final frame.
+        local size = ui.windowSize()
+        ui.drawImage(op.shot, vec2(0, 0), size)
+        op.hudSize = size
+    end
+end)
+
 -- Stage probe (docs/RAINFX_STAGE_PROBE.md). Registered before the drop
 -- draw callback: inside the drop stage it captures the frame BEFORE drops.
 rainDynamicSceneCopyState.probeStages = {
@@ -9818,6 +10613,7 @@ float4 main(PS_IN pin)
             l + (f.g - l) * k, l + (f.b - l) * k)
     end
     rainDynamicSceneCopyState.shotToneUpdate(sim)
+    pcall(rainDynamicSceneCopyState.visorProbeCopy, sim)
     local dropMeshParams = {
         mesh = rainDynamicSurfaceMesh,
         transform = 'original',
@@ -9853,6 +10649,12 @@ float4 main(PS_IN pin)
         values = {
             gDynamicDropWeatherFogColor =
                 rainDynamicSceneCopyState.fogTone or sim.fogColor,
+            gDynamicDropLDR = 0.0,
+            gDynamicDropMipBias = 0.0,
+            gDynamicDropPremulOut = 0.0,
+            gDynamicDropLdrFogMip = cfg.RUNTIME.RAIN_VISOR_OVERLAY_FOG_MIP,
+            gDynamicDropLdrFogSat = math.max(0.0,
+                cfg.RUNTIME.RAIN_DYNAMIC_FOG_TONE_SATURATION or 1.0),
 
             gDynamicDropInvScreenSize = vec2(
                 1.0 / math.max(sim.windowWidth or 1, 1),
@@ -10115,7 +10917,13 @@ float4 main(PS_IN pin)
         },
         shader = rainDynamicDropShader.HLSL
     }
-    local dynamicDrawn = render.mesh(dropMeshParams)
+    rainDynamicSceneCopyState.lastDropMeshParams = dropMeshParams
+    local dynamicDrawn = false
+    if not ((cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE
+            and cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE)
+            or cfg.RUNTIME.RAIN_VISOR_OVERLAY) then
+        dynamicDrawn = render.mesh(dropMeshParams)
+    end
     -- Depth occlusion pass (docs/RAINFX_IMPACT_SPLASH.md §7): same mesh and
     -- shader in depth-only mode (alpha 0 output, clipped where the visor is
     -- bare), so car glass drawn later cannot blend over the drops.
@@ -13183,6 +13991,116 @@ function windowMain(dt)
                 ui.endGroup()
                 col = col + 1
                 if col % 2 == 1 then ui.sameLine() end
+            end
+        end
+        ui.separator()
+        ui.text('Post overlay P1 (RAINFX_POST_OVERLAY.md)')
+        tfCheck('Visor layer as post overlay (P1)', 'RAIN_VISOR_OVERLAY')
+        if cfg.RUNTIME.RAIN_VISOR_OVERLAY then
+            local ov = rainDynamicSceneCopyState.overlay
+            ui.text('status: ' .. tostring(ov.status) .. (ov.err and ('  err ' .. ov.err) or ''))
+            tfSlider('Overlay veil tone mip (frame mean)', 'RAIN_VISOR_OVERLAY_FOG_MIP', 0.0, 9.0, '%.1f')
+            tfSlider('Overlay resolution (0 render, 1 output)', 'RAIN_VISOR_OVERLAY_RES_SCALE', 0.0, 1.0, '%.2f')
+            ui.separator()
+            ui.text('Visor layer V1 (RAINFX_VISOR_LAYER.md)')
+            tfCheck('Visor KN5 drawn in the overlay (hidden in scene)', 'RAIN_VISOR_LAYER')
+            if cfg.RUNTIME.RAIN_VISOR_LAYER then
+                local vl = rainDynamicSceneCopyState.visorLayer
+                ui.text('layer: ' .. tostring(vl.status) .. (vl.err and ('  err ' .. vl.err) or ''))
+                tfSlider('Layer ambient (x frame-mean luminance)', 'RAIN_VISOR_LAYER_AMBIENT', 0.0, 2.0, '%.2f')
+                tfSlider('Layer ambient sky chroma', 'RAIN_VISOR_LAYER_AMBIENT_SAT', 0.0, 1.0, '%.2f')
+                tfSlider('Layer ambient floor (down faces)', 'RAIN_VISOR_LAYER_AMBIENT_FLOOR', 0.0, 1.0, '%.2f')
+                tfCheck('Light direction flip (toward light = -lightDirection)', 'RAIN_VISOR_LAYER_LIGHT_FLIP')
+                tfCheck('Helmet shadow on interior parts', 'RAIN_VISOR_LAYER_HELMET_SHADOW')
+                tfSlider('Shadow: sun-forward cos dark', 'RAIN_VISOR_LAYER_SHADOW_COS_LO', -1.0, 1.0, '%.2f')
+                tfSlider('Shadow: sun-forward cos lit', 'RAIN_VISOR_LAYER_SHADOW_COS_HI', -1.0, 1.0, '%.2f')
+                tfSlider('Interior ambient', 'RAIN_VISOR_LAYER_INTERIOR_AMBIENT', 0.0, 1.5, '%.2f')
+                tfSlider('Interior: sun bounce', 'RAIN_VISOR_LAYER_SUN_BOUNCE', 0.0, 1.0, '%.2f')
+                tfSlider('Interior: bounce kept in shadow', 'RAIN_VISOR_LAYER_BOUNCE_BASE', 0.0, 1.0, '%.2f')
+                tfSlider('Interior: light through opening', 'RAIN_VISOR_LAYER_OPENING', 0.0, 1.5, '%.2f')
+                tfSlider('Interior: sky chroma (0 neutral)', 'RAIN_VISOR_LAYER_INTERIOR_SKY_CHROMA', 0.0, 1.0, '%.2f')
+                ui.text('Shadows (s50: scene-shadow probe only)')
+                local vls = rainDynamicSceneCopyState.visorLayer
+                tfCheck('Scene-shadow probe (trees, poles: CSP shadow maps)', 'RAIN_VISOR_LAYER_SHADOW_PROBE')
+                if cfg.RUNTIME.RAIN_VISOR_LAYER_SHADOW_PROBE then
+                    ui.text('probe: ' .. (vls.probe and (vls.probeReady and 'ok' or 'waiting') or 'not loaded')
+                        .. (vls.probeErr and ('  err ' .. vls.probeErr) or ''))
+                    tfCheck('Probe debug (white lit / black shadow)', 'RAIN_VISOR_LAYER_PROBE_DEBUG')
+                    tfSlider('Probe gain (sun calibration)', 'RAIN_VISOR_LAYER_PROBE_GAIN', 0.05, 5.0, '%.2f')
+                    tfSlider('Probe strength', 'RAIN_VISOR_LAYER_PROBE_STRENGTH', 0.0, 1.0, '%.2f')
+                    tfSlider('Probe albedo (in-scene darkness)', 'RAIN_VISOR_LAYER_PROBE_ALBEDO', 0.01, 0.5, '%.3f')
+                    tfSlider('Probe min N.L', 'RAIN_VISOR_LAYER_PROBE_MIN_NL', 0.0, 0.5, '%.2f')
+                    if vls.probeCanvas then ui.image(vls.probeCanvas, vec2(240, 240 * (vls.probeH or 9) / math.max(vls.probeW or 16, 1))) end
+                end
+                tfSlider('Layer ambient mip', 'RAIN_VISOR_LAYER_AMBIENT_MIP', 0.0, 10.0, '%.1f')
+                tfSlider('Layer sun', 'RAIN_VISOR_LAYER_SUN', 0.0, 2.0, '%.2f')
+                tfSlider('Glass film alpha', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
+                tfSlider('Top band opacity', 'RAIN_VISOR_LAYER_BAND_OPACITY', 0.0, 1.0, '%.2f')
+                tfSlider('Glass line grey', 'RAIN_VISOR_LAYER_BORDER_GREY', 0.0, 0.5, '%.3f')
+                tfCheck('Single-sided parts: cull front instead of back', 'RAIN_VISOR_LAYER_CULL_FLIP')
+                ui.text('V2 housing materials')
+                tfCheck('Normal maps: flip green', 'RAIN_VISOR_LAYER_NORMAL_FLIP_G')
+                tfSlider('Frame normal', 'RAIN_VISOR_LAYER_FRAME_NORMAL', 0.0, 3.0, '%.2f')
+                tfSlider('Frame spec', 'RAIN_VISOR_LAYER_FRAME_SPEC', 0.0, 2.0, '%.2f')
+                tfSlider('Frame gloss', 'RAIN_VISOR_LAYER_FRAME_GLOSS', 0.0, 1.0, '%.2f')
+                tfSlider('Glass line (rubber) normal', 'RAIN_VISOR_LAYER_RUBBER_NORMAL', 0.0, 3.0, '%.2f')
+                tfSlider('Glass line (rubber) spec', 'RAIN_VISOR_LAYER_RUBBER_SPEC', 0.0, 2.0, '%.2f')
+                tfSlider('Glass line (rubber) gloss', 'RAIN_VISOR_LAYER_RUBBER_GLOSS', 0.0, 1.0, '%.2f')
+                tfSlider('Fabric normal (fuzz)', 'RAIN_VISOR_LAYER_FABRIC_NORMAL', 0.0, 3.0, '%.2f')
+                tfSlider('Fabric sheen', 'RAIN_VISOR_LAYER_FABRIC_SHEEN', 0.0, 2.0, '%.2f')
+                tfSlider('Fabric sheen power', 'RAIN_VISOR_LAYER_FABRIC_SHEEN_POWER', 1.0, 8.0, '%.2f')
+                tfSlider('Fabric spec', 'RAIN_VISOR_LAYER_FABRIC_SPEC', 0.0, 2.0, '%.2f')
+                tfSlider('Fabric lit-zone lift (direct light)', 'RAIN_VISOR_LAYER_FABRIC_LIT_LIFT', 0.0, 3.0, '%.2f')
+                tfCheck('Mirror: stock visor in mirrors, probe hidden there', 'RAIN_VISOR_LAYER_MIRROR_STOCK')
+                tfSlider('Fabric gloss (x txMaps G)', 'RAIN_VISOR_LAYER_FABRIC_GLOSS', 0.0, 1.0, '%.2f')
+            end
+            ui.text(string.format('overlay %sx%s', tostring(ov.w), tostring(ov.h)))
+            tfCheck('Overlay debug: show alpha', 'RAIN_VISOR_OVERLAY_DEBUG_ALPHA')
+            tfCheck('HUD lift: AC / Python apps above the overlay (no mouse while lifted)', 'RAIN_VISOR_OVERLAY_HUD_LIFT')
+            if cfg.RUNTIME.RAIN_VISOR_OVERLAY_HUD_LIFT then
+                tfCheck('HUD lift: premultiplied blend', 'RAIN_VISOR_OVERLAY_HUD_PREMULTIPLIED')
+                local hl = rainDynamicSceneCopyState.hudLift
+                ui.text('HUD lift draw: ' .. tostring(hl.status) .. '  layer ' .. tostring(hl.layer))
+                if hl.windows then
+                    for _, wnd in ipairs(hl.windows) do
+                        if wnd.visible then
+                            local lift = not hl.skip[wnd.name]
+                            if ui.checkbox(string.format('lift: %s (%s)', tostring(wnd.title),
+                                    tostring(wnd.name)), lift) then
+                                hl.skip[wnd.name] = lift
+                                hl.nextScan = 0
+                            end
+                        end
+                    end
+                end
+            end
+            if ov.shot then
+                local w = 320
+                local h = w * (ov.h or 9) / math.max(ov.w or 16, 1)
+                ui.text('overlay layer (left) / source = final frame (right)')
+                ui.image(ov.shot, vec2(w, h))
+                ui.sameLine()
+                if ov.src then ui.image(ov.src, vec2(w, h)) end
+            end
+        end
+        ui.separator()
+        ui.text('Overlay probe P0 (RAINFX_POST_OVERLAY.md)')
+        tfCheck('Overlay probe: render drops offscreen', 'RAIN_VISOR_OVERLAY_PROBE')
+        if cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE then
+            tfCheck('Overlay probe: draw full-screen in HUD', 'RAIN_VISOR_OVERLAY_PROBE_FULLSCREEN')
+            tfCheck('Overlay probe: hide in-scene drops', 'RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE')
+            local op = rainDynamicSceneCopyState.overlayProbe
+            ui.text('status: ' .. tostring(op.status) .. (op.err and ('  err ' .. op.err) or ''))
+            ui.text(string.format('shot %sx%s  HUD size %s  screen copy %s',
+                tostring(op.w), tostring(op.h), tostring(op.hudSize),
+                op.screenCopyOk == nil and '-' or (op.screenCopyOk and 'ok' or 'FAIL')))
+            if op.shot then
+                local w = 320
+                local h = w * (op.h or 9) / math.max(op.w or 16, 1)
+                ui.text('offscreen drops (left) / dynamic::screen at HUD time (right)')
+                ui.image(op.shot, vec2(w, h))
+                ui.sameLine()
+                if op.screenCopy then ui.image(op.screenCopy, vec2(w, h)) end
             end
         end
         if cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_PREVIEW then

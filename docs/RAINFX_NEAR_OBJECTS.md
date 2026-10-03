@@ -274,3 +274,39 @@ there in the cockpit camera is the open question.
 - In-scene, the source for those texels can only come from the shot. The
   shot lacks the livery or cockpit too, which gives the untextured look.
 - s34's frame priority and rule 1 remain correct for the free camera.
+
+## 9. Correction: the missing wheel/bonnet is a game issue (user, 2026-10-03)
+
+The missing steering wheel and bonnet meshes in the F1 camera with Extra FX
+**reproduce with the RealVisor app removed entirely**. This is CSP/game
+behaviour, not caused by our pipeline, and it is **out of scope**. No further
+work on it.
+
+### What this changes in §7–8
+
+- The "black / untextured HDR at every stage, correct at fixed track
+  places" pattern is the game's own render state. Our stage probe recorded
+  it faithfully, and the stage-probe facts themselves remain valid.
+- The conclusion "post overlay is *required* for the cockpit camera" is
+  withdrawn. The overlay (RAINFX_POST_OVERLAY.md) stays an **option** for
+  its other benefits:
+  - layer above everything (wiper order);
+  - no DLSS reprojection;
+  - final-frame tone.
+
+  It is no longer forced by this issue.
+
+### What stays as is
+
+- §3 rule 1 (trust a nearer frame) and s34 frame priority. They fixed the
+  free-camera wheel and dashboard case, which was ours.
+- s34 thin film lifetime.
+- Defaults are unchanged:
+  - in-scene path;
+  - `RAIN_VISOR_OVERLAY = false`;
+  - `RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG` as set by the user.
+
+### Test rule from now on
+
+Before attributing a render artefact to RainFX, compare with the app
+removed (or with RainFX disabled), at the same place on the track.

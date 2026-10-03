@@ -34,6 +34,20 @@ float4 rainMicroPoint(float2 uv)
     return txDynamicMicroPattern.Load(int3(p, 0));
 }
 
+// (Declared before its first use, s39 fix.)
+// Fog / ambient tone used by veil, glint and sky tone. In-scene (HDR) it is
+// the WeatherFX fog colour; in the post overlay (LDR, docs/
+// RAINFX_POST_OVERLAY.md P1) it is estimated from the final frame itself.
+static float3 gFogTone = float3(0.0, 0.0, 0.0);
+
+// Every refraction-source read goes through here. gDynamicDropMipBias =
+// log2(overlay size / main render size) keeps blur widths in screen terms
+// when the post overlay renders at a higher resolution (s41); 0 in-scene.
+float4 rainSnap(SamplerState s, float2 uv, float mip)
+{
+    return txDynamicSnapshot.SampleLevel(s, uv, mip + gDynamicDropMipBias);
+}
+
 // Match far shot pixels to the current WeatherFX fog tone. Transfer only
 // bounded cloud luminance from the shot; never copy its mismatched sky hue.
 float3 rainDynamicWeatherSkyTone(float3 scene, float2 uv)
@@ -42,14 +56,14 @@ float3 rainDynamicWeatherSkyTone(float3 scene, float2 uv)
         samLinearClamp, saturate(uv), 0.0).r;
     if (depth <= 0.99999)
         return scene;
-    float3 broad = txDynamicSnapshot.SampleLevel(
+    float3 broad = rainSnap(
         samLinearClamp, saturate(uv), 9.0).rgb;
     float3 weights = float3(0.2126, 0.7152, 0.0722);
     float contrast = clamp(
         1.0 + (dot(scene, weights)
             / max(dot(broad, weights), 0.02) - 1.0) * 0.25,
         0.95, 1.12);
-    return gDynamicDropWeatherFogColor * contrast;
+    return gFogTone * contrast;
 }
 
 // Water field tap: the higher of head canvas and trail canvas wins, so a
@@ -225,12 +239,12 @@ float4 rainHazeEvalBase(float2 posH, float2 patternUV)
     float2 speck = (hz.ga * 2.0 - 1.0) * gDynamicDropHazeSpecklePixels
         * gDynamicDropInvRenderTargetSize;
     float2 uv = saturate(sceneUV + speck);
-    float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp, uv,
+    float3 color = rainSnap(samLinearClamp, uv,
         gDynamicDropHazeMip).rgb;
     if (gDynamicDropHazeSkyCorrection > 0.5)
         color = rainDynamicWeatherSkyTone(color, uv);
     // Forward scattering lifts the film toward the ambient fog tone.
-    color = lerp(color, gDynamicDropWeatherFogColor, gDynamicDropHazeVeil);
+    color = lerp(color, gFogTone, gDynamicDropHazeVeil);
     return float4(color, saturate(amount));
 }
 
@@ -281,7 +295,7 @@ float rainMicroRadiusCells(float packedB)
 // luminance ratio window of bg, so no drop turns into a mirror.
 float3 rainWaterToneBg(float2 sceneUV)
 {
-    float3 bg = txDynamicSnapshot.SampleLevel(samLinearClamp,
+    float3 bg = rainSnap(samLinearClamp,
         saturate(sceneUV), gDynamicDropWaterToneBgMip).rgb;
     if (gDynamicDropBirthSkyCorrection > 0.5)
         bg = rainDynamicWeatherSkyTone(bg, sceneUV);
@@ -301,7 +315,7 @@ float3 rainWaterToneClamp(float3 color, float3 bg)
     float lb = max(dot(bg, w), 1e-5);
     // Upper bound has a floor (x fog luminance): over a black background
     // the window used to collapse and remove every drop there.
-    float lbUp = max(lb, dot(gDynamicDropWeatherFogColor, w)
+    float lbUp = max(lb, dot(gFogTone, w)
         * gDynamicDropWaterToneFloor);
     float target = clamp(l, lb * gDynamicDropWaterToneRatioMin,
         lbUp * gDynamicDropWaterToneRatioMax);
@@ -322,7 +336,7 @@ float3 rainWaterLensColor(float2 sceneUV, float2 slope, float energy,
         * float2(aspect, 1.0));
     float lensMip = gDynamicDropWFSceneMip
         + gDynamicDropWFSlopeMip * saturate(slopeLen / 1.5);
-    float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp,
+    float3 color = rainSnap(samLinearClamp,
         sampleUV, lensMip).rgb;
     if (gDynamicDropBirthSkyCorrection > 0.5)
         color = rainDynamicWeatherSkyTone(color, sampleUV);
@@ -343,7 +357,7 @@ float3 rainWaterLensColor(float2 sceneUV, float2 slope, float energy,
     float glint = facing * facing * facing * facing
         * smoothstep(0.5, 1.1, slopeLen)
         * gDynamicDropWFGlint * (1.0 + energy);
-    color += gDynamicDropWeatherFogColor * glint;
+    color += gFogTone * glint;
     return microTone ? rainWaterToneClamp(color, toneBg) : color;
 }
 
@@ -380,7 +394,7 @@ float3 rainSmearClassColor(float k, float2 sceneUV)
     float mip = max(gDynamicDropSmearMip
         + (h.z * 2.0 - 1.0) * gDynamicDropSmearClassMipRange, 0.0);
     float2 uv = saturate(sceneUV + off);
-    float3 c = txDynamicSnapshot.SampleLevel(samLinearClamp, uv, mip).rgb;
+    float3 c = rainSnap(samLinearClamp, uv, mip).rgb;
     if (gDynamicDropBirthSkyCorrection > 0.5)
         c = rainDynamicWeatherSkyTone(c, uv);
     return c * (1.0 + (h.w * 2.0 - 1.0) * gDynamicDropSmearToneRange);
@@ -548,7 +562,7 @@ float4 rainDropMain(PS_IN pin)
             smearScene *= 1.0 - gDynamicDropSmearLineStrength
                 * (smearN > 1.5 ? 1.0 - smoothstep(0.0,
                     max(gDynamicDropSmearLineWidth, 0.001), smearLineD) : 0.0);
-            gSmearColor = lerp(smearScene, gDynamicDropWeatherFogColor,
+            gSmearColor = lerp(smearScene, gFogTone,
                 gDynamicDropSmearVeil);
             if (gDynamicDropSmearDebug > 3.5)
                 return float4(frac(smearK0 * 0.618034 + 0.2),
@@ -725,7 +739,7 @@ float4 rainDropMain(PS_IN pin)
                             / max(gDynamicDropTrailSlopeMax, 0.1))
                         + gDynamicDropTrailSheetBlur * sheetFactor
                         + gDynamicDropSmearTrailBlur * gSmearMask;
-                float3 color = txDynamicSnapshot.SampleLevel(samLinearClamp,
+                float3 color = rainSnap(samLinearClamp,
                     sampleUV, wfMip).rgb;
                 if (gDynamicDropBirthSkyCorrection > 0.5)
                     color = rainDynamicWeatherSkyTone(color, sampleUV);
@@ -752,8 +766,8 @@ float4 rainDropMain(PS_IN pin)
                     * smoothstep(0.5, 1.1, slopeLen)
                     * gDynamicDropWFGlint * (1.0 + energy)
                     * (1.0 - 0.7 * sheetFactor);
-                color += gDynamicDropWeatherFogColor * glint;
-                color = lerp(color, gDynamicDropWeatherFogColor,
+                color += gFogTone * glint;
+                color = lerp(color, gFogTone,
                     gDynamicDropWFSheetVeil * sheetFactor);
                 color = rainWaterToneClamp(color, toneBg);
                 // Smear: heads turn turbid by region x G; trails by a fixed
@@ -896,7 +910,7 @@ float4 rainDropMain(PS_IN pin)
                     }
                     float2 offset = offsetPx * gDynamicDropInvRenderTargetSize;
                     float2 filmSampleUV = saturate(filmUV + offset);
-                    float3 filmScene = txDynamicSnapshot.SampleLevel(
+                    float3 filmScene = rainSnap(
                         samLinearClamp, filmSampleUV, filmMip).rgb;
                     if (gDynamicDropTrailSkyCorrection > 0.5)
                         filmScene = rainDynamicWeatherSkyTone(
@@ -1019,7 +1033,7 @@ float4 rainDropMain(PS_IN pin)
             float lensAlpha = saturate(gDynamicDropMicroOpacity
                 * microVisibility);
             gSolidA = lensAlpha;
-            lensColor += gDynamicDropWeatherFogColor * microPopFlash;
+            lensColor += gFogTone * microPopFlash;
             float4 lensHaze = rainHazeEval(pin.PosH.xy, patternUV);
             float lensOut = lensAlpha + (1.0 - lensAlpha) * lensHaze.a;
             return rainOver(float4((lensAlpha * lensColor
@@ -1038,7 +1052,21 @@ float4 rainDropMain(PS_IN pin)
 // occlude later car glass, while haze-only pixels let it draw.
 float4 main(PS_IN pin)
 {
+    gFogTone = gDynamicDropWeatherFogColor;
+    if (gDynamicDropLDR > 0.5)
+    {
+        float3 m = rainSnap(samLinearClamp,
+            float2(0.5, 0.4), gDynamicDropLdrFogMip).rgb;
+        float l = dot(m, float3(0.2126, 0.7152, 0.0722));
+        gFogTone = lerp(float3(l, l, l), m, saturate(gDynamicDropLdrFogSat));
+    }
     float4 c = rainDropMain(pin);
+    if (gDynamicDropLDR > 0.5)
+        c.rgb = saturate(c.rgb);
+    // Visor layer (docs/RAINFX_VISOR_LAYER.md): premultiplied output so the
+    // rain layer stacks with the KN5 glass layers (BlendPremultiplied).
+    if (gDynamicDropPremulOut > 0.5)
+        c.rgb *= saturate(c.a);
     if (gDynamicDropDepthOnly > 0.5 && gDynamicDropDepthExact > 0.5)
     {
         // v4 (docs/RAINFX_NEAR_OBJECTS.md): optionally dense haze / film
