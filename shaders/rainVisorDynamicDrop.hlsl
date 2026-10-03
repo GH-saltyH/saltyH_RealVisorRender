@@ -803,8 +803,14 @@ float4 rainDropMain(PS_IN pin)
         {
             float2 coverage = txDynamicTrailMask.SampleLevel(
                 samLinearClamp, patternUV, 0.0).rg;
+            // s34 (docs/RAINFX_NEAR_OBJECTS.md §6): the thin film has its
+            // own lifetime. G decays as 0.95 exp(-3 t / T_wipe), so
+            // (G / 0.95) ^ (T_wipe / T_film) = exp(-3 t / T_film): same
+            // channel, film fades with T_film, micro clearing keeps T_wipe.
+            float filmG = 0.95 * pow(saturate(coverage.g / 0.95),
+                max(gDynamicDropTrailFilmAgeExp, 0.05));
             float filmCoverage = gDynamicDropTrailFilmEnabled > 0.5
-                ? rainSmearWipe(coverage.g) : 0.0;
+                ? rainSmearWipe(filmG) : 0.0;
             float ridgeCoverage = gDynamicDropTrailRidgeEnabled > 0.5
                 ? rainSmearWipe(coverage.r) : 0.0;
             float2 filmGradient = float2(
@@ -1035,7 +1041,14 @@ float4 main(PS_IN pin)
     float4 c = rainDropMain(pin);
     if (gDynamicDropDepthOnly > 0.5 && gDynamicDropDepthExact > 0.5)
     {
-        clip(max(gSolidA, gOver.a) - gDynamicDropDepthAlphaMin);
+        // v4 (docs/RAINFX_NEAR_OBJECTS.md): optionally dense haze / film
+        // also writes depth, so car glass (drawn after every hookable stage,
+        // e.g. the windscreen wiper zone) cannot draw over it. Trade-off:
+        // under that haze the glass tint is gone (2026-10-02 note above).
+        float solid = max(gSolidA, gOver.a) - gDynamicDropDepthAlphaMin;
+        float hazeD = gDynamicDropHazeDepthMin > 0.0
+            ? c.a - gDynamicDropHazeDepthMin : -1.0;
+        clip(max(solid, hazeD));
         return float4(0.0, 0.0, 0.0, 0.0);
     }
     return c;

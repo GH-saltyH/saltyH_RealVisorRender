@@ -526,7 +526,10 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_TRAIL_MASK_FILM_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_SKY_CORRECTION = true,
         RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY = 0.11,    -- Thin film opacity, FINE TUNED
-        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 2.6,      -- Thin film refraction, FIND TUNED
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = 2.6,
+        -- s34: own lifetime of the thin film (was tied to the wipe recovery
+        -- time RAIN_DYNAMIC_TRAIL_MASK_SECONDS, ~3 s visible + fp16 tail).
+        RAIN_DYNAMIC_TRAIL_MASK_FILM_SECONDS = 1.0,      -- Thin film refraction, FIND TUNED
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED = true,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS = 1.30,
         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_OPACITY = 0.22,
@@ -775,7 +778,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_HAZE_SKY_CORRECTION = true,
         RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 384, -- per frame (was 64: each drop
                                                   -- re-stamped only every ~0.5 s)
-        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.11,
+        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 1.00,
         -- Test whether track-stage HDR works without the extra scene copy.
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
@@ -844,6 +847,20 @@ local cfg = scriptSettings:mapConfig({
         -- (depth present but colour not drawn yet at this stage: the black
         -- glove / wheel / glass rim seen in the interior view).
         RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO = 0.25,
+        -- v4 (docs/RAINFX_NEAR_OBJECTS.md): the frame is NEARER than the shot
+        -- and beyond this distance = a real object the shot does not draw
+        -- (steering wheel, cockpit, hands: AC culls the interior in extra
+        -- shots). Trust the frame there instead of falling back to the
+        -- shot sky. Below it = helmet / KN5 visor parts (not refracted).
+        -- Active only at the root.transparent draw stage (frame complete).
+        RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST = true,
+        RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST_MIN = 0.15, -- m
+        -- s34: frame priority. At the root.transparent stage the frame holds
+        -- every opaque object, so it is used wherever it has colour and lies
+        -- beyond NEAR_TRUST_MIN; the shot only fills helmet / KN5 range.
+        -- Fixes the wheel over the dashboard (shot cockpit differs from the
+        -- main one). Trade-off: no car-glass tint from the shot.
+        RAIN_DYNAMIC_SHOT_TONE_FRAME_PRIORITY = true,
         RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG = false, -- green frame / red shot
         RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP = 5,      -- shot mip of the ratio
         RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH = 1.0,
@@ -866,6 +883,10 @@ local cfg = scriptSettings:mapConfig({
         -- 1 = cheap gate (water height / micro class only).
         RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE = 2,
         RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN = 0.35,
+        -- v4: 0 = off. > 0: pixels whose final alpha (haze, film, smear
+        -- included) reaches this value also write depth, so car glass drawn
+        -- later (wiper zone) cannot cover them. Loses the glass tint there.
+        RAIN_DYNAMIC_DROP_HAZE_DEPTH_MIN = 0.0,
         -- Visor KN5 motion stencil (CSP: 1 = reduced TAA, 0.5 = extra TAA,
         -- < 0 = untouched). Anti-ghosting test for fast camera motion.
         RAIN_VISOR_MOTION_STENCIL = -1.0,
@@ -7893,6 +7914,14 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
             },
             values = {
                 gFrameMinRatio = r.RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO,
+                -- s35: also at main.smoke (later than root.transparent).
+                gNearTrust = (r.RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST
+                    and (r.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+                        or not r.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK)) and 1.0 or 0.0,
+                gNearTrustMin = math.max(r.RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST_MIN, near),
+                gFramePriority = (r.RAIN_DYNAMIC_SHOT_TONE_FRAME_PRIORITY
+                    and (r.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
+                        or not r.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK)) and 1.0 or 0.0,
                 gAgreeLo = r.RAIN_DYNAMIC_SHOT_TONE_AGREE_LO,
                 gAgreeHi = r.RAIN_DYNAMIC_SHOT_TONE_AGREE_HI,
                 gComposeDebug = r.RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG and 1.0 or 0.0,
@@ -7925,6 +7954,9 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
                         float4 f = txFrameFull.SampleLevel(samLinearClamp, uv, 0.0);
                         bool frameSky = f.a > 9000.0;
                         float agree = 1.0;
+                        // v4: frame nearer than the shot, beyond the helmet
+                        // range = object the shot lacks (wheel, cockpit).
+                        float nearFrame = 0.0;
                         if (gHasDepth > 0.5)
                         {
                             float d = txShotDepth.SampleLevel(samLinearClamp,
@@ -7938,6 +7970,10 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
                                 agree = 1.0 - smoothstep(gAgreeLo,
                                     max(gAgreeHi, gAgreeLo + 1e-3),
                                     abs(f.a - linS) / max(linS, 0.05));
+                            bool frameNearer = !frameSky && (shotSky
+                                || f.a < linS * (1.0 - gAgreeHi));
+                            nearFrame = (gNearTrust > 0.5 && frameNearer
+                                && f.a > gNearTrustMin) ? 1.0 : 0.0;
                         }
                         else
                         {
@@ -7949,12 +7985,22 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
                         // a root object is not drawn yet at this stage.
                         float lf = dot(f.rgb, w);
                         float ls = dot(c, w);
+                        // (not for nearFrame: a dark wheel against a bright
+                        // shot sky is real, not missing colour)
                         agree *= (lf > 1e-6 ? 1.0 : 0.0)
-                            * smoothstep(gFrameMinRatio * 0.5, gFrameMinRatio,
-                                lf / max(ls, 1e-5))
+                            * (nearFrame > 0.5 ? 1.0
+                                : smoothstep(gFrameMinRatio * 0.5,
+                                    gFrameMinRatio, lf / max(ls, 1e-5)))
                             * saturate(gMatch);
+                        if (nearFrame > 0.5 && lf > 1e-6)
+                            agree = saturate(gMatch);
+                        if (gFramePriority > 0.5 && lf > 1e-6
+                            && f.a > gNearTrustMin)
+                            agree = saturate(gMatch);
                         if (gComposeDebug > 0.5)
-                            return float4(1.0 - agree, agree, 0.0, 1.0);
+                            return nearFrame > 0.5 && lf > 1e-6
+                                ? float4(0.0, 0.3, 1.0, 1.0)
+                                : float4(1.0 - agree, agree, 0.0, 1.0);
                         return float4(lerp(c, f.rgb, agree), 1.0);
                     }
                     if (gMode > 1.5)
@@ -9876,6 +9922,9 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_OPACITY,
             gDynamicDropTrailFilmPixels =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS,
+            gDynamicDropTrailFilmAgeExp =
+                math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS, 0.05)
+                / math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_SECONDS or 1.0, 0.05),
             gDynamicDropTrailRidgeEnabled =
                 cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_ENABLED
@@ -10062,6 +10111,7 @@ float4 main(PS_IN pin)
                 cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE >= 2
                 and 1.0 or 0.0,
             gDynamicDropDepthAlphaMin = cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN,
+            gDynamicDropHazeDepthMin = cfg.RUNTIME.RAIN_DYNAMIC_DROP_HAZE_DEPTH_MIN,
         },
         shader = rainDynamicDropShader.HLSL
     }
@@ -12827,6 +12877,14 @@ function windowMain(dt)
     if filmPixelsChanged then
         cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_PIXELS = filmPixels
     end
+    local filmSeconds, filmSecondsChanged = ui.slider(
+        'Thin film lifetime (seconds)',
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_SECONDS or 1.0,
+        0.10, 5.00, '%.2f'
+    )
+    if filmSecondsChanged then
+        cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_FILM_SECONDS = filmSeconds
+    end
 
     local ridgeChanged = ui.checkbox(
         'Narrow liquid ridge in wiped paths',
@@ -13064,6 +13122,7 @@ function windowMain(dt)
             end
         end
         tfSlider('Depth pass alpha min (exact)', 'RAIN_DYNAMIC_DROP_DEPTH_ALPHA_MIN', 0.02, 0.95, '%.2f')
+        tfSlider('Haze/film also writes depth from alpha (0 off)', 'RAIN_DYNAMIC_DROP_HAZE_DEPTH_MIN', 0.0, 0.95, '%.2f')
         tfCheck('Refraction source: transparent pass (glass)', 'RAIN_DYNAMIC_DROP_SHOT_TRANSPARENT')
         ui.text('Refraction source tone (RAINFX_SHOT_TONE.md)')
         tfCheck('Tone pass (before blur)', 'RAIN_DYNAMIC_SHOT_TONE_ENABLED')
@@ -13079,7 +13138,10 @@ function windowMain(dt)
         tfSlider('Composite: depth agree none (rel)', 'RAIN_DYNAMIC_SHOT_TONE_AGREE_HI', 0.01, 1.0, '%.3f')
         tfCheck('Composite: frame depth reversed', 'RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED')
         tfSlider('Composite: reject frame darker than shot x', 'RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO', 0.0, 1.0, '%.2f')
-        tfCheck('Composite debug (green frame / red shot)', 'RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG')
+        tfCheck('Composite: trust nearer frame (wheel, cockpit; debug blue)', 'RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST')
+        tfCheck('Composite: frame priority (shot only for helmet range)', 'RAIN_DYNAMIC_SHOT_TONE_FRAME_PRIORITY')
+        tfSlider('Composite: nearer frame trusted beyond (m)', 'RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST_MIN', 0.05, 0.6, '%.3f')
+        tfCheck('Composite debug (green frame / red shot / blue near frame)', 'RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG')
         tfSlider('Match: ratio mip (shot)', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP', 2, 8, '%.0f')
         tfSlider('Match: strength', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH', 0.0, 1.0, '%.2f')
         tfSlider('Match: chroma (0 = luminance only)', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA', 0.0, 1.0, '%.2f')
@@ -13497,7 +13559,7 @@ function windowMain(dt)
         {'Flow speed scale', 'RAIN_FLOW_SPEED_SCALE', 0.0, 8.0, '%.2f'},
         {'Flow drag when pinned', 'RAIN_FLOW_DRAG', 0.0, 20.0, '%.2f'},
         {'Movement threshold (UV/s)', 'RAIN_GPU_STATE_MOBILE_THRESHOLD_UV', 0.0011, 0.050, '%.4f'},
-        {'Surface speed 1 mm (UV/s)', 'RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM', 0.001, 0.10, '%.4f'},
+        {'Surface speed 1 mm (UV/s)', 'RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM', 0.001, 1.00, '%.4f'},
     }) do
         local value, sliderChanged = ui.slider(
             control[1], cfg.RUNTIME[control[2]],
