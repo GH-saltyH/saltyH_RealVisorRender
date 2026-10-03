@@ -773,12 +773,18 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_HAZE_SPECKLE_PIXELS = 2.0,
         RAIN_DYNAMIC_HAZE_TRAIL_CLEAR = 0.90,
         RAIN_DYNAMIC_HAZE_SKY_CORRECTION = true,
-        RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 64,
+        RAIN_DYNAMIC_TRAIL_MASK_MAX_STAMPS = 384, -- per frame (was 64: each drop
+                                                  -- re-stamped only every ~0.5 s)
         RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 3.11,
         -- Test whether track-stage HDR works without the extra scene copy.
         RAIN_DYNAMIC_DROP_SCREEN_UV_PREPASS = false,
         -- Compare dynamic::hdr at the track transparent draw stage.
-        RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = true,
+        -- 2026-10-03: false = draw at main.root.transparent (stage probe:
+        -- the frame there already has the cockpit, driver and wipers, so
+        -- they no longer draw over the haze, and the frame copy of tone
+        -- mode 3 contains them). Needs a Lua reload. If rain streaks show
+        -- inside the drops at this stage, set it back to true.
+        RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = false,
         -- Verified: this stage excludes sharp rain streaks from dynamic
         -- drops. Other KN5 transparent visor regions still show the artifact
         -- and require a separate visor-wide rendering/order investigation.
@@ -802,7 +808,15 @@ local cfg = scriptSettings:mapConfig({
         -- drop / trail. The pass tones every shot texel once (continuous
         -- aerial fog by depth, sky = fog with bounded cloud contrast) and the
         -- mips are built from the toned image, so blur stays consistent.
-        RAIN_DYNAMIC_SHOT_TONE_ENABLED = false,
+        RAIN_DYNAMIC_SHOT_TONE_ENABLED = true,
+        -- Stage probe (docs/RAINFX_STAGE_PROBE.md): copies the chosen scene
+        -- texture at every hookable render stage into small thumbnails, to
+        -- see what each stage already contains (car, clouds, transparents)
+        -- and in which order the stages run. Diagnostic only.
+        RAIN_DYNAMIC_STAGE_PROBE = false,
+        RAIN_DYNAMIC_STAGE_PROBE_SOURCE = 1,   -- 1 dynamic::hdr, 2 dynamic::screen, 3 dynamic::depth
+        RAIN_DYNAMIC_STAGE_PROBE_EXPOSURE = 1.0,
+        RAIN_DYNAMIC_STAGE_PROBE_WIDTH = 320,
         RAIN_DYNAMIC_SHOT_TONE_AERIAL_DENSITY = 0.004, -- 1/m: 1-exp(-d*k)
         RAIN_DYNAMIC_SHOT_TONE_AERIAL_MAX = 0.85,  -- cap for geometry
         RAIN_DYNAMIC_SHOT_TONE_SATURATION = 0.75,  -- geometry chroma kept
@@ -814,7 +828,23 @@ local cfg = scriptSettings:mapConfig({
         -- from dynamic::hdr inside the drop callback (before car glass and
         -- before our drops). Hue, fog and exposure come from the real frame,
         -- detail from the shot. v1 read too blue: fog colour is not the sky.
-        RAIN_DYNAMIC_SHOT_TONE_MODE = 2,
+        RAIN_DYNAMIC_SHOT_TONE_MODE = 3,
+        -- v3 (docs/RAINFX_STAGE_PROBE.md §result): 3 = frame-first composite.
+        -- Per texel, the HDR frame of THIS frame (copied in the drop callback,
+        -- before our drops and before car glass) is used wherever its depth
+        -- agrees with the shot (same surface, or both sky); the shot fills
+        -- what the frame lacks at that stage (root objects such as wipers)
+        -- and what the frame has but must not refract (KN5 visor < 0.1 m).
+        -- HDR stays in scene space, so post-processing tones it like the
+        -- rest of the frame (no LDR double tone mapping).
+        RAIN_DYNAMIC_SHOT_TONE_AGREE_LO = 0.04,   -- rel. depth diff: full frame
+        RAIN_DYNAMIC_SHOT_TONE_AGREE_HI = 0.12,   -- rel. depth diff: full shot
+        RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED = false,
+        -- Frame texel rejected when it is this much darker than the shot
+        -- (depth present but colour not drawn yet at this stage: the black
+        -- glove / wheel / glass rim seen in the interior view).
+        RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO = 0.25,
+        RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG = false, -- green frame / red shot
         RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP = 5,      -- shot mip of the ratio
         RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH = 1.0,
         RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA = 1.0, -- 0 = luminance ratio only
@@ -7800,6 +7830,12 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
             render.AntialiasingMode.None,
             render.TextureFormat.R16G16B16A16.Float)
         st.toneFrame:setName('RainFX frame tone reference')
+        if st.frameFull then st.frameFull:dispose() end
+        -- v3: full-size frame copy, RGB = HDR, A = linear depth (m).
+        st.frameFull = ui.ExtraCanvas(vec2(width, height), 1,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        st.frameFull:setName('RainFX frame copy (HDR + depth)')
         st.toneWidth, st.toneHeight, st.toneMips = width, height, mips
     end
     local near = math.max(sim.cameraClipNear or 0.05,
@@ -7821,6 +7857,31 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
             })
             if copied == false then return false end
             st.toneFrame:mipsUpdate()
+        elseif mode == 3 then
+            local mainNear = math.max(sim.cameraClipNear or 0.05, 0.001)
+            local mainFar = math.max(sim.cameraClipFar or 5000.0, mainNear + 1.0)
+            local copied = st.frameFull:updateSceneWithShader({
+                async = true,
+                textures = { txInput = 'dynamic::hdr', txDepthIn = 'dynamic::depth' },
+                values = {
+                    gN = mainNear, gF = mainFar,
+                    gReversed = r.RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED and 1.0 or 0.0,
+                },
+                shader = [[
+                    float4 main(PS_IN pin)
+                    {
+                        float3 c = txInput.SampleLevel(samLinearClamp,
+                            pin.Tex, 0.0).rgb;
+                        float d = txDepthIn.SampleLevel(samLinearClamp,
+                            pin.Tex, 0.0).r;
+                        if (gReversed > 0.5) d = 1.0 - d;
+                        float lin = d > 0.99999 ? 10000.0
+                            : gN * gF / max(gF - d * (gF - gN), 1e-4);
+                        return float4(c, min(lin, 10000.0));
+                    }
+                ]]
+            })
+            if copied == false then return false end
         end
         local updated = st.toneCanvas:updateSceneWithShader({
             async = true,
@@ -7828,8 +7889,13 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
                 txShot = st.geometryShot,
                 txShotDepth = withDepth and st.geometryShot:depth() or false,
                 txFrame = st.toneFrame,
+                txFrameFull = st.frameFull,
             },
             values = {
+                gFrameMinRatio = r.RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO,
+                gAgreeLo = r.RAIN_DYNAMIC_SHOT_TONE_AGREE_LO,
+                gAgreeHi = r.RAIN_DYNAMIC_SHOT_TONE_AGREE_HI,
+                gComposeDebug = r.RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG and 1.0 or 0.0,
                 gMode = mode,
                 gHasDepth = withDepth and 1.0 or 0.0,
                 gNear = near,
@@ -7853,6 +7919,44 @@ rainDynamicSceneCopyState.shotToneUpdate = function(sim)
                     float2 uv = pin.Tex;
                     float3 w = float3(0.2126, 0.7152, 0.0722);
                     float3 c = txShot.SampleLevel(samLinearClamp, uv, 0.0).rgb;
+                    if (gMode > 2.5)
+                    {
+                        // v3 frame-first composite (per texel, no ratio).
+                        float4 f = txFrameFull.SampleLevel(samLinearClamp, uv, 0.0);
+                        bool frameSky = f.a > 9000.0;
+                        float agree = 1.0;
+                        if (gHasDepth > 0.5)
+                        {
+                            float d = txShotDepth.SampleLevel(samLinearClamp,
+                                uv, 0.0).r;
+                            bool shotSky = d > 0.99999;
+                            float linS = gNear * gFar
+                                / max(gFar - d * (gFar - gNear), 1e-4);
+                            if (shotSky || frameSky)
+                                agree = (shotSky && frameSky) ? 1.0 : 0.0;
+                            else
+                                agree = 1.0 - smoothstep(gAgreeLo,
+                                    max(gAgreeHi, gAgreeLo + 1e-3),
+                                    abs(f.a - linS) / max(linS, 0.05));
+                        }
+                        else
+                        {
+                            // No shot depth: only reject what is nearer than
+                            // the shot can see (KN5 visor parts).
+                            agree = f.a < gNear * 1.5 ? 0.0 : 1.0;
+                        }
+                        // Colour sanity: depth can exist where the colour of
+                        // a root object is not drawn yet at this stage.
+                        float lf = dot(f.rgb, w);
+                        float ls = dot(c, w);
+                        agree *= (lf > 1e-6 ? 1.0 : 0.0)
+                            * smoothstep(gFrameMinRatio * 0.5, gFrameMinRatio,
+                                lf / max(ls, 1e-5))
+                            * saturate(gMatch);
+                        if (gComposeDebug > 0.5)
+                            return float4(1.0 - agree, agree, 0.0, 1.0);
+                        return float4(lerp(c, f.rgb, agree), 1.0);
+                    }
                     if (gMode > 1.5)
                     {
                         // v2 frame match: low-frequency ratio frame / shot.
@@ -7961,11 +8065,16 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
     if not state.trailMaskA or state.trailMaskSize ~= size then
         if state.trailMaskA then state.trailMaskA:dispose() end
         if state.trailMaskB then state.trailMaskB:dispose() end
+        -- 2026-10-03 fix (docs/RAINFX_TRAIL_FLOW.md "wipe mask"): 8-bit
+        -- UNorm could not decay: v * decay rounds back to v once
+        -- v < 0.5 / (1 - decay) (e.g. ~12 % at 60 fps / 3.1 s, ~40 % with
+        -- longer seconds), so wiped paths never recovered and kept
+        -- accumulating. fp16 RG (only R/G are read) + an explicit cutoff.
         state.trailMaskA = ui.ExtraCanvas(vec2(size, size), 1,
-            render.TextureFormat.R8G8B8A8.UNorm)
+            render.TextureFormat.R16G16.Float)
             :setName('RainFX Wipe Mask A')
         state.trailMaskB = ui.ExtraCanvas(vec2(size, size), 1,
-            render.TextureFormat.R8G8B8A8.UNorm)
+            render.TextureFormat.R16G16.Float)
             :setName('RainFX Wipe Mask B')
         state.trailMaskA:clear(rgbm.colors.transparent)
         state.trailMaskB:clear(rgbm.colors.transparent)
@@ -7996,9 +8105,10 @@ rainDynamicSceneCopyState.updateTrailMask = function(sim)
             {
                 float4 previous = txWipePrevious.SampleLevel(
                     samLinearClamp, pin.Tex, 0.0);
-                return float4(previous.r * gRidgeDecay,
-                    previous.g * gWipeDecay, 0.0,
-                    previous.a * gWipeDecay);
+                float r = previous.r * gRidgeDecay;
+                float g = previous.g * gWipeDecay;
+                return float4(r < 0.004 ? 0.0 : r, g < 0.004 ? 0.0 : g,
+                    0.0, 1.0);
             }
         ]]
     })
@@ -9367,6 +9477,74 @@ end)
 -- are in the visor mesh's local coordinates; use the scene mesh's original
 -- transform when drawing it explicitly.
 --------------------------------------------------------
+-- Stage probe (docs/RAINFX_STAGE_PROBE.md). Registered before the drop
+-- draw callback: inside the drop stage it captures the frame BEFORE drops.
+rainDynamicSceneCopyState.probeStages = {
+    'main.track.opaque', 'main.root.opaque', 'main.track.transparent',
+    'main.root.transparent', 'main.smoke',
+}
+rainDynamicSceneCopyState.probe = {}
+rainDynamicSceneCopyState.probeCapture = function(stage, inScene)
+    local st = rainDynamicSceneCopyState
+    local r = cfg.RUNTIME
+    if not r.RAIN_DYNAMIC_STAGE_PROBE then return end
+    local sim = ac.getSim()
+    local frame = sim and sim.frame or 0
+    if st.probeFrame ~= frame then
+        st.probeFrame, st.probeSeq = frame, 0
+    end
+    st.probeSeq = (st.probeSeq or 0) + 1
+    local p = st.probe[stage]
+    local w = math.max(64, math.floor(r.RAIN_DYNAMIC_STAGE_PROBE_WIDTH))
+    local src = r.RAIN_DYNAMIC_STAGE_PROBE_SOURCE
+    local aspect = sim and sim.windowHeight and sim.windowWidth
+        and sim.windowWidth > 0 and sim.windowHeight / sim.windowWidth or 0.5625
+    local h = math.max(36, math.floor(w * aspect))
+    if not p or p.w ~= w or p.h ~= h then
+        if p and p.canvas then p.canvas:dispose() end
+        p = { w = w, h = h, canvas = ui.ExtraCanvas(vec2(w, h), 1,
+            render.AntialiasingMode.None, render.TextureFormat.R8G8B8A8.UNorm) }
+        st.probe[stage] = p
+    end
+    local params = {
+        async = true,
+        textures = { txInput = src == 3 and 'dynamic::depth'
+            or (src == 2 and 'dynamic::screen' or 'dynamic::hdr') },
+        values = { gMode = src, gExposure = r.RAIN_DYNAMIC_STAGE_PROBE_EXPOSURE },
+        shader = [[
+            float4 main(PS_IN pin)
+            {
+                float4 c = txInput.SampleLevel(samLinearClamp, pin.Tex, 0.0);
+                if (gMode > 2.5)
+                {
+                    // Non-linear depth: far = black, near = white.
+                    float d = saturate((1.0 - c.r) * 50.0 * gExposure);
+                    return float4(d, d, d, 1.0);
+                }
+                float3 x = c.rgb * gExposure;
+                if (gMode < 1.5)
+                    x = sqrt(x / (1.0 + x));   // HDR -> displayable
+                return float4(saturate(x), 1.0);
+            }
+        ]]
+    }
+    local ok, res = pcall(function()
+        if inScene then return p.canvas:updateSceneWithShader(params) end
+        return p.canvas:updateWithShader(params)
+    end)
+    p.ok = ok and res ~= false
+    p.err = not ok and tostring(res) or nil
+    p.order, p.frame = st.probeSeq, frame
+end
+for _, stage in ipairs(rainDynamicSceneCopyState.probeStages) do
+    render.on(stage, function()
+        rainDynamicSceneCopyState.probeCapture(stage, true)
+    end)
+end
+render.onSceneReady(function()
+    rainDynamicSceneCopyState.probeCapture('sceneReady (prev frame)', false)
+end)
+
 render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG
     and 'main.smoke'
     or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
@@ -12890,13 +13068,18 @@ function windowMain(dt)
         ui.text('Refraction source tone (RAINFX_SHOT_TONE.md)')
         tfCheck('Tone pass (before blur)', 'RAIN_DYNAMIC_SHOT_TONE_ENABLED')
         do
-            local value, changed = ui.slider('Tone mode (1 aerial fog, 2 frame match)',
-                cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_MODE, 1, 2, '%.0f')
+            local value, changed = ui.slider('Tone mode (1 aerial, 2 ratio, 3 frame composite)',
+                cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_MODE, 1, 3, '%.0f')
             if help.RAIN_DYNAMIC_SHOT_TONE_MODE and ui.itemHovered() then
                 ui.setTooltip(help.RAIN_DYNAMIC_SHOT_TONE_MODE)
             end
             if changed then cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_MODE = math.floor(value + 0.5) end
         end
+        tfSlider('Composite: depth agree full frame (rel)', 'RAIN_DYNAMIC_SHOT_TONE_AGREE_LO', 0.0, 0.5, '%.3f')
+        tfSlider('Composite: depth agree none (rel)', 'RAIN_DYNAMIC_SHOT_TONE_AGREE_HI', 0.01, 1.0, '%.3f')
+        tfCheck('Composite: frame depth reversed', 'RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED')
+        tfSlider('Composite: reject frame darker than shot x', 'RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO', 0.0, 1.0, '%.2f')
+        tfCheck('Composite debug (green frame / red shot)', 'RAIN_DYNAMIC_SHOT_TONE_COMPOSE_DEBUG')
         tfSlider('Match: ratio mip (shot)', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_MIP', 2, 8, '%.0f')
         tfSlider('Match: strength', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_STRENGTH', 0.0, 1.0, '%.2f')
         tfSlider('Match: chroma (0 = luminance only)', 'RAIN_DYNAMIC_SHOT_TONE_MATCH_CHROMA', 0.0, 1.0, '%.2f')
@@ -12908,6 +13091,38 @@ function windowMain(dt)
         tfSlider('Geometry saturation', 'RAIN_DYNAMIC_SHOT_TONE_SATURATION', 0.0, 1.5, '%.2f')
         tfSlider('Sky cloud contrast', 'RAIN_DYNAMIC_SHOT_TONE_CLOUD_CONTRAST', 0.0, 1.0, '%.2f')
         tfCheck('Preview toned source', 'RAIN_DYNAMIC_SHOT_TONE_PREVIEW')
+        ui.separator()
+        ui.text('Stage probe (RAINFX_STAGE_PROBE.md)')
+        tfCheck('Stage probe: capture every render stage', 'RAIN_DYNAMIC_STAGE_PROBE')
+        if cfg.RUNTIME.RAIN_DYNAMIC_STAGE_PROBE then
+            local value, changed = ui.slider('Probe source (1 hdr, 2 screen, 3 depth)',
+                cfg.RUNTIME.RAIN_DYNAMIC_STAGE_PROBE_SOURCE, 1, 3, '%.0f')
+            if changed then cfg.RUNTIME.RAIN_DYNAMIC_STAGE_PROBE_SOURCE = math.floor(value + 0.5) end
+            tfSlider('Probe exposure', 'RAIN_DYNAMIC_STAGE_PROBE_EXPOSURE', 0.05, 8.0, '%.2f')
+            tfSlider('Probe width (px)', 'RAIN_DYNAMIC_STAGE_PROBE_WIDTH', 128, 640, '%.0f')
+            local st = rainDynamicSceneCopyState
+            local names = { 'sceneReady (prev frame)' }
+            for _, n in ipairs(st.probeStages) do names[#names + 1] = n end
+            local drawStage = cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG and 'main.smoke'
+                or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'main.track.transparent'
+                    or 'main.root.transparent')
+            local col = 0
+            for _, n in ipairs(names) do
+                local p = st.probe[n]
+                ui.beginGroup()
+                ui.text(string.format('%s%s', n, n == drawStage and '  [drops drawn here]' or ''))
+                if p then
+                    ui.text(string.format('order %s  frame %s  %s', tostring(p.order),
+                        tostring(p.frame), p.ok and 'ok' or ('FAIL ' .. tostring(p.err or 'pending'))))
+                    ui.image(p.canvas, vec2(p.w, p.h))
+                else
+                    ui.text('not called yet')
+                end
+                ui.endGroup()
+                col = col + 1
+                if col % 2 == 1 then ui.sameLine() end
+            end
+        end
         if cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_PREVIEW then
             local st = rainDynamicSceneCopyState
             ui.text(st.toneReady and 'toned (left) / raw shot (right)'

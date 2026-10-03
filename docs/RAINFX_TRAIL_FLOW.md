@@ -273,3 +273,75 @@ including the end clamp. With size weighting and no end clamp, the rim loss
 and glint on thin trails (small radius codes) brought the chrome look back. If
 small heads look flat again, address it outside the limiter: raise `GLINT`,
 or adjust the ratio window.
+
+## Pipeline check after the v3 revert (2026-10-03)
+
+### User observations (reverted code = v3)
+
+1. "Painted" trails appear after a session of toggling and fine-tuning:
+   wipe paths, WF trail, haze, smear, KN5 part visibility. A reload fixes
+   it. It is hard to reproduce; first seen in the free camera.
+2. After (1), the **thin water film** and the **narrow ridge** in wiped
+   paths no longer fade away after their seconds. They stay, and over
+   time they paint over the whole visor. Their stepwise drawing also looks
+   too fast or jerky.
+3. Wipers and similar parts are drawn **after** the haze.
+4. In the interior view with haze off, some areas (glove, car glass rim,
+   steering wheel) render black or broken, exactly like the HDR probe
+   thumbnails. In the free camera they are fine.
+5. Those areas become normal or vanish within a very short distance from
+   the camera.
+6. The brightness jump when entering the cockpit also happens without the
+   visor, so it is engine behaviour.
+
+### Findings and fixes
+
+**(2) Wipe mask could not decay: 8-bit quantisation (fixed).**
+
+- The wipe mask (`trailMaskA/B`) was `R8G8B8A8.UNorm`, decayed by ×`decay`
+  every frame.
+- In 8 bit, `round(v × decay) == v` as soon as `v < 0.5 / (1 − decay)`.
+  At 60 fps with `TRAIL_MASK_SECONDS` 3.11, decay = 0.984, so every value
+  below about **31/255 (12 %) never decays**. The film threshold is 0.04,
+  so the film and ridge stay forever, and every new stamp adds to the
+  floor.
+- Longer seconds or a higher frame rate raise the floor (about 40 % at
+  10 s). That is why it "always" appears after tuning sessions.
+- **Fix:** the canvas is now `R16G16.Float` (only R and G are read), with an
+  explicit cutoff at 0.004.
+- **Smoother drawing:** `TRAIL_MASK_MAX_STAMPS` goes from 64 to 384 per
+  frame. With about 2k drops, each drop was re-stamped only every
+  ~0.5 s, as long straight segments.
+
+**(3) Root objects drawn over the haze (stage change).**
+
+- The drops were drawn at `main.track.transparent`. The stage probe shows
+  that the wipers, cockpit and driver are drawn later, so they land on
+  top of the haze.
+- **Now** `RAIN_DYNAMIC_DROP_DRAW_AT_TRACK = false`, which means
+  `main.root.transparent`. A **Lua reload** is required, because the stage
+  is chosen at load. If rain streaks show inside the drops at this stage,
+  set it back.
+
+**(4), (5) Black regions.**
+
+- With tone mode 3 at the track stage, the frame has **depth but not yet
+  the colour** of root objects (glove, wheel, glass rim). The depth agreed
+  with the shot, so their missing (black) colour was used.
+- This also explains why haze on or off changes their look, and why they
+  go normal within the very short range where the shot (near 0.10 m) and
+  the frame stop agreeing.
+- **Fixes:**
+  - the draw-stage move above, since the frame then contains those
+    objects;
+  - a **colour sanity check**: a frame texel is rejected when it is more
+    than `FRAME_MIN_RATIO` (0.25) times darker than the shot.
+
+**(1) Painted trails after toggling.** The most likely cause is the same
+pair:
+
+- the source picking up undrawn (black or stale) frame texels, as in (4);
+- the wipe-mask floor, as in (2), weakening the haze and film rules
+  across the visor.
+
+If it still appears after this build, note which toggle came last.
