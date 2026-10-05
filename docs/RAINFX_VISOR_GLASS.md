@@ -1,7 +1,17 @@
 # Visor glass: shimmer under DLSS, and how to take over its render pass (2026-10-02)
 
-Status: **exploration**. §6 (2026-10-02, later) supersedes the layer and
-specular hypotheses in §1–2. Test switches T1–T3 are in the code. The body parts (frame, fabric, rubber) are lower priority.
+Status (2026-10-05): **CLOSED / ABSORBED.**
+- §1–§2 (layer/specular diagnosis): superseded by §6 (render-pass problem).
+- §3.C / §4 (own glass pass, glass shader design E-list): **absorbed by
+  `RAINFX_VISOR_LAYER.md`** (scene stack, V3/V4).
+- §7 (shimmer inside our mesh from the T3 redraw bug): **fixed, closed**.
+- §8 (drops dragged by DLSS reprojection): **accepted, won't fix**; the post
+  overlay proposed there was built and **archived**
+  (`RAINFX_POST_OVERLAY.md`).
+- Stock-KN5 shimmer under DLSS: re-evaluate with the scene stack (our own
+  glass shaders replace the stacked transparent KN5 layers).
+
+Original status: exploration. Test switches T1–T3 are in the code.
 
 ## 1. Facts so far
 

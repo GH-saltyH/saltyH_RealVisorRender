@@ -2,7 +2,8 @@
 
 > **REMOVED (2026-10-02).** The spray film v1–v3 (covering pattern, noise relief, impact wave simulation) code, config, uniforms and UI were deleted from `realvisor.lua` and `rainVisorDynamicDrop.hlsl`. The high-speed water film is now built on the smear mask (`RAINFX_SMEAR_MASK.md`). This document is kept as a record only.
 
-Status: implemented behind `RAIN_DYNAMIC_SPRAY_ENABLED` (default `true`).
+Status: **REMOVED 2026-10-02 — historical record only** (the text below describes the deleted feature).
+Former status: implemented behind `RAIN_DYNAMIC_SPRAY_ENABLED` (default `true`).
 v1 and v2 have been reviewed in game (2026-10-01). **v3 (the impact wave
 simulation, §v3 below) has not been seen in game yet.** DXC (ps_6_0) compiles the main shader, and a Lua
 block/bracket check (`docs/tools`-style checker, now counts bare `do` blocks)

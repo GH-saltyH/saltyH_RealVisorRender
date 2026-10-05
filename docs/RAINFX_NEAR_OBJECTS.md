@@ -1,7 +1,14 @@
 # RainFX: near objects (wiper zone, steering wheel, KN5 visor parts) — 2026-10-03
 
-Status: s33. v4 rules 1 and 2 implemented (both behind toggles). The
-structural fix (§4, post overlay) is proposed and not built yet.
+Status (2026-10-05): **CLOSED as an investigation.** Active results: the
+composite rules (near-trust, frame priority, §10 summary) and the
+haze-depth option (rule 2, still to verify). §4 (post overlay as the
+structural fix) is **superseded** by the scene stack
+(`RAINFX_VISOR_LAYER.md` §17). The F1-camera mesh loss (§7–§9) is a game
+issue, out of scope. The thin-film lifetime (§6) is documented in
+`RAINFX_TRAIL_FLOW.md`.
+
+Original status: s33. v4 rules 1 and 2 implemented (both behind toggles).
 
 ## 1. User observations (after s32)
 
@@ -90,7 +97,7 @@ structural fix (§4, post overlay) is proposed and not built yet.
 - Cost of the trade-off: no glass tint under that haze.
 - UI: "Haze/film also writes depth from alpha (0 off)".
 
-## 4. Structural fix: visor layer as a post overlay (RAINFX_VISOR_GLASS §8)
+## 4. Structural fix: visor layer as a post overlay (RAINFX_VISOR_GLASS §8) — SUPERSEDED (scene stack, VISOR_LAYER §17)
 
 One architecture removes all three mechanisms together:
 
@@ -310,3 +317,25 @@ work on it.
 
 Before attributing a render artefact to RainFX, compare with the app
 removed (or with RainFX disabled), at the same place on the track.
+
+
+## 10. Summary for new readers: tone-mode-3 composite rules (s29, s32, s33, s34)
+
+The refraction source in tone mode 3 is composited per texel from the HDR
+frame copy (`frameFull`: RGB HDR, A = linear depth, copied in the drop
+callback) and the geometry shot (`txShot` + shot depth). Rules, in order:
+
+| Rule | Condition | Source | Config | Since |
+|---|---|---|---|---|
+| depth agree | `|frameZ − shotZ| / shotZ` < `AGREE_LO` (0.04) … > `AGREE_HI` (0.12) blends frame → shot; both sky = agree | frame | `RAIN_DYNAMIC_SHOT_TONE_AGREE_LO/HI` | s29 |
+| colour sanity | frame much darker than shot (colour not drawn yet at this stage) | shot | `RAIN_DYNAMIC_SHOT_TONE_FRAME_MIN_RATIO` (0.25) | s32 |
+| **near-trust (rule 1)** | frame nearer than shot by more than `AGREE_HI` and `frameZ > NEAR_TRUST_MIN` (0.15 m): an object the shot does not draw (wheel, cockpit, hands — AC culls the interior in extra shots). Colour sanity is skipped (a dark wheel against a bright shot sky is real). | frame | `RAIN_DYNAMIC_SHOT_TONE_NEAR_TRUST`, `_NEAR_TRUST_MIN` | s33 |
+| **frame priority** | frame has colour and `frameZ > NEAR_TRUST_MIN`: the frame wins everywhere beyond the helmet range; the shot only fills the helmet/KN5 range | frame | `RAIN_DYNAMIC_SHOT_TONE_FRAME_PRIORITY` | s34 |
+| helmet range | `frameZ < NEAR_TRUST_MIN` | shot | — | s29 |
+
+- Rules 1 and frame priority are active only when the drops draw at
+  `main.root.transparent` or `main.smoke` (not at `track.transparent`,
+  where root objects have no colour yet).
+- Trade-off of frame priority: the drops lose the car-glass tint that the
+  shot's transparent pass provided.
+- Compose debug colours: green = frame, red = shot, blue = near-trust.

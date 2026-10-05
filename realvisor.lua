@@ -247,7 +247,9 @@ local cfg = scriptSettings:mapConfig({
         ENABLED = true,
         
         MODEL_PATH =
-        'visors/visor_lando_2025Champion_maxquality.kn5',
+        --'visors/visor_lando_2025Champion_maxquality.kn5',
+        -- 'visors/visor_lando_2025Champion_maxquality_full.kn5',      -- it contains every version (big size)
+        'visors/visor_lando_2025Champion_maxquality_diet.kn5',      -- compact version for overlayProbe
         
 
         --------------------------------------------------------
@@ -838,7 +840,7 @@ local cfg = scriptSettings:mapConfig({
         -- a post overlay: in-scene draw off, the final frame (dynamic::screen
         -- in the HUD callback, before our draw) is the refraction source,
         -- shader in LDR mode, composite with ui.renderShader (alpha blend).
-        RAIN_VISOR_OVERLAY = true,
+        RAIN_VISOR_OVERLAY = false, -- s53: archived (scene stack is the path)
         RAIN_VISOR_OVERLAY_SOURCE_MIPS = 9,
         RAIN_VISOR_OVERLAY_FOG_MIP = 6.0,   -- LDR veil tone: frame mean mip
         RAIN_VISOR_OVERLAY_DEBUG_ALPHA = false, -- show overlay alpha as grey
@@ -860,6 +862,11 @@ local cfg = scriptSettings:mapConfig({
         -- Housing opaque with depth, then glass back to front (coating,
         -- rain, GLASS_EXT, GLASS_INT), premultiplied. Needs RAIN_VISOR_OVERLAY.
         RAIN_VISOR_LAYER = true,
+        -- s53 (docs/RAINFX_VISOR_LAYER.md §17): the visor stack is drawn IN
+        -- THE SCENE (drop callback), not in the overlay. Housing opaque with
+        -- depth, then glass back to front around the rain mesh. HDR output.
+        RAIN_VISOR_SCENE_STACK = true,
+        RAIN_VISOR_LAYER_SUN_HDR = 1.0,       -- x sim.lightColor (HDR) in the scene stack
         RAIN_VISOR_LAYER_AMBIENT = 0.35,      -- x frame-mean luminance (s45)
         RAIN_VISOR_LAYER_AMBIENT_SAT = 0.35,  -- sky/horizon chroma kept
         RAIN_VISOR_LAYER_AMBIENT_FLOOR = 0.35, -- downward faces x this
@@ -870,13 +877,13 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_HELMET_SHADOW = true, -- s50: off, the scene-shadow probe is the shadow source
         RAIN_VISOR_LAYER_SHADOW_COS_LO = -0.05, -- dot(toLight, forward): dark
         RAIN_VISOR_LAYER_SHADOW_COS_HI = 0.35,  -- fully lit through the opening
-        RAIN_VISOR_LAYER_INTERIOR_AMBIENT = 0.50, -- ambient x this inside (s47: was 0.6)
+        RAIN_VISOR_LAYER_INTERIOR_AMBIENT = 0.42, -- ambient x this inside (s47: was 0.6)
         -- s47 scattered light inside the helmet (hard-coded estimate):
         -- sun bounce = sun x SUN_BOUNCE x (BOUNCE_BASE + (1-BASE) x sunVis)
         -- opening   = frame-mean luminance x OPENING (scene through the visor)
-        RAIN_VISOR_LAYER_SUN_BOUNCE = 0.27,
+        RAIN_VISOR_LAYER_SUN_BOUNCE = 0.04,
         RAIN_VISOR_LAYER_BOUNCE_BASE = 0.47,
-        RAIN_VISOR_LAYER_OPENING = 0.30,
+        RAIN_VISOR_LAYER_OPENING = 0.11,
         -- s48: interior hemisphere / opening light keep this much sky chroma
         -- (0 = neutral grey; s47 tinted the interior with the sky tone).
         RAIN_VISOR_LAYER_INTERIOR_SKY_CHROMA = 1.0,
@@ -893,23 +900,24 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_AMBIENT_MIP = 6.0,
         RAIN_VISOR_LAYER_SUN = 0.50,          -- x light colour (normalised)
         RAIN_VISOR_LAYER_GLASS_ALPHA = 0.04,  -- faint film of the glass layers
-        RAIN_VISOR_LAYER_BAND_OPACITY = 0.92, -- top band blocks the scene
+        RAIN_VISOR_LAYER_BAND_OPACITY = 1.00, -- top band blocks the scene (s55: was 0.92)
+        RAIN_VISOR_LAYER_BAND_ALPHA_MIN = 0.90, -- txDIFF alpha where the band starts (BC alpha < 1)
         RAIN_VISOR_LAYER_BORDER_GREY = 0.06,  -- BODY_INT_BORDER_GLASSLINE
         RAIN_VISOR_LAYER_CULL_FLIP = false,   -- single-sided parts: cull front
         -- V2 housing materials (docs/RAINFX_VISOR_LAYER.md §8)
         RAIN_VISOR_LAYER_NORMAL_FLIP_G = false,
         RAIN_VISOR_LAYER_FRAME_NORMAL = 1.76,
-        RAIN_VISOR_LAYER_FRAME_SPEC = 01.03,
+        RAIN_VISOR_LAYER_FRAME_SPEC = 1.03,
         RAIN_VISOR_LAYER_FRAME_GLOSS = 0.72,
-        RAIN_VISOR_LAYER_RUBBER_NORMAL = 1.0,
-        RAIN_VISOR_LAYER_RUBBER_SPEC = 2.00,
-        RAIN_VISOR_LAYER_RUBBER_GLOSS = 0.32,
-        RAIN_VISOR_LAYER_FABRIC_NORMAL = 0.99,
-        RAIN_VISOR_LAYER_FABRIC_SHEEN = 0.91,
+        RAIN_VISOR_LAYER_RUBBER_NORMAL = 1.12,
+        RAIN_VISOR_LAYER_RUBBER_SPEC = 0.53,
+        RAIN_VISOR_LAYER_RUBBER_GLOSS = 0.35,
+        RAIN_VISOR_LAYER_FABRIC_NORMAL = 1.00,
+        RAIN_VISOR_LAYER_FABRIC_SHEEN = 0.74,
         RAIN_VISOR_LAYER_FABRIC_SHEEN_POWER = 1.0,
-        RAIN_VISOR_LAYER_FABRIC_SPEC = 0.65,
+        RAIN_VISOR_LAYER_FABRIC_SPEC = 0.0,
         RAIN_VISOR_LAYER_FABRIC_GLOSS = 0.60,
-        RAIN_VISOR_LAYER_FABRIC_LIT_LIFT = 2.58, -- s51: x spec x mask x N.L, direct light only
+        RAIN_VISOR_LAYER_FABRIC_LIT_LIFT = 1.75, -- s51: x spec x mask x N.L, direct light only
         -- s51: interior mirror. Overlay-drawn visor meshes are shown in the
         -- MIRROR pass (stock materials, coloured) and the grey shadow probe
         -- is hidden there; in the main pass it is the other way round.
@@ -3213,6 +3221,65 @@ local activeMaterialEditor = nil
 ------------------------------------------------------------
 -- Custom Parameter Registry
 ------------------------------------------------------------
+local PARAMS_KS_PERPIXEL = {
+
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        label = 'Emissive',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    }
+
+}
+
+
 local PARAMS_ST_PERPIXELNM_UVFLOW = {
 
     -- Scalar
@@ -3433,6 +3500,126 @@ local PARAMS_ST_PERPIXELNM_UVFLOW = {
         group = 'Flags'   
     }
 }
+
+
+local PARAMS_KS_PERPIXELNM_UV_MULT = {
+    ------------------------------------------------------------
+    -- ksPerPixelReflection
+    ------------------------------------------------------------
+    
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    
+    {
+        name = 'diffuseMult',    
+        type = 'float',   
+        label = 'Diffuse multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'normalMult',    
+        type = 'float',   
+        label = 'Diffuse multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'bo',    
+        type = 'vec2',   
+        label = 'b.o',
+        group = 'ETC', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000    
+    },
+
+    {    
+        name = 'boh',    
+        type = 'float',   
+        label = 'b.o ',
+        group = 'ETC', 
+        format = '%.3f',
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000    
+    }
+}    
 
 
 local PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE = {
@@ -4127,6 +4314,130 @@ local PARAMS_KS_PERPIXEL_MULTIMAP_NMDETAIL = {
 }
 
 
+local PARAMS_KS_PERPIXEL_MULTIMAP_SIMPLE_REFL = {
+
+    -- Scalar
+    { 
+        name = 'ksAmbient',    
+        type = 'float',   
+        label = 'Ambient',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksDiffuse',
+        type = 'float',   
+        label = 'Diffuse',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecular',    
+        type = 'float',   
+        label = 'Specular',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'ksSpecularEXP',    
+        type = 'float',   
+        label = 'Specular EXP',  
+        group = 'Base', 
+        format = '%.1f'  
+    },
+
+    {
+        name = 'ksAlphaRef',    
+        type = 'float',   
+        label = 'Alpha Ref',  
+        group = 'Base', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelC',
+        type = 'float',   
+        label = 'C',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+
+    {    
+        name = 'fresnelEXP',    
+        type = 'float',   
+        label = 'EXP',  
+        group = 'Fresnel', 
+        format = '%.2f'  
+    },
+
+    {
+        name = 'fresnelMaxLevel',    
+        type = 'float',   
+        label = 'Max Level',  
+        group = 'Fresnel', 
+        format = '%.3f'  
+    },
+        
+    {
+        name = 'nmObjectSpace',    
+        type = 'float',   
+        label = 'Object Space',  
+        group = 'Normal', 
+        format = '%.3f'  
+    },
+    
+    {
+        name = 'detailUVMultiplier',    
+        type = 'float',   
+        label = 'UV Multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    {
+        name = 'shadowBiasMult',
+        type = 'float',   
+        label = 'shadow Bias Multiplier',  
+        group = 'UV', 
+        format = '%.3f'  
+    },
+
+    -- Vector3
+    {    
+        name = 'ksEmissive',    
+        type = 'vec3',   
+        label = 'Emissive',
+        labelX = 'Emissive R',  
+        labelY = 'Emissive G',  
+        labelZ = 'Emissive B',  
+        group = 'Emissive', 
+        format = '%.3f',
+        rangeMin = 0.000,
+        rangeMax = 1.000
+    },
+
+
+    -- Boolean / 0 or 1
+    {
+        name = 'isAdditive',    
+        type = 'bool',   
+        label = 'Additive',  
+        group = 'Flags' 
+    },
+    
+    {   
+        name = 'useDetail',    
+        type = 'bool',   
+        label = 'use Detail texture',  
+        group = 'Flags'   
+    }
+
+}
+
+
 local PARAMS_KS_WINDSCREEN = {
     ------------------------------------------------------------
     -- ksWindScreen
@@ -4188,7 +4499,7 @@ local PARAMS_KS_WINDSCREEN = {
 }    
 
 
-local PARAMS_KS_PERPIXELREFLECTION = {
+local PARAMS_KS_PERPIXEL_REFLECTION = {
     ------------------------------------------------------------
     -- ksPerPixelReflection
     ------------------------------------------------------------
@@ -4361,6 +4672,258 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
         ------------------------------------------------------------
 
         {
+            id = 'OVRBODYFABRIC',
+
+            meshName = 
+                'BODY_FABRIC_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+				
+        {
+            id = 'OVRBODYFRAME',
+
+            meshName = 
+                'BODY_FRAME_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+        {
+            id = 'OVRRUBBERBAND',
+
+            meshName = 
+                'BODY_GLASSLINE_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+
+        {
+            id = 'OVRGLASSCOAT',
+
+            meshName = 
+                'GLASS_COATING_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },        
+
+        {
+            id = 'OVRGLASSEXT',
+
+            meshName = 
+                'GLASS_EXT_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'OVRGLASSINT',
+
+            meshName = 
+                'GLASS_INT_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+				
+				
+        {
+            id = 'OVRGLASSRAINFX',
+
+            meshName = 
+                'GLASS_RAINFX_OVERLAY',
+
+            materialName = 
+                'DUMMY',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+        {
+            id = 'BODYCAM',
+
+            meshName = 
+                'BODY_CAM',
+
+            materialName = 
+                'mtBODY_CAM',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'BODYCAMHOUSE',
+
+            meshName = 
+                'BODY_CAM_HOUSE',
+
+            materialName = 
+                'mtBODY_CAM_HOUSE',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'BODYCAMLENS',
+
+            meshName = 
+                'BODY_CAM_LENS',
+
+            materialName = 
+                'mtBODY_CAM_LENS',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_ALPHA,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
             id = 'BODYFRAME',
 
             meshName = 
@@ -4385,70 +4948,21 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             visible = true,
         },
 
+
         {
-            id = 'BODYFRAMEFLIP',
+            id = 'RUBBERBAND',
 
             meshName = 
-                'BODY_FRAME_FLIP',
+                'BODY_GLASSLINE',
 
             materialName = 
-                'mtBODY_FRAME',
+                'mtBODY_GLASSLINE',
 
             targetMesh = nil,
             materialQueryRef = nil,
 
             parameters = 
-                PARAMS_KS_PERPIXEL_MULTIMAP,
-
-            values = {},
-
-            inputBuffers = {},
-            
-            loaded = false,
-            lastError = nil,
-
-            visible = true,
-        },
-
-        {
-            id = 'GLASSRUBBER',
-
-            meshName = 
-                'BODY_INT_BORDER_GLASSLINE',
-
-            materialName = 
-                'mtBODY_INT_BORDER',
-
-            targetMesh = nil,
-            materialQueryRef = nil,
-
-            parameters = 
-                PARAMS_KS_PERPIXEL_MULTIMAP,
-
-            values = {},
-
-            inputBuffers = {},
-            
-            loaded = false,
-            lastError = nil,
-
-            visible = true,
-        },
-
-        {
-            id = 'BODYFABRIC',
-
-            meshName = 
-                'BODY_INT_FABRIC',
-
-            materialName = 
-                'mtBODY_INT_FABRIC',
-
-            targetMesh = nil,
-            materialQueryRef = nil,
-
-            parameters = 
-                PARAMS_KS_PERPIXEL_MULTIMAP,
+                PARAMS_KS_PERPIXEL_NM,
 
             values = {},
 
@@ -4460,6 +4974,7 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             visible = true,
         },
         
+        
         {
             id = 'GLASSINT',
 
@@ -4468,31 +4983,6 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
 
             materialName = 
                 'mtGLASS_INT',
-
-            targetMesh = nil,
-            materialQueryRef = nil,
-
-            parameters = 
-                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
-
-            values = {},
-
-            inputBuffers = {},
-            
-            loaded = false,
-            lastError = nil,
-
-            visible = true,
-        },
-
-        {
-            id = 'GLASSEXT',
-
-            meshName = 
-                'GLASS_EXT',
-
-            materialName = 
-                'mtGLASS_EXT',
 
             targetMesh = nil,
             materialQueryRef = nil,
@@ -4535,30 +5025,6 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             visible = true,
         },
 
-        {
-            id = 'GLASSCOATING',
-
-            meshName = 
-                'GLASS_COATING',
-
-            materialName = 
-                'mtGLASS_COATING',
-
-            targetMesh = nil,
-            materialQueryRef = nil,
-
-            parameters = 
-                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
-
-            values = {},
-
-            inputBuffers = {},
-            
-            loaded = false,
-            lastError = nil,
-
-            visible = true,
-        },
 
         {
             id = 'GLASSCOATINGREFL',
@@ -4608,8 +5074,262 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             lastError = nil,
 
             visible = true,
-        }
+        },
 
+
+        {
+            id = 'MRRBODYBRACKET',
+
+            meshName = 
+                'BODY_BRACKET_MIRROR',
+
+            materialName = 
+                'mtBODY_BRACKET_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_NM,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+
+        {
+            id = 'MRRBODYFRAME',
+
+            meshName = 
+                'BODY_FRAME_MIRROR',
+
+            materialName = 
+                'mtBODY_FRAME',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+
+        {
+            id = 'MRRSCREWBLACK',
+
+            meshName = 
+                'BODY_SCREW_BLACK_MIRROR',
+
+            materialName = 
+                'mtBODY_SCREW_BLACK_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'MRRSCREWFRAMEBLACK',
+
+            meshName = 
+                'BODY_SCREW_FRAME_BLACK_MIRROR',
+
+            materialName = 
+                'mtBODY_SCREW_FRAME_BLACK_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_NM,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+        {
+            id = 'MRRSCREWMETAL',
+
+            meshName = 
+                'BODY_SCREW_METAL_MIRROR',
+
+            materialName = 
+                'mtBODY_SCREW_METAL_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+        {
+            id = 'MRRSILICON',
+
+            meshName = 
+                'BODY_SILICON_MIRROR',
+
+            materialName = 
+                'mtBODY_SILICON_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+        {
+            id = 'MRRBODYWING',
+
+            meshName = 
+                'BODY_WING_MIRROR',
+
+            materialName = 
+                'mtBODY_WING_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXELNM_UV_MULT,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+        {
+            id = 'MRRGLASSCOAT',
+
+            meshName = 
+                'GLASS_COATING_MIRROR',
+
+            materialName = 
+                'mtGLASS_COATING_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },        
+        
+
+        {
+            id = 'MRRGLASS',
+
+            meshName = 
+                'GLASS_MIRROR',
+
+            materialName = 
+                'mtGLASS_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+
+        {
+            id = 'MRRGLASSSTICKER',
+
+            meshName = 
+                'GLASS_STICKER_MIRROR',
+
+            materialName = 
+                'mtGLASS_STICKER_MIRROR',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_REFLECTION,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        }
     }    
 
 
@@ -9723,25 +10443,22 @@ rainDynamicSceneCopyState.visorLayerDefs = function()
         -- s44: all two-sided (user: single-sided parts were overdrawn by
         -- the two-sided ones; the cost difference is negligible).
         housing = {
-            { mesh = 'BODY_FRAME', two = true, mat = 'FRAME',
+            { mesh = 'BODY_FRAME_OVERLAY', two = true, mat = 'FRAME',
                 tex = T .. 'BODY_FRAME/BODY_FRAME_1K_txDiff.dds',
                 nrm = T .. 'BODY_FRAME/BODY_FRAME_1K_txNormal.dds' },
-            { mesh = 'BODY_FRAME_FLIP', two = true, mat = 'FRAME',
-                tex = T .. 'BODY_FRAME/BODY_FRAME_1K_txDiff.dds',
-                nrm = T .. 'BODY_FRAME/BODY_FRAME_1K_txNormal.dds' },
-            { mesh = 'BODY_INT_BORDER_GLASSLINE', two = true, grey = true, mat = 'RUBBER', interior = true,
+            { mesh = 'BODY_GLASSLINE_OVERLAY', two = true, grey = true, mat = 'RUBBER', interior = true,
                 nrm = T .. 'BODY_FRAME/BODY_INT_BORDER_GLASSLINE_2K_txNormal.dds' },
-            { mesh = 'BODY_INT_FABRIC', two = true, mat = 'FABRIC', interior = true,
+            { mesh = 'BODY_FABRIC_OVERLAY', two = true, mat = 'FABRIC', interior = true,
                 tex = T .. 'BODY_FRAME/BODY_INT_FABRIC_2K_txDiff.dds',
                 nrm = T .. 'BODY_FRAME/BODY_INT_FABRIC_4K_txNormal.dds',
                 maps = T .. 'BODY_FRAME/BODY_INT_FABRIC_2K_txMaps.dds' },
         },
         -- back to front (outermost first, as seen from the eye)
         glass = {
-            { mesh = 'GLASS_COATING', two = true, kind = 2 },
+            { mesh = 'GLASS_COATING_OVERLAY', two = true, kind = 2 },
             { rain = true },
-            { mesh = 'GLASS_EXT', two = true, kind = 1, tex = T .. 'GLASS/GLASS_INT_EXT_4k_txDIFF.dds' },
-            { mesh = 'GLASS_INT', two = true, kind = 2 },
+            { mesh = 'GLASS_EXT_OVERLAY', two = true, kind = 1, tex = T .. 'GLASS/GLASS_INT_EXT_4k_txDIFF.dds' },
+            { mesh = 'GLASS_INT_OVERLAY', two = true, kind = 2 },
         },
     }
 end
@@ -9813,6 +10530,10 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     local lmax = math.max(lc.r, lc.g, lc.b, 1e-3)
     local sun = rgb(lc.r / lmax, lc.g / lmax, lc.b / lmax)
         * (r.RAIN_VISOR_LAYER_SUN * math.min(1.0, lmax))
+    if ov.hdr then
+        -- s53 scene stack: real HDR light colour, toned by post-processing
+        sun = rgb(lc.r, lc.g, lc.b) * r.RAIN_VISOR_LAYER_SUN_HDR
+    end
     item.params = item.params or {
         mesh = e.targetMesh, transform = 'original', shader = shader,
         textures = { txLayerDiffuse = false, txLayerSource = false,
@@ -9841,6 +10562,7 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     v.gLayerGloss = mr('GLOSS', 0.5)
     v.gLayerSheen = mr('SHEEN', 0.0)
     v.gLayerSheenPower = mr('SHEEN_POWER', 3.0)
+    v.gLayerHDR = ov.hdr and 1.0 or 0.0
     v.gLayerFabricLitLift = r.RAIN_VISOR_LAYER_FABRIC_LIT_LIFT or 0.6
     v.gLayerKind = item.kind or 0
     v.gLayerUseDiffuse = item.tex and 1.0 or 0.0
@@ -9891,6 +10613,7 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     v.gLayerAmbientMip = r.RAIN_VISOR_LAYER_AMBIENT_MIP
     v.gLayerGlassAlpha = r.RAIN_VISOR_LAYER_GLASS_ALPHA
     v.gLayerBandOpacity = r.RAIN_VISOR_LAYER_BAND_OPACITY
+    v.gLayerBandAlphaMin = r.RAIN_VISOR_LAYER_BAND_ALPHA_MIN or 0.90
     local probeOn = item.mat ~= nil
         and r.RAIN_VISOR_LAYER_SHADOW_PROBE and vl.probeReady and vl.probeCanvas ~= nil
     p.textures.txLayerProbe = probeOn and vl.probeCanvas or ov.src
@@ -10016,6 +10739,52 @@ rainDynamicSceneCopyState.visorProbeCopy = function(sim)
         })
     end)
     vl.probeReady = ok
+end
+
+-- s53 scene stack: called from the in-scene drop callback.
+-- phase 'pre'  : housing (opaque, depth write) + glass items before rain
+-- phase 'post' : glass items after rain (before the drop depth pass)
+rainDynamicSceneCopyState.visorSceneStack = function(phase)
+    local r = cfg.RUNTIME
+    if not r.RAIN_VISOR_SCENE_STACK or r.RAIN_VISOR_OVERLAY then return end
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not vl.shader then
+        for _, sh in ipairs(shaders) do
+            if sh.ID == 'RAINFXVISORLAYER' and sh.LOADED then vl.shader = sh.HLSL end
+        end
+        if not vl.shader then vl.status = 'shader not loaded'; return end
+    end
+    vl.defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
+    local st = rainDynamicSceneCopyState
+    local src = (st.toneReady and st.toneCanvas) or st.geometryShot or 'dynamic::hdr'
+    local sov = vl.sceneOv or {}
+    vl.sceneOv = sov
+    sov.src, sov.hdr = src, true
+    sov.w = math.max(1, st.mainTargetWidth or 1280)
+    sov.h = math.max(1, st.mainTargetHeight or 720)
+    if phase == 'pre' then
+        rainDynamicSceneCopyState.visorLayerSceneHide(true)
+        render.setBlendMode(render.BlendMode.Opaque)
+        render.setDepthMode(render.DepthMode.Normal)
+        for _, item in ipairs(vl.defs.housing) do
+            rainDynamicSceneCopyState.visorLayerDrawItem(item, sov)
+        end
+    end
+    local afterRain = false
+    for _, item in ipairs(vl.defs.glass) do
+        if item.rain then
+            afterRain = true
+        elseif (phase == 'pre' and not afterRain) or (phase == 'post' and afterRain) then
+            render.setBlendMode(render.BlendMode.BlendPremultiplied)
+            render.setDepthMode(render.DepthMode.ReadOnly)
+            rainDynamicSceneCopyState.visorLayerDrawItem(item, sov)
+        end
+    end
+    -- state the rain draw / depth pass expect
+    render.setBlendMode(render.BlendMode.BlendAccurate)
+    render.setDepthMode(render.DepthMode.ReadOnly)
+    render.setCullMode(render.CullMode.None)
+    vl.status = 'scene stack drawn'
 end
 
 -- Called inside the overlay GeometryShot transparent callback.
@@ -10150,9 +10919,13 @@ end
 rainDynamicSceneCopyState.rainOverlayHud = function(mode)
     local r = cfg.RUNTIME
     local ov = rainDynamicSceneCopyState.overlay
-    local wantHide = r.RAIN_VISOR_OVERLAY and r.RAIN_VISOR_LAYER
+    local overlayLayer = r.RAIN_VISOR_OVERLAY and r.RAIN_VISOR_LAYER
+    -- the scene stack is drawn from the drop callback, which needs the rain
+    -- pipeline; without it the KN5 meshes fall back to their Visible boxes.
+    local wantHide = overlayLayer or (r.RAIN_VISOR_SCENE_STACK
+        and r.RAIN_ENABLED and r.RAIN_DYNAMIC_SURFACE_STATE_ENABLED)
     pcall(rainDynamicSceneCopyState.visorProbeSet,
-        wantHide and r.RAIN_VISOR_LAYER_SHADOW_PROBE and true or false)
+        overlayLayer and r.RAIN_VISOR_LAYER_SHADOW_PROBE and true or false)
     if wantHide then
         -- every frame: other code (editors, profiles) may set visibility
         rainDynamicSceneCopyState.visorLayerSceneHide(true)
@@ -10919,10 +11692,17 @@ float4 main(PS_IN pin)
     }
     rainDynamicSceneCopyState.lastDropMeshParams = dropMeshParams
     local dynamicDrawn = false
+    local sceneStackOk = pcall(rainDynamicSceneCopyState.visorSceneStack, 'pre')
     if not ((cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE
             and cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE)
             or cfg.RUNTIME.RAIN_VISOR_OVERLAY) then
         dynamicDrawn = render.mesh(dropMeshParams)
+    end
+    -- s53: glass in front of the rain (GLASS_EXT band, GLASS_INT), before
+    -- the drop depth pass so the same-surface GLASS_EXT is not rejected.
+    if sceneStackOk then
+        local okPost, errPost = pcall(rainDynamicSceneCopyState.visorSceneStack, 'post')
+        if not okPost then rainDynamicSceneCopyState.visorLayer.err = tostring(errPost) end
     end
     -- Depth occlusion pass (docs/RAINFX_IMPACT_SPLASH.md §7): same mesh and
     -- shader in depth-only mode (alpha 0 output, clipped where the visor is
@@ -11461,7 +12241,7 @@ local function initializeScene()
             -- binding target mesh for RainFX
             --------------------------------------------------------
 
-            if editor.id == 'GLASSEXTDUMMY' then
+            if editor.id == 'OVRGLASSRAINFX' then
                 rainTargetMesh = editor.targetMesh 
             end
 
@@ -13994,9 +14774,18 @@ function windowMain(dt)
             end
         end
         ui.separator()
-        ui.text('Post overlay P1 (RAINFX_POST_OVERLAY.md)')
-        tfCheck('Visor layer as post overlay (P1)', 'RAIN_VISOR_OVERLAY')
-        if cfg.RUNTIME.RAIN_VISOR_OVERLAY then
+        ui.text('Visor scene stack (RAINFX_VISOR_LAYER.md §17)')
+        tfCheck('Visor stack drawn in the scene (custom shaders)', 'RAIN_VISOR_SCENE_STACK')
+        if cfg.RUNTIME.RAIN_VISOR_SCENE_STACK then
+            local vl = rainDynamicSceneCopyState.visorLayer
+            ui.text('stack: ' .. tostring(vl.status) .. (vl.err and ('  err ' .. vl.err) or ''))
+            tfSlider('Stack sun (x HDR light colour)', 'RAIN_VISOR_LAYER_SUN_HDR', 0.0, 3.0, '%.2f')
+            ui.text('Material / ambient sliders: see the Visor layer section (overlay UI).')
+        end
+        ui.separator()
+        ui.text('Post overlay P1 (RAINFX_POST_OVERLAY.md, archived)')
+        tfCheck('Visor layer as post overlay (P1, archived)', 'RAIN_VISOR_OVERLAY')
+        if cfg.RUNTIME.RAIN_VISOR_OVERLAY or cfg.RUNTIME.RAIN_VISOR_SCENE_STACK then
             local ov = rainDynamicSceneCopyState.overlay
             ui.text('status: ' .. tostring(ov.status) .. (ov.err and ('  err ' .. ov.err) or ''))
             tfSlider('Overlay veil tone mip (frame mean)', 'RAIN_VISOR_OVERLAY_FOG_MIP', 0.0, 9.0, '%.1f')
@@ -14004,7 +14793,7 @@ function windowMain(dt)
             ui.separator()
             ui.text('Visor layer V1 (RAINFX_VISOR_LAYER.md)')
             tfCheck('Visor KN5 drawn in the overlay (hidden in scene)', 'RAIN_VISOR_LAYER')
-            if cfg.RUNTIME.RAIN_VISOR_LAYER then
+            if cfg.RUNTIME.RAIN_VISOR_LAYER or cfg.RUNTIME.RAIN_VISOR_SCENE_STACK then
                 local vl = rainDynamicSceneCopyState.visorLayer
                 ui.text('layer: ' .. tostring(vl.status) .. (vl.err and ('  err ' .. vl.err) or ''))
                 tfSlider('Layer ambient (x frame-mean luminance)', 'RAIN_VISOR_LAYER_AMBIENT', 0.0, 2.0, '%.2f')
@@ -14036,6 +14825,7 @@ function windowMain(dt)
                 tfSlider('Layer sun', 'RAIN_VISOR_LAYER_SUN', 0.0, 2.0, '%.2f')
                 tfSlider('Glass film alpha', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
                 tfSlider('Top band opacity', 'RAIN_VISOR_LAYER_BAND_OPACITY', 0.0, 1.0, '%.2f')
+                tfSlider('Top band starts at texture alpha', 'RAIN_VISOR_LAYER_BAND_ALPHA_MIN', 0.5, 0.99, '%.2f')
                 tfSlider('Glass line grey', 'RAIN_VISOR_LAYER_BORDER_GREY', 0.0, 0.5, '%.3f')
                 tfCheck('Single-sided parts: cull front instead of back', 'RAIN_VISOR_LAYER_CULL_FLIP')
                 ui.text('V2 housing materials')

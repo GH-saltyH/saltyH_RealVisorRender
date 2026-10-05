@@ -2,7 +2,8 @@
 
 > **REMOVED (2026-10-02).** The flow layer code, config, uniforms and UI were deleted from `realvisor.lua` and `rainVisorDynamicDrop.hlsl`. The high-speed water film is now built on the smear mask (`RAINFX_SMEAR_MASK.md`). This document is kept as a record only.
 
-Status: implemented behind `RAIN_DYNAMIC_FLOW_LAYER_ENABLED` (default
+Status: **REMOVED 2026-10-02 — historical record only** (the text below describes the deleted feature).
+Former status: implemented behind `RAIN_DYNAMIC_FLOW_LAYER_ENABLED` (default
 `true`). Both new shaders compile with DXC (ps_6_0): the flow-layer update
 shader embedded in Lua, and the main drop shader. The Lua block/bracket check
 passes. **Not yet seen in game.**

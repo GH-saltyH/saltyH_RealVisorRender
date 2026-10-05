@@ -1,6 +1,8 @@
 # Refraction source: how CSP's windscreen gets clouds, and what we can use (2026-10-03)
 
-Status: research only, no code change yet. It follows from
+Status (2026-10-05): **CLOSED — implemented** as tone mode 3 (frame-first
+composite, `RAINFX_STAGE_PROBE.md` v3) with the composite rules in
+`RAINFX_NEAR_OBJECTS.md` §10. Original status: research only. It follows from
 `RAINFX_SHOT_TONE.md` v1 and v2.
 
 ## User findings (2026-10-03)

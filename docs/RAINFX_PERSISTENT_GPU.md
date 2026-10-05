@@ -1,5 +1,13 @@
 # RainFX Persistent GPU Development Guide
 
+> **HISTORICAL DEVELOPMENT LOG (2026-09-2x … 09-28).** Chronological record
+> of the persistent-GPU state machine (texel identity, lifecycle, forces,
+> early renderers). It is long and partly superseded. **For the current
+> structure read `docs/README.md` first**, then the topic documents
+> (`RAINFX_WATER_FIELD.md`, `RAINFX_MICRO_PATTERN.md`, `RAINFX_SMEAR_MASK.md`,
+> `RAINFX_TRAIL_*`, `RAINFX_VISOR_LAYER.md`). Use this file to trace why a
+> state-shader decision was made.
+
 ## 1. Purpose
 This document is the baseline for understanding the RealVisorRender RainFX system without relying on previous conversation history.
 Current branch: feature-RainFXPersistentGPU

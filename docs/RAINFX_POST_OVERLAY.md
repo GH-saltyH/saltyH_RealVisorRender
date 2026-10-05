@@ -1,5 +1,13 @@
 # RainFX: visor layer as a post overlay (2026-10-03)
 
+> **ARCHIVED (2026-10-04, confirmed 2026-10-05).** The scene path is final
+> (`RAINFX_VISOR_LAYER.md` §16–§17). The overlay code stays in
+> `realvisor.lua` behind `RAIN_VISOR_OVERLAY = false` and is not developed
+> further. Reasons: covered HUD/UI with no mouse-safe fix, no mirror
+> support, CSP lighting (shadows, local lights, reflections) would have to
+> be rebuilt. All items below (P0–P4, HUD lift, resolution, keep-out zones)
+> are **closed**.
+
 Status: P0 done, P1 implemented (s37, default off). **Optional path**: the cockpit-camera mesh loss that motivated it is a game issue (RAINFX_NEAR_OBJECTS.md §9). Nothing in the normal path changes
 while the probe is off.
 

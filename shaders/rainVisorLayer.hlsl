@@ -63,7 +63,9 @@ float3 rainLayerNormal(float3 n, float3 p, float2 uv)
     // Reconstruct z: works for RGB and two-channel (BC5) normal maps.
     float3 tn = float3(xy, sqrt(saturate(1.0 - dot(xy, xy))));
     float3x3 tbn = rainLayerTBN(n, p, uv);
-    return normalize(mul(tn, tbn));
+    // s53 NaN guard: a degenerate derivative frame falls back to n.
+    float3 rn = mul(tn, tbn);
+    return dot(rn, rn) > 1e-12 ? normalize(rn) : n;
 }
 
 // s49 scene-shadow probe: a second copy of the visor housing is drawn IN
@@ -138,7 +140,7 @@ float4 main(PS_IN pin)
         float specMask = m.r;
         float gloss = saturate(gLayerGloss * m.g);
         float expo = lerp(4.0, 256.0, gloss * gloss);
-        float3 h = normalize(l + toEye);
+        float3 h = normalize(l + toEye + n * 1e-4);   // s53 NaN guard
         float spec = pow(saturate(dot(n, h)), expo) * (nl > 0.0 ? 1.0 : 0.0)
             * gLayerSpec * specMask * (expo + 8.0) / 64.0;
         float fres = pow(1.0 - nv, 5.0);
@@ -171,7 +173,9 @@ float4 main(PS_IN pin)
                 * lerp(0.5, 1.0, m.b);
             c = d.rgb * lit + spec * sunL + env * amb;
         }
-        return float4(saturate(c), 1.0);
+        // s53: in-scene stack is HDR (post-processing tones it), the
+        // archived overlay path is LDR.
+        return float4(gLayerHDR > 0.5 ? max(c, 0.0) : saturate(c), 1.0);
     }
 
     float a = gLayerGlassAlpha;
@@ -179,10 +183,16 @@ float4 main(PS_IN pin)
     if (gLayerKind < 1.5)
     {
         float nl = saturate(dot(ng, gLayerLightDir));
-        float band = smoothstep(0.96, 0.995, d.a);
+        // s55: block-compressed alpha rarely reaches exactly 1, so the band
+        // mask starts at gLayerBandAlphaMin; inside the band the opacity is
+        // gLayerBandOpacity (1 = fully opaque, nothing behind shows).
+        float bandLo = saturate(gLayerBandAlphaMin);
+        float band = smoothstep(bandLo, min(bandLo + 0.04, 1.0), d.a);
         a = lerp(gLayerGlassAlpha, gLayerBandOpacity, band);
+        if (band >= 0.999)
+            a = gLayerBandOpacity;
         c = lerp(amb, d.rgb * (amb + sunL * nl), band);
     }
     a = saturate(a);
-    return float4(saturate(c) * a, a);
+    return float4((gLayerHDR > 0.5 ? max(c, 0.0) : saturate(c)) * a, a);
 }

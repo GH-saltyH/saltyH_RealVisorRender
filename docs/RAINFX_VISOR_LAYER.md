@@ -1,6 +1,14 @@
-# RainFX: the whole visor as one overlay layer (plan, 2026-10-03)
+# RainFX: visor layer — scene stack (current path; started as an overlay plan 2026-10-03)
 
-Status: **plan**, decided with the user. Nothing is implemented yet.
+Status (2026-10-05): **ACTIVE — scene stack S1 implemented (s53, §17), S2
+verification in progress.** The visor `*_OVERLAY` meshes are drawn with our
+shaders inside the in-scene drop callback (housing opaque + glass stack
+around the rain mesh, HDR). §1–§16 document the overlay phase and are
+**ARCHIVED** (kept for reference; the post overlay is off by default, see
+`RAINFX_POST_OVERLAY.md`). Current rules: §18 (KN5 structure), §19
+(material editors), §20 (open items).
+
+Original status (2026-10-03): plan, decided with the user.
 Supersedes `RAINFX_POST_OVERLAY.md` P3 (KN5 occlusion) and absorbs
 `RAINFX_VISOR_GLASS.md` §3.C/§4 (own glass pass) and Roadmap R2.
 
@@ -537,3 +545,234 @@ s49 probe, which is visible in the scene.
 - **Assumption.** Each pass calls its `track.opaque` stage before the visor
   is drawn. The stage probe showed the KN5 visor appears from
   `root.opaque` on.
+
+## 16. s51 result and the direction decision (2026-10-04)
+
+### User result
+
+- **The mirror exception does not work.** The probe is gone from the
+  mirror, which is good and is kept, but the stock meshes do not appear
+  there in its place. Possible reasons:
+  - the mirror pass may not call `mirror.track.opaque` before it draws the
+    visor;
+  - visibility toggled mid-frame may not reach the mirror draw list.
+- **User's workaround (already in the code).** The outer single-sided
+  shape meshes that the overlay does not draw are kept Visible, so they
+  show in the mirror. Drops not showing in the mirror is acceptable.
+- **The user renamed the KN5 meshes** and updated the Lua names.
+- **Open issues on the overlay path.**
+  1. With the probe on, the housing turns transparent at certain light
+     angles. Probe debug shows holes there.
+  2. World shadows are still incomplete.
+  3. Covered UI that needs the mouse is very awkward to use.
+  4. Choose a direction: in-scene ordering vs overlay shadows, whichever is
+     simpler with the fewest conflicts.
+
+### Assessment
+
+**What the overlay must rebuild, because CSP gives it for free in-scene:**
+
+| CSP feature | Overlay status | Cost to finish |
+|---|---|---|
+| Shadow maps: trees, poles, car, self | probe hack, partial, artefacts | high: one probe per layer, calibration, night/headlights unsolved |
+| Local lights (headlights, pit lights, night) | none | high |
+| Reflections, cubemap, SSLR | none (frame mean) | medium |
+| Mirrors | broken (stock swap failed) | unknown, no API |
+| HUD / UI above the visor | covered; the lift kills mouse input | **no API fix** |
+
+**What the overlay solved that the scene path does not:**
+
+| Issue | Scene path today | Severity |
+|---|---|---|
+| Drops dragged by DLSS motion vectors | present | the user accepted it earlier ("won't fix") |
+| Car glass / wipers over haze-only pixels | present | mitigated by the s33 rule 2 option (haze writes depth) |
+| Final-frame refraction tone | tone mode 3 | the user rated it very good |
+| KN5 visor order and shimmer | open | **solvable**, see below |
+
+**Conclusion.** The overlay's remaining problems are API limits (HUD,
+mouse, mirrors) or open-ended re-implementations of CSP lighting.
+Pursuing it multiplies conflicts. The scene path's remaining problem, the
+visor order, is local to our own draw call and can reuse the V1 work.
+
+### Decision: return to the scene path, with our own ordered glass stack ("S-stack")
+
+1. **Housing stays stock and in-scene:** frame, fabric, glass line and outer
+   shape, using CSP materials. That gives real shadows, local lights,
+   reflections, the mirror and HUD/UI natively.
+   - The V2 material work is shelved; it can return later as
+     `applyShaderReplacements` tuning if needed.
+   - The s49 probe and the mirror switch go.
+2. **Only the glass layers are taken over.** `GLASS_COATING`, rain,
+   `GLASS_EXT` (band) and `GLASS_INT` are hidden in the scene and drawn **in
+   our in-scene drop callback**, back to front, with the s43 V1 ordering and
+   the premultiplied shaders.
+   - Depth is read-only against the scene, so the stock housing occludes
+     them correctly.
+   - Our existing depth pass keeps glass and drops above later car glass.
+3. **Shadows for the glass effects (§15.1)** come from the stock housing's
+   lit pixels, or from a glass probe, both in the frame copy. **Decided in
+   V3.**
+4. **Overlay code.** P1, the layer and the HUD lift stay behind
+   `RAIN_VISOR_OVERLAY = false` as an archived option, untouched, and are
+   not developed further.
+5. **Known accepted costs:**
+   - DLSS drag of the drops (as accepted before);
+   - car glass over haze-only pixels, unless the haze-depth option is used.
+
+**Implementation steps.**
+
+| Step | Content |
+|---|---|
+| S1 | Move the V1 glass-stack draw from the overlay shot into the scene drop callback: same items, back to front, scene depth read-only. Hide only the taken-over glass meshes; housing stays stock and visible. |
+| S2 | Verify the order: band over drops, housing over glass at the edges, no double glass. |
+| S3 | V3 glass optics (E2–E4) in the scene stack, with the shadow source chosen then. |
+
+### Note on the probe transparency (overlay path, archived)
+
+The likely cause is a NaN in the housing shader:
+
+- `normalize(l + toEye)` is zero when the light is exactly behind the eye;
+- a degenerate derivative TBN gives the same.
+
+Both produce NaN, which can corrupt the premultiplied composite. If the
+overlay is ever revived, guard both (`+ n × 1e-4`, an `isnan` fallback).
+
+## 17. s53: scene stack (S1). The overlay is archived.
+
+**User decision (2026-10-04/05).**
+
+- The overlay is withdrawn but kept in the code. The scene path is final.
+- The custom-shader targets are the `*_OVERLAY` meshes exactly as the Lua
+  lists them. The user restructured the KN5 (diet version) with:
+  - `BODY_FABRIC_OVERLAY`, `BODY_FRAME_OVERLAY`, `BODY_GLASSLINE_OVERLAY`;
+  - `GLASS_COATING_OVERLAY`, `GLASS_EXT_OVERLAY`, `GLASS_INT_OVERLAY`,
+    `GLASS_RAINFX_OVERLAY`;
+  - DUMMY materials.
+- Fabric, frame and glass line **keep the custom shader**, to be evaluated
+  in the scene.
+- The `*_MIRROR` meshes only shape what the mirrors show and are invisible
+  from inside, so they are not touched.
+
+### Implementation
+
+- **Defaults.** `RAIN_VISOR_OVERLAY = false` (archived);
+  `RAIN_VISOR_SCENE_STACK = true`; `RAIN_VISOR_LAYER` stays true.
+- **Drop callback** (in-scene stage; smoke by user setting):
+  1. **`pre`:**
+     - hide the overlay-drawn meshes in the scene (every frame, also from
+       the HUD callback);
+     - draw the **housing** opaque with depth write;
+     - draw the glass before the rain: `GLASS_COATING_OVERLAY`,
+       premultiplied, depth read-only.
+  2. **Rain mesh**, as before: BlendAccurate, read-only.
+  3. **`post`:** `GLASS_EXT_OVERLAY` (band) and `GLASS_INT_OVERLAY`,
+     premultiplied, read-only. These are drawn **before** the drop depth
+     pass; otherwise the same-surface `GLASS_EXT` would fail the depth test
+     where drops wrote depth.
+  4. The drop depth pass, as before.
+- **HDR.** The layer shader has `gLayerHDR = 1`, so the output is not
+  saturated and the post-processing tones it like the scene.
+  - Sun = `sim.lightColor` × `RAIN_VISOR_LAYER_SUN_HDR` (1.0), the real HDR
+    value. The archived overlay normalised it.
+  - The ambient source is the tone canvas (HDR), with the same hemisphere
+    model and the same sliders.
+- **Probe.** The s49 probe and the mirror switch only run with the overlay,
+  so they are inactive now.
+- **NaN guards** (§16 note) are added to the half vector and the TBN normal.
+- **UI.** A "Visor scene stack" section with status and the HDR sun gain.
+  The material and ambient sliders of the layer section are shown while
+  the scene stack is on.
+
+### Limits and open items
+
+- No CSP shadows on the custom-shaded housing yet. The overlay probe used
+  the same mesh position; in the scene it would z-fight with our housing.
+  To be solved with the glass shadow source (§15.1) in V3.
+- The stack draws only when the rain pipeline runs. With rain off, the KN5
+  meshes return to their Visible boxes.
+- **To verify (S2):**
+  - housing over glass at the edges;
+  - band over the drops;
+  - no double glass;
+  - HDR brightness of the housing against the stock look (tune
+    `SUN_HDR` and `AMBIENT`).
+
+
+## 18. KN5 restructure rules (user, 2026-10-04/05) — READ FIRST
+
+The visor KN5 was restructured by the user. Default model:
+`visors/visor_lando_2025Champion_maxquality_diet.kn5` (compact; the `_full`
+version contains every variant and is large). Mesh name suffixes define who
+draws a mesh:
+
+| Suffix / group | Meshes | Material | Drawn by | Rule |
+|---|---|---|---|---|
+| `*_OVERLAY` | `BODY_FABRIC_OVERLAY`, `BODY_FRAME_OVERLAY`, `BODY_GLASSLINE_OVERLAY`, `GLASS_COATING_OVERLAY`, `GLASS_EXT_OVERLAY`, `GLASS_INT_OVERLAY`, `GLASS_RAINFX_OVERLAY` | `DUMMY` | **our shaders only** (scene stack, `visorLayerDefs()`) | always hidden in the normal scene pass while the stack runs; the Visible box decides whether we draw it |
+| `*_MIRROR` | `BODY_BRACKET_MIRROR`, `BODY_FRAME_MIRROR`, `BODY_SCREW_*_MIRROR`, `BODY_SILICON_MIRROR`, `BODY_WING_MIRROR`, `GLASS_COATING_MIRROR`, `GLASS_MIRROR`, `GLASS_STICKER_MIRROR` | stock (own `mt*_MIRROR`) | CSP, stock | outer shape seen **only in mirrors** (single-sided, invisible from inside); **not touched** by RainFX; follow their Visible box |
+| stock interior | `BODY_CAM`, `BODY_CAM_HOUSE`, `BODY_CAM_LENS`, `BODY_FRAME`, `BODY_GLASSLINE`, `GLASS_INT`, `GLASS_EXT_BAND`, `GLASS_COATING_REFL` | stock | CSP, stock | not drawn by us; follow their Visible box (user decides per mesh) |
+| rain target | `GLASS_EXT_DUMMY` | `mtGLASS_EXT_DUMMY` | — | geometry/UV source of the rain surface mesh (`rainTargetMesh`, editor id `GLASSEXTDUMMY`); keep it in the KN5 |
+
+Consequences:
+- Mirrors show the stock/`*_MIRROR` look (colour). Drops are not reflected
+  in mirrors — accepted by the user.
+- Adding a mesh to the custom stack = add an `*_OVERLAY` mesh in the KN5,
+  an editor entry in `MATERIAL_EDITORS`, and an item in
+  `visorLayerDefs()` (housing or glass list, glass list is back-to-front).
+
+## 19. MATERIAL_EDITORS changes (user, 2026-10-04/05)
+
+- Editors now follow §18: ids `OVR*` (overlay meshes, all
+  `PARAMS_KS_PERPIXEL_ALPHA`, material `DUMMY`), stock interior ids
+  (`BODYCAM`, `BODYCAMHOUSE`, `BODYCAMLENS`, `BODYFRAME`, `RUBBERBAND`,
+  `GLASSINT`, `GLASSEXTBAND`, `GLASSCOATINGREFL`, `GLASSEXTDUMMY`) and
+  mirror ids `MRR*`.
+- Removed ids (old KN5): `BODYFRAMEFLIP`, `GLASSRUBBER`, `BODYFABRIC`,
+  `GLASSEXT`, `GLASSCOATING` (their roles moved to `*_OVERLAY` / `*_MIRROR`).
+- New parameter sets (`realvisor.lua`, before `MATERIAL_EDITORS`):
+
+| Set | Properties | Used by |
+|---|---|---|
+| `PARAMS_KS_PERPIXEL` (new) | ksAmbient, ksDiffuse, ksSpecular, ksSpecularEXP, ksAlphaRef, ksEmissive | `BODYCAM`, `MRRSILICON` |
+| `PARAMS_KS_PERPIXELNM_UV_MULT` (new) | + diffuseMult, normalMult, bo, boh, fresnelC/EXP/MaxLevel | `MRRBODYWING` |
+| `PARAMS_KS_PERPIXEL_MULTIMAP_SIMPLE_REFL` (new) | ks*, fresnel*, nmObjectSpace, detailUVMultiplier, shadowBiasMult, isAdditive, useDetail | (available) |
+| `PARAMS_KS_PERPIXEL_REFLECTION` (renamed from `PARAMS_KS_PERPIXELREFLECTION`) | ks*, fresnel*, isAdditive | `MRRGLASSSTICKER` |
+| existing | `PARAMS_KS_PERPIXEL_ALPHA`, `_MULTIMAP`, `_MULTIMAP_EMISSIVE`, `_MULTIMAP_NMDETAIL`, `_NM`, `PARAMS_ST_PERPIXELNM_UVFLOW`, `PARAMS_KS_WINDSCREEN` | see editors |
+
+- Material editing of `*_OVERLAY` meshes has no visual effect (DUMMY, hidden;
+  their look comes from `rainVisorLayer.hlsl` and the `RAIN_VISOR_LAYER_*`
+  config). Editing stock and mirror meshes works as before.
+
+## 20. Open items of the scene stack (2026-10-05)
+
+| # | Item | State |
+|---|---|---|
+| 1 | S2 verification: housing over glass at edges, band over drops, no double glass, HDR brightness vs stock | **closed 2026-10-05** (§21) — housing brightness tuned, not final (see 1b) |
+| 1b | Housing interior brightness: tuned by the user, acceptable, **not final** | **open, low priority** |
+| 2 | CSP shadows on the custom housing (probe z-fights with our housing at the same position) | **open** |
+| 3 | Night / local lights (headlights, pit lights) on the custom housing | **open** (consequence of custom shaders) |
+| 4 | Shadow signal for glass optics (§15.1) | **open**, decide in V3 |
+| 5 | V3/V4 glass optics E1–E7, `txMAPS` channel definition | **open** |
+| 6 | Car glass / wipers over haze-only pixels: verify the s33 haze-depth option (`RAIN_DYNAMIC_DROP_HAZE_DEPTH_MIN`) | **open** (verify) |
+| — | Overlay-only items (HUD lift, probe artefacts, mirror swap, NaN transparency) | **closed** (overlay archived; NaN guards also added to the shared shader) |
+
+
+## 21. S2 result (user, 2026-10-05) and s55 band opacity
+
+**Result.**
+- Frame, glass line and fabric occlude the glass correctly.
+- The top band occludes the drops correctly, **but kept a slight
+  transparency**: with the provided texture alpha it must block the view
+  completely.
+- Housing brightness tuned by the user (interior ambient 0.42, sun bounce
+  0.04, opening 0.11, rubber normal 1.12 / spec 0.53 / gloss 0.35, fabric
+  sheen 0.74, fabric spec 0, lit lift 1.75). Good enough for now, not final.
+
+**Cause of the band transparency.** `RAIN_VISOR_LAYER_BAND_OPACITY` defaulted
+to 0.92, and the band mask used `smoothstep(0.96, 0.995, alpha)`:
+block-compressed DDS alpha rarely reaches exactly 1, so the band rarely hit
+full mask either.
+
+**Fix (s55).** `BAND_OPACITY = 1.0`; new `RAIN_VISOR_LAYER_BAND_ALPHA_MIN =
+0.90` (mask = smoothstep(min, min + 0.04, alpha); fully inside → exactly the
+band opacity). UI: "Top band starts at texture alpha". If scratches (0 < a < 1
+region) start reading as band, raise the threshold.

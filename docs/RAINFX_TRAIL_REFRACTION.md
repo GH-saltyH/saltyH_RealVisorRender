@@ -1,5 +1,9 @@
 # Trail / film refraction: from "painted" to flowing lenses (review, 2026-10-03)
 
+> **Status (2026-10-05): CLOSED — implemented** (T1–T4, T6, smear v9);
+> user rated the flowing refraction as achieved. Further tuning belongs to
+> the final tuning pass.
+
 ## User result and request
 
 - **Tone is solved.** Tone pass off, plus "Veil / glint fog chroma"

@@ -1,5 +1,10 @@
 # Feature reviews requested on 2026-10-02
 
+> **Status (2026-10-05):** §1 open as roadmap R1. §2 implemented and
+> closed (`RAINFX_MICRO_PATTERN.md` "Pop-in"). §3 closed here: moved to
+> `RAINFX_VISOR_GLASS.md` (render-pass problem), and to be re-evaluated with
+> the scene stack (`RAINFX_VISOR_LAYER.md`).
+
 ## 1. GPU drops pre-laid like the micro pattern (select, live, die)
 
 **Status: on the roadmap** (`RAINFX_ROADMAP.md`, R1). Not implemented.
@@ -60,7 +65,7 @@ Would that let us control many more drops smoothly?
 rate below about 2 flips per disk per second. This can be added in one
 step whenever wanted.
 
-## 3. Visor base meshes shimmer/noise under DLSS
+## 3. Visor base meshes shimmer/noise under DLSS — CLOSED here (see banner)
 
 **Observation.** The original visor parts (KN5 loaded with its own shaders)
 shimmer and get noisy under DLSS. Our RainFX mesh does not.

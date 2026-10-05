@@ -151,12 +151,16 @@ stub cbuffer for DXC.
 5. **Cost.** The trail pass adds 4 taps on 1024². The state pass adds 4 taps
    on 3072×1. The main shader adds 1–2 taps on covered pixels.
 
-## Next
+## Next (status 2026-10-05)
 
-- After this step, tune the amount (spawn rate and sizes) against the CSP
-  0.6 and 1.0 references.
-- Decide whether the spray layer returns on top of matched trails.
-- The wipe still does not clear the trail canvas (`RAINFX_WATER_FIELD.md` §6).
+- Tune the amount (spawn rate and sizes) against the CSP 0.6 and 1.0
+  references — **open**, belongs to the final tuning pass (and R1).
+- Decide whether the spray layer returns on top of matched trails —
+  **closed**: the spray film was removed 2026-10-02 (`RAINFX_SPRAY.md`).
+- The wipe still does not clear the trail canvas (`RAINFX_WATER_FIELD.md` §6)
+  — **open, verify** in the current build (the wipe mask was fixed in s32,
+  haze/smear trail clearing exists, but the WF trail canvas itself is not
+  cleared by the wipe mask).
 
 ## v2 (2026-10-01): size-aware tone, glints back, separate micro, large-drop look
 
@@ -345,3 +349,20 @@ pair:
   across the visor.
 
 If it still appears after this build, note which toggle came last.
+
+
+## Thin water film lifetime (s34, 2026-10-03)
+
+The cleared-path thin film (wipe mask G channel, not the WF trail) used the
+wipe recovery time directly (`RAIN_DYNAMIC_TRAIL_MASK_SECONDS`), so it stayed
+visible ~3.3 s, and after the s32 fp16 fix its tail really decayed (the 8-bit
+mask used to stall). The film now has its own lifetime without a new channel:
+
+- G decays as `0.95 · exp(−3t / T_wipe)` (stamp 0.95, per-frame decay
+  `exp(−dt · 3 / T_wipe)`, cutoff 0.004).
+- The shader remaps `filmG = 0.95 · (G / 0.95)^(T_wipe / T_film)` =
+  `0.95 · exp(−3t / T_film)`, i.e. the film fades with `T_film` while micro
+  clearing and haze recovery keep `T_wipe`.
+- Config: `RAIN_DYNAMIC_TRAIL_MASK_FILM_SECONDS` (default 1.0; uniform
+  `gDynamicDropTrailFilmAgeExp` = T_wipe / T_film). UI: "Thin film lifetime
+  (seconds)". Source: `RAINFX_NEAR_OBJECTS.md` §6.

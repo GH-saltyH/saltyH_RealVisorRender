@@ -1,5 +1,12 @@
 # Refraction-source tone pass: removing the "paint" look in the sky (2026-10-02)
 
+> **Status (2026-10-05):** v1 (aerial fog) and v2 (ratio match) are
+> superseded by **tone mode 3** (frame-first composite,
+> `RAINFX_STAGE_PROBE.md` v3), rated very good by the user and the default.
+> Its composite rules (depth agree, colour sanity, near-trust, frame
+> priority) are summarised in `RAINFX_NEAR_OBJECTS.md` §10. The veil/glint
+> fog chroma 0.35–0.37 (`RAIN_DYNAMIC_FOG_TONE_SATURATION`) stays.
+
 ## Review (user, screenshots: CSP vs ours)
 
 The smear is now very close to CSP. The next most important step is more

@@ -223,7 +223,7 @@ Haze / condensation film: see `RAINFX_HAZE.md`.
    true mass coalescence:
    - deterministic survivor, mass/radius update in both GPU state passes,
    - velocity bias toward the absorbed neighbour.
-3. **High contrast outside the sky (detailed tuning stage).** It is not a
+3. **[CLOSED 2026-10-05: not important; re-open if it recurs in the latest build] High contrast outside the sky (detailed tuning stage).** It is not a
    problem in most situations. When many large drops land together, however,
    the refracted non-sky scene reads too metallic. Reserved for the
    detailed-tuning pass, together with the "blurry / turbid" direction above.

@@ -1,5 +1,9 @@
 # Stage probe: what each render stage already contains (2026-10-03)
 
+> **Status (2026-10-05): CLOSED.** v3 (tone mode 3) adopted; v3.1 reverted;
+> the probe stays as a diagnostic (`RAIN_DYNAMIC_STAGE_PROBE`, off). F1-camera
+> + Extra FX results: `RAINFX_NEAR_OBJECTS.md` §8–§9 (game issue).
+
 Purpose: find where the final-tone scene (clouds, cars, transparents) is
 available, so the refraction source can be taken from the real frame
 (`RAINFX_REFRACTION_SOURCE.md`). Diagnostic only, off by default.
