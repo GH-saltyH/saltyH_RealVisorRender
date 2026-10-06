@@ -9,6 +9,35 @@ The Lua block/bracket check passes. **Not yet seen in game.**
 
 ## 1. Impact splash v2 (`RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2`, default on)
 
+**2026-10-06 trigger control (revised).** Splash v2 is the only impact
+renderer. On a new drop, it activates if the drop diameter reaches the
+configured heavy birth-size threshold, or if vehicle speed is above
+`TEAR_MIN_KMH` and that drop is selected for a speed-only splash. The UI
+slider `WF torn impact: heavy size range (%)`
+places that threshold between `Heavy minimum` (0%) and `Heavy maximum`
+(100%); the default is 50%. The splash strength is the larger of the speed
+strength and the size strength. Size-only activation starts at 0.35 strength
+and increases toward the heavy maximum, so it remains visible at zero speed.
+The splash remains at its frozen impact position. Birth-size keyframe edits
+affect new births only; the threshold slider applies live.
+
+After the 4096-slot fast-driving capture showed 666 simultaneous splash
+heads and 9.09 ms in the CPU head overlay, `Speed-only splash birth share`
+was added. It defaults to 0.12 and selects a stable fraction of drop lives
+by slot and generation. It changes splash density, not the size threshold:
+large drops always qualify, including at 0 km/h. Set it to 1.00 to restore
+the earlier behavior where every drop above the speed threshold splashes.
+The capture is a transient sample, so the FPS effect needs an in-game A/B
+test under the same moving scene.
+
+The earlier requirement that **both** speed and size pass, and the coupling
+to `WF torn impacts at speed`, are withdrawn. The legacy staged-pancake
+renderer, its toggle, duration and minimum-diameter setting were removed.
+`Impact splash v2` now controls all torn impacts. In GPU-head mode its
+kernels draw as a CPU overlay on the GPU head canvas; GPU-head debug 2
+intentionally hides that overlay. The GPU body override applies one frame
+later. In-game visual and performance verification is pending.
+
 **Request.** The burst at high-speed drop birth should animate like the
 reference shapes. The bigger the drop and the harder the impact, the bigger
 the effect:
@@ -40,16 +69,16 @@ end:  the final scattered state is stamped once into the persistent trail canvas
 ```
 
 Union kernels carry the slope, so the refraction and highlight ring moves
-outward with the mass. The old staged "pancake" stays available with
-`SPLASH_V2 = false`.
+outward with the mass. The older staged "pancake" was removed on
+2026-10-06; `SPLASH_V2 = false` disables impact splashes.
 
 Prototype: `images/impact_splash/splash_v2_E04_E10.png`, energy 0.4 (top) and 1.0
 (bottom), at t = 0.05, 0.2, 0.4, 0.6, 0.8 and 1.0. Script:
 `tools/impact_splash/splash_proto.py`.
 
 **Defaults.** SECONDS 0.45, SIZE_REF 8, SPREAD 1.8, HOLLOW_AT 0.45,
-BREAK_AT 0.55, SCATTER 1.4, RESIDUAL 0.65. It triggers under the existing
-tear conditions: `TEAR_MIN_KMH`, `TEAR_FULL_KMH` and `TEAR_MIN_DIAMETER_MM`.
+BREAK_AT 0.55, SCATTER 1.4, RESIDUAL 0.65. It triggers under the speed
+and size conditions described above.
 
 ## 2. Birth hold (`RAIN_GPU_STATE_BIRTH_HOLD_SECONDS 0.6`, `RAMP 1.2`)
 

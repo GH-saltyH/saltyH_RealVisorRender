@@ -348,7 +348,7 @@ local cfg = scriptSettings:mapConfig({
 
         -- Number of persistent droplet state texels.
         -- One texel represents one persistent droplet.
-        RAIN_GPU_STATE_COUNT = 2048,
+        RAIN_GPU_STATE_COUNT = 4096,
 
         -- Persistent state:
         -- 0 = disabled
@@ -372,6 +372,9 @@ local cfg = scriptSettings:mapConfig({
         -- At r=0.03 / 0.08 / 0.50, approximate eligible fractions are
         -- 0.21 / 0.30 / 0.69 before the optional density multiplier.
         RAIN_GPU_STATE_DENSITY_SCALE = 1.0,
+        RAIN_GPU_STATE_FREEZE_DEBUG = false, -- performance diagnosis: keep existing state, skip physics passes
+        RAIN_GPU_PRELAID_SITES = false, -- R1.2: bake valid birth sites once on the GPU
+        RAIN_GPU_PRELAID_DEBUG = false,
         RAIN_GPU_STATE_CAPACITY_RAMP_POWER = 1.0,
         -- Live birth-size keyframes in mm; a slot samples these at birth.
         RAIN_GPU_SIZE_MIN_DRY = 0.24,                   -- Default 0.35mm
@@ -564,9 +567,11 @@ local cfg = scriptSettings:mapConfig({
         -- live state textures by tile binning; the CPU keeps only the splash
         -- v2 / tear pieces and the trail. A/B with the CPU path.
         RAIN_GPU_HEADS = true,
+        RAIN_GPU_SPLASH = false,      -- R1.4: bounded GPU splash atlas, opt-in
+        RAIN_GPU_HEADS_SPARSE_WORDS = false, -- R1.3: skip empty tile-mask words
         RAIN_GPU_HEADS_TILE = 64,        -- px of the head canvas per tile
         RAIN_GPU_HEADS_FLIP_Y = false,   -- debug: canvas row orientation
-        RAIN_GPU_HEADS_DEBUG = 0,        -- 0 off, 1 tile occupancy, 2 GPU-only (no CPU overlay)
+        RAIN_GPU_HEADS_DEBUG = 0,        -- 0 off, 1 tile occupancy, 2 GPU-only, 3 no head shading
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = 0.85,
@@ -600,11 +605,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS = 1.0,
         RAIN_DYNAMIC_WATER_FIELD_LOBES = true,
         RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH = 0.35,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED = true,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH = 111.0,
         RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH = 205.0,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS = 0.12,
-        RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM = 0.30,   -- WF tear min diameter (mm), FINE TUNED 
+        RAIN_DYNAMIC_WATER_FIELD_TEAR_HEAVY_SIZE_PERCENT = 50.0, -- minimum position within the heavy birth-size range
         -- Kernels below ~1.5 texels never cross the silhouette threshold
         -- on the texel grid; tear pieces are clamped to this size.
         RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS = 0.50,     -- WF tear min piece (texels), FINE TUNED
@@ -613,6 +616,7 @@ local cfg = scriptSettings:mapConfig({
         -- emptied, mass pushed into a rim ring that grows, breaks up and
         -- scatters. Energy = speed term x size term. false = old pancake.
         RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2 = true,
+        RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPEED_SHARE = 0.12, -- stable share of speed-only births; size-qualified births always pass
         RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS = 0.45, -- x (0.6 + 0.8 size)
         RAIN_DYNAMIC_WATER_FIELD_SPLASH_SIZE_REF = 8.0, -- head texels = size 1
         RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPREAD = 1.8,   -- rim radius growth
@@ -1289,6 +1293,7 @@ local rainStateUpdateParams = {
         txRainStateMeta = false,
         txRainSurfaceNormal = false,
         txRainBoundaryMask = false,
+        txRainSpawnAtlas = false,
         txRainMergeCmd = false,
         txRainWetPath = false,
     },
@@ -1330,6 +1335,7 @@ local rainStateUpdateParams = {
         gRainStateAdhesionMax = cfg.RUNTIME.RAIN_ADHESION_MAX,
         gRainObjectToWorld = mat4x4.identity(),
         gRainStateInit = 0.0,
+        gRainSpawnAtlasEnabled = 0.0,
         gRainStatePhysics = 0.0,
         gRainStatePhysicalTest = 0.0,
         gRainStatePhysicalGridTest = 0.0,
@@ -1947,6 +1953,15 @@ local rainStateUpdateParams = {
             float2 previousPosition
         )
         {
+            if (gRainSpawnAtlasEnabled > 0.5)
+            {
+                int count = (int)max(gRainStateCount, 1.0);
+                int site = ((int)stateIndex + (int)respawnCycle * 37) % count;
+                float4 prelaid = txRainSpawnAtlas.Load(int3(site, 0, 0));
+                float2 pos = float2(prelaid.r, prelaid.g - 1.0);
+                if (prelaid.a > 0.5 && rainStateBoundaryMask(pos) >= 0.5)
+                    return pos;
+            }
             return rainStateFindValidPosition(
                 stateIndex,
                 respawnCycle,
@@ -2145,7 +2160,7 @@ local rainStateUpdateParams = {
                 }
 
                 float2 p =
-                    rainStateFindValidPosition(
+                    rainStateRespawnPosition(
                         index,
                         0.0,
                         float2(0.5, -0.5)
@@ -2337,12 +2352,14 @@ local rainStateMetaUpdateParams = {
         txRainStateMeta = false,
         txRainState = false,
         txRainBoundaryMask = false,
+        txRainSpawnAtlas = false,
         txRainMergeCmd = false,
     },
     values = {
         gRainStateDeltaTime = 0.0,
         gRainStateCount = 256.0,
         gRainStateInit = 0.0,
+        gRainSpawnAtlasEnabled = 0.0,
         gRainStatePhysicalTest = 0.0,
         gRainStatePhysicalGridTest = 0.0,
         gRainStateLifecycle = 0.0,
@@ -2621,7 +2638,9 @@ local rainStateMetaUpdateParams = {
                     // Use a stable eligibility per slot. With a new random
                     // admission for each generation, rejected slots could
                     // never retry and the alive count converged to zero.
-                    float admission = rainStateHash(index + 419.0);
+                    float admission = gRainSpawnAtlasEnabled > 0.5
+                        ? txRainSpawnAtlas.Load(int3((int)index, 0, 0)).b
+                        : rainStateHash(index + 419.0);
                     float gapScale = lerp(3.0, 0.5, sqrt(rain))
                         / max(gRainStateExposure, 1.0);
                     if (rain > 0.001
@@ -6300,6 +6319,50 @@ rainDynamicSceneCopyState.lifecycleTravelMix = function(velocity)
     return x * x * (3.0 - 2.0 * x)
 end
 
+rainDynamicSceneCopyState.prepareSpawnAtlas = function(count)
+    local st = rainDynamicSceneCopyState
+    if not cfg.RUNTIME.RAIN_GPU_PRELAID_SITES or not textureRainBoundaryMask then
+        return false
+    end
+    if st.spawnAtlas and st.spawnAtlasCount == count then return true end
+    if st.spawnAtlas then st.spawnAtlas:dispose(); st.spawnAtlas = nil end
+    local ok, result = pcall(function()
+        local atlas = ui.ExtraCanvas(vec2(count, 1), 1,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R32G32B32A32.Float)
+            :setName('RainFX pre-laid birth sites')
+        local updated = atlas:updateWithShader({
+            textures = { txRainBoundaryMask = textureRainBoundaryMask },
+            values = { gCount = count },
+            shader = [[
+                float siteHash(float n)
+                {
+                    return frac(sin(n * 127.1 + 311.7) * 43758.5453);
+                }
+                float4 main(PS_IN pin)
+                {
+                    int site = (int)min(floor(pin.Tex.x * gCount), gCount - 1.0);
+                    float order = siteHash(site + 419.0);
+                    [loop] for (int k = 0; k < 64; ++k)
+                    {
+                        float u = siteHash(site * 17.13 + k * 71.71);
+                        float v = siteHash(site * 29.37 + k * 53.53);
+                        float2 p = float2(u, -v);
+                        if (txRainBoundaryMask.SampleLevel(samLinearClamp, p, 0).r >= 0.5)
+                            return float4(u, 1.0 - v, order, 1.0);
+                    }
+                    return float4(0.5, 0.5, order, 0.0);
+                }
+            ]],
+        })
+        if updated == false then error('atlas shader pending') end
+        st.spawnAtlas = atlas
+        st.spawnAtlasCount = count
+    end)
+    st.spawnAtlasError = ok and nil or tostring(result)
+    return ok
+end
+
 local function initializeRainGPUState()
     if rainStateInitialized and rainStateA and rainStateB
         and rainStateMetaA and rainStateMetaB then
@@ -6423,10 +6486,17 @@ local function initializeRainGPUState()
     rainStateUpdateParams.textures.txRainStateMeta = false
     rainStateUpdateParams.textures.txRainSurfaceNormal = false
     rainStateUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+    local atlasReady = rainDynamicSceneCopyState.prepareSpawnAtlas(count)
+    rainStateUpdateParams.textures.txRainSpawnAtlas =
+        atlasReady and rainDynamicSceneCopyState.spawnAtlas or false
+    rainStateUpdateParams.values.gRainSpawnAtlasEnabled = atlasReady and 1.0 or 0.0
 
     rainStateMetaUpdateParams.textures.txRainStateMeta = false
     rainStateMetaUpdateParams.textures.txRainState = false
     rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+    rainStateMetaUpdateParams.textures.txRainSpawnAtlas =
+        atlasReady and rainDynamicSceneCopyState.spawnAtlas or false
+    rainStateMetaUpdateParams.values.gRainSpawnAtlasEnabled = atlasReady and 1.0 or 0.0
     rainStateUpdateParams.values.gRainMergeEnabled = 0.0
     rainStateMetaUpdateParams.values.gRainMergeEnabled = 0.0
 
@@ -6648,6 +6718,14 @@ local function updateRainGPUState(sim)
 
     rainStateLastFrame = frame
 
+    if cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG then
+        local deadline = rainDynamicSceneCopyState.stateFreezeUntil
+        if deadline and os.preciseClock() < deadline then return end
+        -- A probe must not silently persist across a reload or a drive.
+        cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG = false
+        rainDynamicSceneCopyState.stateFreezeUntil = nil
+    end
+
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE == 1 then
         return
     end
@@ -6864,6 +6942,13 @@ local function updateRainGPUState(sim)
     rainStateMetaUpdateParams.textures.txRainStateMeta = readMeta
     rainStateMetaUpdateParams.textures.txRainState = readState
     rainStateMetaUpdateParams.textures.txRainBoundaryMask = textureRainBoundaryMask
+
+    local atlasReady = rainDynamicSceneCopyState.prepareSpawnAtlas(count)
+    local atlas = atlasReady and rainDynamicSceneCopyState.spawnAtlas or false
+    rainStateUpdateParams.textures.txRainSpawnAtlas = atlas
+    rainStateMetaUpdateParams.textures.txRainSpawnAtlas = atlas
+    rainStateUpdateParams.values.gRainSpawnAtlasEnabled = atlasReady and 1.0 or 0.0
+    rainStateMetaUpdateParams.values.gRainSpawnAtlasEnabled = atlasReady and 1.0 or 0.0
 
     local lifecycleOn =
         rainStateMetaUpdateParams.values.gRainStateLifecycle > 0.5
@@ -9367,66 +9452,6 @@ rainDynamicSceneCopyState.waterRibbonKernel = function(state)
     return canvas
 end
 
--- Impact splash (docs/RAINFX_WATER_FIELD.md): a pressed "pancake" that
--- spreads to a wide flat disk sized from the drop, with a torn rim of
--- random lobes/notches/tongues and a few small satellite droplets.
--- Everything is random per life (seeds), nothing is evenly spaced.
--- `stage` 1..4 grows the pancake (drawn once per stage into the persistent
--- trail canvas); satellites appear at the last stage. `scale` maps head
--- texels to the target canvas; radius codes stay in head texels.
-rainDynamicSceneCopyState.waterFieldTearPieces = function(quad, origin,
-    scale, stage, minKernel)
-    local frac = rainDynamicSurfaceFrac
-    local Rf = origin.radius
-    local amount = origin.amount
-    local sa0, sb0 = origin.seedA, origin.seedB
-    local x, y = origin.x, origin.y
-    local grow = 0.5 + 0.125 * math.min(stage, 4)
-    local pancake = Rf * (1.4 + 0.9 * amount) * (0.85 + 0.3 * frac(sa0 * 9.1))
-        * grow
-    local count = 0
-    -- Flat core: a big, low-slope body (thin film, clear interior).
-    local ox = (frac(sb0 * 5.3) - 0.5) * 0.2 * pancake
-    local oy = (frac(sa0 * 6.7) - 0.5) * 0.2 * pancake
-    quad((x + ox) * scale, (y + oy) * scale, pancake * 0.95 * scale,
-        pancake * (0.86 + 0.12 * frac(sb0 * 2.9)) * scale,
-        math.cos(sa0 * 6.28), math.sin(sa0 * 6.28), pancake / 32.0, 1.0)
-    count = count + 1
-    -- Torn rim: random angles, random radial reach, some missing (notches),
-    -- some stretched outward (tongues).
-    local rimCount = 14 + math.floor(10 * amount * frac(sb0 * 3.7) + 0.5)
-    for k = 1, rimCount do
-        local h1 = frac(sa0 * 17.13 + k * 0.7548776662)
-        local h2 = frac(sb0 * 11.71 + k * 0.5698402911)
-        local h3 = frac((sa0 + sb0) * 7.77 + k * 0.4142135623)
-        if h3 > 0.18 then
-            local a = h1 * math.pi * 2.0
-            local ca, sn = math.cos(a), math.sin(a)
-            local reach = pancake * (0.86 + 0.22 * h2)
-            local rr = math.max(minKernel, pancake * (0.07 + 0.10 * h3))
-            local tongue = h2 > 0.85 and (1.5 + 1.0 * h3) or 1.0
-            quad((x + ca * reach) * scale, (y + sn * reach) * scale,
-                rr * tongue * scale, rr * scale, ca, sn, rr / 32.0, 1.0)
-            count = count + 1
-        end
-    end
-    -- Satellites: a few small droplets thrown clear of the rim.
-    if stage >= 4 then
-        local satellites = math.floor(2 + 5 * amount * frac(sa0 * 4.9) + 0.5)
-        for k = 1, satellites do
-            local h1 = frac(sb0 * 13.3 + k * 0.6180339887)
-            local h2 = frac(sa0 * 19.9 + k * 0.3819660113)
-            local a = h1 * math.pi * 2.0
-            local d = pancake * (1.2 + 0.7 * h2)
-            local rr = math.max(minKernel, Rf * (0.10 + 0.22 * h2))
-            quad((x + math.cos(a) * d) * scale, (y + math.sin(a) * d) * scale,
-                rr * scale, rr * scale, 1.0, 0.0, rr / 32.0, 1.0)
-            count = count + 1
-        end
-    end
-    return count
-end
-
 -- Impact splash v2 (docs/RAINFX_IMPACT_SPLASH.md). State at t = 0..1 of
 -- its life, drawn as union kernels at the frozen impact point:
 --   centre: pressed flat (amplitude falls), then empty after HOLLOW_AT;
@@ -9446,6 +9471,38 @@ rainDynamicSceneCopyState.waterFieldSplashV2 = function(quad, origin, scale,
     local Rf, E = origin.radius, origin.energy or origin.amount
     local sa, sb = origin.seedA, origin.seedB
     local x, y = origin.x, origin.y
+    -- These values depend only on the drop life. Reuse them for every
+    -- animation frame and for the final persistent-trail stamp.
+    local pieces = origin.splashPieces
+    if not pieces then
+        local ring = {}
+        local satellites = {}
+        local n = math.floor(10 + 12 * E * (0.5 + 0.5 * frac(sb * 3.7)) + 0.5)
+        for k = 1, n do
+            local h1 = frac(sa * 17.13 + k * 0.7548776662)
+            local h2 = frac(sb * 11.71 + k * 0.5698402911)
+            local h3 = frac((sa + sb) * 7.77 + k * 0.4142135623)
+            local a = (k + 0.6 * (h1 - 0.5)) / n * math.pi * 2.0 + sa * 6.28
+            local j = #ring
+            ring[j + 1], ring[j + 2], ring[j + 3] = h1, h2, h3
+            ring[j + 4], ring[j + 5] = math.cos(a), math.sin(a)
+        end
+        local m = math.floor(2 + 6 * E * frac(sa * 4.9) + 0.5)
+        for k = 1, m do
+            local h1 = frac(sb * 13.3 + k * 0.6180339887)
+            local h2 = frac(sa * 19.9 + k * 0.3819660113)
+            local a = h1 * math.pi * 2.0
+            local j = #satellites
+            satellites[j + 1], satellites[j + 2] = h2, math.cos(a)
+            satellites[j + 3] = math.sin(a)
+        end
+        pieces = { ring = ring, satellites = satellites,
+            ringCount = n, satelliteCount = m,
+            centreCos = math.cos(sa * 6.28),
+            centreSin = math.sin(sa * 6.28),
+            centreAspect = 0.88 + 0.12 * frac(sb * 2.9) }
+        origin.splashPieces = pieces
+    end
     local amp0 = ampScale or 1.0
     t = math.max(0.0, math.min(1.0, t))
     local s = 1.0 - (1.0 - t) * (1.0 - t)
@@ -9456,8 +9513,8 @@ rainDynamicSceneCopyState.waterFieldSplashV2 = function(quad, origin, scale,
         t)) * (1.0 - 0.45 * s)
     if ac > 0.02 then
         quad(x * scale, y * scale, Rp * 0.80 * scale,
-            Rp * 0.80 * (0.88 + 0.12 * frac(sb * 2.9)) * scale,
-            math.cos(sa * 6.28), math.sin(sa * 6.28), Rp / 32.0, 0.5 * E,
+            Rp * 0.80 * pieces.centreAspect * scale,
+            pieces.centreCos, pieces.centreSin, Rp / 32.0, 0.5 * E,
             ac * amp0)
         count = count + 1
     end
@@ -9466,15 +9523,13 @@ rainDynamicSceneCopyState.waterFieldSplashV2 = function(quad, origin, scale,
     local breakAt = r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_BREAK_AT
     local brk = math.max(0.0, math.min(1.0, (t - breakAt)
         / math.max(1.0 - breakAt, 1e-3)))
-    local n = math.floor(10 + 12 * E * (0.5 + 0.5 * frac(sb * 3.7)) + 0.5)
-    for k = 1, n do
-        local h1 = frac(sa * 17.13 + k * 0.7548776662)
-        local h2 = frac(sb * 11.71 + k * 0.5698402911)
-        local h3 = frac((sa + sb) * 7.77 + k * 0.4142135623)
+    local ring = pieces.ring
+    for k = 1, pieces.ringCount do
+        local j = (k - 1) * 5
+        local h1, h2, h3 = ring[j + 1], ring[j + 2], ring[j + 3]
         -- Pieces vanish one by one while the ring breaks up.
         if h3 >= brk * 0.6 then
-            local a = (k + 0.6 * (h1 - 0.5)) / n * math.pi * 2.0 + sa * 6.28
-            local ca, sn = math.cos(a), math.sin(a)
+            local ca, sn = ring[j + 4], ring[j + 5]
             local d = Rp * (0.88 + 0.24 * h2) + Rf
                 * r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SCATTER * E * brk
                 * (0.4 + h2)
@@ -9489,20 +9544,140 @@ rainDynamicSceneCopyState.waterFieldSplashV2 = function(quad, origin, scale,
     end
     -- Satellites thrown beyond the rim.
     if t > 0.25 then
-        local m = math.floor(2 + 6 * E * frac(sa * 4.9) + 0.5)
         local fly = (t - 0.25) / 0.75
-        for k = 1, m do
-            local h1 = frac(sb * 13.3 + k * 0.6180339887)
-            local h2 = frac(sa * 19.9 + k * 0.3819660113)
-            local a = h1 * math.pi * 2.0
+        local satellites = pieces.satellites
+        for k = 1, pieces.satelliteCount do
+            local j = (k - 1) * 3
+            local h2 = satellites[j + 1]
             local d = Rp * (1.05 + 0.9 * h2 * fly)
             local rr = math.max(minKernel, Rf * (0.08 + 0.14 * h2))
-            quad((x + math.cos(a) * d) * scale, (y + math.sin(a) * d) * scale,
+            quad((x + satellites[j + 2] * d) * scale,
+                (y + satellites[j + 3] * d) * scale,
                 rr * scale, rr * scale, 1.0, 0.0, rr / 32.0, 1.0, amp0)
             count = count + 1
         end
     end
     return count
+end
+
+-- R1.4 only needs impact lifecycle metadata. Avoid body geometry, velocity
+-- normalization, kernel setup and per-life seeds for ineligible GPU drops.
+rainDynamicSceneCopyState.waterFieldCollectGpuSplash = function(state, stamps,
+    size)
+    local r = cfg.RUNTIME
+    local origins = state.tearOrigin or {}
+    local overrides = state.gpuOverrides or {}
+    local splashes = state.gpuSplashList or {}
+    state.tearOrigin = origins
+    state.gpuOverrides = overrides
+    state.gpuSplashList = splashes
+    local tearing = 0
+    if not r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2 then
+        state.waterFieldKernels = 0
+        state.waterFieldTearHeads = 0
+        return
+    end
+    local car = ac.getCar(0)
+    local kmh = car and car.speedKmh or 0.0
+    local tearMin = r.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH
+    local speedAmount = math.max(0.0, math.min(1.0,
+        (kmh - tearMin) / math.max(
+            r.RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH - tearMin, 1.0)))
+    local speedShare = math.max(0.0, math.min(1.0,
+        r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPEED_SHARE or 1.0))
+    local heavyMin = math.min(r.RAIN_GPU_SIZE_MIN_HEAVY,
+        r.RAIN_GPU_SIZE_MAX_HEAVY)
+    local heavyMax = math.max(r.RAIN_GPU_SIZE_MIN_HEAVY,
+        r.RAIN_GPU_SIZE_MAX_HEAVY)
+    local sizeThresholdMM = heavyMin + (heavyMax - heavyMin)
+        * math.max(0.0, math.min(100.0,
+            r.RAIN_DYNAMIC_WATER_FIELD_TEAR_HEAVY_SIZE_PERCENT)) * 0.01
+    local uvPerMM = math.max(r.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
+        0.000001)
+    local clock = rainDynamicStateRenderClock
+    for i = 1, #stamps do
+        local stamp = stamps[i]
+        local R = stamp.radius or 0.0
+        if R > 0.25 then
+            local index = stamp.index
+            local birthAt = state.birthSeenAt and state.birthSeenAt[index]
+            local age = birthAt and clock - birthAt
+            if age and age >= 0.0 then
+                local generation = state.generation
+                    and state.generation[index] or 0
+                local origin = origins[index]
+                if not (origin and origin.generation == generation) then
+                    origin = nil
+                    local radiusUV = rainDynamicStateRadius[index] or 0.0
+                    local diameterMM = radiusUV * 2.0 / uvPerMM
+                    local sizeAmount = 0.0
+                    if diameterMM >= sizeThresholdMM then
+                        sizeAmount = 0.35 + 0.65 * math.max(0.0,
+                            math.min(1.0, (diameterMM - sizeThresholdMM)
+                                / math.max(heavyMax - sizeThresholdMM,
+                                    0.000001)))
+                    end
+                    local speedSelected = speedAmount > 0.0
+                        and rainDynamicSurfaceFrac(index * 0.438579
+                            + generation * 0.913247) < speedShare
+                    local amount = math.max(
+                        speedSelected and speedAmount or 0.0, sizeAmount)
+                    if amount > 0.0 then
+                        local Rf = math.max(R, radiusUV * size)
+                        local sizeF = math.min(1.0, Rf / math.max(
+                            r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SIZE_REF, 0.5))
+                        origin = { generation = generation, x = stamp.x,
+                            y = stamp.y, radius = Rf,
+                            seedA = rainDynamicSurfaceFrac(index * 0.7548776662
+                                + generation * 0.5698402911),
+                            seedB = rainDynamicSurfaceFrac(index * 0.6180339887
+                                + generation * 0.4142135623),
+                            amount = amount,
+                            energy = amount * (0.55 + 0.45 * sizeF),
+                            duration = math.max(0.05,
+                                r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS
+                                * (0.6 + 0.8 * sizeF)),
+                            stage = 0, inked = false }
+                        origins[index] = origin
+                    end
+                end
+                if origin then
+                    local st = age / origin.duration
+                    local bodyAmp = 1.0
+                    local splashScale = 1.0
+                    if st < 1.0 then
+                        splashes[#splashes + 1] = { index, origin.x,
+                            origin.y, origin.radius, origin.energy,
+                            st, generation }
+                        local back = math.max(0.0,
+                            math.min(1.0, (st - 0.7) / 0.3))
+                        bodyAmp = back * back * (3.0 - 2.0 * back)
+                        splashScale = r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_RESIDUAL
+                        tearing = tearing + 1
+                    elseif not origin.inked then
+                        origin.inked = true
+                        if r.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED then
+                            state.pendingSplash = state.pendingSplash or {}
+                            state.pendingSplash[#state.pendingSplash + 1] =
+                                { origin = origin, v2 = true }
+                        end
+                    end
+                    if age < origin.duration * 3.0 then
+                        splashScale = splashScale + (1.0 - splashScale)
+                            * math.max(0.0, math.min(1.0,
+                                (st - 1.0) / 2.0))
+                    end
+                    if bodyAmp < 0.999
+                        or math.abs(splashScale - 1.0) > 1e-3 then
+                        overrides[#overrides + 1] =
+                            { index, bodyAmp, splashScale }
+                    end
+                end
+            end
+        end
+    end
+    state.waterFieldKernels = 0
+    state.waterFieldTearHeads = tearing
 end
 
 -- Draws every head stamp as soft kernels. Called inside canvas:update().
@@ -9531,19 +9706,23 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
     end
     local lobes = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES
     local splashV2 = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2
+    local speedShare = math.max(0.0, math.min(1.0,
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPEED_SHARE or 1.0))
     local stretchGain = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH
     local car = ac.getCar(0)
     local kmh = car and car.speedKmh or 0.0
     local tearMin = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH
-    local tearAmount = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED
-        and math.max(0.0, math.min(1.0, (kmh - tearMin) / math.max(
+    local speedAmount = math.max(0.0, math.min(1.0, (kmh - tearMin) / math.max(
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH - tearMin,
-            1.0))) or 0.0
-    local tearSeconds = math.max(
-        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS, 0.01)
-    local tearMinRadiusUV =
-        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM * 0.5
-        * cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+            1.0)))
+    local heavyMin = math.min(cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+        cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY)
+    local heavyMax = math.max(cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+        cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY)
+    local heavyPercent = math.max(0.0, math.min(100.0,
+        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_HEAVY_SIZE_PERCENT))
+    local sizeThresholdMM = heavyMin
+        + (heavyMax - heavyMin) * heavyPercent * 0.01
     local tearMinKernel = math.max(0.5,
         cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS)
     local drawn = 0
@@ -9551,7 +9730,9 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
     -- R1.1: in GPU-heads mode the body/tail/lobe/puddle kernels come from
     -- the GPU pass; only splash/tear pieces are drawn here.
     local gpu = state.gpuHeadsActive
+    local gpuSplash = gpu and cfg.RUNTIME.RAIN_GPU_SPLASH
     state.gpuOverrides = gpu and (state.gpuOverrides or {}) or state.gpuOverrides
+    state.gpuSplashList = gpuSplash and (state.gpuSplashList or {}) or state.gpuSplashList
     local function bq(...)
         if not gpu then kernelQuad(...) end
     end
@@ -9582,12 +9763,26 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
             local splashScale = 1.0
             local birthAt2 = state.birthSeenAt and state.birthSeenAt[index]
             local age2 = birthAt2 and rainDynamicStateRenderClock - birthAt2
-            if splashV2 and tearAmount > 0.0 and age2 and age2 >= 0.0
-                and (rainDynamicStateRadius[index] or 0.0) >= tearMinRadiusUV
-            then
+            local diameterMM = (rainDynamicStateRadius[index] or 0.0) * 2.0
+                / math.max(cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
+                    0.000001)
+            local sizeEligible = diameterMM >= sizeThresholdMM
+            local sizeAmount = sizeEligible and (0.35 + 0.65
+                * math.max(0.0, math.min(1.0,
+                    (diameterMM - sizeThresholdMM)
+                    / math.max(heavyMax - sizeThresholdMM, 0.000001)))) or 0.0
+            -- Thin speed-only splashes by a stable per-life hash. A large
+            -- drop still qualifies at any speed; 1.0 restores the old load.
+            local speedSelected = rainDynamicSurfaceFrac(index * 0.438579
+                + generation * 0.913247) < speedShare
+            local impactAmount = math.max(
+                speedSelected and speedAmount or 0.0, sizeAmount)
+            local origin = state.tearOrigin and state.tearOrigin[index]
+            local activeOrigin = origin and origin.generation == generation
+            if splashV2 and age2 and age2 >= 0.0
+                and (impactAmount > 0.0 or activeOrigin) then
                 state.tearOrigin = state.tearOrigin or {}
-                local origin = state.tearOrigin[index]
-                if not origin or origin.generation ~= generation then
+                if not activeOrigin then
                     local Rf = math.max(R,
                         (rainDynamicStateRadius[index] or 0.0) * size)
                     local sizeF = math.min(1.0, Rf / math.max(
@@ -9595,8 +9790,8 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                         0.5))
                     origin = { generation = generation, x = stamp.x,
                         y = stamp.y, radius = Rf, seedA = seedA,
-                        seedB = seedB, amount = tearAmount,
-                        energy = tearAmount * (0.55 + 0.45 * sizeF),
+                        seedB = seedB, amount = impactAmount,
+                        energy = impactAmount * (0.55 + 0.45 * sizeF),
                         duration = math.max(0.05,
                             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS
                             * (0.6 + 0.8 * sizeF)),
@@ -9605,8 +9800,14 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                 end
                 local st = age2 / origin.duration
                 if st < 1.0 then
-                    drawn = drawn + state.waterFieldSplashV2(kernelQuad,
-                        origin, 1.0, st, tearMinKernel, 1.0)
+                    if gpuSplash then
+                        state.gpuSplashList[#state.gpuSplashList + 1] =
+                            { index, origin.x, origin.y, origin.radius,
+                                origin.energy, st, generation }
+                    else
+                        drawn = drawn + state.waterFieldSplashV2(kernelQuad,
+                            origin, 1.0, st, tearMinKernel, 1.0)
+                    end
                     local back = math.max(0.0, math.min(1.0, (st - 0.7) / 0.3))
                     bodyAmp = back * back * (3.0 - 2.0 * back)
                     splashScale = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_RESIDUAL
@@ -9632,6 +9833,9 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
             if gpu and (bodyAmp < 0.999 or math.abs(splashScale - 1.0) > 1e-3) then
                 state.gpuOverrides[#state.gpuOverrides + 1] = { index, bodyAmp, splashScale }
             end
+            -- The GPU pass owns these kernels. Do not calculate their
+            -- per-drop geometry on the CPU when it is active.
+            if not gpu then
             R = R * splashScale
             -- Body: mild stretch along motion, radius-relative.
             local stretch = math.min(0.6, speed * stretchGain
@@ -9679,42 +9883,6 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                 end
                 drawn = drawn + count
             end
-            -- Impact at speed: a torn splash that stays WHERE IT LANDED.
-            -- The pieces are separate water; only the head keeps moving.
-            -- With trails on, the splash is stamped once into the
-            -- persistent trail canvas (it then thins and beads there).
-            -- Without trails it is drawn at the frozen impact origin.
-            local birthAt = state.birthSeenAt and state.birthSeenAt[index]
-            local age = birthAt and rainDynamicStateRenderClock - birthAt
-            if not splashV2 and tearAmount > 0.0 and age and age >= 0.0
-                and age < tearSeconds
-                and (rainDynamicStateRadius[index] or 0.0) >= tearMinRadiusUV
-            then
-                local Rf = math.max(R,
-                    (rainDynamicStateRadius[index] or 0.0) * size)
-                state.tearOrigin = state.tearOrigin or {}
-                local origin = state.tearOrigin[index]
-                if not origin or origin.generation ~= generation then
-                    origin = { generation = generation, x = stamp.x,
-                        y = stamp.y, radius = Rf, seedA = seedA,
-                        seedB = seedB, amount = tearAmount, stage = 0 }
-                    state.tearOrigin[index] = origin
-                end
-                -- Spread in 4 steps over ~0.12 s (one stamp per step).
-                local targetStage = math.min(4, math.floor(age / 0.03) + 1)
-                if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED then
-                    state.pendingSplash = state.pendingSplash or {}
-                    while origin.stage < targetStage do
-                        origin.stage = origin.stage + 1
-                        state.pendingSplash[#state.pendingSplash + 1] =
-                            { origin = origin, stage = origin.stage }
-                    end
-                else
-                    origin.stage = targetStage
-                    drawn = drawn + state.waterFieldTearPieces(kernelQuad,
-                        origin, 1.0, targetStage, tearMinKernel)
-                end
-                tearing = tearing + 1
             end
         end
     end
@@ -9886,10 +10054,6 @@ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
                     trails = trails + state.waterFieldSplashV2(splashQuad,
                         item.origin, scale, 1.0,
                         tearMinKernel / math.max(scale, 0.05), 0.85)
-                else
-                    trails = trails + state.waterFieldTearPieces(splashQuad,
-                        item.origin, scale, item.stage,
-                        tearMinKernel / math.max(scale, 0.05))
                 end
             end
             color.mult = 1.0
@@ -10048,6 +10212,33 @@ float4 main(PS_IN pin)
         rgBitsFor(base + 72, tmin, tmax));
 }
 ]]
+-- One bit per nonempty 96-drop tile-mask word. Two summary texels cover
+-- up to 192 words (18,432 slots), without dropping dense-tile candidates.
+rainDynamicSceneCopyState.gpuHeadsSummaryPass = [[
+float4 main(PS_IN pin)
+{
+    int x = (int)floor(pin.Tex.x * gSummaryW);
+    int ty = (int)floor(pin.Tex.y * gTilesY);
+    int tx = x / (int)gSummaryWords;
+    int block = x - tx * (int)gSummaryWords;
+    uint bx = 0u, by = 0u, bz = 0u, bw = 0u;
+    [loop] for (int j = 0; j < 96; ++j)
+    {
+        int word = block * 96 + j;
+        if (word >= (int)gWords) break;
+        float4 m = txMask.Load(int3(tx * (int)gWords + word, ty, 0));
+        if (m.x > 0.0 || m.y > 0.0 || m.z > 0.0 || m.w > 0.0)
+        {
+            uint bit = 1u << (uint)(j % 24);
+            if (j < 24) bx |= bit;
+            else if (j < 48) by |= bit;
+            else if (j < 72) bz |= bit;
+            else bw |= bit;
+        }
+    }
+    return float4((float)bx, (float)by, (float)bz, (float)bw);
+}
+]]
 rainDynamicSceneCopyState.gpuHeadsPassB = rainDynamicSceneCopyState.gpuHeadsCommon .. [[
 void rgKern(float2 px, float2 c, float ax, float ay, float2 u, float code,
     float amp, inout float4 acc)
@@ -10153,8 +10344,30 @@ void rgWalk(float fbits, int base, float2 px, inout float4 acc, inout int occupi
         rgEval(base + (int)b, px, acc);
     }
 }
+void rgWalkWord(int w, int tx, int ty, float2 px,
+    inout float4 acc, inout int occupied)
+{
+    float4 m = txMask.Load(int3(tx * (int)gWords + w, ty, 0));
+    rgWalk(m.x, w * 96, px, acc, occupied);
+    rgWalk(m.y, w * 96 + 24, px, acc, occupied);
+    rgWalk(m.z, w * 96 + 48, px, acc, occupied);
+    rgWalk(m.w, w * 96 + 72, px, acc, occupied);
+}
+void rgWalkSummary(float fbits, int base, int tx, int ty, float2 px,
+    inout float4 acc, inout int occupied)
+{
+    uint bits = (uint)fbits;
+    [loop] while (bits != 0u)
+    {
+        uint b = firstbitlow(bits);
+        bits &= bits - 1u;
+        int w = base + (int)b;
+        if (w < (int)gWords) rgWalkWord(w, tx, ty, px, acc, occupied);
+    }
+}
 float4 main(PS_IN pin)
 {
+    if (gDebug > 2.5) return float4(0.0, 0.0, 0.0, 0.0);
     float2 tex = pin.Tex;
     if (gFlipY > 0.5) tex.y = 1.0 - tex.y;
     float2 px = tex * gSize;
@@ -10162,13 +10375,22 @@ float4 main(PS_IN pin)
     int ty = (int)min(floor(px.y / gTile), gTilesY - 1.0);
     float4 acc = 0.0;
     int occupied = 0;
-    [loop] for (int w = 0; w < (int)gWords; w++)
+    if (gSparseWords > 0.5)
     {
-        float4 m = txMask.Load(int3(tx * (int)gWords + w, ty, 0));
-        rgWalk(m.x, w * 96, px, acc, occupied);
-        rgWalk(m.y, w * 96 + 24, px, acc, occupied);
-        rgWalk(m.z, w * 96 + 48, px, acc, occupied);
-        rgWalk(m.w, w * 96 + 72, px, acc, occupied);
+        [loop] for (int block = 0; block < (int)gSummaryWords; ++block)
+        {
+            float4 s = txSummary.Load(int3(tx * (int)gSummaryWords + block, ty, 0));
+            int base = block * 96;
+            rgWalkSummary(s.x, base, tx, ty, px, acc, occupied);
+            rgWalkSummary(s.y, base + 24, tx, ty, px, acc, occupied);
+            rgWalkSummary(s.z, base + 48, tx, ty, px, acc, occupied);
+            rgWalkSummary(s.w, base + 72, tx, ty, px, acc, occupied);
+        }
+    }
+    else
+    {
+        [loop] for (int w = 0; w < (int)gWords; ++w)
+            rgWalkWord(w, tx, ty, px, acc, occupied);
     }
     if (gDebug > 0.5 && gDebug < 1.5)
         return float4(saturate(occupied / 64.0), acc.g, 0.0, 1.0);
@@ -10187,12 +10409,24 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
     local tilesY = tilesX
     local words = math.ceil(count / 96)
     local maskW = tilesX * words
+    local summaryWords = math.ceil(words / 96)
+    local summaryW = tilesX * summaryWords
     if not st.gpuMask or st.gpuMaskW ~= maskW or st.gpuMaskH ~= tilesY then
         if st.gpuMask then st.gpuMask:dispose() end
         st.gpuMask = ui.ExtraCanvas(vec2(maskW, tilesY), 1,
             render.AntialiasingMode.None, render.TextureFormat.R32G32B32A32.Float)
         st.gpuMask:setName('RainFX GPU heads tile mask')
         st.gpuMaskW, st.gpuMaskH = maskW, tilesY
+    end
+    if r.RAIN_GPU_HEADS_SPARSE_WORDS
+        and (not st.gpuSummary or st.gpuSummaryW ~= summaryW
+            or st.gpuSummaryH ~= tilesY) then
+        if st.gpuSummary then st.gpuSummary:dispose() end
+        st.gpuSummary = ui.ExtraCanvas(vec2(summaryW, tilesY), 1,
+            render.AntialiasingMode.None,
+            render.TextureFormat.R32G32B32A32.Float)
+        st.gpuSummary:setName('RainFX GPU heads sparse word summary')
+        st.gpuSummaryW, st.gpuSummaryH = summaryW, tilesY
     end
     if not st.gpuOverride or st.gpuOverrideN ~= count then
         if st.gpuOverride then st.gpuOverride:dispose() end
@@ -10210,6 +10444,9 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
     values.gTilesY = tilesY
     values.gWords = words
     values.gMaskW = maskW
+    values.gSummaryW = summaryW
+    values.gSummaryWords = summaryWords
+    values.gSparseWords = r.RAIN_GPU_HEADS_SPARSE_WORDS and 1.0 or 0.0
     values.gCount = count
     values.gKs = math.max(1.0, r.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
     values.gMaxRadii = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII
@@ -10234,11 +10471,23 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
         })
     end)
     if not okA then st.gpuHeadsErr = 'pass A: ' .. tostring(errA); return false end
+    if r.RAIN_GPU_HEADS_SPARSE_WORDS then
+        local okS, errS = pcall(function()
+            local updated = st.gpuSummary:updateWithShader({
+                textures = { txMask = st.gpuMask },
+                values = values,
+                shader = st.gpuHeadsSummaryPass,
+            })
+            if updated == false then error('summary shader pending') end
+        end)
+        if not okS then st.gpuHeadsErr = 'summary: ' .. tostring(errS); return false end
+    end
     local okB, errB = pcall(function()
         target:updateWithShader({
             blendMode = render.BlendMode.Opaque,
             textures = { txRainState = state, txRainStateMeta = meta,
-                txMask = st.gpuMask, txOverride = st.gpuOverride },
+                txMask = st.gpuMask, txOverride = st.gpuOverride,
+                txSummary = st.gpuSummary or st.gpuMask },
             values = values,
             shader = rainDynamicSceneCopyState.gpuHeadsPassB,
         })
@@ -10264,6 +10513,199 @@ rainDynamicSceneCopyState.gpuOverrideWrite = function()
     end
     st.gpuOverrideCount = #list
     st.gpuOverrides = {}
+end
+rainDynamicSceneCopyState.gpuSplashAtlasShader = [[
+float splashFrac(float x) { return x - floor(x); }
+float splashStep(float a, float b, float x)
+{
+    float q = saturate((x - a) / max(b - a, 1e-4));
+    return q * q * (3.0 - 2.0 * q);
+}
+void splashKern(float2 px, float2 c, float ax, float ay, float2 u,
+    float code, float energy, float amp, inout float4 acc)
+{
+    ax *= gKs; ay *= gKs;
+    float2 d = px - c;
+    float2 v = float2(-u.y, u.x);
+    float2 p = float2(dot(d, u) / max(ax, 1e-3),
+        dot(d, v) / max(ay, 1e-3));
+    float k = saturate(1.0 - dot(p, p)) * amp;
+    if (k <= 0.0 || amp <= 0.005) return;
+    acc.rgb = float3(min(code, 1.0), 1.0, energy) * k
+        + acc.rgb * (1.0 - k);
+    acc.a = k + acc.a * (1.0 - k);
+}
+float4 main(PS_IN pin)
+{
+    float2 atlasPx = floor(pin.Tex * float2(gAtlasW, gAtlasH));
+    int col = (int)floor(atlasPx.x / gTileSize);
+    int row = (int)floor(atlasPx.y / gTileSize);
+    int i = row * (int)gAtlasCols + col;
+    if (i >= (int)gSplashCount) return 0.0;
+    float4 a = txSplashMeta.Load(int3(i * 2, 0, 0));
+    float4 b = txSplashMeta.Load(int3(i * 2 + 1, 0, 0));
+    float Rf = a.x * gSize, E = a.y, t = saturate(a.z);
+    float sa = b.x, sb = b.y, reach = b.z * gSize;
+    float2 cell = atlasPx - float2(col, row) * gTileSize;
+    float2 px = ((cell + 0.5) / gTileSize * 2.0 - 1.0) * reach;
+    float4 acc = 0.0;
+    float s = 1.0 - (1.0 - t) * (1.0 - t);
+    float Rp = Rf * (1.0 + gSplashSpread * E * s);
+    float centre = (1.0 - splashStep(0.05, gSplashHollowAt, t))
+        * (1.0 - 0.45 * s);
+    if (centre > 0.02)
+        splashKern(px, 0.0, Rp * 0.80,
+            Rp * 0.80 * (0.88 + 0.12 * splashFrac(sb * 2.9)),
+            float2(cos(sa * 6.28), sin(sa * 6.28)),
+            Rp / 32.0, 0.5 * E, centre, acc);
+    float ringOn = splashStep(0.0, 0.18, t);
+    float brk = saturate((t - gSplashBreakAt)
+        / max(1.0 - gSplashBreakAt, 1e-3));
+    int n = (int)floor(10.0 + 12.0 * E
+        * (0.5 + 0.5 * splashFrac(sb * 3.7)) + 0.5);
+    [loop] for (int k = 1; k <= n; ++k)
+    {
+        float h1 = splashFrac(sa * 17.13 + k * 0.7548776662);
+        float h2 = splashFrac(sb * 11.71 + k * 0.5698402911);
+        float h3 = splashFrac((sa + sb) * 7.77 + k * 0.4142135623);
+        if (h3 < brk * 0.6) continue;
+        float ang = (k + 0.6 * (h1 - 0.5)) / n * 6.28318530718 + sa * 6.28;
+        float ca = cos(ang), sn = sin(ang);
+        float d = Rp * (0.88 + 0.24 * h2) + Rf
+            * gSplashScatter * E * brk * (0.4 + h2);
+        float rr = max(gSplashMinKernel, Rf * (0.30 + 0.18 * h1)
+            * (1.0 - 0.55 * brk) * (0.8 + 0.4 * E));
+        float along = rr * (1.0 + (0.8 + 0.6 * h2) * (1.0 - brk));
+        splashKern(px, float2(ca, sn) * d, along, rr,
+            float2(-sn, ca), rr / 32.0, 1.0, ringOn, acc);
+    }
+    if (t > 0.25)
+    {
+        int m = (int)floor(2.0 + 6.0 * E * splashFrac(sa * 4.9) + 0.5);
+        float fly = (t - 0.25) / 0.75;
+        [loop] for (int k = 1; k <= m; ++k)
+        {
+            float h1 = splashFrac(sb * 13.3 + k * 0.6180339887);
+            float h2 = splashFrac(sa * 19.9 + k * 0.3819660113);
+            float ang = h1 * 6.28318530718;
+            float d = Rp * (1.05 + 0.9 * h2 * fly);
+            float rr = max(gSplashMinKernel, Rf * (0.08 + 0.14 * h2));
+            splashKern(px, float2(cos(ang), sin(ang)) * d,
+                rr, rr, float2(1.0, 0.0), rr / 32.0, 1.0, 1.0, acc);
+        }
+    }
+    // Atlas is drawn with straight-alpha UI blending. Convert the
+    // accumulated premultiplied colour back before that final blend.
+    if (acc.a > 1e-5) acc.rgb /= acc.a;
+    return acc;
+}
+]]
+rainDynamicSceneCopyState.gpuSplashRender = function(target, size)
+    local st = rainDynamicSceneCopyState
+    local list = st.gpuSplashList or {}
+    if #list > 1024 then
+        error('GPU splash atlas limit (1024 heads); CPU fallback next frame')
+    end
+    local count = math.min(#list, 1024)
+    st.gpuSplashCount = count
+    st.gpuSplashOverflow = #list - count
+    st.gpuSplashList = {}
+    -- ExtraCanvas shader updates can become visible after the CPU has
+    -- advanced to another compact list order. Composite the atlas and
+    -- coordinates from the same completed frame, then write the next one
+    -- into the other atlas texture.
+    local drawList = st.gpuSplashDrawList
+    local drawAtlas = st.gpuSplashReadAtlas
+    if drawList and drawAtlas and st.gpuSplashDrawSize == size
+        and count <= (st.gpuSplashCapacity or 0)
+        and #drawList > 0 then
+        local tile = 64
+        local cols = 32
+        local atlasW = st.gpuSplashAtlasW
+        local atlasH = st.gpuSplashAtlasH
+        target:update(function()
+            for j = 1, #drawList do
+                local o = drawList[j]
+                local col = (j - 1) % cols
+                local row = math.floor((j - 1) / cols)
+                ui.drawImage(drawAtlas,
+                    vec2(o[2] - o[8], o[3] - o[8]),
+                    vec2(o[2] + o[8], o[3] + o[8]),
+                    rgbm(1.0, 1.0, 1.0, 1.0),
+                    vec2(col * tile / atlasW, row * tile / atlasH),
+                    vec2((col + 1) * tile / atlasW,
+                        (row + 1) * tile / atlasH))
+            end
+        end)
+    end
+    st.gpuSplashDrawList = nil
+    if count == 0 then return end
+    local capacity = 128
+    while capacity < count do capacity = capacity * 2 end
+    capacity = math.max(capacity, st.gpuSplashCapacity or 0)
+    local tile = 64
+    local cols = 32
+    local atlasW = cols * tile
+    local atlasH = math.ceil(capacity / cols) * tile
+    if st.gpuSplashCapacity ~= capacity then
+        if st.gpuSplashMeta then st.gpuSplashMeta:dispose() end
+        if st.gpuSplashAtlasA then st.gpuSplashAtlasA:dispose() end
+        if st.gpuSplashAtlasB then st.gpuSplashAtlasB:dispose() end
+        st.gpuSplashMeta = ui.ExtraCanvas(vec2(capacity * 2, 1), 1,
+            render.AntialiasingMode.None, render.TextureFormat.R32G32B32A32.Float)
+        st.gpuSplashAtlasA = ui.ExtraCanvas(vec2(atlasW, atlasH), 1,
+            render.AntialiasingMode.None, render.TextureFormat.R16G16B16A16.Float)
+        st.gpuSplashAtlasB = ui.ExtraCanvas(vec2(atlasW, atlasH), 1,
+            render.AntialiasingMode.None, render.TextureFormat.R16G16B16A16.Float)
+        st.gpuSplashMeta:setName('RainFX GPU splash metadata')
+        st.gpuSplashAtlasA:setName('RainFX GPU splash atlas A')
+        st.gpuSplashAtlasB:setName('RainFX GPU splash atlas B')
+        st.gpuSplashCapacity = capacity
+        st.gpuSplashWriteIsA = true
+    end
+    st.gpuSplashAtlasW, st.gpuSplashAtlasH = atlasW, atlasH
+    local spread = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPREAD
+    local scatter = cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_SCATTER
+    local ks = math.max(1.0, cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
+    st.gpuSplashMeta:clear(rgbm.colors.transparent)
+    st.gpuSplashMeta:update(function()
+        for j = 1, count do
+            local o = list[j]
+            local reach = o[4] * ((1.0 + spread * o[5]) * 2.0
+                + scatter * o[5] * 1.5 + 0.8 * ks) + 2.0
+            o[8] = reach
+            local sa = rainDynamicSurfaceFrac(o[1] * 0.7548776662
+                + o[7] * 0.5698402911)
+            local sb = rainDynamicSurfaceFrac(o[1] * 0.6180339887
+                + o[7] * 0.4142135623)
+            local mx = (j - 1) * 2
+            ui.drawRectFilled(vec2(mx, 0), vec2(mx + 1, 1),
+                rgbm(o[4] / size, o[5], o[6], 1.0))
+            ui.drawRectFilled(vec2(mx + 1, 0), vec2(mx + 2, 1),
+                rgbm(sa, sb, reach / size, 1.0))
+        end
+    end)
+    local r = cfg.RUNTIME
+    local values = { gSize = size, gAtlasW = atlasW, gAtlasH = atlasH,
+        gAtlasCols = cols, gTileSize = tile, gSplashCount = count,
+        gKs = ks, gSplashSpread = spread,
+        gSplashScatter = scatter,
+        gSplashBreakAt = r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_BREAK_AT,
+        gSplashHollowAt = r.RAIN_DYNAMIC_WATER_FIELD_SPLASH_HOLLOW_AT,
+        gSplashMinKernel = math.max(0.5,
+            r.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS) }
+    local writeAtlas = st.gpuSplashWriteIsA
+        and st.gpuSplashAtlasA or st.gpuSplashAtlasB
+    local updated = writeAtlas:updateWithShader({
+        textures = { txSplashMeta = st.gpuSplashMeta },
+        values = values, shader = st.gpuSplashAtlasShader,
+        blendMode = render.BlendMode.Opaque,
+    })
+    if updated == false then error('GPU splash atlas shader pending') end
+    st.gpuSplashReadAtlas = writeAtlas
+    st.gpuSplashWriteIsA = not st.gpuSplashWriteIsA
+    st.gpuSplashDrawList = list
+    st.gpuSplashDrawSize = size
 end
 
 rainDynamicSceneCopyState.updateTrailMaskTimed = function(sim)
@@ -10321,6 +10763,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         state.profGpuSubmitMs = (os.preciseClock() - tg) * 1000.0
     end
 
+    local cpuBuildStart = os.preciseClock()
     local stamps = {}
     local count = rainDynamicStateReadbackCount
     -- Every live drop is stamped every frame (full redraw).
@@ -10443,23 +10886,25 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                 + generation * 0.5698402911)
             if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION
                 and seed > 0.34 and stamp.radius >= 1.2 then
-                local secondary = rainDynamicSurfaceFrac(
-                    stamp.index * 0.6180339887
-                    + generation * 0.4142135623)
-                local jitter = (secondary - 0.5) * 1.10
-                local dirX = (stamp.x / size - 0.5) * 0.9
-                    + jitter
-                local dirY = 1.0 + (seed - 0.5) * 0.30
-                local length = math.sqrt(dirX * dirX + dirY * dirY)
                 local radius = stamp.radius
-                local reach = radius
-                    * (0.45 + 0.15 * secondary) * strength
-                stamp.lobeX = stamp.x + dirX / length * reach
-                stamp.lobeY = stamp.y + dirY / length * reach
-                stamp.lobeRadius = radius * (0.55 + 0.10 * secondary)
+                if not state.gpuHeadsActive then
+                    local secondary = rainDynamicSurfaceFrac(
+                        stamp.index * 0.6180339887
+                        + generation * 0.4142135623)
+                    local jitter = (secondary - 0.5) * 1.10
+                    local dirX = (stamp.x / size - 0.5) * 0.9 + jitter
+                    local dirY = 1.0 + (seed - 0.5) * 0.30
+                    local length = math.sqrt(dirX * dirX + dirY * dirY)
+                    local reach = radius
+                        * (0.45 + 0.15 * secondary) * strength
+                    stamp.lobeX = stamp.x + dirX / length * reach
+                    stamp.lobeY = stamp.y + dirY / length * reach
+                    stamp.lobeRadius = radius * (0.55 + 0.10 * secondary)
+                end
                 stamp.radius = radius * (1.0 - 0.10 * strength)
                 shaped = shaped + 1
             end
+            if not state.gpuHeadsActive then
             local diameterMM = 2.0
                 * (rainDynamicStateRadius[stamp.index] or 0.0)
                 / math.max(cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM, 0.000001)
@@ -10499,24 +10944,69 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
                 stamp.puddle2Radius = stamp.radius * 0.42
                 puddles = puddles + 1
             end
+            end
         end
     end
     if waterField then
+        state.profCpuBuildMs = (os.preciseClock() - cpuBuildStart) * 1000.0
         -- Bake the kernels outside any canvas:update() callback.
         state.waterKernel(state)
         if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_RIBBON then
             state.waterRibbonKernel(state)
         end
+        local overlayStart = os.preciseClock()
         if #stamps > 0 and not (state.gpuHeadsActive
                 and (cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG or 0) >= 1.5) then
-            target:update(function()
-                state.waterFieldDrawStamps(state, stamps, size, sim)
-            end)
+            if state.gpuHeadsActive and cfg.RUNTIME.RAIN_GPU_SPLASH then
+                -- Metadata only: no head quads are submitted in R1.4.
+                local splashStateStart = os.preciseClock()
+                state.waterFieldCollectGpuSplash(state, stamps, size)
+                state.profSplashStateMs =
+                    (os.preciseClock() - splashStateStart) * 1000.0
+            else
+                state.profSplashStateMs = 0.0
+                target:update(function()
+                    state.waterFieldDrawStamps(state, stamps, size, sim)
+                end)
+            end
+        else
+            state.profSplashStateMs = 0.0
+            state.waterFieldKernels = 0
+            state.waterFieldTearHeads = 0
         end
         if state.gpuHeadsActive then
+            local overrideStart = os.preciseClock()
             state.gpuOverrideWrite()
+            state.profOverrideWriteMs =
+                (os.preciseClock() - overrideStart) * 1000.0
+            if cfg.RUNTIME.RAIN_GPU_SPLASH then
+                local splashStart = os.preciseClock()
+                local okSplash, errSplash = pcall(state.gpuSplashRender,
+                    target, size)
+                state.profGpuSplashSubmitMs =
+                    (os.preciseClock() - splashStart) * 1000.0
+                if not okSplash then
+                    state.gpuSplashErr = tostring(errSplash)
+                    cfg.RUNTIME.RAIN_GPU_SPLASH = false
+                else
+                    state.gpuSplashErr = nil
+                end
+            else
+                state.gpuSplashCount = 0
+                state.gpuSplashOverflow = 0
+                state.profGpuSplashSubmitMs = 0.0
+                state.gpuSplashDrawList = nil
+            end
+        else
+            state.profOverrideWriteMs = 0.0
         end
+        if not (state.gpuHeadsActive and cfg.RUNTIME.RAIN_GPU_SPLASH) then
+            state.gpuSplashList = {}
+        end
+        state.profHeadOverlayMs = (os.preciseClock() - overlayStart) * 1000.0
+        local trailStart = os.preciseClock()
         state.waterFieldUpdateTrail(state, stamps, size, sim)
+        state.profWaterTrailMs = (os.preciseClock() - trailStart) * 1000.0
     end
     state.birthMaskRead = target
     state.birthMaskFrame = sim.frame
@@ -14586,6 +15076,40 @@ function windowMain(dt)
             .. tostring(cfg.RUNTIME.RAIN_GPU_STATE_COUNT))
         ui.text('512 = baseline; 3072 = 6x capacity. Change needs game restart.')
         ui.text('Birth mask redraw and GPU readback scale with live slots; compare FPS.')
+        if ui.checkbox('Freeze GPU drop state (performance probe)',
+            cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG) then
+            cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG =
+                not cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG
+            rainDynamicSceneCopyState.stateFreezeUntil =
+                cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG
+                    and (os.preciseClock() + 30.0) or nil
+        end
+        if cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG then
+            ui.text(string.format('GPU DROP PHYSICS FROZEN (%.0f s left; auto resumes)',
+                math.max(0.0, (rainDynamicSceneCopyState.stateFreezeUntil
+                    or os.preciseClock()) - os.preciseClock())))
+        end
+        if ui.checkbox('Pre-laid GPU birth sites (R1.2)',
+            cfg.RUNTIME.RAIN_GPU_PRELAID_SITES) then
+            cfg.RUNTIME.RAIN_GPU_PRELAID_SITES =
+                not cfg.RUNTIME.RAIN_GPU_PRELAID_SITES
+        end
+        if cfg.RUNTIME.RAIN_GPU_PRELAID_SITES then
+            ui.text(string.format('Birth atlas: %s | %d sites%s',
+                rainDynamicSceneCopyState.spawnAtlas and 'ready' or 'pending',
+                rainDynamicSceneCopyState.spawnAtlasCount or 0,
+                rainDynamicSceneCopyState.spawnAtlasError
+                    and (' | ' .. rainDynamicSceneCopyState.spawnAtlasError) or ''))
+            if ui.checkbox('Preview birth atlas (R=U, G=V+1, B=order)',
+                cfg.RUNTIME.RAIN_GPU_PRELAID_DEBUG) then
+                cfg.RUNTIME.RAIN_GPU_PRELAID_DEBUG =
+                    not cfg.RUNTIME.RAIN_GPU_PRELAID_DEBUG
+            end
+            if cfg.RUNTIME.RAIN_GPU_PRELAID_DEBUG
+                and rainDynamicSceneCopyState.spawnAtlas then
+                ui.image(rainDynamicSceneCopyState.spawnAtlas, vec2(320, 24))
+            end
+        end
     end
     local densityScale, densityChanged = ui.slider(
         'Moving drop density',
@@ -15367,22 +15891,30 @@ function windowMain(dt)
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES =
                 not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_LOBES
         end
-        if ui.checkbox('WF torn impacts at speed',
-            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED) then
-            cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED =
-                not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_ENABLED
-        end
         wfSlider('WF tear start (km/h)',
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KMH', 0.0, 200.0, '%.0f')
         wfSlider('WF tear full (km/h)',
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_FULL_KMH', 10.0, 300.0, '%.0f')
-        wfSlider('WF tear duration (s)',
-            'RAIN_DYNAMIC_WATER_FIELD_TEAR_SECONDS', 0.05, 1.5, '%.2f')
+        wfSlider('WF torn impact: heavy size range (%)',
+            'RAIN_DYNAMIC_WATER_FIELD_TEAR_HEAVY_SIZE_PERCENT',
+            0.0, 100.0, '%.0f')
+        do
+            local low = math.min(cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+                cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY)
+            local high = math.max(cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+                cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY)
+            local threshold = low + (high - low) * math.max(0.0, math.min(100.0,
+                cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_HEAVY_SIZE_PERCENT)) * 0.01
+            ui.text(string.format('Heavy birth size %.2f-%.2f mm | size trigger at %.2f mm or larger (or speed)',
+                low, high, threshold))
+        end
         if ui.checkbox('Impact splash v2 (press, ring, scatter)',
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2) then
             cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2 =
                 not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SPLASH_V2
         end
+        wfSlider('Speed-only splash birth share',
+            'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SPEED_SHARE', 0.0, 1.0, '%.2f')
         wfSlider('Splash v2 duration (s)',
             'RAIN_DYNAMIC_WATER_FIELD_SPLASH_SECONDS', 0.05, 2.0, '%.2f')
         wfSlider('Splash v2 size ref (head texels)',
@@ -15480,32 +16012,62 @@ function windowMain(dt)
             rainDynamicSceneCopyState.waterTrailStamps or 0,
             rainDynamicSceneCopyState.waterTrailSheets or 0,
             rainDynamicSceneCopyState.waterTrailMaxSpeed or 0.0))
-        wfSlider('WF tear min diameter (mm)',
-            'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_DIAMETER_MM', 0.3, 4.0, '%.2f')
         wfSlider('WF tear min piece (texels)',
             'RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS', 0.5, 4.0, '%.2f')
         local car = ac.getCar(0)
-        ui.text(string.format('WF kernels %d | tearing heads %d | %.0f km/h',
+        ui.text(string.format('WF CPU kernels %d (GPU heads excluded) | splash heads %d | %.0f km/h',
             rainDynamicSceneCopyState.waterFieldKernels or 0,
             rainDynamicSceneCopyState.waterFieldTearHeads or 0,
             car and car.speedKmh or 0.0))
         do
             local p = rainDynamicSceneCopyState
+            if cfg.RUNTIME.RAIN_GPU_STATE_FREEZE_DEBUG then
+                ui.text('PERFORMANCE PROBE: GPU DROP PHYSICS FROZEN')
+            end
             p.profBirthAvg = (p.profBirthAvg or 0) * 0.95 + (p.profBirthMs or 0) * 0.05
             p.profTrailAvg = (p.profTrailAvg or 0) * 0.95 + (p.profTrailMaskMs or 0) * 0.05
-            ui.text(string.format('R1.0 CPU cost (avg): birth mask + WF stamps %.2f ms | wipe mask %.2f ms | slots %d',
+            p.profBuildAvg = (p.profBuildAvg or 0) * 0.95 + (p.profCpuBuildMs or 0) * 0.05
+            p.profOverlayAvg = (p.profOverlayAvg or 0) * 0.95 + (p.profHeadOverlayMs or 0) * 0.05
+            p.profWaterTrailAvg = (p.profWaterTrailAvg or 0) * 0.95 + (p.profWaterTrailMs or 0) * 0.05
+            ui.text(string.format('Rain birth + WF CPU (avg): total %.2f ms | wipe mask %.2f ms | slots %d',
                 p.profBirthAvg, p.profTrailAvg, rainDynamicStateReadbackCount or 0))
+            ui.text(string.format('R1.1 CPU parts (avg): build %.2f | head overlay %.2f | water trail %.2f ms',
+                p.profBuildAvg, p.profOverlayAvg, p.profWaterTrailAvg))
             if ui.checkbox('GPU heads (R1.1, tile binning)', cfg.RUNTIME.RAIN_GPU_HEADS) then
                 cfg.RUNTIME.RAIN_GPU_HEADS = not cfg.RUNTIME.RAIN_GPU_HEADS
             end
             if cfg.RUNTIME.RAIN_GPU_HEADS then
+                if ui.checkbox('GPU splash pieces (R1.4 prototype)',
+                    cfg.RUNTIME.RAIN_GPU_SPLASH) then
+                    cfg.RUNTIME.RAIN_GPU_SPLASH =
+                        not cfg.RUNTIME.RAIN_GPU_SPLASH
+                end
+                ui.text(string.format('GPU splash atlas: %d heads | submit %.2f ms%s%s',
+                    p.gpuSplashCount or 0,
+                    p.profGpuSplashSubmitMs or 0,
+                    (p.gpuSplashOverflow or 0) > 0
+                        and (' | ' .. p.gpuSplashOverflow .. ' over limit') or '',
+                    p.gpuSplashErr and (' | ' .. p.gpuSplashErr) or ''))
+                if cfg.RUNTIME.RAIN_GPU_SPLASH then
+                    p.profSplashStateAvg = (p.profSplashStateAvg or 0) * 0.95
+                        + (p.profSplashStateMs or 0) * 0.05
+                    p.profOverrideWriteAvg = (p.profOverrideWriteAvg or 0) * 0.95
+                        + (p.profOverrideWriteMs or 0) * 0.05
+                    ui.text(string.format('R1.4 CPU split (avg): splash state %.2f | override upload %.2f ms',
+                        p.profSplashStateAvg, p.profOverrideWriteAvg))
+                end
                 ui.text(string.format('GPU heads: %s | submit %.2f ms | splash overrides %d%s',
                     p.gpuHeadsActive and 'active' or 'off',
                     p.profGpuSubmitMs or 0, p.gpuOverrideCount or 0,
                     p.gpuHeadsErr and ('  err ' .. p.gpuHeadsErr) or ''))
                 local tv, tc = ui.slider('GPU heads tile (px)', cfg.RUNTIME.RAIN_GPU_HEADS_TILE, 16, 256, '%.0f')
                 if tc then cfg.RUNTIME.RAIN_GPU_HEADS_TILE = math.floor(tv + 0.5) end
-                local dv, dc = ui.slider('GPU heads debug (1 tile occupancy, 2 GPU only)', cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG, 0, 2, '%.0f')
+                if ui.checkbox('GPU heads: skip empty tile words (R1.3)',
+                    cfg.RUNTIME.RAIN_GPU_HEADS_SPARSE_WORDS) then
+                    cfg.RUNTIME.RAIN_GPU_HEADS_SPARSE_WORDS =
+                        not cfg.RUNTIME.RAIN_GPU_HEADS_SPARSE_WORDS
+                end
+                local dv, dc = ui.slider('GPU heads debug (1 occupancy, 2 GPU only, 3 no heads)', cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG, 0, 3, '%.0f')
                 if dc then cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG = math.floor(dv + 0.5) end
                 if ui.checkbox('GPU heads: flip canvas Y (if heads appear mirrored)', cfg.RUNTIME.RAIN_GPU_HEADS_FLIP_Y) then
                     cfg.RUNTIME.RAIN_GPU_HEADS_FLIP_Y = not cfg.RUNTIME.RAIN_GPU_HEADS_FLIP_Y

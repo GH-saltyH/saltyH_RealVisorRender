@@ -2,7 +2,7 @@
 
 See `docs/README.md` for the document index and working rules.
 
-## R1. GPU drops pre-laid like the micro pattern (added 2026-10-02) — STARTED 2026-10-05 (`RAINFX_GPU_PRELAID.md`)
+## R1. GPU drops pre-laid like the micro pattern (added 2026-10-02) — 4096-slot performance isolation in progress (`RAINFX_GPU_PRELAID.md`)
 
 Source: `RAINFX_REVIEW_2026-10-02.md` §1.
 
@@ -13,11 +13,17 @@ advance and selected by intensity, as the micro pattern does.
 1. **GPU-side WF head stamping.** Draw the WF head canvas from the state
    texture (`txRainState` / meta) with an instanced or point-sprite pass;
    removes the per-drop CPU loop in `waterFieldDrawStamps`.
-2. **Atlas-driven respawn.** Spawn atlas in visor UV (jitter, size class,
-   activation order); respawn reads site `(slot + generation × K) mod N`,
-   active when its order ≤ rain intensity.
-3. **Raise the state texture size** (10k+ slots) once 1 and 2 hold; readback
-   for stats only.
+2. **Atlas-driven respawn.** R1.2 prototype bakes valid visor-UV sites and
+   stable activation order on the GPU, behind a toggle. In-game validation
+   is pending; size class remains on the existing birth-size path.
+3. **Raise the state texture size** (10k+ slots) once 1 and 2 hold. A
+   sparse-word GPU head pass is now behind a toggle for scaling tests;
+   CPU trail/splash/readback work still needs bounding before 10k+ slots.
+
+**Current gate (2026-10-06):** 4096 slots show excellent density but about
+25 FPS in a scene that previously ran near 52 FPS. R1.2 recovers only
+1–2 FPS and R1.3 about 1 FPS. Isolate the main cost before raising the
+slot cap further.
 
 **Not before** the visor scene stack (R2) is stable.
 

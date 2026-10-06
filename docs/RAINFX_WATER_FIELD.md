@@ -170,7 +170,8 @@ The user found the frozen torn pattern visually poor: fixed and star-like.
 The target is a pressed pancake: a wide circle that spreads, with a torn
 edge and a little splatter around it, sized to the drop, with random tearing.
 
-Implementation (`waterFieldTearPieces`):
+Historical implementation (`waterFieldTearPieces`, removed 2026-10-06 in
+favour of impact splash v2; see `RAINFX_IMPACT_SPLASH.md`):
 - A flat core ellipse of radius
   `P = Rf·(1.4+0.9·amount)·(0.85..1.15 per life)`.
 - 14–24 small rim kernels at 0.86–1.08 P, with random angles and sizes. About
