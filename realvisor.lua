@@ -1036,6 +1036,13 @@ local cfg = scriptSettings:mapConfig({
         
         RAIN_DEBUG = 0,
         
+
+        AVG_TIME_X_MIN = 0.0,
+        AVG_TIME_X_MAX = 0.0,
+        AVG_TIME_Y_MIN = 0.0,
+        AVG_TIME_Y_MAX = 0.0,
+        AVG_TIME_N_MIN = 0.0,
+        AVG_TIME_N_MAX = 0.0,
     },
 })
 
@@ -5293,7 +5300,7 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             materialQueryRef = nil,
 
             parameters = 
-                PARAMS_KS_PERPIXEL_MULTIMAP_EMISSIVE,
+                PARAMS_KS_PERPIXEL_MULTIMAP,
 
             values = {},
 
@@ -8884,7 +8891,7 @@ render.onSceneReady(function()
     rainDynamicSceneCopyState.stateReadyFrame = sim.frame
     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
         local maskOk, maskError = pcall(
-            rainDynamicSceneCopyState.updateTrailMask, sim)
+            rainDynamicSceneCopyState.updateTrailMaskTimed, sim)
         if not maskOk and not rainDynamicSceneCopyState.maskWarned then
             ac.warn(appNameDebug .. ' Dynamic UV mask update failed: '
                 .. tostring(maskError))
@@ -8893,8 +8900,12 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.microRebakeIfNeeded(
             rainDynamicSceneCopyState)
         if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED then
+            local tB0 = os.preciseClock()
             local birthOk, birthError = pcall(
                 rainDynamicSceneCopyState.updateBirthMask, sim)
+            -- R1.0 profiling (docs/RAINFX_GPU_PRELAID.md): CPU cost of the
+            -- per-drop stamping (birth mask + water-field heads + trails).
+            rainDynamicSceneCopyState.profBirthMs = (os.preciseClock() - tB0) * 1000.0
             if not birthOk and not rainDynamicSceneCopyState.birthMaskWarned then
                 ac.warn(appNameDebug .. ' Dynamic birth mask update failed: '
                     .. tostring(birthError))
@@ -9955,6 +9966,12 @@ end
 
 -- Birth probes use a separate small canvas so their growth cannot erase the
 -- validated R/G wipe and liquid-ridge channels. Only recent GPU births stamp.
+rainDynamicSceneCopyState.updateTrailMaskTimed = function(sim)
+    local t0 = os.preciseClock()
+    local res = rainDynamicSceneCopyState.updateTrailMask(sim)
+    rainDynamicSceneCopyState.profTrailMaskMs = (os.preciseClock() - t0) * 1000.0
+    return res
+end
 rainDynamicSceneCopyState.updateBirthMask = function(sim)
     if not rainDynamicStateHasSnapshot then return end
     local state = rainDynamicSceneCopyState
@@ -10461,6 +10478,81 @@ rainDynamicSceneCopyState.visorLayerDefs = function()
             { mesh = 'GLASS_INT_OVERLAY', two = true, kind = 2 },
         },
     }
+end
+-- s56: per-mesh parameter UI of the custom-shader (*_OVERLAY) meshes,
+-- shown in the KN5 tab material popup.
+rainDynamicSceneCopyState.visorLayerItemFor = function(meshName)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    local defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
+    for _, it in ipairs(defs.housing) do
+        if it.mesh == meshName then return it end
+    end
+    for _, it in ipairs(defs.glass) do
+        if it.mesh == meshName then return it end
+    end
+    if meshName == 'GLASS_RAINFX_OVERLAY' then return { rainNote = true } end
+    return nil
+end
+rainDynamicSceneCopyState.visorLayerParamUI = function(editor, item)
+    local r = cfg.RUNTIME
+    local function sl(label, key, a, b, fmt)
+        local v, ch = ui.slider(label, r[key], a, b, fmt)
+        if ch then r[key] = v end
+    end
+    local function ck(label, key)
+        if ui.checkbox(label, r[key]) then r[key] = not r[key] end
+    end
+    ui.text('Custom shader (rainVisorLayer.hlsl), scene stack. '
+        .. 'Values are runtime config (RAIN_VISOR_LAYER_*).')
+    if item.rainNote then
+        ui.text('Rain surface: its parameters are in the RainFX tab.')
+        return
+    end
+    if item.mat == 'FRAME' then
+        sl('Frame normal', 'RAIN_VISOR_LAYER_FRAME_NORMAL', 0.0, 3.0, '%.2f')
+        sl('Frame spec', 'RAIN_VISOR_LAYER_FRAME_SPEC', 0.0, 2.0, '%.2f')
+        sl('Frame gloss', 'RAIN_VISOR_LAYER_FRAME_GLOSS', 0.0, 1.0, '%.2f')
+    elseif item.mat == 'RUBBER' then
+        sl('Glass line grey', 'RAIN_VISOR_LAYER_BORDER_GREY', 0.0, 0.5, '%.3f')
+        sl('Glass line normal', 'RAIN_VISOR_LAYER_RUBBER_NORMAL', 0.0, 3.0, '%.2f')
+        sl('Glass line spec', 'RAIN_VISOR_LAYER_RUBBER_SPEC', 0.0, 2.0, '%.2f')
+        sl('Glass line gloss', 'RAIN_VISOR_LAYER_RUBBER_GLOSS', 0.0, 1.0, '%.2f')
+    elseif item.mat == 'FABRIC' then
+        sl('Fabric normal (fuzz)', 'RAIN_VISOR_LAYER_FABRIC_NORMAL', 0.0, 3.0, '%.2f')
+        sl('Fabric sheen', 'RAIN_VISOR_LAYER_FABRIC_SHEEN', 0.0, 2.0, '%.2f')
+        sl('Fabric sheen power', 'RAIN_VISOR_LAYER_FABRIC_SHEEN_POWER', 1.0, 8.0, '%.2f')
+        sl('Fabric spec', 'RAIN_VISOR_LAYER_FABRIC_SPEC', 0.0, 2.0, '%.2f')
+        sl('Fabric gloss (x txMaps G)', 'RAIN_VISOR_LAYER_FABRIC_GLOSS', 0.0, 1.0, '%.2f')
+        sl('Fabric lit-zone lift (direct light)', 'RAIN_VISOR_LAYER_FABRIC_LIT_LIFT', 0.0, 3.0, '%.2f')
+    elseif item.kind == 1 then
+        sl('Glass film alpha (outside the band)', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
+        sl('Top band opacity', 'RAIN_VISOR_LAYER_BAND_OPACITY', 0.0, 1.0, '%.2f')
+        sl('Top band starts at texture alpha', 'RAIN_VISOR_LAYER_BAND_ALPHA_MIN', 0.5, 0.99, '%.2f')
+    elseif item.kind == 2 then
+        sl('Glass film alpha (shared by coating / inner glass)', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
+    end
+    if item.interior then
+        ui.separator()
+        ui.text('Interior light (shared by fabric and glass line)')
+        ck('Helmet shadow (sun only through the opening)', 'RAIN_VISOR_LAYER_HELMET_SHADOW')
+        sl('Shadow: sun-forward cos dark', 'RAIN_VISOR_LAYER_SHADOW_COS_LO', -1.0, 1.0, '%.2f')
+        sl('Shadow: sun-forward cos lit', 'RAIN_VISOR_LAYER_SHADOW_COS_HI', -1.0, 1.0, '%.2f')
+        sl('Interior ambient', 'RAIN_VISOR_LAYER_INTERIOR_AMBIENT', 0.0, 1.5, '%.2f')
+        sl('Interior: sun bounce', 'RAIN_VISOR_LAYER_SUN_BOUNCE', 0.0, 1.0, '%.2f')
+        sl('Interior: bounce kept in shadow', 'RAIN_VISOR_LAYER_BOUNCE_BASE', 0.0, 1.0, '%.2f')
+        sl('Interior: light through opening', 'RAIN_VISOR_LAYER_OPENING', 0.0, 1.5, '%.2f')
+        sl('Interior: sky chroma (0 neutral)', 'RAIN_VISOR_LAYER_INTERIOR_SKY_CHROMA', 0.0, 1.0, '%.2f')
+    end
+    ui.separator()
+    ui.text('Shared lighting (all custom-shader meshes)')
+    sl('Stack sun (x HDR light colour)', 'RAIN_VISOR_LAYER_SUN_HDR', 0.0, 3.0, '%.2f')
+    sl('Ambient (x source-mean luminance)', 'RAIN_VISOR_LAYER_AMBIENT', 0.0, 2.0, '%.2f')
+    sl('Ambient sky chroma', 'RAIN_VISOR_LAYER_AMBIENT_SAT', 0.0, 1.0, '%.2f')
+    sl('Ambient floor (down faces)', 'RAIN_VISOR_LAYER_AMBIENT_FLOOR', 0.0, 1.0, '%.2f')
+    sl('Ambient mip', 'RAIN_VISOR_LAYER_AMBIENT_MIP', 0.0, 10.0, '%.1f')
+    ck('Normal maps: flip green', 'RAIN_VISOR_LAYER_NORMAL_FLIP_G')
+    ck('Light direction flip (toward light = -lightDirection)', 'RAIN_VISOR_LAYER_LIGHT_FLIP')
+    ui.text('(These settings are runtime values, like the RainFX tab; save them to the Lua defaults when final.)')
 end
 rainDynamicSceneCopyState.visorLayerEditor = function(meshName)
     for _, e in ipairs(MATERIAL_EDITORS or {}) do
@@ -13363,16 +13455,7 @@ local function drawMaterialEditorWindow(editor)
         return
     end
 
-    if ui.beginPopup(
-
-        strMaterialEditorPopup,
-        
-        nil,
-        nil,
-
-        materialEditWindowOpen
-
-    ) then
+    if ui.beginPopup(strMaterialEditorPopup) then
 
         ui.text(
             editor.materialName
@@ -13382,7 +13465,15 @@ local function drawMaterialEditorWindow(editor)
         ui.separator()
 
 
-        if not editor.materialQueryRef
+        local overlayItem = rainDynamicSceneCopyState.visorLayerItemFor
+            and rainDynamicSceneCopyState.visorLayerItemFor(editor.meshName)
+        if overlayItem then
+
+            -- s56: custom-shader (*_OVERLAY) meshes: our shader parameters
+            -- instead of the DUMMY KN5 material.
+            rainDynamicSceneCopyState.visorLayerParamUI(editor, overlayItem)
+
+        elseif not editor.materialQueryRef
             or #editor.materialQueryRef == 0 then
 
             ui.text(
@@ -13441,6 +13532,9 @@ local function drawMaterialEditorWindow(editor)
             ui.text('Last error: ' .. editor.lastError)
         end
 
+        -- s56 fix: every successful beginPopup needs endPopup (it was
+        -- missing, which broke the popup and the window after it opened).
+        ui.endPopup()
     end
 end
 
@@ -14005,7 +14099,9 @@ function windowMain(dt)
         -- Button: Open Material Parameter editor
         --------------------------------------------------------
     
-        if foundEditor.materialQueryRef then
+        local isOverlayMesh = rainDynamicSceneCopyState.visorLayerItemFor
+            and rainDynamicSceneCopyState.visorLayerItemFor(foundEditor.meshName)
+        if foundEditor.materialQueryRef or isOverlayMesh then
             ui.text('')
             ui.sameLine(320, 15)
            
@@ -14019,7 +14115,8 @@ function windowMain(dt)
                 materialEditWindowOpen = 
                     true
         
-                if not activeMaterialEditor.loaded then
+                if not activeMaterialEditor.loaded
+                    and not isOverlayMesh then
 
                     loadMaterialParams(
                         activeMaterialEditor
@@ -14033,6 +14130,10 @@ function windowMain(dt)
         end
         ui.text('\t')
     end
+
+    -- s56: the popup must be drawn in the same ID scope as ui.openPopup()
+    -- (inside this tab), not at window level.
+    drawMaterialEditorWindow(activeMaterialEditor)
         
 
     --------------------------------------------------------
@@ -14779,8 +14880,7 @@ function windowMain(dt)
         if cfg.RUNTIME.RAIN_VISOR_SCENE_STACK then
             local vl = rainDynamicSceneCopyState.visorLayer
             ui.text('stack: ' .. tostring(vl.status) .. (vl.err and ('  err ' .. vl.err) or ''))
-            tfSlider('Stack sun (x HDR light colour)', 'RAIN_VISOR_LAYER_SUN_HDR', 0.0, 3.0, '%.2f')
-            ui.text('Material / ambient sliders: see the Visor layer section (overlay UI).')
+            ui.text('Per-mesh parameters: KN5 tab -> "Click to Edit" on a *_OVERLAY mesh.')
         end
         ui.separator()
         ui.text('Post overlay P1 (RAINFX_POST_OVERLAY.md, archived)')
@@ -14796,53 +14896,8 @@ function windowMain(dt)
             if cfg.RUNTIME.RAIN_VISOR_LAYER or cfg.RUNTIME.RAIN_VISOR_SCENE_STACK then
                 local vl = rainDynamicSceneCopyState.visorLayer
                 ui.text('layer: ' .. tostring(vl.status) .. (vl.err and ('  err ' .. vl.err) or ''))
-                tfSlider('Layer ambient (x frame-mean luminance)', 'RAIN_VISOR_LAYER_AMBIENT', 0.0, 2.0, '%.2f')
-                tfSlider('Layer ambient sky chroma', 'RAIN_VISOR_LAYER_AMBIENT_SAT', 0.0, 1.0, '%.2f')
-                tfSlider('Layer ambient floor (down faces)', 'RAIN_VISOR_LAYER_AMBIENT_FLOOR', 0.0, 1.0, '%.2f')
-                tfCheck('Light direction flip (toward light = -lightDirection)', 'RAIN_VISOR_LAYER_LIGHT_FLIP')
-                tfCheck('Helmet shadow on interior parts', 'RAIN_VISOR_LAYER_HELMET_SHADOW')
-                tfSlider('Shadow: sun-forward cos dark', 'RAIN_VISOR_LAYER_SHADOW_COS_LO', -1.0, 1.0, '%.2f')
-                tfSlider('Shadow: sun-forward cos lit', 'RAIN_VISOR_LAYER_SHADOW_COS_HI', -1.0, 1.0, '%.2f')
-                tfSlider('Interior ambient', 'RAIN_VISOR_LAYER_INTERIOR_AMBIENT', 0.0, 1.5, '%.2f')
-                tfSlider('Interior: sun bounce', 'RAIN_VISOR_LAYER_SUN_BOUNCE', 0.0, 1.0, '%.2f')
-                tfSlider('Interior: bounce kept in shadow', 'RAIN_VISOR_LAYER_BOUNCE_BASE', 0.0, 1.0, '%.2f')
-                tfSlider('Interior: light through opening', 'RAIN_VISOR_LAYER_OPENING', 0.0, 1.5, '%.2f')
-                tfSlider('Interior: sky chroma (0 neutral)', 'RAIN_VISOR_LAYER_INTERIOR_SKY_CHROMA', 0.0, 1.0, '%.2f')
-                ui.text('Shadows (s50: scene-shadow probe only)')
-                local vls = rainDynamicSceneCopyState.visorLayer
-                tfCheck('Scene-shadow probe (trees, poles: CSP shadow maps)', 'RAIN_VISOR_LAYER_SHADOW_PROBE')
-                if cfg.RUNTIME.RAIN_VISOR_LAYER_SHADOW_PROBE then
-                    ui.text('probe: ' .. (vls.probe and (vls.probeReady and 'ok' or 'waiting') or 'not loaded')
-                        .. (vls.probeErr and ('  err ' .. vls.probeErr) or ''))
-                    tfCheck('Probe debug (white lit / black shadow)', 'RAIN_VISOR_LAYER_PROBE_DEBUG')
-                    tfSlider('Probe gain (sun calibration)', 'RAIN_VISOR_LAYER_PROBE_GAIN', 0.05, 5.0, '%.2f')
-                    tfSlider('Probe strength', 'RAIN_VISOR_LAYER_PROBE_STRENGTH', 0.0, 1.0, '%.2f')
-                    tfSlider('Probe albedo (in-scene darkness)', 'RAIN_VISOR_LAYER_PROBE_ALBEDO', 0.01, 0.5, '%.3f')
-                    tfSlider('Probe min N.L', 'RAIN_VISOR_LAYER_PROBE_MIN_NL', 0.0, 0.5, '%.2f')
-                    if vls.probeCanvas then ui.image(vls.probeCanvas, vec2(240, 240 * (vls.probeH or 9) / math.max(vls.probeW or 16, 1))) end
-                end
-                tfSlider('Layer ambient mip', 'RAIN_VISOR_LAYER_AMBIENT_MIP', 0.0, 10.0, '%.1f')
-                tfSlider('Layer sun', 'RAIN_VISOR_LAYER_SUN', 0.0, 2.0, '%.2f')
-                tfSlider('Glass film alpha', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
-                tfSlider('Top band opacity', 'RAIN_VISOR_LAYER_BAND_OPACITY', 0.0, 1.0, '%.2f')
-                tfSlider('Top band starts at texture alpha', 'RAIN_VISOR_LAYER_BAND_ALPHA_MIN', 0.5, 0.99, '%.2f')
-                tfSlider('Glass line grey', 'RAIN_VISOR_LAYER_BORDER_GREY', 0.0, 0.5, '%.3f')
-                tfCheck('Single-sided parts: cull front instead of back', 'RAIN_VISOR_LAYER_CULL_FLIP')
-                ui.text('V2 housing materials')
-                tfCheck('Normal maps: flip green', 'RAIN_VISOR_LAYER_NORMAL_FLIP_G')
-                tfSlider('Frame normal', 'RAIN_VISOR_LAYER_FRAME_NORMAL', 0.0, 3.0, '%.2f')
-                tfSlider('Frame spec', 'RAIN_VISOR_LAYER_FRAME_SPEC', 0.0, 2.0, '%.2f')
-                tfSlider('Frame gloss', 'RAIN_VISOR_LAYER_FRAME_GLOSS', 0.0, 1.0, '%.2f')
-                tfSlider('Glass line (rubber) normal', 'RAIN_VISOR_LAYER_RUBBER_NORMAL', 0.0, 3.0, '%.2f')
-                tfSlider('Glass line (rubber) spec', 'RAIN_VISOR_LAYER_RUBBER_SPEC', 0.0, 2.0, '%.2f')
-                tfSlider('Glass line (rubber) gloss', 'RAIN_VISOR_LAYER_RUBBER_GLOSS', 0.0, 1.0, '%.2f')
-                tfSlider('Fabric normal (fuzz)', 'RAIN_VISOR_LAYER_FABRIC_NORMAL', 0.0, 3.0, '%.2f')
-                tfSlider('Fabric sheen', 'RAIN_VISOR_LAYER_FABRIC_SHEEN', 0.0, 2.0, '%.2f')
-                tfSlider('Fabric sheen power', 'RAIN_VISOR_LAYER_FABRIC_SHEEN_POWER', 1.0, 8.0, '%.2f')
-                tfSlider('Fabric spec', 'RAIN_VISOR_LAYER_FABRIC_SPEC', 0.0, 2.0, '%.2f')
-                tfSlider('Fabric lit-zone lift (direct light)', 'RAIN_VISOR_LAYER_FABRIC_LIT_LIFT', 0.0, 3.0, '%.2f')
-                tfCheck('Mirror: stock visor in mirrors, probe hidden there', 'RAIN_VISOR_LAYER_MIRROR_STOCK')
-                tfSlider('Fabric gloss (x txMaps G)', 'RAIN_VISOR_LAYER_FABRIC_GLOSS', 0.0, 1.0, '%.2f')
+                ui.text('s56: per-mesh parameters moved to the KN5 tab ->')
+                ui.text('"Click to Edit" on the *_OVERLAY meshes.')
             end
             ui.text(string.format('overlay %sx%s', tostring(ov.w), tostring(ov.h)))
             tfCheck('Overlay debug: show alpha', 'RAIN_VISOR_OVERLAY_DEBUG_ALPHA')
@@ -15120,7 +15175,34 @@ function windowMain(dt)
             rainDynamicSceneCopyState.waterFieldKernels or 0,
             rainDynamicSceneCopyState.waterFieldTearHeads or 0,
             car and car.speedKmh or 0.0))
+        do
+            local p = rainDynamicSceneCopyState
+            p.profBirthAvg = (p.profBirthAvg or 0) * 0.95 + (p.profBirthMs or 0) * 0.05
+            p.profTrailAvg = (p.profTrailAvg or 0) * 0.95 + (p.profTrailMaskMs or 0) * 0.05
+            ui.text(string.format('R1.0 CPU cost (avg): birth mask + WF stamps %.2f ms | wipe mask %.2f ms | slots %d',
+                p.profBirthAvg, p.profTrailAvg, rainDynamicStateReadbackCount or 0))
+            cfg.RUNTIME.AVG_TIME_X_MIN = cfg.RUNTIME.AVG_TIME_X_MIN == 0.0 and p.profBirthAvg or math.min(cfg.RUNTIME.AVG_TIME_X_MIN, p.profBirthAvg)
+            cfg.RUNTIME.AVG_TIME_X_MAX = cfg.RUNTIME.AVG_TIME_X_MAX == 0.0 and p.profBirthAvg or math.max(cfg.RUNTIME.AVG_TIME_X_MAX, p.profBirthAvg)
+            cfg.RUNTIME.AVG_TIME_Y_MIN = cfg.RUNTIME.AVG_TIME_Y_MIN == 0.0 and p.profTrailAvg or math.min(cfg.RUNTIME.AVG_TIME_Y_MIN, p.profTrailAvg)
+            cfg.RUNTIME.AVG_TIME_Y_MAX = cfg.RUNTIME.AVG_TIME_Y_MAX == 0.0 and p.profTrailAvg or math.max(cfg.RUNTIME.AVG_TIME_Y_MAX, p.profTrailAvg)
+            ui.text(
+                string.format('%.2f ~ %.2fms | %.2f ~ %.2fms', 
+                    cfg.RUNTIME.AVG_TIME_X_MIN, 
+                    cfg.RUNTIME.AVG_TIME_X_MAX,
+                    cfg.RUNTIME.AVG_TIME_Y_MIN, 
+                    cfg.RUNTIME.AVG_TIME_Y_MAX
+                )
+            )          
+        end
     end
+
+    if ui.button('ResetTime11') then            
+        cfg.RUNTIME.AVG_TIME_X_MIN = 0.0 
+        cfg.RUNTIME.AVG_TIME_X_MAX = 0.0
+        cfg.RUNTIME.AVG_TIME_Y_MIN = 0.0 
+        cfg.RUNTIME.AVG_TIME_Y_MAX = 0.0
+    end
+
 
     ui.separator()
     ui.text('Haze / condensation film')
@@ -15330,11 +15412,7 @@ function windowMain(dt)
 
     end)
 
-    --------------------------------------------------------
-    -- Material Parameter: floating editor window
-    --------------------------------------------------------
-
-    drawMaterialEditorWindow(activeMaterialEditor)
+    -- (s56: the material editor popup is drawn inside the KN5 tab.)
 
 
 end

@@ -2,7 +2,7 @@
 
 See `docs/README.md` for the document index and working rules.
 
-## R1. GPU drops pre-laid like the micro pattern (added 2026-10-02) — OPEN
+## R1. GPU drops pre-laid like the micro pattern (added 2026-10-02) — STARTED 2026-10-05 (`RAINFX_GPU_PRELAID.md`)
 
 Source: `RAINFX_REVIEW_2026-10-02.md` §1.
 

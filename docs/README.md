@@ -51,6 +51,7 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+| `RAINFX_GPU_PRELAID.md` | ACTIVE | R1 GPU pre-laid drops: ceiling analysis, R1.0 profiling, tile-binning head stamping, atlas respawn |
 | `RAINFX_VISOR_LAYER.md` | ACTIVE | visor stack: V1/V2 overlay phase (archived §1–16), scene stack §17, KN5 rules §18, material editors §19, open items §20 |
 | `RAINFX_WATER_FIELD.md` | REFERENCE | the drop renderer: soft-kernel heads, metaball silhouettes, trails, refraction rule; backlog #3 closed |
 | `RAINFX_MICRO_PATTERN.md` | REFERENCE | micro drop pattern v2, pop-in, point reads |

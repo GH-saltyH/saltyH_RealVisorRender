@@ -776,3 +776,18 @@ full mask either.
 0.90` (mask = smoothstep(min, min + 0.04, alpha); fully inside → exactly the
 band opacity). UI: "Top band starts at texture alpha". If scratches (0 < a < 1
 region) start reading as band, raise the threshold.
+
+
+## 22. s56: KN5-tab material editor fix, per-mesh custom-shader UI
+
+- **Bug:** the KN5 tab material editor did not respond. `drawMaterialEditorWindow`
+  called `ui.beginPopup()` without the matching `ui.endPopup()`, and the popup
+  was drawn at window level while `ui.openPopup()` ran inside the KN5 tab
+  (different IMGUI ID scope). Fixed: `endPopup()` added, popup drawn inside the
+  KN5 tab, `beginPopup(id)` without the extra args.
+- **Per-mesh UI:** "Click to Edit" on a `*_OVERLAY` mesh now opens our shader
+  parameters for that mesh (frame / glass line / fabric material, glass film,
+  band; interior light for fabric and glass line; shared lighting for all).
+  `GLASS_RAINFX_OVERLAY` points to the RainFX tab. The sliders were removed
+  from the RainFX tab (a pointer text remains). Values are runtime config
+  (`RAIN_VISOR_LAYER_*`), as before.
