@@ -153,3 +153,75 @@ Slots: 2048 in every run.
 - **Splash v2 pieces** stay on the CPU at first. They get a **per-frame
   budget** of tearing heads, as a cheap cap on the 8.9 ms peak, until they
   move to the GPU as well.
+
+## 7. R1.1 prototype (s58): GPU heads by tile binning
+
+**User requirement.** No visible pattern: no tile seams, no regular
+spacing, nothing that reveals the binning.
+
+### Implementation
+
+The feature is behind `RAIN_GPU_HEADS = false`. UI: Water field section →
+"GPU heads (R1.1, tile binning)".
+
+1. **Source.** The **live GPU state textures**: `rainStateA/B` holds pos.uv
+   and vel.uv, `rainStateMetaA/B` holds radius and packed status
+   (generation·4 + status), each N × 1. The readback is not used, so there is
+   no prediction lag.
+2. **Pass A, tile mask.** One RGBA32F canvas texel per (tile, word). Each
+   channel stores 24 exact bits (a float holds integers up to 2²⁴), so one
+   texel covers 96 drops.
+   - Layout: width = tilesX · ⌈N/96⌉, height = tilesY.
+   - Each texel tests its 96 drops with a **conservative circle–rectangle**
+     overlap, `reach = R·(1.4·ks + max(maxRadii, 1.1·puddleReach, 0.6) + 0.1) + 2 px`.
+   - Cost: tilesX · tilesY · N tests, about 2 M for 32² tiles × 2048.
+3. **Pass B, heads.** Each pixel of the head canvas (2048², fp16) walks its
+   tile's bits (`firstbitlow`) and evaluates **the same kernels as
+   `waterFieldDrawStamps`**, in slot order:
+   - the stretched body;
+   - two tail kernels (body stretch);
+   - the shape-variation lobe;
+   - two puddles;
+   - 0–2 irregular lobes.
+
+   It uses the same per-life seeds (1-based slot index, generation) and
+   the same `ks`, and blends with the same "over" rule:
+   rgb = (code, 1, 0)·k + rgb·(1−k), a = k + a·(1−k).
+4. **CPU overlay.** The CPU loop still builds the stamps (for the trail and
+   the splash). In GPU mode it skips the head kernels (`bq()`) and draws
+   only the splash v2 and tear pieces on top. For each tearing head it
+   records `(bodyAmp, splashScale)` into an N × 1 override canvas, which
+   pass B reads **next frame** (a one-frame lag on the hollow body).
+5. **Debug.**
+   - `RAIN_GPU_HEADS_DEBUG` 1: tile occupancy (red = number of drops tested,
+     green = coverage).
+   - `RAIN_GPU_HEADS_DEBUG` 2: GPU only, with no CPU overlay.
+   - `RAIN_GPU_HEADS_FLIP_Y`: in case the canvas row order differs from the
+     UI drawing.
+
+### Pattern safety
+
+- **No list truncation.** The bitmask holds every drop, so a dense tile
+  cannot drop drops.
+- **No seams.** The footprint test is conservative, so a kernel crossing a
+  tile border is evaluated in both tiles.
+- **No new regularity.** The seeds and shapes are the CPU ones.
+
+### Known differences to the CPU path (check in the A/B)
+
+- **Fresh-birth growth.** The CPU grows births over
+  `BIRTH_MASK_GROW_SECONDS` (0.12 s) using `birthSeenAt`. GPU heads appear
+  at full size. If visible, add an age channel.
+- **Positions.** The GPU uses the current state; the CPU uses the readback
+  plus prediction. The CPU trail can sit a few ms behind the GPU head.
+- **Blend order.** Strict slot order on the GPU; CPU order was "fresh
+  first, then a rotating cursor". Only the overlap order differs.
+
+### To measure
+
+With `RAIN_GPU_HEADS` on and off, in heavy rain, report:
+
+- the R1.0 "WF stamps" ms;
+- the "GPU heads submit" ms (CPU-side submit only);
+- the FPS;
+- any visible difference: shape, seams, mirrored heads.

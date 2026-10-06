@@ -559,6 +559,14 @@ local cfg = scriptSettings:mapConfig({
         RAIN_DYNAMIC_BIRTH_MASK_ENABLED = true,
         RAIN_DYNAMIC_BIRTH_MASK_ONLY = true,
         RAIN_DYNAMIC_BIRTH_MASK_SIZE = 2048,
+        -- R1.1 (docs/RAINFX_GPU_PRELAID.md): water-field heads (body, tail,
+        -- shape lobe, puddles, irregular lobes) evaluated on the GPU from the
+        -- live state textures by tile binning; the CPU keeps only the splash
+        -- v2 / tear pieces and the trail. A/B with the CPU path.
+        RAIN_GPU_HEADS = true,
+        RAIN_GPU_HEADS_TILE = 64,        -- px of the head canvas per tile
+        RAIN_GPU_HEADS_FLIP_Y = false,   -- debug: canvas row orientation
+        RAIN_GPU_HEADS_DEBUG = 0,        -- 0 off, 1 tile occupancy, 2 GPU-only (no CPU overlay)
         RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION = true,
         RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH = 0.85,
@@ -9540,6 +9548,13 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
         cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS)
     local drawn = 0
     local tearing = 0
+    -- R1.1: in GPU-heads mode the body/tail/lobe/puddle kernels come from
+    -- the GPU pass; only splash/tear pieces are drawn here.
+    local gpu = state.gpuHeadsActive
+    state.gpuOverrides = gpu and (state.gpuOverrides or {}) or state.gpuOverrides
+    local function bq(...)
+        if not gpu then kernelQuad(...) end
+    end
     for _, stamp in ipairs(stamps) do
         local R = stamp.radius or 0.0
         if R > 0.25 then
@@ -9614,18 +9629,21 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                     splashScale = 1.0
                 end
             end
+            if gpu and (bodyAmp < 0.999 or math.abs(splashScale - 1.0) > 1e-3) then
+                state.gpuOverrides[#state.gpuOverrides + 1] = { index, bodyAmp, splashScale }
+            end
             R = R * splashScale
             -- Body: mild stretch along motion, radius-relative.
             local stretch = math.min(0.6, speed * stretchGain
                 / math.max(R / size, 1e-6) * 0.05)
-            kernelQuad(stamp.x, stamp.y, R * (1.0 + 0.6 * stretch),
+            bq(stamp.x, stamp.y, R * (1.0 + 0.6 * stretch),
                 R * (1.0 - 0.25 * stretch), ux, uy, code, 0.0)
             drawn = drawn + 1
             -- Tapered tail: two shrinking kernels toward the tail point.
             if stamp.tailX then
                 for k = 1, 2 do
                     local t = k * 0.4
-                    kernelQuad(stamp.x + (stamp.tailX - stamp.x) * t,
+                    bq(stamp.x + (stamp.tailX - stamp.x) * t,
                         stamp.y + (stamp.tailY - stamp.y) * t,
                         R * (0.85 - 0.3 * t), R * (0.85 - 0.3 * t),
                         ux, uy, code, 0.0)
@@ -9634,14 +9652,14 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
             end
             -- Existing per-life lobe and puddle circles become kernels.
             if stamp.lobeX then
-                kernelQuad(stamp.lobeX, stamp.lobeY, stamp.lobeRadius,
+                bq(stamp.lobeX, stamp.lobeY, stamp.lobeRadius,
                     stamp.lobeRadius, ux, uy, stamp.lobeRadius / 32.0, 0.0)
                 drawn = drawn + 1
             end
             if stamp.puddleX then
-                kernelQuad(stamp.puddleX, stamp.puddleY, stamp.puddleRadius,
+                bq(stamp.puddleX, stamp.puddleY, stamp.puddleRadius,
                     stamp.puddleRadius, ux, uy, stamp.puddleRadius / 32.0, 0.0)
-                kernelQuad(stamp.puddle2X, stamp.puddle2Y,
+                bq(stamp.puddle2X, stamp.puddle2Y,
                     stamp.puddle2Radius, stamp.puddle2Radius, ux, uy,
                     stamp.puddle2Radius / 32.0, 0.0)
                 drawn = drawn + 2
@@ -9655,7 +9673,7 @@ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
                         seedB * 7.13 + k * 0.29))
                     local rr = R * (0.45 + 0.30 * rainDynamicSurfaceFrac(
                         seedA * 5.71 + k * 0.53))
-                    kernelQuad(stamp.x + math.cos(a) * d,
+                    bq(stamp.x + math.cos(a) * d,
                         stamp.y + math.sin(a) * d, rr, rr, ux, uy,
                         R / 32.0, 0.0)
                 end
@@ -9966,6 +9984,288 @@ end
 
 -- Birth probes use a separate small canvas so their growth cannot erase the
 -- validated R/G wipe and liquid-ridge channels. Only recent GPU births stamp.
+-- R1.1 GPU heads (docs/RAINFX_GPU_PRELAID.md §4). Pass A: per tile, a
+-- bitmask of the drops whose conservative footprint touches the tile
+-- (RGBA32F, 24 exact bits per channel = 96 drops per texel). Pass B: every
+-- head-canvas pixel walks its tile's bits and blends the same kernels as
+-- waterFieldDrawStamps, in slot order. No list truncation, no tile seams:
+-- the footprint test is conservative, so nothing is cut at tile borders.
+-- (s59: shader strings live in rainDynamicSceneCopyState, not as chunk
+-- locals: the main chunk is at Lua's 200-local limit.)
+rainDynamicSceneCopyState.gpuHeadsCommon = [[
+float rgFrac(float x) { return x - floor(x); }
+bool rgDrop(int i, out float2 pos, out float R, out float2 vel,
+    out float idx, out float gen, out float rUV)
+{
+    float4 st = txRainState.Load(int3(i, 0, 0));
+    float4 me = txRainStateMeta.Load(int3(i, 0, 0));
+    float packed = me.a;
+    float status = packed - 4.0 * floor(packed / 4.0);
+    pos = float2(st.r, st.g + 1.0) * gSize;
+    vel = st.ba;
+    rUV = max(me.r, 0.0);
+    R = rUV * gSize;
+    idx = (float)i + 1.0;          // Lua slots are 1-based (seeds)
+    gen = floor(packed / 4.0);
+    if (abs(status - 1.0) > 0.25) return false;
+    if (st.r < 0.0 || st.r > 1.0 || st.g < -1.0 || st.g > 0.0) return false;
+    return R > 0.0;
+}
+]]
+rainDynamicSceneCopyState.gpuHeadsPassA = rainDynamicSceneCopyState.gpuHeadsCommon .. [[
+// s60: one helper per channel (no dynamic l-value indexing, which forced
+// an unroll of a [loop] and failed to compile: X3550 / X3531).
+float rgBitsFor(int base, float2 tmin, float2 tmax)
+{
+    uint bits = 0u;
+    [loop] for (int b = 0; b < 24; b++)
+    {
+        int i = base + b;
+        if (i >= (int)gCount) break;
+        float2 pos; float R; float2 vel; float idx; float gen; float rUV;
+        if (rgDrop(i, pos, R, vel, idx, gen, rUV))
+        {
+            float reach = R * (gKs * 1.4 + max(gMaxRadii, max(gPuddleReach * 1.1, 0.6)) + 0.1) + 2.0;
+            float2 q = clamp(pos, tmin, tmax);
+            if (dot(q - pos, q - pos) <= reach * reach)
+                bits |= (1u << (uint)b);
+        }
+    }
+    return (float)bits;
+}
+float4 main(PS_IN pin)
+{
+    float xf = floor(pin.Tex.x * gMaskW);
+    float tyf = floor(pin.Tex.y * gTilesY);
+    float txf = floor(xf / gWords);
+    float wf = xf - txf * gWords;
+    float2 tmin = float2(txf, tyf) * gTile;
+    float2 tmax = tmin + gTile;
+    int base = (int)wf * 96;
+    return float4(rgBitsFor(base, tmin, tmax),
+        rgBitsFor(base + 24, tmin, tmax),
+        rgBitsFor(base + 48, tmin, tmax),
+        rgBitsFor(base + 72, tmin, tmax));
+}
+]]
+rainDynamicSceneCopyState.gpuHeadsPassB = rainDynamicSceneCopyState.gpuHeadsCommon .. [[
+void rgKern(float2 px, float2 c, float ax, float ay, float2 u, float code,
+    float amp, inout float4 acc)
+{
+    ax *= gKs; ay *= gKs;
+    float2 d = px - c;
+    float2 v = float2(-u.y, u.x);
+    float2 p = float2(dot(d, u) / max(ax, 1e-3), dot(d, v) / max(ay, 1e-3));
+    float k = saturate(1.0 - dot(p, p)) * amp;
+    if (k <= 0.0 || amp <= 0.005) return;
+    acc.rgb = float3(min(code, 1.0), 1.0, 0.0) * k + acc.rgb * (1.0 - k);
+    acc.a = k + acc.a * (1.0 - k);
+}
+void rgEval(int i, float2 px, inout float4 acc)
+{
+    float2 pos; float R; float2 vel; float idx; float gen; float rUV;
+    if (!rgDrop(i, pos, R, vel, idx, gen, rUV)) return;
+    float speed = length(vel);
+    float seedA = rgFrac(idx * 0.7548776662 + gen * 0.5698402911);
+    float seedB = rgFrac(idx * 0.6180339887 + gen * 0.4142135623);
+    // body stretch tail (updateBirthMask)
+    bool hasTail = false; float2 tail = pos;
+    if (gBodyStretch > 0.5)
+    {
+        float mr = min(gMaxRadii, speed * gLookback / max(R / gSize, 1e-6));
+        if (speed > 0.0 && mr > 0.20) { tail = pos - vel / speed * (mr * R); hasTail = true; }
+    }
+    // shape lobe
+    bool hasLobe = false; float2 lobe = pos; float lobeR = 0.0;
+    if (gShapeOn > 0.5 && seedA > 0.34 && R >= 1.2)
+    {
+        float jitter = (seedB - 0.5) * 1.10;
+        float2 dir = float2((pos.x / gSize - 0.5) * 0.9 + jitter, 1.0 + (seedA - 0.5) * 0.30);
+        dir /= max(length(dir), 1e-6);
+        lobe = pos + dir * (R * (0.45 + 0.15 * seedB) * gShapeStrength);
+        lobeR = R * (0.55 + 0.10 * seedB);
+        R = R * (1.0 - 0.10 * gShapeStrength);
+        hasLobe = true;
+    }
+    // puddles
+    bool hasPuddle = false; float2 p1 = pos, p2 = pos; float r1 = 0.0, r2 = 0.0;
+    float diameterMM = 2.0 * rUV / max(gUvPerMM, 1e-6);
+    float puddleSeed = rgFrac(idx * 0.4142135623 + gen * 0.7320508076);
+    if (gPuddleOn > 0.5 && diameterMM >= gPuddleMinMM && puddleSeed < gPuddleShare)
+    {
+        float ang = rgFrac(idx * 0.5698402911 + gen * 0.6180339887) * 6.28318530718;
+        float motion = min(speed * 10.0, 1.0);
+        float2 vd = speed > 1e-6 ? vel / speed : float2(0.0, 0.0);
+        float2 dd = float2(cos(ang), sin(ang)) * (1.0 - motion) + vd * motion;
+        dd /= max(length(dd), 0.001);
+        float reach = R * gPuddleReach;
+        p1 = pos + dd * reach; r1 = R * (0.58 + 0.12 * puddleSeed);
+        p2 = pos + float2(-dd.y * 0.7 - dd.x * 0.35, dd.x * 0.7 - dd.y * 0.35) * reach;
+        r2 = R * 0.42;
+        hasPuddle = true;
+    }
+    if (R <= 0.25) return;
+    float code = R / 32.0;
+    // splash v2 override from the CPU (body hidden / residual size)
+    float amp = 1.0, scale = 1.0;
+    float4 ov = txOverride.Load(int3(i, 0, 0));
+    if (ov.a > 0.5) { amp = ov.r; scale = ov.g; }
+    float2 u = speed > 1e-6 ? vel / speed
+        : float2(cos(seedA * 3.14159265), sin(seedA * 3.14159265));
+    R *= scale;
+    float stretch = min(0.6, speed * gStretchGain / max(R / gSize, 1e-6) * 0.05);
+    rgKern(px, pos, R * (1.0 + 0.6 * stretch), R * (1.0 - 0.25 * stretch), u, code, amp, acc);
+    if (hasTail)
+    {
+        [unroll] for (int k = 1; k <= 2; k++)
+        {
+            float t = k * 0.4;
+            float rr = R * (0.85 - 0.3 * t);
+            rgKern(px, pos + (tail - pos) * t, rr, rr, u, code, amp, acc);
+        }
+    }
+    if (hasLobe) rgKern(px, lobe, lobeR, lobeR, u, lobeR / 32.0, amp, acc);
+    if (hasPuddle)
+    {
+        rgKern(px, p1, r1, r1, u, r1 / 32.0, amp, acc);
+        rgKern(px, p2, r2, r2, u, r2 / 32.0, amp, acc);
+    }
+    if (gLobesOn > 0.5 && R >= 2.0)
+    {
+        int cnt = R >= 4.0 ? 2 : 1;
+        [loop] for (int k = 1; k <= cnt; k++)
+        {
+            float a = (seedA + k * 0.37) * 6.28318530718;
+            float d = R * (0.25 + 0.30 * rgFrac(seedB * 7.13 + k * 0.29));
+            float rr = R * (0.45 + 0.30 * rgFrac(seedA * 5.71 + k * 0.53));
+            rgKern(px, pos + float2(cos(a), sin(a)) * d, rr, rr, u, R / 32.0, amp, acc);
+        }
+    }
+}
+void rgWalk(float fbits, int base, float2 px, inout float4 acc, inout int occupied)
+{
+    uint bits = (uint)fbits;
+    [loop] while (bits != 0u)
+    {
+        uint b = firstbitlow(bits);
+        bits &= bits - 1u;
+        occupied++;
+        rgEval(base + (int)b, px, acc);
+    }
+}
+float4 main(PS_IN pin)
+{
+    float2 tex = pin.Tex;
+    if (gFlipY > 0.5) tex.y = 1.0 - tex.y;
+    float2 px = tex * gSize;
+    int tx = (int)min(floor(px.x / gTile), gTilesX - 1.0);
+    int ty = (int)min(floor(px.y / gTile), gTilesY - 1.0);
+    float4 acc = 0.0;
+    int occupied = 0;
+    [loop] for (int w = 0; w < (int)gWords; w++)
+    {
+        float4 m = txMask.Load(int3(tx * (int)gWords + w, ty, 0));
+        rgWalk(m.x, w * 96, px, acc, occupied);
+        rgWalk(m.y, w * 96 + 24, px, acc, occupied);
+        rgWalk(m.z, w * 96 + 48, px, acc, occupied);
+        rgWalk(m.w, w * 96 + 72, px, acc, occupied);
+    }
+    if (gDebug > 0.5 && gDebug < 1.5)
+        return float4(saturate(occupied / 64.0), acc.g, 0.0, 1.0);
+    return acc;
+}
+]]
+rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
+    local st = rainDynamicSceneCopyState
+    local r = cfg.RUNTIME
+    local state = rainStateReadIsA and rainStateA or rainStateB
+    local meta = rainStateReadIsA and rainStateMetaA or rainStateMetaB
+    local count = rainDynamicStateReadbackCount or 0
+    if not state or not meta or count <= 0 then return false end
+    local tile = math.max(16, math.floor(r.RAIN_GPU_HEADS_TILE))
+    local tilesX = math.ceil(size / tile)
+    local tilesY = tilesX
+    local words = math.ceil(count / 96)
+    local maskW = tilesX * words
+    if not st.gpuMask or st.gpuMaskW ~= maskW or st.gpuMaskH ~= tilesY then
+        if st.gpuMask then st.gpuMask:dispose() end
+        st.gpuMask = ui.ExtraCanvas(vec2(maskW, tilesY), 1,
+            render.AntialiasingMode.None, render.TextureFormat.R32G32B32A32.Float)
+        st.gpuMask:setName('RainFX GPU heads tile mask')
+        st.gpuMaskW, st.gpuMaskH = maskW, tilesY
+    end
+    if not st.gpuOverride or st.gpuOverrideN ~= count then
+        if st.gpuOverride then st.gpuOverride:dispose() end
+        st.gpuOverride = ui.ExtraCanvas(vec2(count, 1), 1,
+            render.AntialiasingMode.None, render.TextureFormat.R16G16B16A16.Float)
+        st.gpuOverride:setName('RainFX GPU heads splash override')
+        st.gpuOverride:clear(rgbm.colors.transparent)
+        st.gpuOverrideN = count
+    end
+    local values = st.gpuValues or {}
+    st.gpuValues = values
+    values.gSize = size
+    values.gTile = tile
+    values.gTilesX = tilesX
+    values.gTilesY = tilesY
+    values.gWords = words
+    values.gMaskW = maskW
+    values.gCount = count
+    values.gKs = math.max(1.0, r.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
+    values.gMaxRadii = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII
+    values.gLookback = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS
+    values.gBodyStretch = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH and 1.0 or 0.0
+    values.gShapeOn = r.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION and 1.0 or 0.0
+    values.gShapeStrength = math.max(0.0, math.min(1.5, r.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH))
+    values.gPuddleOn = r.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED and 1.0 or 0.0
+    values.gPuddleMinMM = r.RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM
+    values.gPuddleShare = r.RAIN_DYNAMIC_BIRTH_PUDDLE_SHARE
+    values.gPuddleReach = r.RAIN_DYNAMIC_BIRTH_PUDDLE_REACH
+    values.gUvPerMM = r.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+    values.gStretchGain = r.RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH
+    values.gLobesOn = r.RAIN_DYNAMIC_WATER_FIELD_LOBES and 1.0 or 0.0
+    values.gFlipY = r.RAIN_GPU_HEADS_FLIP_Y and 1.0 or 0.0
+    values.gDebug = r.RAIN_GPU_HEADS_DEBUG or 0
+    local okA, errA = pcall(function()
+        st.gpuMask:updateWithShader({
+            textures = { txRainState = state, txRainStateMeta = meta },
+            values = values,
+            shader = rainDynamicSceneCopyState.gpuHeadsPassA,
+        })
+    end)
+    if not okA then st.gpuHeadsErr = 'pass A: ' .. tostring(errA); return false end
+    local okB, errB = pcall(function()
+        target:updateWithShader({
+            blendMode = render.BlendMode.Opaque,
+            textures = { txRainState = state, txRainStateMeta = meta,
+                txMask = st.gpuMask, txOverride = st.gpuOverride },
+            values = values,
+            shader = rainDynamicSceneCopyState.gpuHeadsPassB,
+        })
+    end)
+    if not okB then st.gpuHeadsErr = 'pass B: ' .. tostring(errB); return false end
+    st.gpuHeadsErr = nil
+    return true
+end
+-- Splash v2 overrides (body amplitude, residual scale) collected by the
+-- CPU pass this frame; used by pass B next frame (one-frame lag).
+rainDynamicSceneCopyState.gpuOverrideWrite = function()
+    local st = rainDynamicSceneCopyState
+    if not st.gpuOverride then return end
+    local list = st.gpuOverrides or {}
+    st.gpuOverride:clear(rgbm.colors.transparent)
+    if #list > 0 then
+        st.gpuOverride:update(function()
+            for _, o in ipairs(list) do
+                ui.drawRectFilled(vec2(o[1] - 1, 0), vec2(o[1], 1),
+                    rgbm(o[2], o[3], 0.0, 1.0))
+            end
+        end)
+    end
+    st.gpuOverrideCount = #list
+    st.gpuOverrides = {}
+end
+
 rainDynamicSceneCopyState.updateTrailMaskTimed = function(sim)
     local t0 = os.preciseClock()
     local res = rainDynamicSceneCopyState.updateTrailMask(sim)
@@ -10010,6 +10310,16 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     local target = state.birthMaskA
     state.birthMaskRead = state.birthMaskA
     target:clear(rgbm.colors.transparent)
+    -- R1.1: GPU heads fill the canvas; the CPU pass then only overlays the
+    -- splash / tear pieces and records splash overrides.
+    state.gpuHeadsActive = false
+    if waterField and cfg.RUNTIME.RAIN_GPU_HEADS then
+        local tg = os.preciseClock()
+        local okG, resG = pcall(state.gpuHeadsRun, target, size, sim)
+        state.gpuHeadsActive = okG and resG == true
+        if not okG then state.gpuHeadsErr = tostring(resG) end
+        state.profGpuSubmitMs = (os.preciseClock() - tg) * 1000.0
+    end
 
     local stamps = {}
     local count = rainDynamicStateReadbackCount
@@ -10197,10 +10507,14 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
         if cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_RIBBON then
             state.waterRibbonKernel(state)
         end
-        if #stamps > 0 then
+        if #stamps > 0 and not (state.gpuHeadsActive
+                and (cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG or 0) >= 1.5) then
             target:update(function()
                 state.waterFieldDrawStamps(state, stamps, size, sim)
             end)
+        end
+        if state.gpuHeadsActive then
+            state.gpuOverrideWrite()
         end
         state.waterFieldUpdateTrail(state, stamps, size, sim)
     end
@@ -15181,6 +15495,22 @@ function windowMain(dt)
             p.profTrailAvg = (p.profTrailAvg or 0) * 0.95 + (p.profTrailMaskMs or 0) * 0.05
             ui.text(string.format('R1.0 CPU cost (avg): birth mask + WF stamps %.2f ms | wipe mask %.2f ms | slots %d',
                 p.profBirthAvg, p.profTrailAvg, rainDynamicStateReadbackCount or 0))
+            if ui.checkbox('GPU heads (R1.1, tile binning)', cfg.RUNTIME.RAIN_GPU_HEADS) then
+                cfg.RUNTIME.RAIN_GPU_HEADS = not cfg.RUNTIME.RAIN_GPU_HEADS
+            end
+            if cfg.RUNTIME.RAIN_GPU_HEADS then
+                ui.text(string.format('GPU heads: %s | submit %.2f ms | splash overrides %d%s',
+                    p.gpuHeadsActive and 'active' or 'off',
+                    p.profGpuSubmitMs or 0, p.gpuOverrideCount or 0,
+                    p.gpuHeadsErr and ('  err ' .. p.gpuHeadsErr) or ''))
+                local tv, tc = ui.slider('GPU heads tile (px)', cfg.RUNTIME.RAIN_GPU_HEADS_TILE, 16, 256, '%.0f')
+                if tc then cfg.RUNTIME.RAIN_GPU_HEADS_TILE = math.floor(tv + 0.5) end
+                local dv, dc = ui.slider('GPU heads debug (1 tile occupancy, 2 GPU only)', cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG, 0, 2, '%.0f')
+                if dc then cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG = math.floor(dv + 0.5) end
+                if ui.checkbox('GPU heads: flip canvas Y (if heads appear mirrored)', cfg.RUNTIME.RAIN_GPU_HEADS_FLIP_Y) then
+                    cfg.RUNTIME.RAIN_GPU_HEADS_FLIP_Y = not cfg.RUNTIME.RAIN_GPU_HEADS_FLIP_Y
+                end
+            end
             cfg.RUNTIME.AVG_TIME_X_MIN = cfg.RUNTIME.AVG_TIME_X_MIN == 0.0 and p.profBirthAvg or math.min(cfg.RUNTIME.AVG_TIME_X_MIN, p.profBirthAvg)
             cfg.RUNTIME.AVG_TIME_X_MAX = cfg.RUNTIME.AVG_TIME_X_MAX == 0.0 and p.profBirthAvg or math.max(cfg.RUNTIME.AVG_TIME_X_MAX, p.profBirthAvg)
             cfg.RUNTIME.AVG_TIME_Y_MIN = cfg.RUNTIME.AVG_TIME_Y_MIN == 0.0 and p.profTrailAvg or math.min(cfg.RUNTIME.AVG_TIME_Y_MIN, p.profTrailAvg)
