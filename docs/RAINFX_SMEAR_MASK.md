@@ -1,6 +1,22 @@
 # Smear mask: fingerprint-like turbid patches (2026-10-01)
 
 Status: implemented behind `RAIN_DYNAMIC_SMEAR_ENABLED` (default `true`).
+
+## Whole-visor eligibility and nose exclusion (2026-10-07)
+
+The existing `texture/smear_mask_v7_template_2048.png` is the R/G pattern
+texture, not a separate whole-visor eligibility map. Its alpha is uniformly
+255. Alpha is now sampled once in non-tiled visor UV and multiplies smear
+eligibility, allowing later hand-painted global exclusions without repeating
+them with R/G tiling. The current texture remains unchanged.
+
+A soft triangular nose exclusion additionally multiplies eligibility in
+non-tiled visor UV. `RAIN_DYNAMIC_SMEAR_NOSE_EXCLUDE` enables it. UI controls
+set centre U, tip V, half width, height and feather distance. The apex points
+up, with the base below it. This masks smear, including its influence on
+water color/visibility, without removing actual WF water from that region.
+Use smear region debug 1 to check placement; raw R/G debug retains raw data.
+
 This is the procedural **test** version. DXC (ps_6_0) compiles the main
 shader and the Lua block/bracket check passes. **Not yet seen in game.**
 
@@ -671,3 +687,13 @@ point-sampled in CSP is unverified. If micro decode artefacts ever appear
 at disk borders (gate or radius codes mixing), switch those reads to
 `Texture.Load(int3(uv × size, 0))` with `GetDimensions`, which is
 point-exact by definition.
+
+### Visibility feathering (2026-10-07)
+
+R reveal and G visibility use a five-tap cross filter with 0.003 visor-UV
+support (scaled by each channel tiling). Class presence transitions use a
+minimum 0.15 band. Original G remains the source of facet colours, so smoothing
+the hiding mask does not blur the smear class tone definitions. The alpha
+eligibility and nose exclusion retain their existing soft transitions.
+WF trail and impact film within smear now refract existing scene layers;
+their mix sliders control refraction strength, without an added water tone.

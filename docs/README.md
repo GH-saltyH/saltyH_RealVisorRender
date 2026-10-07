@@ -1,4 +1,4 @@
-# RealVisor RainFX — docs index and working rules (2026-10-05)
+# RealVisor RainFX — docs index and working rules (2026-10-07)
 
 Start here. This file lists every document in `docs/` with its state, the
 current architecture in one screen, and the rules for working on the
@@ -51,7 +51,10 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
-| `RAINFX_GPU_PRELAID.md` | ACTIVE | R1 GPU pre-laid drops: CPU A/B, tile-binning heads, R1.2 birth-site atlas prototype |
+| `RAINFX_GPU_PRELAID.md` | REFERENCE | R1 GPU pre-laid drops: CPU A/B, tile-binning heads, R1.2 birth-site atlas prototype |
+| `RAINFX_IMPACT_FILM.md` | REFERENCE | local impact film, trigger, layer composition and validation |
+| `RAINFX_UI.md` | REFERENCE | grouped popup controls, conditional settings, and validation |
+| `RELEASE_0.6.0.md` | REFERENCE | accepted RainFX release, performance cleanup and deferred movement work |
 | `RAINFX_VISOR_LAYER.md` | ACTIVE | visor stack: V1/V2 overlay phase (archived §1–16), scene stack §17, KN5 rules §18, material editors §19, open items §20 |
 | `RAINFX_WATER_FIELD.md` | REFERENCE | the drop renderer: soft-kernel heads, metaball silhouettes, trails, refraction rule; backlog #3 closed |
 | `RAINFX_MICRO_PATTERN.md` | REFERENCE | micro drop pattern v2, pop-in, point reads |
@@ -81,7 +84,7 @@ States:
 
 ### Files and versions
 
-1. **Work on local files.** The user commits to Git. Never commit.
+1. **Work on local files.** Preserve user tuning. The user normally commits; commit and integrate only when they explicitly request it (0.6.0 main integration authorised 2026-10-07).
 2. **Before every patch:**
    - re-stage `realvisor.lua`, the shaders and the docs, and diff them
      against the last delivered version;
@@ -145,7 +148,4 @@ States:
 
 ### Priority
 
-11. **Current priorities** (project instructions): optimisation and final
-    optical form on this branch, physical drop optics (plano-convex lens,
-    inversion, TIR rim, aberration, bokeh), and a tone that is not chrome
-    but has presence.
+11. **Current priorities** (2026-10-07): integrate accepted RainFX as 0.6.0, then resume visor E1–E7 optics. Final RainFX movement refinement is deferred by the user; do not change its physics as part of this release.

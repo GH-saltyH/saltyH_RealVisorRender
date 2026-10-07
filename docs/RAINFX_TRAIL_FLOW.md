@@ -366,3 +366,64 @@ mask used to stall). The film now has its own lifetime without a new channel:
 - Config: `RAIN_DYNAMIC_TRAIL_MASK_FILM_SECONDS` (default 1.0; uniform
   `gDynamicDropTrailFilmAgeExp` = T_wipe / T_film). UI: "Thin film lifetime
   (seconds)". Source: `RAINFX_NEAR_OBJECTS.md` §6.
+
+### Sheet activation UI (2026-10-07)
+
+Fast-flow sheet controls now group activation gates before appearance settings.
+The required update chain is birth mask → WF → trails → sheet enabled. Each
+current stamp must exceed the shared minimum head radius (default 0.5 head-mask texel), speed >= trail minimum,
+and either speed > sheet start OR enabled density > density start. Speed is
+drop movement in UV/s, not vehicle km/h. Strength is the maximum of
+clamp((speed-start)/max(full-start,1e-5),0,1) and the optional density ramp. Density is rain × relative air km/h / smear reference
+km/h; density full is saturation, not an upper cutoff.
+
+Live counters show current samples, radius passes, radius+speed passes,
+generated segments and maximum sheet factor, with upstream switch/readiness
+status. Radius/speed pass counts are prerequisites, not final density passes.
+Invalid start/full ranges are shown without changing saved tuning. Surface
+renderer readiness is reported separately. Impact film influx prerequisites
+are shown in their own section; appearance controls do not trigger sheets.
+
+### Small-drop tuning controls (2026-10-07)
+
+Previously fixed geometry limits are now runtime controls: shared trail/sheet
+minimum head radius (default 0.5 head-mask texel), head setback (default 0.9
+radii), ribbon continuity length (default 8 head radii) and a minimum
+continuity allowance in trail-canvas texels (default 0). Motion minimum
+UV/s is also exposed beside the radius gate. Zero radius minimum permits
+positive sub-texel radii; zero motion minimum still requires speed > 1e-6
+to safely compute the backward offset. Diagnostics use the same gates.
+
+For smaller drops, reduce minimum radius first. If ribbon segments repeatedly
+restart, increase continuity radii or the texel allowance. Density reference
+airspeed is exposed in sheet gates and explicitly marked as shared with
+smear; changing it changes both models' density. Existing saved tuning and
+all prior default thresholds are preserved.
+
+### Density OR speed (2026-10-07)
+
+Density no longer multiplies or blocks the speed ramp. Either ramp can
+activate fast-flow sheets; strength is max(speedRamp, densityRamp). Disabled
+density contributes zero, restoring speed-only behaviour rather than
+forcing all moving drops into sheets. Radius, minimum nonzero motion and
+upstream enabled-state requirements remain shared prerequisites. UI now
+shows the OR semantics and a final prerequisite+OR pass count separately
+from the speed-only pass count.
+
+### Common sheet cross-section (2026-10-07)
+
+The speed and density paths already shared stamping code, but their ramp
+value also controlled width, thinning and B/G sheet classification. At
+current thinning 0.80, full-trigger height was 0.20, below WF threshold 0.35.
+An isolated sheet could therefore disappear while overlaps accumulated
+visible height. This can explain the observed density-associated thickness;
+confirm the visual behaviour in game.
+
+Trigger ramps now only decide whether a sheet is stamped. Both paths use
+`SHEET_FORM` (default 1) for widening and B/G classification, and height
+max(1-thinning*form, SHEET_HEIGHT_MIN), default floor 0.75. Existing width,
+thinning and trigger tuning values remain intact. Shared shape and height
+floor are exposed in UI with the current WF threshold/profile range and a
+warning when an isolated sheet is below threshold. Decay still lowers old
+sheets naturally. This intentionally restores isolated-sheet presence and
+gives density/speed the same cross-section for an equal-sized drop.

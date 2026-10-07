@@ -1,8 +1,8 @@
-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-05
+# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-07
 
 See `docs/README.md` for the document index and working rules.
 
-## R1. GPU drops pre-laid like the micro pattern (added 2026-10-02) — 4096-slot performance isolation in progress (`RAINFX_GPU_PRELAID.md`)
+## R1. GPU drops pre-laid like the micro pattern — accepted for 0.6.0 (2026-10-07) (`RAINFX_GPU_PRELAID.md`)
 
 Source: `RAINFX_REVIEW_2026-10-02.md` §1.
 
@@ -20,14 +20,26 @@ advance and selected by intensity, as the micro pattern does.
    sparse-word GPU head pass is now behind a toggle for scaling tests;
    CPU trail/splash/readback work still needs bounding before 10k+ slots.
 
-**Current gate (2026-10-06):** 4096 slots show excellent density but about
-25 FPS in a scene that previously ran near 52 FPS. R1.2 recovers only
-1–2 FPS and R1.3 about 1 FPS. Isolate the main cost before raising the
-slot cap further.
+**Current result (2026-10-07):** user accepts the current RainFX for release.
+R1.1–R1.4, local impact film, sheet tuning and grouped UI form the 4096-slot
+baseline. User captures reached roughly 50+ FPS in the demanding scene;
+instantaneous captures are variable and are not a universal FPS guarantee.
+Further particle-cap increases are not a release requirement.
 
-**Not before** the visor scene stack (R2) is stable.
+## Deferred RainFX movement finish — user request, no date scheduled
 
-## R2. Visor scene stack and glass optics — IN PROGRESS
+- Use currently available physical inputs to produce naturally curved paths
+  rather than excessively straight movement.
+- With no sustained driving force, let water gradually lose speed and stop.
+- At Rain or higher intensity, allow appropriate downward flow while parked.
+- Separate tuning factors for adhesion, external acceleration, curvature,
+  dissipation and rain feed so adjusting one goal does not break another.
+- Preserve the accepted trail/film appearance and physical coordinate model.
+
+Do not implement these changes in the 0.6.0 release. No reminder or automatic
+execution time was requested; this is a deferred engineering backlog.
+
+## R2. Visor scene stack and glass optics — resumed after 0.6.0 integration
 
 Replaces the former "R2 visor glass pass" (`RAINFX_VISOR_GLASS.md` §3.C/§4).
 Work and open items: `RAINFX_VISOR_LAYER.md` §17–§20.
