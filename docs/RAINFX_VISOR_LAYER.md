@@ -32,7 +32,7 @@ Supersedes `RAINFX_POST_OVERLAY.md` P3 (KN5 occlusion) and absorbs
 |---|---|---|
 | E1 | **Projected strong forward light.** Bright parts of the forward image are refracted onto the visor, as inside a real visor. | camera view × visor normal → gathered forward image; only the strong part (threshold) is projected. Source = final frame. |
 | E2 | **Relief of the glass surface.** | pre-baked normal map, fast. |
-| E3 | **Optics of the relief zones.** The image is slightly turbid and smeared; at normal borders it tears blurrily in every direction; strong light is likely caught there. | a lens effect driven by the normal map, like a drop: refraction offset from N, mip up at high ∥∇N∥, split sampling across edges (`VISOR_GLASS` §4 "rim tear"). |
+| E3 | **Optics of the authored relief rim.** Only the white outline mask has refraction, blur and thickness contrast. | Direct mesh UV normal and outline-mask sampling; independent lens slope, reflection and transmission gains. Current definition and controls: `VISOR_OPTICS_E2_E3.md`. |
 | E4 | **Top band.** Simple texture plus a matte surface that blocks a set amount of light. The band lies **outside the inner glass film**, so it does not cover the inner film's gloss. | band texture × transmission; inner-film gloss drawn over it. |
 | E5 | **Per-part material and light response** | masks (existing assets). |
 | E6 | **Scratches** highlighted by light | the scratch pattern texture exists. Anisotropic highlight × light (`VISOR_GLASS` §4). |
@@ -155,8 +155,9 @@ must render from both sides.
      RGBA layout is ours to define.
 4. **`GLASS_INT`** (two-sided): E2, E3, E7.
    - **Relief normal:** `GLASS_INT_EXT_4k_txNormal.dds`.
-   - **Relief vs other-zone optical border:** `GLASS_INT_EXT_4k_txMAPS.dds`.
-     The channels can be redefined.
+   - **Optical rim:** `GLASS_INT_OUTLINE_MASK.png` sampled at original `pin.Tex`,
+     defined in `VISOR_OPTICS_E2_E3.md`. The center and exterior stay optically clear.
+     MAPS channels remain available for later authoring.
 5. **`BODY_FRAME`** (two-sided). Low priority, barely visible.
    - Diffuse `BODY_FRAME/BODY_FRAME_1K_txDiff.dds`.
    - Normal `BODY_FRAME_1K_txNormal.dds`.

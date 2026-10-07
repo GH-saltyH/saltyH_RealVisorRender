@@ -13,7 +13,8 @@
                    2 alcantara fabric), a = 1
       1 GLASS_EXT: band where txLayerDiffuse.a ~ 1 (blocks the scene by
                    gLayerBandOpacity), faint film elsewhere (V1)
-      2 glass    : faint film (GLASS_INT, GLASS_COATING) (V1)
+      2 glass    : faint film (GLASS_COATING) (V1)
+      3 inner    : optional E2/E3 normal-driven scene refraction prototype
 
     Light model (LDR, the frame is already tone mapped), s45:
       ambient = hemisphere chroma (horizon -> sky, from WeatherFX colours,
@@ -29,6 +30,49 @@
 */
 
 float2 rainLayerWrapUV(float2 uv) { return frac(uv); }
+
+// Mesh UV is authored on a negative V tile. CSP sampler bindings can clamp
+// even nominal wrap samplers, so repeat texel addresses explicitly. The UV
+// from pin is unchanged; this is texture addressing, not a fitted UV region.
+float4 rainLayerTextureRepeat(Texture2D tx, float2 uv)
+{
+    uint width, height, levels;
+    tx.GetDimensions(0, width, height, levels);
+    float2 size = float2(width, height);
+    float footprint = max(length(ddx(uv) * size), length(ddy(uv) * size));
+    uint mip = (uint)clamp(floor(log2(max(footprint, 1.0))), 0.0, (float)levels - 1.0);
+    uint unusedLevels;
+    tx.GetDimensions(mip, width, height, unusedLevels);
+    float2 extent = float2(width, height);
+    float2 texel = uv * float2(width, height) - 0.5;
+    float2 p = floor(texel);
+    float2 weight = frac(texel);
+    int2 p0 = (int2)(p - floor(p / extent) * extent);
+    int2 p1 = (int2)((p + 1.0) - floor((p + 1.0) / extent) * extent);
+    float4 a = tx.Load(int3(p0, mip));
+    float4 b = tx.Load(int3(p1.x, p0.y, mip));
+    float4 c = tx.Load(int3(p0.x, p1.y, mip));
+    float4 d = tx.Load(int3(p1, mip));
+    return lerp(lerp(a, b, weight.x), lerp(c, d, weight.x), weight.y);
+}
+
+// Reconstruct the outer-band material at each refracted sample. This avoids
+// framebuffer feedback and keeps opaque-band pixels from sampling outside.
+float rainLayerBandCoverage(float alpha)
+{
+    float lo = saturate(gLayerBandAlphaMin);
+    return smoothstep(lo, min(lo + 0.04, 1.0), alpha);
+}
+float3 rainLayerOpticsScene(float2 uv, float2 origin, float2 tex,
+    float2 texDx, float2 texDy, float3 bandLight, float bandFloor)
+{
+    float2 deltaPixels = (uv - origin) / max(gLayerInvShotSize, 1e-8);
+    float2 materialUV = tex + texDx * deltaPixels.x + texDy * deltaPixels.y;
+    float4 band = txLayerBand.SampleGrad(samLinearClamp, frac(materialUV), texDx, texDy);
+    float opacity = max(bandFloor, rainLayerBandCoverage(band.a)) * saturate(gLayerBandOpacity);
+    float3 scene = txLayerSource.SampleLevel(samLinearClamp, uv, 0).rgb;
+    return lerp(scene, band.rgb * bandLight, opacity);
+}
 
 // Samplers are effectively clamp (docs/RAINFX_SMEAR_MASK.md): wrap by
 // hand and keep the derivatives of the unwrapped UV for correct mips.
@@ -178,6 +222,130 @@ float4 main(PS_IN pin)
         return float4(gLayerHDR > 0.5 ? max(c, 0.0) : saturate(c), 1.0);
     }
 
+    if (gLayerKind > 2.5 && gLayerOptics > 0.5)
+    {
+        float3x3 tbn = rainLayerTBN(ng, pin.PosC, pin.Tex);
+        float2 bandTex = rainLayerTextureRepeat(txLayerBandUV, pin.Tex).rg;
+        float2 bandTexDx = ddx(bandTex);
+        float2 bandTexDy = ddy(bandTex);
+        float4 originBand = txLayerBand.SampleGrad(samLinearClamp, frac(bandTex), bandTexDx, bandTexDy);
+        // Any pixel inside the band transition belongs to the band material.
+        // A fractional floor would still blend outside-scene taps into it.
+        float bandFloor = rainLayerBandCoverage(originBand.a) > 0.0 ? 1.0 : 0.0;
+        float3 bandLight = gLayerBandExternalLight > 0.5
+            ? amb + sunL * saturate(dot(ng, gLayerLightDir))
+            : gLayerBandUnlitBrightness.xxx;
+        // Use mesh UV directly with repeat texture addressing.
+        float2 relief = rainLayerTextureRepeat(txLayerNormal, pin.Tex).rg * 2.0 - 1.0;
+        float coverage = saturate(rainLayerTextureRepeat(txLayerOutline, pin.Tex).r);
+        float4 lensField = rainLayerTextureRepeat(txLayerLens, pin.Tex);
+        // The mask is the allowed area; only sharp authored normal peaks draw
+        // the bevel. This narrows the line without moving or scaling mesh UV.
+        float ridge = pow(smoothstep(0.03, max(gLayerOpticsRimPeak, 0.031), length(relief)),
+            max(gLayerOpticsRimSharpness, 1.0));
+        if (gLayerOpticsMaskPreview > 0.5)
+            return float4((coverage * ridge).xxx, 1.0);
+        if (coverage <= 0.0)
+            return float4(0.0, 0.0, 0.0, 0.0);
+        if (gLayerNormalFlipG > 0.5) relief.y = -relief.y;
+        float2 rawRelief = relief;
+        // BC neutral-normal error should not light an otherwise flat region.
+        float reliefSupport = smoothstep(0.015, 0.08, length(relief));
+        // E3 direction uses the authored rim normal independently of E2 gain.
+        float2 lensSlope = relief * gLayerOpticsLensGain;
+        lensSlope /= max(1.0, length(lensSlope));
+        float3 perturbation = mul(float3(lensSlope, 0.0), tbn);
+        relief *= gLayerOpticsNormal;
+        float3 rn = mul(normalize(float3(relief, 1.0)), tbn);
+        rn = dot(rn, rn) > 1e-12 ? normalize(rn) : ng;
+        float2 direction = float2(dot(perturbation, gLayerCameraSide),
+            -dot(perturbation, gLayerCameraUp));
+        float2 pixel = gLayerInvShotSize;
+        float2 lo = pixel * 0.5;
+        float2 hi = 1.0 - lo;
+        float2 uv = clamp(pin.PosH.xy * pixel, lo, hi);
+        float2 shifted = clamp(uv + direction * gLayerOpticsRefractionPx * pixel, lo, hi);
+        float3 base = rainLayerOpticsScene(uv, uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+        float3 warped = rainLayerOpticsScene(shifted, uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+        if (gLayerOpticsBlurPx > 0.0)
+        {
+            // Keep the main image crisp; a weak asymmetric pair across the
+            // normal creates hairline tearing instead of a four-way box blur.
+            float2 axis = direction * rsqrt(max(dot(direction, direction), 1e-8));
+            float2 spread = axis * pixel * gLayerOpticsBlurPx;
+            float3 splitA = rainLayerOpticsScene(clamp(shifted + spread, lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+            float3 splitB = rainLayerOpticsScene(clamp(shifted - spread * 0.5, lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+            warped = warped * 0.75 + splitA * 0.15 + splitB * 0.10;
+        }
+        // E2 responds to light and view direction. Subtract the flat-surface
+        // lobe so flat glass stays neutral instead of receiving a white wash.
+        float3 hRaw = gLayerLightDir + toEye;
+        float3 h = hRaw * rsqrt(max(dot(hRaw, hRaw), 1e-12));
+        float exponent = lerp(8.0, 256.0, saturate(gLayerOpticsReliefGloss));
+        float specN = pow(saturate(dot(rn, h)), exponent) * saturate(dot(rn, gLayerLightDir));
+        float specFlat = pow(saturate(dot(ng, h)), exponent) * saturate(dot(ng, gLayerLightDir));
+        float3 highlight = sunL * max(specN - specFlat, 0.0)
+            * gLayerOpticsReliefSpec * reliefSupport
+            * (gLayerBandExternalLight > 0.5 ? 1.0 : 1.0 - bandFloor);
+        // A bevel still has contrast under a featureless sky. Fresnel and
+        // optical transmission supply this cue independently of sun N.L.
+        float fresnel = 0.04 + 0.96 * pow(1.0 - saturate(dot(rn, toEye)), 5.0);
+        float viewBevel = clamp(dot(rn - ng, toEye), -1.0, 1.0);
+        float skyBevel = clamp(rn.y - ng.y, -1.0, 1.0);
+        float transmission = saturate(1.0 - gLayerOpticsTransmissionLoss
+            + (viewBevel + skyBevel) * gLayerOpticsReliefShade);
+        float reflection = saturate(gLayerOpticsReflection * (0.15 + fresnel));
+        float2 reflectionUV = clamp(uv - direction * gLayerOpticsReflectionPx * pixel, lo, hi);
+        float3 environment = rainLayerOpticsScene(reflectionUV, uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+        float3 rim = lerp(warped * transmission, environment, reflection) + highlight;
+        float3 interiorDelta = float3(0.0, 0.0, 0.0);
+        if (gLayerOpticsInterior > 0.5 && ridge < 1.0)
+        {
+            // Rounded convex lens across the original WHITE band. Black
+            // holes remain black. No sine warp or inferred enclosed region.
+            float2 interiorSlope = lensField.rg + rawRelief * gLayerOpticsInteriorNormal;
+            interiorSlope /= max(length(interiorSlope), 1.0);
+            float3 interiorTangent = mul(float3(interiorSlope, 0.0), tbn);
+            float2 interiorDirection = float2(dot(interiorTangent, gLayerCameraSide),
+                -dot(interiorTangent, gLayerCameraUp));
+            float2 offset = interiorDirection * (gLayerOpticsInteriorPx
+                + lensField.b * gLayerOpticsInteriorBendPx);
+            float2 interiorUV = clamp(uv + offset * pixel, lo, hi);
+            float3 interior = rainLayerOpticsScene(interiorUV, uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+            if (gLayerOpticsInteriorSplitPx > 0.0)
+            {
+                float2 axis = offset * rsqrt(max(dot(offset, offset), 1e-8));
+                float2 split = axis * pixel * gLayerOpticsInteriorSplitPx;
+                float3 tear = rainLayerOpticsScene(clamp(interiorUV + split, lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
+                interior = lerp(interior, tear, 0.15);
+            }
+            if (gLayerOpticsInteriorBlurPx > 0.0 && gLayerOpticsInteriorBlurAmount > 0.0)
+            {
+                // Explicit nine-tap Gaussian blur: true defocus, independent
+                // of displacement. Weights sum to one, preserving scene tone.
+                float2 radius = pixel * gLayerOpticsInteriorBlurPx;
+                float3 blurred = interior * 0.25;
+                blurred += rainLayerOpticsScene(clamp(interiorUV + float2(radius.x, 0), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.125;
+                blurred += rainLayerOpticsScene(clamp(interiorUV - float2(radius.x, 0), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.125;
+                blurred += rainLayerOpticsScene(clamp(interiorUV + float2(0, radius.y), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.125;
+                blurred += rainLayerOpticsScene(clamp(interiorUV - float2(0, radius.y), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.125;
+                blurred += rainLayerOpticsScene(clamp(interiorUV + radius, lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.0625;
+                blurred += rainLayerOpticsScene(clamp(interiorUV - radius, lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.0625;
+                blurred += rainLayerOpticsScene(clamp(interiorUV + float2(radius.x, -radius.y), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.0625;
+                blurred += rainLayerOpticsScene(clamp(interiorUV + float2(-radius.x, radius.y), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.0625;
+                interior = lerp(interior, blurred, saturate(gLayerOpticsInteriorBlurAmount));
+            }
+            interiorDelta = interior - base;
+        }
+        // Clear glass adds a scene difference to preserve existing rain.
+        // Band overlap REPLACES the covered destination: an alpha-zero delta
+        // assumes an identical base, and cannot guarantee outside occlusion.
+        float3 opticalImage = rim * ridge + (base + interiorDelta) * (1.0 - ridge);
+        opticalImage *= max(gLayerOpticsBrightness, 0.0);
+        float bandReplace = bandFloor * saturate(gLayerBandOpacity);
+        float3 output = lerp(opticalImage - base, opticalImage, bandReplace) * coverage;
+        return float4(output, bandReplace * coverage);
+    }
     float a = gLayerGlassAlpha;
     float3 c = amb;
     if (gLayerKind < 1.5)
@@ -191,7 +359,9 @@ float4 main(PS_IN pin)
         a = lerp(gLayerGlassAlpha, gLayerBandOpacity, band);
         if (band >= 0.999)
             a = gLayerBandOpacity;
-        c = lerp(amb, d.rgb * (amb + sunL * nl), band);
+        float3 bandLighting = gLayerBandExternalLight > 0.5
+            ? amb + sunL * nl : gLayerBandUnlitBrightness.xxx;
+        c = lerp(amb, d.rgb * bandLighting, band);
     }
     a = saturate(a);
     return float4((gLayerHDR > 0.5 ? max(c, 0.0) : saturate(c)) * a, a);
