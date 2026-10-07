@@ -933,6 +933,24 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_SUN = 0.50,          -- x light colour (normalised)
         RAIN_VISOR_LAYER_GLASS_ALPHA = 0.04,  -- faint film of the glass layers
         RAIN_VISOR_LAYER_OPTICS = true, -- E2/E3 prototype, inner glass only
+        RAIN_VISOR_LAYER_E1 = false,
+        RAIN_VISOR_LAYER_E1_DOUBLE = true,
+        RAIN_VISOR_LAYER_E1_EXTERIOR = true,
+        RAIN_VISOR_LAYER_E1_IOR = 1.828,
+        RAIN_VISOR_LAYER_E1_VIRTUAL_IOR = 1.068,
+        RAIN_VISOR_LAYER_E1_PATH_GAIN = 49.07,
+        RAIN_VISOR_LAYER_E1_RADIUS_X = 0.525,
+        RAIN_VISOR_LAYER_E1_RADIUS_Y = 0.091,
+        RAIN_VISOR_LAYER_E1_COMPRESSION_X = 2.71,
+        RAIN_VISOR_LAYER_E1_COMPRESSION_Y = 1.14,
+        RAIN_VISOR_LAYER_E1_SOURCE_MIN = 2.01,
+        RAIN_VISOR_LAYER_E1_THICKNESS = 0.0024,
+        RAIN_VISOR_LAYER_E1_THRESHOLD = 0.1308,
+        RAIN_VISOR_LAYER_E1_KNEE = 0.0429,
+        RAIN_VISOR_LAYER_E1_GAIN = 2.38,
+        RAIN_VISOR_LAYER_E1_BLUR_PX = 5.0800,
+        RAIN_VISOR_LAYER_E1_SOURCE_FEATHER = 0.127,
+        RAIN_VISOR_LAYER_E1_DEBUG = false,
         RAIN_VISOR_LAYER_OPTICS_NORMAL = 0.0,
         RAIN_VISOR_LAYER_OPTICS_REFRACTION_PX = 18.23,
         RAIN_VISOR_LAYER_OPTICS_BLUR_PX = 1.52, -- directional hairline split, not area blur
@@ -11551,6 +11569,7 @@ rainDynamicSceneCopyState.visorLayerDefs = function()
               nrm = T .. 'GLASS/GLASS_INT_EXT_4k_txNormal.dds',
               outline = T .. 'GLASS/GLASS_INT_OUTLINE_MASK.png',
               lens = T .. 'GLASS/GLASS_INT_LENS_FIELD.dds' },
+            { mesh = 'GLASS_COATING_OVERLAY', two = true, kind = 4 },
         },
     }
 end
@@ -11607,6 +11626,32 @@ rainDynamicSceneCopyState.visorLayerParamUI = function(editor, item)
         sl('Top band starts at texture alpha', 'RAIN_VISOR_LAYER_BAND_ALPHA_MIN', 0.0, 0.99, '%.2f')
     elseif item.kind == 2 then
         sl('Glass film alpha (shared by coating / inner glass)', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
+        ui.separator()
+        ck('E1 forward bright-image prototype', 'RAIN_VISOR_LAYER_E1')
+        ck('E1 two internal reflections (off: one reflection)', 'RAIN_VISOR_LAYER_E1_DOUBLE')
+        ck('E1 exterior reflection viewed from inside', 'RAIN_VISOR_LAYER_E1_EXTERIOR')
+        if r.RAIN_VISOR_LAYER_E1_EXTERIOR then
+            ui.text('Virtual exterior observer; original mesh normal. Two internal reflections is bypassed.')
+        end
+        ck('E1 debug ray coverage and rejection', 'RAIN_VISOR_LAYER_E1_DEBUG')
+        if r.RAIN_VISOR_LAYER_E1_DEBUG then
+            ui.text('Green: valid ray (not brightness eligibility). Blue: source U outside screen.')
+            ui.text('Purple: source V outside screen. Red: backward. Yellow: total internal reflection.')
+        end
+        sl('E1 material IOR (Fresnel energy)', 'RAIN_VISOR_LAYER_E1_IOR', 1.01, 5.0, '%.3f')
+        sl('E1 virtual IOR (image bending)', 'RAIN_VISOR_LAYER_E1_VIRTUAL_IOR', 1.01, 3.0, '%.3f')
+        sl('E1 virtual optical path gain', 'RAIN_VISOR_LAYER_E1_PATH_GAIN', 1.0, 100.0, '%.2f')
+        sl('E1 horizontal curve radius (metres)', 'RAIN_VISOR_LAYER_E1_RADIUS_X', 0.04, 1.0, '%.3f')
+        sl('E1 vertical curve radius (metres)', 'RAIN_VISOR_LAYER_E1_RADIUS_Y', 0.04, 1.0, '%.3f')
+        sl('E1 horizontal image compression', 'RAIN_VISOR_LAYER_E1_COMPRESSION_X', 0.5, 4.0, '%.2f')
+        sl('E1 vertical image compression', 'RAIN_VISOR_LAYER_E1_COMPRESSION_Y', 0.5, 4.0, '%.2f')
+        sl('E1 source HDR bright-pass minimum', 'RAIN_VISOR_LAYER_E1_SOURCE_MIN', 0.0, 12.0, '%.2f')
+        sl('E1 shell thickness (metres)', 'RAIN_VISOR_LAYER_E1_THICKNESS', 0.0001, 0.008, '%.4f m')
+        sl('E1 reflected HDR threshold', 'RAIN_VISOR_LAYER_E1_THRESHOLD', 0.0, 0.2, '%.4f')
+        sl('E1 threshold soft knee', 'RAIN_VISOR_LAYER_E1_KNEE', 0.0001, 0.1, '%.4f')
+        sl('E1 image gain', 'RAIN_VISOR_LAYER_E1_GAIN', 0.0, 100.0, '%.2f')
+        sl('E1 optical blur (pixels)', 'RAIN_VISOR_LAYER_E1_BLUR_PX', 0.0, 24.0, '%.2f px')
+        sl('E1 source edge fade (screen fraction)', 'RAIN_VISOR_LAYER_E1_SOURCE_FEATHER', 0.001, 0.4, '%.3f')
     elseif item.kind == 3 then
         ck('E2/E3 inner glass optics (prototype)', 'RAIN_VISOR_LAYER_OPTICS')
         ck('Preview effective sharp rim', 'RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW')
@@ -11741,7 +11786,7 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     local p = item.params
     p.mesh = e.targetMesh
     p.textures.txLayerDiffuse = item.tex or ov.src
-    p.textures.txLayerSource = ov.src
+    p.textures.txLayerSource = (item.kind == 4 and vl.e1SourceReady and vl.e1Source) or ov.src
     p.textures.txLayerNormal = item.nrm or ov.src
     p.textures.txLayerOutline = item.outline or ov.src
     p.textures.txLayerLens = item.lens or ov.src
@@ -11837,6 +11882,24 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     v.gLayerOpticsInteriorBlurAmount = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_AMOUNT
     v.gLayerCameraSide = sim.cameraSide
     v.gLayerCameraUp = sim.cameraUp
+    v.gLayerCameraLook = sim.cameraLook
+    v.gLayerCameraTanFov = math.tan(math.rad(sim.cameraFOV or 60.0) * 0.5)
+    v.gLayerE1 = r.RAIN_VISOR_LAYER_E1 and 1.0 or 0.0
+    v.gLayerE1Double = r.RAIN_VISOR_LAYER_E1_DOUBLE and 1.0 or 0.0
+    v.gLayerE1Exterior = r.RAIN_VISOR_LAYER_E1_EXTERIOR and 1.0 or 0.0
+    v.gLayerE1F0 = ((r.RAIN_VISOR_LAYER_E1_IOR - 1.0) / (r.RAIN_VISOR_LAYER_E1_IOR + 1.0)) ^ 2
+    v.gLayerE1IOR = r.RAIN_VISOR_LAYER_E1_IOR
+    v.gLayerE1VirtualIOR = r.RAIN_VISOR_LAYER_E1_VIRTUAL_IOR
+    v.gLayerE1PathGain = r.RAIN_VISOR_LAYER_E1_PATH_GAIN
+    v.gLayerE1Radius = vec2(r.RAIN_VISOR_LAYER_E1_RADIUS_X, r.RAIN_VISOR_LAYER_E1_RADIUS_Y)
+    v.gLayerE1Compression = vec2(r.RAIN_VISOR_LAYER_E1_COMPRESSION_X, r.RAIN_VISOR_LAYER_E1_COMPRESSION_Y)
+    v.gLayerE1Thickness = r.RAIN_VISOR_LAYER_E1_THICKNESS
+    v.gLayerE1Threshold = r.RAIN_VISOR_LAYER_E1_THRESHOLD
+    v.gLayerE1Knee = r.RAIN_VISOR_LAYER_E1_KNEE
+    v.gLayerE1Gain = r.RAIN_VISOR_LAYER_E1_GAIN
+    v.gLayerE1BlurPx = r.RAIN_VISOR_LAYER_E1_BLUR_PX
+    v.gLayerE1SourceFeather = r.RAIN_VISOR_LAYER_E1_SOURCE_FEATHER
+    v.gLayerE1Debug = r.RAIN_VISOR_LAYER_E1_DEBUG and 1.0 or 0.0
     v.gLayerBandOpacity = r.RAIN_VISOR_LAYER_BAND_OPACITY
     v.gLayerBandExternalLight = r.RAIN_VISOR_LAYER_BAND_EXTERNAL_LIGHT and 1.0 or 0.0
     v.gLayerBandUnlitBrightness = r.RAIN_VISOR_LAYER_BAND_UNLIT_BRIGHTNESS
@@ -11969,7 +12032,50 @@ rainDynamicSceneCopyState.visorProbeCopy = function(sim)
 end
 
 -- s53 scene stack: called from the in-scene drop callback.
+-- All inner optics use a stable copy AFTER rain colour, before lens draws.
+-- Never sample the live render target or the pre-rain tone snapshot here.
+rainDynamicSceneCopyState.visorOpticsCapture = function(w, h)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not vl.opticsSource or vl.opticsW ~= w or vl.opticsH ~= h then
+        if vl.opticsSource then vl.opticsSource:dispose() end
+        vl.opticsSource = ui.ExtraCanvas(vec2(w, h), 1, render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        vl.opticsSource:setName('Visor inner optics source (scene + rain)')
+        vl.opticsW, vl.opticsH = w, h
+    end
+    local ok, err = pcall(function() vl.opticsSource:copyFrom('dynamic::hdr') end)
+    vl.opticsReady = ok
+    if not ok then vl.err = 'post-rain optics capture: ' .. tostring(err); return nil end
+    return vl.opticsSource
+end
 -- phase 'pre'  : housing (opaque, depth write) + glass items before rain
+rainDynamicSceneCopyState.visorE1Prefilter = function(source, w, h)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not vl.e1Source or vl.e1W ~= w or vl.e1H ~= h then
+        if vl.e1Source then vl.e1Source:dispose() end
+        vl.e1Source = ui.ExtraCanvas(vec2(w, h), 5, render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        vl.e1Source:setName('E1 bright HDR source with MIPs')
+        vl.e1W, vl.e1H = w, h
+    end
+    local ok, ready = pcall(function()
+        local drawn = vl.e1Source:updateSceneWithShader({
+            async = true, textures = { txInput = source },
+            values = { gMin = cfg.RUNTIME.RAIN_VISOR_LAYER_E1_SOURCE_MIN },
+            shader = [[float4 main(PS_IN pin) {
+                float3 c = max(txInput.SampleLevel(samLinearClamp, pin.Tex, 0).rgb, 0.0);
+                float l = dot(c, float3(0.2126, 0.7152, 0.0722));
+                float gate = smoothstep(gMin, gMin + max(gMin * 0.25, 0.05), l);
+                return float4(c * gate, 1.0);
+            }]]
+        })
+        if drawn == false then return false end
+        vl.e1Source:mipsUpdate()
+        return true
+    end)
+    vl.e1SourceReady = ok and ready
+    if not ok then vl.err = 'E1 prefilter: ' .. tostring(ready) end
+end
 -- phase 'post' : glass items after rain (before the drop depth pass)
 rainDynamicSceneCopyState.visorSceneStack = function(phase)
     local r = cfg.RUNTIME
@@ -11989,6 +12095,15 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
     sov.src, sov.hdr = src, true
     sov.w = math.max(1, st.mainTargetWidth or 1280)
     sov.h = math.max(1, st.mainTargetHeight or 720)
+    if phase == 'post' and (r.RAIN_VISOR_LAYER_OPTICS or r.RAIN_VISOR_LAYER_E1) then
+        local opticsSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h)
+        if opticsSource then
+            sov.src = opticsSource
+            if r.RAIN_VISOR_LAYER_E1 then
+                rainDynamicSceneCopyState.visorE1Prefilter(opticsSource, sov.w, sov.h)
+            end
+        end
+    end
     if phase == 'pre' then
         rainDynamicSceneCopyState.visorLayerSceneHide(true)
         render.setBlendMode(render.BlendMode.Opaque)
@@ -12004,7 +12119,12 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
         elseif (phase == 'pre' and not afterRain) or (phase == 'post' and afterRain) then
             render.setBlendMode(render.BlendMode.BlendPremultiplied)
             render.setDepthMode(render.DepthMode.ReadOnly)
-            rainDynamicSceneCopyState.visorLayerDrawItem(item, sov)
+            if not ((item.kind == 4 and (not r.RAIN_VISOR_LAYER_E1 or not vl.e1SourceReady))
+                    or (phase == 'post' and not vl.opticsReady
+                        and ((item.kind == 3 and r.RAIN_VISOR_LAYER_OPTICS)
+                            or item.kind == 4))) then
+                rainDynamicSceneCopyState.visorLayerDrawItem(item, sov)
+            end
         end
     end
     -- state the rain draw / depth pass expect

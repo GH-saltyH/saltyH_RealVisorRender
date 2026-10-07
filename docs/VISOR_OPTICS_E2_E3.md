@@ -146,3 +146,14 @@ Both EXT_OVERLAY draw and INT lens band sampling now use
 GLASS_EXT_BAND_WITH_ALPHAMASK.dds instead of the shared glass diffuse.
 The same alpha cutoff and external-light controls apply. UV correspondence
 and normal/lens textures are unchanged. Reload Lua to refresh cached bindings.
+
+## Mandatory post-rain source (E1–E7)
+
+User accepted E2/E3/E4 at ff085b5, then specified all inner lens effects must
+include drops/trails/film. The accepted tuning is preserved. Active scene
+stack now copies dynamic::hdr after rain colour and before the post optics;
+E2/E3 uses this stable copy for scene refraction, blur and brightness. Copy
+failure skips inner optics and records the error rather than using a dry scene.
+No change to rain physics. Actual captured content and GPU bandwidth require
+in-game verification. Earlier statements that rain itself is not refracted
+are superseded by this contract. E1 path analysis is in VISOR_E1_DESIGN.md.

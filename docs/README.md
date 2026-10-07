@@ -148,4 +148,11 @@ States:
 
 ### Priority
 
-11. **Current priorities** (2026-10-07): integrate accepted RainFX as 0.6.0, then resume visor E1–E7 optics. Final RainFX movement refinement is deferred by the user; do not change its physics as part of this release.
+11. **Current priorities** (2026-10-07): RainFX 0.6.0 integrated; E2/E3/E4 accepted at user commit ff085b5. Next is E1. Final RainFX movement refinement remains deferred.
+
+12. **Inner optical layer contract (E1–E7).** All lens effects are camera-side
+    of the rain surface. Refraction, blur, brightness and reflected/ghost
+    images must include already-rendered drops, trails and water film. Use
+    a stable post-rain HDR capture, never the pre-rain scene snapshot or the
+    live target being written. Preserve the accepted E2/E3/E4 tuning. Read
+    `VISOR_E1_DESIGN.md` before implementing E1.
