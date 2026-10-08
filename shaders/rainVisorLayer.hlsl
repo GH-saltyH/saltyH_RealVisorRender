@@ -434,6 +434,24 @@ float4 main(PS_IN pin)
                 blurred += rainLayerOpticsScene(clamp(interiorUV + float2(-radius.x, radius.y), lo, hi), uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor) * 0.0625;
                 interior = lerp(interior, blurred, saturate(gLayerOpticsInteriorBlurAmount));
             }
+            if (gLayerOpticsInteriorSoftPx > 0.0 && gLayerOpticsInteriorSoftAmount > 0.0)
+            {
+                // Prefilter each tap before averaging: unlike the sparse sharp
+                // copies above, this removes detail rather than duplicating it.
+                float radiusPx = gLayerOpticsInteriorSoftPx;
+                float lod = clamp(log2(max(radiusPx,1.0)),0.0,5.0);
+                float2 radius = pixel * radiusPx * 0.5;
+                float3 soft = txLayerSource.SampleLevel(samLinearClamp,interiorUV,lod).rgb * 0.25;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV+float2(radius.x,0),lo,hi),lod).rgb * 0.125;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV-float2(radius.x,0),lo,hi),lod).rgb * 0.125;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV+float2(0,radius.y),lo,hi),lod).rgb * 0.125;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV-float2(0,radius.y),lo,hi),lod).rgb * 0.125;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV+radius,lo,hi),lod).rgb * 0.0625;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV-radius,lo,hi),lod).rgb * 0.0625;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV+float2(radius.x,-radius.y),lo,hi),lod).rgb * 0.0625;
+                soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV+float2(-radius.x,radius.y),lo,hi),lod).rgb * 0.0625;
+                interior = lerp(interior,soft,saturate(gLayerOpticsInteriorSoftAmount));
+            }
             interiorDelta = interior - base;
         }
         // Clear glass adds a scene difference to preserve existing rain.
@@ -449,7 +467,8 @@ float4 main(PS_IN pin)
     float3 c = amb;
     if (gLayerKind < 1.5)
     {
-        float nl = saturate(dot(ng, gLayerLightDir));
+        float3 bandNormal=rainLayerNormal(ng,pin.PosC,pin.Tex);
+        float nl = saturate(dot(bandNormal, gLayerLightDir));
         // s55: block-compressed alpha rarely reaches exactly 1, so the band
         // mask starts at gLayerBandAlphaMin; inside the band the opacity is
         // gLayerBandOpacity (1 = fully opaque, nothing behind shows).
@@ -460,6 +479,7 @@ float4 main(PS_IN pin)
             a = gLayerBandOpacity;
         float3 bandLighting = gLayerBandExternalLight > 0.5
             ? amb + sunL * nl : gLayerBandUnlitBrightness.xxx;
+        bandLighting*=1.0-0.35*saturate(length(bandNormal-ng));
         c = lerp(amb, d.rgb * bandLighting, band);
     }
     a = saturate(a);
