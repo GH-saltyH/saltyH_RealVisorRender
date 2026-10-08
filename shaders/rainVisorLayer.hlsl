@@ -15,7 +15,6 @@
                    gLayerBandOpacity), faint film elsewhere (V1)
       2 glass    : faint film (GLASS_COATING) (V1)
       3 inner    : E2/E3 masked scene refraction
-      4 E1       : bright-source Fresnel ghost prototype (post-rain HDR)
 
     Light model (LDR, the frame is already tone mapped), s45:
       ambient = hemisphere chroma (horizon -> sky, from WeatherFX colours,
@@ -144,32 +143,6 @@ float3 rainLayerAmbient(float3 n, float frameLum)
         * lerp(gLayerAmbFloor, 1.0, up);
 }
 
-float rainLayerE1Fresnel(float cosine)
-{
-    float x = 1.0 - saturate(abs(cosine));
-    float x2 = x * x;
-    return gLayerE1F0 + (1.0 - gLayerE1F0) * x2 * x2 * x;
-}
-float3 rainLayerE1CurveNormal(float3 n, float3 displacement)
-{
-    float3 side = gLayerCameraSide - n * dot(gLayerCameraSide, n);
-    float3 up = gLayerCameraUp - n * dot(gLayerCameraUp, n);
-    side /= max(length(side), 1e-5);
-    up /= max(length(up), 1e-5);
-    return normalize(n - side * dot(displacement, side) / max(gLayerE1Radius.x, 0.04)
-        - up * dot(displacement, up) / max(gLayerE1Radius.y, 0.04));
-}
-float3 rainLayerE1Source(float2 uv, float energy, float mip)
-{
-    if (any(uv <= 0.0) || any(uv >= 1.0)) return float3(0.0, 0.0, 0.0);
-    float3 reflected = max(txLayerSource.SampleLevel(samLinearClamp, uv, mip).rgb, 0.0) * energy;
-    float lum = dot(reflected, float3(0.2126, 0.7152, 0.0722));
-    float gate = smoothstep(gLayerE1Threshold,
-        gLayerE1Threshold + max(gLayerE1Knee, 1e-6), lum);
-    float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
-    return reflected * gate * smoothstep(0.0, max(gLayerE1SourceFeather, 0.001), edge);
-}
-
 float4 main(PS_IN pin)
 {
     float3 toEye = normalize(-pin.PosC);
@@ -177,77 +150,6 @@ float4 main(PS_IN pin)
     float3 ng = outwardNormal;
     if (dot(ng, toEye) < 0.0)
         ng = -ng;                       // two-sided
-    if (gLayerKind > 3.5)
-    {
-        if (gLayerE1 < 0.5) return float4(0.0, 0.0, 0.0, 0.0);
-        float3 direction = reflect(-toEye, ng);
-        float energy = rainLayerE1Fresnel(dot(ng, toEye));
-        if (gLayerE1Exterior > 0.5)
-        {
-            // Artistic exterior observer on the opposite side of the surface.
-            // Two-sided drawing alone cannot turn an interior ray forward.
-            // Retain authored normal; virtual shell travel controls curvature.
-            float virtualIOR = max(gLayerE1VirtualIOR, 1.01);
-            float3 faceNormal = dot(outwardNormal, toEye) > 0.0 ? -outwardNormal : outwardNormal;
-            float3 shellRay = refract(toEye, faceNormal, 1.0 / virtualIOR);
-            float travel = gLayerE1Thickness * gLayerE1PathGain
-                / max(abs(dot(shellRay, faceNormal)), 0.1);
-            float3 curvedNormal = rainLayerE1CurveNormal(outwardNormal, shellRay * travel);
-            direction = reflect(toEye, curvedNormal);
-            energy = rainLayerE1Fresnel(dot(curvedNormal, toEye));
-        }
-        else if (gLayerE1Double > 0.5)
-        {
-            // Continuous virtual shell, anchored to the mesh normal. Energy
-            // uses material IOR; artistic bending uses a separate index/path.
-            float virtualIOR = max(gLayerE1VirtualIOR, 1.01);
-            float thickness = gLayerE1Thickness * gLayerE1PathGain;
-            float3 insideRay = refract(-toEye, ng, 1.0 / virtualIOR);
-            float distanceToShell = thickness / max(abs(dot(insideRay, ng)), 0.1);
-            float3 displacement = insideRay * distanceToShell;
-            float3 outerNormal = rainLayerE1CurveNormal(ng, displacement);
-            float3 backwardRay = reflect(insideRay, outerNormal);
-            displacement += backwardRay * thickness / max(abs(dot(backwardRay, outerNormal)), 0.1);
-            float3 innerNormal = rainLayerE1CurveNormal(ng, displacement);
-            float3 forwardRay = reflect(backwardRay, innerNormal);
-            direction = refract(forwardRay, innerNormal, virtualIOR);
-            float f1 = rainLayerE1Fresnel(dot(insideRay, outerNormal));
-            float f2 = rainLayerE1Fresnel(dot(backwardRay, innerNormal));
-            energy = f1 * f2 * (1.0 - energy) * (1.0 - energy);
-        }
-        float forward = dot(direction, gLayerCameraLook);
-        float aspect = gLayerInvShotSize.y / max(gLayerInvShotSize.x, 1e-8);
-        float2 projected = float2(dot(direction, gLayerCameraSide) / aspect,
-            -dot(direction, gLayerCameraUp)) / max(forward * gLayerCameraTanFov, 1e-6);
-        float2 sourceUV = projected * gLayerE1Compression * 0.5 + 0.5;
-        float2 dx = ddx(sourceUV) / gLayerInvShotSize;
-        float2 dy = ddy(sourceUV) / gLayerInvShotSize;
-        float footprint = max(max(length(dx), length(dy)), max(gLayerE1BlurPx * 0.5, 1.0));
-        float mip = clamp(log2(max(footprint, 1.0)), 0.0, 4.0);
-        bool valid = forward > 0.001 && dot(direction, direction) > 0.5
-            && all(sourceUV > 0.0) && all(sourceUV < 1.0);
-        if (gLayerE1Debug > 0.5)
-        {
-            // Diagnose ray rejection independently of material UV and HDR.
-            if (dot(direction, direction) <= 0.5) return float4(1.0, 0.7, 0.0, 1.0); // TIR
-            if (forward <= 0.001) return float4(0.7, 0.0, 0.0, 1.0); // backward
-            if (sourceUV.x <= 0.0 || sourceUV.x >= 1.0) return float4(0.0, 0.25, 1.0, 1.0);
-            if (sourceUV.y <= 0.0 || sourceUV.y >= 1.0) return float4(0.8, 0.0, 0.8, 1.0);
-            return float4(0.0, 0.35 + 0.65 * saturate(energy * 100.0), 0.0, 1.0);
-        }
-        // Reject impossible rays, but let the blur footprint cross source
-        // bounds. Each tap fades independently; no rectangular centre gate.
-        if (forward <= 0.001 || dot(direction, direction) <= 0.5)
-            return float4(0.0, 0.0, 0.0, 0.0);
-        float2 radius = gLayerInvShotSize * gLayerE1BlurPx;
-        // Threshold each source tap before optical blur; no global haze.
-        float3 image = rainLayerE1Source(sourceUV, energy, mip) * 0.5;
-        image += rainLayerE1Source(sourceUV + float2(radius.x, 0.0), energy, mip) * 0.125;
-        image += rainLayerE1Source(sourceUV - float2(radius.x, 0.0), energy, mip) * 0.125;
-        image += rainLayerE1Source(sourceUV + float2(0.0, radius.y), energy, mip) * 0.125;
-        image += rainLayerE1Source(sourceUV - float2(0.0, radius.y), energy, mip) * 0.125;
-        return float4(image * gLayerE1Gain, 0.0);
-    }
     float frameLum = dot(txLayerSource.SampleLevel(samLinearClamp,
         float2(0.5, 0.4), gLayerAmbientMip).rgb,
         float3(0.2126, 0.7152, 0.0722));
