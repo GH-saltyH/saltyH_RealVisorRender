@@ -1,3 +1,5 @@
+> 현재 하우징 소스: BODY_FRAME / BODY_GLASSLINE / BODY_FABRIC의 KN5 원본 재질. 전체 모델 루트는 캡처하지 않는다. [현재 경로](HOUSING_BAKED_NATIVE.md).
+
 # E1 재설계: 개구부 조명에 의한 내부 반사
 
 최신 하우징 경로: HOUSING_NATIVE_REFACTOR.md. 하우징과 E1 lit source는

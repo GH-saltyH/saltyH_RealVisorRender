@@ -250,7 +250,8 @@ local cfg = scriptSettings:mapConfig({
         MODEL_PATH =
         --'visors/visor_lando_2025Champion_maxquality.kn5',
         -- 'visors/visor_lando_2025Champion_maxquality_full.kn5',      -- it contains every version (big size)
-        'visors/visor_lando_2025Champion_maxquality_diet.kn5',      -- compact version for overlayProbe
+        --'visors/visor_lando_2025Champion_maxquality_diet.kn5',      -- compact version for overlayProbe
+        'visors/visor_lando_2025Champion_maxquality_diet_face.kn5',      -- include face mesh
         
 
         --------------------------------------------------------
@@ -955,7 +956,11 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX = true,
         RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE = 1.5,
         RAIN_VISOR_LAYER_REFERENCE_HOUSING = true,
-        RAIN_VISOR_LAYER_NATIVE_HOUSING = true, -- engine multimap, no custom lighting/probe
+        RAIN_VISOR_LAYER_NATIVE_HOUSING = true, -- KN5-authored native materials; no automatic replacements
+        RAIN_VISOR_LAYER_NATIVE_SCENE_PASS = false, -- archived HDR capture/custom output experiment
+        RAIN_VISOR_LAYER_NATIVE_DIRECT_ONLY = false, -- diagnose direct light vs sky ambient/reflections
+        RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS = false, -- comparison; default shares scene shadow set
+        RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW = false, -- physical BODY_FRAME_MIRROR caster, no colour output
         RAIN_VISOR_LAYER_NATIVE_AMBIENT = 1.0,
         RAIN_VISOR_LAYER_NATIVE_DIFFUSE = 0.6,
         RAIN_VISOR_LAYER_NATIVE_FRESNEL = 0.04,
@@ -2966,7 +2971,10 @@ local function loadProfiles()
             editor.visible and 1 or 0
         )
 
-        editor.visible = visibleValue ~= 0
+        local retired=editor.meshName=='BODY_FRAME_OVERLAY' or editor.meshName=='BODY_GLASSLINE_OVERLAY'
+            or editor.meshName=='BODY_FABRIC_OVERLAY'
+        editor.visible = not retired and visibleValue ~= 0
+        if retired and editor.targetMesh and #editor.targetMesh>0 then editor.targetMesh:setShadows(false) end
 
         if editor.targetMesh
             and #editor.targetMesh > 0 then
@@ -5085,6 +5093,31 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
             visible = true,
         },
 
+
+        {
+            id = 'BODYFABRIC',
+
+            meshName =
+                'BODY_FABRIC',
+
+            materialName =
+                'mtBODY_FABRIC',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters =
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
 
         {
             id = 'RUBBERBAND',
@@ -11683,12 +11716,12 @@ rainDynamicSceneCopyState.visorLayerDefs = function()
         -- s44: all two-sided (user: single-sided parts were overdrawn by
         -- the two-sided ones; the cost difference is negligible).
         housing = {
-            { mesh = 'BODY_FRAME_OVERLAY', two = true, mat = 'FRAME',
+            { mesh = 'BODY_FRAME', two = true, mat = 'FRAME',
                 tex = T .. 'BODY_FRAME/BODY_FRAME_1K_txDiff.dds',
                 nrm = T .. 'BODY_FRAME/BODY_FRAME_1K_txNormal.dds' },
-            { mesh = 'BODY_GLASSLINE_OVERLAY', two = true, grey = true, mat = 'RUBBER', interior = true,
+            { mesh = 'BODY_GLASSLINE', two = true, grey = true, mat = 'RUBBER', interior = true,
                 nrm = T .. 'BODY_FRAME/BODY_INT_BORDER_GLASSLINE_2K_txNormal.dds' },
-            { mesh = 'BODY_FABRIC_OVERLAY', two = true, mat = 'FABRIC', interior = true,
+            { mesh = 'BODY_FABRIC', two = true, mat = 'FABRIC', interior = true,
                 tex = T .. 'BODY_FRAME/BODY_INT_FABRIC_2K_txDiff.dds',
                 nrm = T .. 'BODY_FRAME/BODY_INT_FABRIC_4K_txNormal.dds',
                 maps = T .. 'BODY_FRAME/BODY_INT_FABRIC_2K_txMaps.dds' },
@@ -11713,10 +11746,12 @@ end
 -- s56: per-mesh parameter UI of the custom-shader (*_OVERLAY) meshes,
 -- shown in the KN5 tab material popup.
 rainDynamicSceneCopyState.visorLayerItemFor = function(meshName)
+    if meshName=='BODY_FRAME_OVERLAY' or meshName=='BODY_GLASSLINE_OVERLAY'
+        or meshName=='BODY_FABRIC_OVERLAY' then return {retired=true} end
     local vl = rainDynamicSceneCopyState.visorLayer
     local defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
     for _, it in ipairs(defs.housing) do
-        if it.mesh == meshName then return it end
+        if it.mesh == meshName then return nil end
     end
     for _, it in ipairs(defs.glass) do
         if it.mesh == meshName then return it end
@@ -11733,18 +11768,8 @@ rainDynamicSceneCopyState.visorLayerParamUI = function(editor, item)
     local function ck(label, key)
         if ui.checkbox(label, r[key]) then r[key] = not r[key] end
     end
-    if item.mat and r.RAIN_VISOR_LAYER_NATIVE_HOUSING then
-        ui.text('Native engine material: ksPerPixelMultiMap')
-        ck('Housing: native engine multimap', 'RAIN_VISOR_LAYER_NATIVE_HOUSING')
-        sl('Engine ambient', 'RAIN_VISOR_LAYER_NATIVE_AMBIENT',0,2,'%.2f')
-        sl('Engine diffuse', 'RAIN_VISOR_LAYER_NATIVE_DIFFUSE',0,2,'%.2f')
-        sl('Engine specular', 'RAIN_VISOR_LAYER_'..item.mat..'_SPEC',0,2,'%.2f')
-        sl('Engine gloss (base exponent)', 'RAIN_VISOR_LAYER_'..item.mat..'_GLOSS',0,1,'%.2f')
-        sl('Engine Fresnel F0', 'RAIN_VISOR_LAYER_NATIVE_FRESNEL',0,1,'%.2f')
-        sl('Engine Fresnel maximum', 'RAIN_VISOR_LAYER_NATIVE_FRESNEL_MAX',0,1,'%.2f')
-        if item.mat=='RUBBER' then sl('Rubber diffuse grey','RAIN_VISOR_LAYER_BORDER_GREY',0,1,'%.2f') end
-        ui.textWrapped(rainDynamicSceneCopyState.nativeHousingStatus or 'Waiting for native materials')
-        ui.textWrapped('Engine scene lighting and native shadow maps. E1 lit capture uses the same materials with dedicated shadows. Legacy helmet masks, bounce and shadow probes are bypassed.')
+    if item.retired then
+        ui.textWrapped('Retired housing overlay: hidden and excluded from rendering and reflection capture.')
         return
     end
     ui.text('Custom shader (rainVisorLayer.hlsl), scene stack. '
@@ -11850,15 +11875,11 @@ end
 -- s51: names of the meshes the overlay draws itself.
 rainDynamicSceneCopyState.visorLayerDrawnSet = function()
     local vl = rainDynamicSceneCopyState.visorLayer
-    if vl.drawnSet and vl.drawnSetNative==cfg.RUNTIME.RAIN_VISOR_LAYER_NATIVE_HOUSING then return vl.drawnSet end
+    if vl.drawnSet then return vl.drawnSet end
     local set = {}
     local defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
-    if not cfg.RUNTIME.RAIN_VISOR_LAYER_NATIVE_HOUSING then
-        for _, it in ipairs(defs.housing) do if it.mesh then set[it.mesh] = true end end
-    end
     for _, it in ipairs(defs.glass) do if it.mesh then set[it.mesh] = true end end
     vl.drawnSet = set
-    vl.drawnSetNative=cfg.RUNTIME.RAIN_VISOR_LAYER_NATIVE_HOUSING
     return set
 end
 -- Hide (or restore) the overlay-drawn visor meshes in the scene pass.
@@ -11868,7 +11889,9 @@ rainDynamicSceneCopyState.visorLayerSceneHide = function(hide)
     local drawn = rainDynamicSceneCopyState.visorLayerDrawnSet()
     for _, e in ipairs(MATERIAL_EDITORS or {}) do
         if e.targetMesh and #e.targetMesh > 0 then
-            local hideThis = hide and drawn[e.meshName]
+            local retired=e.meshName=='BODY_FRAME_OVERLAY' or e.meshName=='BODY_GLASSLINE_OVERLAY'
+                or e.meshName=='BODY_FABRIC_OVERLAY'
+            local hideThis = retired or (hide and drawn[e.meshName])
             e.targetMesh:setVisible((not hideThis) and e.visible or false, false)
         end
     end
@@ -11902,9 +11925,10 @@ if cfg.RUNTIME.RAIN_VISOR_OVERLAY and cfg.RUNTIME.RAIN_VISOR_LAYER_MIRROR_STOCK 
 end
 rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     local r = cfg.RUNTIME
-    if item.mat and r.RAIN_VISOR_LAYER_NATIVE_HOUSING and not ov.internalSource then return end
+    if item.mat and not ov.internalSource then return end -- native KN5 main-camera draw
     local vl = rainDynamicSceneCopyState.visorLayer
-    local e = rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+    local e = ov.internalSource and rainDynamicSceneCopyState.e1SourceEditor(item.mesh)
+        or rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
     if not e or not e.targetMesh or #e.targetMesh == 0 or e.visible == false then
         return
     end
@@ -11932,7 +11956,9 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
         float4 main(PS_IN pin) {
             float checker = fmod(floor(pin.Tex.x*16)+floor(pin.Tex.y*16),2);
             float3 color = gLayerMat < 0.5 ? float3(1,0.15,0.05)
-                : gLayerMat < 1.5 ? float3(0.05,1,0.15) : float3(0.1,0.2,1);
+                : gLayerMat < 1.5 ? float3(0.05,1,0.15)
+                : gLayerMat < 2.5 ? float3(0.1,0.2,1)
+                : gLayerMat < 3.5 ? float3(1,0.5,0.15) : float3(0.7,0.1,1);
             return float4(color * lerp(0.3,1,checker),1);
         }
     ]] or shader
@@ -11951,7 +11977,9 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
         local val = r['RAIN_VISOR_LAYER_' .. M .. '_' .. key]
         return val == nil and def or val
     end
-    v.gLayerMat = M == 'FABRIC' and 2.0 or (M == 'RUBBER' and 1.0 or 0.0)
+    v.gLayerMat = item.mesh=='DRIVER_FACE' and 3.0
+        or item.mesh=='DRIVER_BALAKLAVA' and 4.0
+        or M == 'FABRIC' and 2.0 or (M == 'RUBBER' and 1.0 or 0.0)
     v.gLayerReferenceHousing = r.RAIN_VISOR_LAYER_REFERENCE_HOUSING and 1.0 or 0.0
     v.gLayerUseNormal = item.nrm and 1.0 or 0.0
     v.gLayerUseMaps = item.maps and 1.0 or 0.0
@@ -12098,13 +12126,175 @@ end
 -- Geometry data pass: explicitly write metric view depth instead of
 -- interpreting an engine hardware depth texture. Each mesh keeps its own UV;
 -- this pass needs only position and is independent of glass texture layouts.
+-- Optional reflection-only meshes retain the shaders/textures authored in KN5.
+-- Missing meshes are expected while the new model is being prepared.
+rainDynamicSceneCopyState.e1ReflectionActors = function()
+    local st=rainDynamicSceneCopyState.nativeHousing
+    if not st then return {} end
+    if st.actorRoot~=visor then
+        st.actorRoot=visor;st.actors={}
+        if visor then
+            for _,name in ipairs({'DRIVER_FACE','DRIVER_BALAKLAVA'}) do
+                local ref=visor:findMeshes(name)
+                if ref and #ref>0 then
+                    ref:setVisible(false,false)
+                    st.actors[#st.actors+1]={mesh=name,mat='FACE',targetMesh=ref,visible=true}
+                end
+            end
+        end
+        st.generation=(st.generation or 0)+1
+    end
+    return st.actors or {}
+end
+rainDynamicSceneCopyState.e1SourceEditor = function(name)
+    local ed=rainDynamicSceneCopyState.visorLayerEditor(name)
+    if ed then return ed end
+    for _,actor in ipairs(rainDynamicSceneCopyState.e1ReflectionActors()) do
+        if actor.mesh==name then return actor end
+    end
+end
+-- Registered capture roots participate in engine transform/render-list updates.
+-- Their transforms are prepared before rendering, but their meshes stay hidden
+-- except during the synchronous GeometryShot update. A late colour-pass hide
+-- alone can leave duplicate polygons in earlier depth/render-list passes.
+rainDynamicSceneCopyState.nativeCaptureModel = {}
+rainDynamicSceneCopyState.nativeOccluderEnsure = function()
+    local models=rainDynamicSceneCopyState.nativeCaptureModel
+    models.occluder=models.occluder or {}
+    local st=models.occluder
+    local r=cfg.RUNTIME
+    if not (r.RAIN_VISOR_LAYER_NATIVE_HOUSING and r.RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW
+        and visor and axisRollNode) then
+        if st.root then st.root:setVisible(false,false) end
+        return
+    end
+    if st.owner~=visor then
+        if st.root then st.root:dispose() end
+        st.root=axisRollNode:loadKN5({filename=r.MODEL_PATH,forceRenderableOn=true})
+        if not st.root then error('Cannot load helmet shell shadow model') end
+        st.root:findMeshes('*'):setVisible(false,false)
+        st.mesh=st.root:findMeshes('BODY_FRAME_MIRROR')
+        st.owner=visor
+    end
+    st.count=st.mesh and #st.mesh or 0
+    if st.count==0 then st.root:setVisible(false,false);return end
+    st.root:getTransformationRaw():set(visor:getTransformationRaw())
+    st.mesh:setVisible(true,false)
+    st.mesh:setShadows(true)
+    st.mesh:setCullMode(render.CullMode.None)
+    st.root:setVisible(true,false)
+end
+rainDynamicSceneCopyState.nativeCapturePrepare = function()
+    local r=cfg.RUNTIME
+    for kind,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
+        if st.root then
+            local enabled=r.RAIN_VISOR_LAYER_NATIVE_HOUSING and st.owner==visor
+                and (kind=='source' and (r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW or r.RAIN_VISOR_LAYER_E1_PRIMARY)
+                    or kind=='housing' and r.RAIN_VISOR_LAYER_NATIVE_SCENE_PASS
+                        and r.RAIN_VISOR_SCENE_STACK and r.RAIN_VISOR_LAYER
+                    or kind=='occluder' and r.RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW and (st.count or 0)>0)
+            st.root:setVisible(enabled or false,false)
+            if kind~='occluder' then st.root:findMeshes('*'):setVisible(false,false) end
+            if enabled then st.root:getTransformationRaw():set(visor:getTransformationRaw()) end
+        end
+    end
+end
+rainDynamicSceneCopyState.nativeCaptureHide = function()
+    for _,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
+        if st.root then
+            st.root:findMeshes('*'):setVisible(false,false)
+            st.root:setVisible(false,false)
+        end
+    end
+end
+render.on('main.root.opaque',rainDynamicSceneCopyState.nativeCaptureHide)
+render.on('mirror.track.opaque',rainDynamicSceneCopyState.nativeCaptureHide)
+rainDynamicSceneCopyState.nativeCaptureRefs = function(includeActors)
+    local kind=includeActors and 'source' or 'housing'
+    local models=rainDynamicSceneCopyState.nativeCaptureModel
+    models[kind]=models[kind] or {}
+    local st=models[kind]
+    if not visor or not axisRollNode then return nil end
+    if st.owner~=visor then
+        if st.root then st.root:dispose() end
+        st.root=axisRollNode:loadKN5({filename=cfg.RUNTIME.MODEL_PATH,forceRenderableOn=true})
+        if not st.root then error('Cannot load registered housing capture model') end
+        st.root:findMeshes('*'):setVisible(false,false)
+        st.root:findMeshes('*'):setShadows(false) -- copies must not affect scene shadows
+        st.owner=visor;st.refs={}
+        rainDynamicSceneCopyState.nativeHousing.generation=
+            (rainDynamicSceneCopyState.nativeHousing.generation or 0)+1
+    end
+    local transform=st.root:getTransformationRaw()
+    local localPose=visor:getTransformationRaw()
+    if not transform or not localPose then error('Registered housing capture pose unavailable') end
+    transform:set(localPose)
+    st.root:setVisible(true,false)
+    local defs=rainDynamicSceneCopyState.visorLayerDefs().housing
+    for _,actor in ipairs(rainDynamicSceneCopyState.e1ReflectionActors()) do
+        defs[#defs+1]=actor
+    end
+    local union
+    local casterCount,meshCount=0,0
+    for _,item in ipairs(defs) do
+        local ed=rainDynamicSceneCopyState.e1SourceEditor(item.mesh)
+        local copy=st.refs[item.mesh]
+        if not copy then
+            copy=st.root:findMeshes(item.mesh)
+            st.refs[item.mesh]=copy
+        end
+        local enabled=ed and ed.visible~=false and ed.targetMesh and #ed.targetMesh>0
+            and #copy>0 and (item.mat~='FACE' or includeActors)
+        -- Membership in the capture allowlist does not enable a scene draw.
+        copy:setVisible(false,false)
+        if enabled then
+            -- Preserve the KN5 shader, textures, blend/depth/cull states.
+            -- Share explicit material-editor changes without rebuilding a material.
+            copy:assignMaterialFrom(ed.targetMesh)
+            for i=1,#copy do
+                meshCount=meshCount+1
+                if copy:isCastingShadows(i) then casterCount=casterCount+1 end
+            end
+            if item.mat~='FACE' or includeActors then
+                union=union and union:append(copy) or copy:clone()
+            end
+        end
+    end
+    st.casterCount,st.meshCount=casterCount,meshCount
+    -- Keep the root registered for transform updates, but capture ONLY the allowlist.
+    return union
+end
+-- Scope visibility to the capture, including failures. Never expose the face
+-- to the normal camera or leave a stock housing draw alongside the custom pass.
+rainDynamicSceneCopyState.nativeCaptureUpdate = function(shot,refs,origin,look,up,fov)
+    local restore={}
+    for i=1,#refs do
+        local ref=refs:at(i)
+        restore[#restore+1]={ref=ref,visible=refs:isVisible(i)}
+    end
+    local ok,res=pcall(function()
+        for kind,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
+            if kind~='occluder' and st.root and st.owner==visor then
+                st.root:setVisible(true,false)
+            end
+        end
+        for _,entry in ipairs(restore) do entry.ref:setVisible(true,false) end
+        return shot:update(origin,look,up,fov)
+    end)
+    for _,entry in ipairs(restore) do entry.ref:setVisible(entry.visible,false) end
+    -- End capture visibility now, before any main-camera pass can see it.
+    -- Do this on pending/failed updates as well as successful captures.
+    rainDynamicSceneCopyState.nativeCaptureHide()
+    if not ok then error(res) end
+    return res
+end
 rainDynamicSceneCopyState.e1SourceDepthDraw = function()
     local st = rainDynamicSceneCopyState.e1Source
     st.depthCalls = (st.depthCalls or 0) + 1
     st.depthParams = st.depthParams or {}
     local restore = {}
     for _, item in ipairs(st.items) do
-        local e = rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+        local e = rainDynamicSceneCopyState.e1SourceEditor(item.mesh)
         if e and e.targetMesh then
             for i = 1, #e.targetMesh do
                 restore[#restore+1] = {ref=e.targetMesh:at(i), visible=e.targetMesh:isVisible(i)}
@@ -12116,7 +12306,7 @@ rainDynamicSceneCopyState.e1SourceDepthDraw = function()
         render.setDepthMode(render.DepthMode.Normal)
         render.setBlendMode(render.BlendMode.Opaque)
         for index, item in ipairs(st.items) do
-            local e = rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+            local e = rainDynamicSceneCopyState.e1SourceEditor(item.mesh)
             if e and e.visible ~= false and e.targetMesh and #e.targetMesh>0 then
                 local p = st.depthParams[index] or {transform='original', async=false, values={}, shader=[[
                     float4 main(PS_IN pin) {
@@ -12159,19 +12349,28 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
     local nativeCapture=r.RAIN_VISOR_LAYER_NATIVE_HOUSING and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE~=2
     local nativeRef
     if nativeCapture then
-        nativeRef=rainDynamicSceneCopyState.nativeHousingEnsure()
-        if not nativeRef then st.status=rainDynamicSceneCopyState.nativeHousingStatus;return end
+        if not rainDynamicSceneCopyState.nativeHousingEnsure() then
+            st.status=rainDynamicSceneCopyState.nativeHousingStatus;return
+        end
+        nativeRef=rainDynamicSceneCopyState.nativeCaptureRefs(true)
+        if not nativeRef then st.status='Waiting for registered source geometry';return end
     end
     if st.shot and (st.width~=sourceWidth or st.nativeCapture~=nativeCapture
-        or (nativeCapture and st.nativeGeneration~=rainDynamicSceneCopyState.nativeHousing.generation)) then
+        or (nativeCapture and (st.nativeGeneration~=rainDynamicSceneCopyState.nativeHousing.generation
+            or st.dedicatedShadows~=r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS))) then
         rainDynamicSceneCopyState.e1SourceDispose()
     end
     if not st.shot then
         st.width,st.height=sourceWidth,sourceHeight
         st.nativeCapture=nativeCapture
         st.nativeGeneration=rainDynamicSceneCopyState.nativeHousing.generation
+        st.dedicatedShadows=r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS
         -- Separate item instances: capture parameters never overwrite main draw.
         st.items = rainDynamicSceneCopyState.visorLayerDefs().housing
+        for _,actor in ipairs(rainDynamicSceneCopyState.e1ReflectionActors()) do
+            st.items[#st.items+1]=actor
+        end
+        st.nativeRef=nativeRef
         st.lightFrame = ui.ExtraCanvas(vec2(512, 256), 10,
             render.AntialiasingMode.None, render.TextureFormat.R16G16B16A16.Float)
         st.preview = ui.ExtraCanvas(vec2(384, 256), 1,
@@ -12181,7 +12380,7 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
             st.calls = st.calls + 1
             local restore = {}
             for _, item in ipairs(st.items) do
-                local e = rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+                local e = rainDynamicSceneCopyState.e1SourceEditor(item.mesh)
                 if e and e.targetMesh then
                     for i = 1, #e.targetMesh do
                         restore[#restore + 1] = {ref = e.targetMesh:at(i), visible = e.targetMesh:isVisible(i)}
@@ -12210,7 +12409,9 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
         if nativeCapture then
             st.shot:setOriginalLighting(true)
             st.shot:setShadersType(render.ShadersType.Main)
-            st.shot:setAlternativeShadowsSet('dedicated')
+            if st.dedicatedShadows then st.shot:setAlternativeShadowsSet('dedicated') end
+            st.shot:setOpaqueAlphaFix(true)
+            st.shot:setTransparentPass(true) -- preserve alpha materials on optional face/balaclava
         end
         st.positionShot = ac.GeometryShot({opaque=rainDynamicSceneCopyState.e1SourceDepthDraw},
             vec2(sourceWidth,sourceHeight),1,true,render.AntialiasingMode.None,
@@ -12233,7 +12434,14 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
     st.side = up:cross(st.look):normalize()
     st.tanFov = math.tan(math.rad(r.RAIN_VISOR_LAYER_E1_SOURCE_FOV) * 0.5)
     local callsBefore = st.calls
-    if st.shot:update(origin, -forward, up, r.RAIN_VISOR_LAYER_E1_SOURCE_FOV) == false then
+    local updated
+    if nativeCapture then
+        updated=rainDynamicSceneCopyState.nativeCaptureUpdate(st.shot,st.nativeRef,
+            origin,-forward,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
+    else
+        updated=st.shot:update(origin,-forward,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
+    end
+    if updated == false then
         error('Source shot update pending')
     end
     if nativeCapture then st.calls=st.calls+1
@@ -12272,6 +12480,7 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
 end
 render.onSceneReady(function()
     local ok, err = pcall(rainDynamicSceneCopyState.e1SourceUpdate)
+    rainDynamicSceneCopyState.nativeCaptureHide()
     if not ok then
         rainDynamicSceneCopyState.e1Source.ready = false
         rainDynamicSceneCopyState.e1Source.status = 'Source error: ' .. tostring(err)
@@ -12307,18 +12516,22 @@ rainDynamicSceneCopyState.e1SourceUI = function()
         ui.text(string.format('Opening weight %.3f / directional HDR luminance %.5f', st.opening or 0, st.sunLum or 0))
         ui.image(st.preview, vec2(384, 256))
     end
-    ui.textWrapped('Housing/liner only; no face geometry or cockpit source. '
+    ui.text(string.format('Optional reflection actors: %d / 2 (DRIVER_FACE, DRIVER_BALAKLAVA)',
+        #rainDynamicSceneCopyState.e1ReflectionActors()))
+    ui.textWrapped('Housing/liner plus optional face/balaclava; no cockpit source. '
         .. 'Mode 1 is the shared directional aperture weight, not spatial occlusion. '
         .. 'Lit preview uses C/(1+C); source retains HDR. Glass is unchanged.')
     if r.RAIN_VISOR_LAYER_NATIVE_HOUSING then
-        ui.textWrapped('Lit source: native engine multimap, original lighting, dedicated engine shadows. Aperture weight is diagnostic only. No legacy shadow probe or camera-frame ambient proxy is used for source shading.')
+        ui.textWrapped('Lit source: native engine materials, original lighting, '
+            ..(r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS and 'dedicated shadows' or 'shared scene shadows')
+            ..'. Aperture weight is diagnostic only; no legacy shadow probe.')
     else
         ui.textWrapped('Legacy custom source: main-camera shadow probe disabled for this capture view.')
     end
 end
 -- Stage 3 directional internal-source prototype. Real mesh normal/view
 -- selects the source direction; no screen UV offset or camera-HDR image.
--- Source-depth parallax intersects visible housing within the finite capture.
+-- Source-depth parallax intersects housing and optional face/balaclava within the finite capture.
 -- Missing/occluded source layers and the INT/EXT ghost remain future work.
 rainDynamicSceneCopyState.e1Primary = {attempts = 0}
 rainDynamicSceneCopyState.e1PrimaryDraw = function()
@@ -12530,7 +12743,7 @@ rainDynamicSceneCopyState.e1GeometryUpdate = function()
         primary.status='Geometry validation: use modes 1/2/3/5/6; lit final/gate not connected'
         return
     end
-    if r.MODEL_PATH~='visors/visor_lando_2025Champion_maxquality_diet.kn5' then
+    if r.MODEL_PATH~='visors/visor_lando_2025Champion_maxquality_diet_face.kn5' then
         primary.status='Geometry data model mismatch';return
     end
     local e=rainDynamicSceneCopyState.visorLayerEditor('GLASS_INT_OVERLAY')
@@ -12577,8 +12790,8 @@ rainDynamicSceneCopyState.e1GeometryUpdate = function()
     v.gE1Checker=r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==2 and 1.0 or 0.0
     v.gE1RubberGrey=r.RAIN_VISOR_LAYER_BORDER_GREY
     local T=appFolder..'/texture/GLASS/E1_GEOMETRY/'
-    for _,pair in ipairs({{'frame','Frame','BODY_FRAME_OVERLAY'},
-        {'rubber','Rubber','BODY_GLASSLINE_OVERLAY'},{'fabric','Fabric','BODY_FABRIC_OVERLAY'}}) do
+    for _,pair in ipairs({{'frame','Frame','BODY_FRAME'},
+        {'rubber','Rubber','BODY_GLASSLINE'},{'fabric','Fabric','BODY_FABRIC'}}) do
         local ed=rainDynamicSceneCopyState.visorLayerEditor(pair[3])
         if not ed or not ed.targetMesh or #ed.targetMesh~=1 then
             primary.status='Geometry requires one mesh: '..pair[3];return
@@ -12601,91 +12814,163 @@ rainDynamicSceneCopyState.e1GeometryUpdate = function()
     st.ready=ok
     primary.status=ok and 'Geometry capture ready; waiting for INT composite' or ('Geometry capture error: '..tostring(err))
 end
--- Use engine materials in the normal scene pass. Original shader configs are
--- saved in-session so switching back does not leave shader replacements behind.
+-- Preserve materials and render states authored in KN5. Only visibility and
+-- retired overlay shadow participation are managed here.
 rainDynamicSceneCopyState.nativeHousing = {}
 rainDynamicSceneCopyState.nativeHousingEnsure = function()
     local st=rainDynamicSceneCopyState.nativeHousing
-    local native=cfg.RUNTIME.RAIN_VISOR_LAYER_NATIVE_HOUSING
-    local defs=rainDynamicSceneCopyState.visorLayerDefs().housing
-    local union
-    for _,item in ipairs(defs) do
-        local ed=rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
-        if not ed or not ed.targetMesh or #ed.targetMesh==0 then
-            rainDynamicSceneCopyState.nativeHousingStatus='Waiting for housing mesh: '..item.mesh
-            return nil
-        end
-        local ref=ed.targetMesh
-        local saved=st[item.mesh]
-        if not saved or saved.ref~=ref then
-            saved={ref=ref,original=ref:dumpShaderReplacements(),enabled=false}
-            st[item.mesh]=saved
-            st.generation=(st.generation or 0)+1
-        end
-        if native and not saved.enabled then
-            ref:ensureUniqueMaterials()
-            local spec=cfg.RUNTIME['RAIN_VISOR_LAYER_'..item.mat..'_SPEC'] or 0
-            local gloss=cfg.RUNTIME['RAIN_VISOR_LAYER_'..item.mat..'_GLOSS'] or 0.5
-            ref:applyShaderReplacements('SHADER=ksPerPixelMultiMap\n'
-                ..'PROP_0=ksAmbient, 1\nPROP_1=ksDiffuse, 0.6\n'
-                ..'PROP_2=ksSpecular, '..tostring(spec)..'\n'
-                ..'PROP_3=ksSpecularEXP, '..tostring(4+252*math.max(0,math.min(1,gloss)))..'\n'
-                ..'PROP_4=fresnelC, 0.04\nPROP_5=fresnelEXP, 5\nPROP_6=fresnelMaxLevel, 0.5\n')
-            -- Each housing mesh has its own UV/material; no glass UV transfer.
-            local grey=cfg.RUNTIME.RAIN_VISOR_LAYER_BORDER_GREY
-            ref:setMaterialTexture('txDiffuse',item.tex or rgbm(grey,grey,grey,1))
-            ref:setMaterialTexture('txNormal',item.nrm or rgbm(0.5,0.5,1,1))
-            ref:setMaterialTexture('txMaps',item.maps or rgbm(1,1,1,1))
-            ref:setTransparent(false)
-            ref:setBlendMode(render.BlendMode.Opaque)
-            ref:setDepthMode(render.DepthMode.Normal)
-            ref:setCullMode(render.CullMode.None)
-            ref:setShadows(true)
-            for i=1,#ref do
-                if ref:shaderName(i)~='ksPerPixelMultiMap' then
-                    error('Native shader replacement not applied: '..item.mesh)
-                end
+    local r=cfg.RUNTIME
+    -- The archived experiments must never replace authored native materials.
+    r.RAIN_VISOR_LAYER_NATIVE_HOUSING=true
+    r.RAIN_VISOR_LAYER_NATIVE_SCENE_PASS=false
+    r.RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW=false
+    r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE=false -- old packed BVHs require a new bake
+    for _,name in ipairs({'BODY_FRAME_OVERLAY','BODY_GLASSLINE_OVERLAY','BODY_FABRIC_OVERLAY'}) do
+        local ed=rainDynamicSceneCopyState.visorLayerEditor(name)
+        if ed then
+            ed.visible=false
+            if ed.targetMesh and #ed.targetMesh>0 then
+                ed.targetMesh:setVisible(false,false)
+                ed.targetMesh:setShadows(false)
             end
-            saved.enabled=true
-            saved.paramsKey=nil
-        elseif not native and saved.enabled then
-            ref:applyShaderReplacements(saved.original)
-            saved.enabled=false
-            saved.paramsKey=nil
-        end
-        if native then
-            local r=cfg.RUNTIME
-            local spec=r['RAIN_VISOR_LAYER_'..item.mat..'_SPEC'] or 0
-            local gloss=r['RAIN_VISOR_LAYER_'..item.mat..'_GLOSS'] or 0.5
-            local key=table.concat({r.RAIN_VISOR_LAYER_NATIVE_AMBIENT,r.RAIN_VISOR_LAYER_NATIVE_DIFFUSE,
-                spec,gloss,r.RAIN_VISOR_LAYER_NATIVE_FRESNEL,r.RAIN_VISOR_LAYER_NATIVE_FRESNEL_MAX,
-                r.RAIN_VISOR_LAYER_BORDER_GREY},':')
-            if saved.paramsKey~=key then
-                ref:setMaterialProperty('ksAmbient',r.RAIN_VISOR_LAYER_NATIVE_AMBIENT)
-                ref:setMaterialProperty('ksDiffuse',r.RAIN_VISOR_LAYER_NATIVE_DIFFUSE)
-                ref:setMaterialProperty('ksSpecular',spec)
-                ref:setMaterialProperty('ksSpecularEXP',4+252*math.max(0,math.min(1,gloss)))
-                ref:setMaterialProperty('fresnelC',r.RAIN_VISOR_LAYER_NATIVE_FRESNEL)
-                ref:setMaterialProperty('fresnelMaxLevel',r.RAIN_VISOR_LAYER_NATIVE_FRESNEL_MAX)
-                if item.grey then
-                    local grey=r.RAIN_VISOR_LAYER_BORDER_GREY
-                    ref:setMaterialTexture('txDiffuse',rgbm(grey,grey,grey,1))
-                end
-                saved.paramsKey=key
-            end
-            ref:setVisible(ed.visible~=false,false)
-            union=union and union:append(ref) or ref:clone()
         end
     end
-    rainDynamicSceneCopyState.nativeHousingStatus=native
-        and 'Native ksPerPixelMultiMap: engine scene lighting; verify in game'
-        or 'Legacy custom housing selected'
+    local union
+    local visibilityKey=''
+    local missing={}
+    for _,item in ipairs(rainDynamicSceneCopyState.visorLayerDefs().housing) do
+        local ed=rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+        local ref=ed and ed.targetMesh
+        if ref and #ref>0 then
+            if not st[item.mesh] or st[item.mesh].ref~=ref then
+                st[item.mesh]={ref=ref}
+                st.generation=(st.generation or 0)+1
+            end
+            visibilityKey=visibilityKey..item.mesh..tostring(ed.visible~=false)
+            ref:setVisible(ed.visible~=false,false)
+            if ed.visible~=false then union=union and union:append(ref) or ref:clone() end
+        else
+            missing[#missing+1]=item.mesh
+        end
+    end
+    if st.visibilityKey~=visibilityKey then
+        st.visibilityKey=visibilityKey;st.generation=(st.generation or 0)+1
+    end
+    rainDynamicSceneCopyState.nativeHousingStatus=#missing>0
+        and ('Missing baked KN5 housing: '..table.concat(missing,', '))
+        or 'KN5-authored native housing: original shader, textures and render states'
     return union
 end
 render.onSceneReady(function()
     local ok,err=pcall(rainDynamicSceneCopyState.nativeHousingEnsure)
     if not ok then rainDynamicSceneCopyState.nativeHousingStatus='Native housing error: '..tostring(err) end
+    for _,actor in ipairs(rainDynamicSceneCopyState.e1ReflectionActors()) do
+        actor.targetMesh:setVisible(false,false)
+    end
 end)
+-- Native shading is evaluated offscreen, before any main scene draw. The main
+-- scene uses real housing geometry/depth with a colour-only custom shader,
+-- avoiding the KN5 colour pass and its per-node temporal history.
+rainDynamicSceneCopyState.nativeHousingScene = {}
+rainDynamicSceneCopyState.nativeHousingSceneUpdate = function()
+    local st=rainDynamicSceneCopyState.nativeHousingScene
+    local r=cfg.RUNTIME
+    st.ready=false
+    if not (r.RAIN_VISOR_LAYER_NATIVE_HOUSING and r.RAIN_VISOR_LAYER_NATIVE_SCENE_PASS
+        and r.RAIN_VISOR_SCENE_STACK and r.RAIN_VISOR_LAYER) then
+        if st.shot then st.shot:dispose();st.shot=nil end
+        return
+    end
+    if not rainDynamicSceneCopyState.nativeHousingEnsure() then return end
+    local refs=rainDynamicSceneCopyState.nativeCaptureRefs(false)
+    local sim=ac.getSim()
+    if not refs or not sim then return end
+    local w=math.max(64,rainDynamicSceneCopyState.mainTargetWidth or 1280)
+    local h=math.max(64,rainDynamicSceneCopyState.mainTargetHeight or 720)
+    local generation=rainDynamicSceneCopyState.nativeHousing.generation
+    if st.shot and (st.w~=w or st.h~=h or st.generation~=generation
+        or st.dedicatedShadows~=r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS) then
+        st.shot:dispose();st.shot=nil
+    end
+    if not st.shot then
+        st.shot=ac.GeometryShot(refs,vec2(w,h),5,true,render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        st.shot:setName('Native housing lighting for custom scene pass')
+        st.shot:setSky(false);st.shot:setParticles(false)
+        st.shot:setClearColor(rgbm(0,0,0,0))
+        st.shot:setClippingPlanes(0.001,2.0)
+        st.shot:setOriginalLighting(true)
+        st.shot:setShadersType(render.ShadersType.Main)
+        st.dedicatedShadows=r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS
+        if st.dedicatedShadows then st.shot:setAlternativeShadowsSet('dedicated') end
+        st.shot:setOpaqueAlphaFix(true)
+        st.refs=refs;st.w=w;st.h=h;st.generation=generation
+    end
+    if rainDynamicSceneCopyState.nativeCaptureUpdate(st.shot,st.refs,
+        sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)==false then
+        error('Native housing scene capture pending')
+    end
+    if st.shot:mipsUpdate()==false then error('Housing capture MIPs pending') end
+    st.view=st.shot:viewMatrix():clone()
+    st.projection=st.shot:projectionMatrix():clone()
+    st.origin=sim.cameraPosition:clone()
+    st.preview=st.preview or ui.ExtraCanvas(vec2(320,180),1,render.AntialiasingMode.None,
+        render.TextureFormat.R16G16B16A16.Float)
+    if st.preview:updateSceneWithShader({async=false,textures={txHousingPreview=st.shot},
+        shader=[[float4 main(PS_IN pin) {
+            float3 c=max(txHousingPreview.SampleLevel(samLinearClamp,pin.Tex,0).rgb,0);
+            return float4(c/(1+c),1);
+        }]]})==false then error('Housing preview update pending') end
+    st.ready=true
+    st.updates=(st.updates or 0)+1
+    st.status=string.format('Registered root HDR capture -> custom scene; updates %d (%dx%d)',
+        st.updates,w,h)
+    local model=rainDynamicSceneCopyState.nativeCaptureModel.housing
+    if model then
+        st.status=st.status..string.format('; shadow casters %d/%d',model.casterCount or 0,model.meshCount or 0)
+    end
+    local shell=rainDynamicSceneCopyState.nativeCaptureModel.occluder
+    st.status=st.status..(st.dedicatedShadows and '; dedicated shadows' or '; shared scene shadows')
+        ..'; shell '..(r.RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW
+            and ((shell and (shell.count or 0)>0) and 'BODY_FRAME_MIRROR found' or 'BODY_FRAME_MIRROR missing') or 'off')
+end
+render.onSceneReady(function()
+    local ok,err=pcall(rainDynamicSceneCopyState.nativeHousingSceneUpdate)
+    if not ok then
+        rainDynamicSceneCopyState.nativeHousingScene.ready=false
+        rainDynamicSceneCopyState.nativeHousingScene.status='Housing capture error: '..tostring(err)
+    end
+end)
+rainDynamicSceneCopyState.nativeHousingSceneDraw = function(item)
+    local st=rainDynamicSceneCopyState.nativeHousingScene
+    local ed=rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+    if not st.ready or not ed or not ed.targetMesh or ed.visible==false then return end
+    st.params=st.params or {transform='original',async=false,textures={},values={},shader=[[
+        float4 main(PS_IN pin) {
+            float3 p=mul(float4(pin.PosC+gHousingEyeToCapture,0),gHousingView).xyz;
+            float4 h=mul(float4(p,1),gHousingProjection);
+            float2 xy=h.xy/max(h.w,1e-5);
+            float2 uv=float2(xy.x*0.5+0.5,0.5-xy.y*0.5);
+            clip(h.w-1e-5);
+            clip(min(min(uv.x,1-uv.x),min(uv.y,1-uv.y)));
+            return float4(txHousingLit.SampleGrad(samLinearClamp,uv,ddx(uv),ddy(uv)).rgb,1);
+        }
+    ]]}
+    local p=st.params
+    p.mesh=ed.targetMesh;p.textures.txHousingLit=st.shot
+    p.values.gHousingView=st.view;p.values.gHousingProjection=st.projection
+    p.values.gHousingEyeToCapture=ac.getSim().cameraPosition-st.origin
+    render.setCullMode(render.CullMode.None)
+    render.setBlendMode(render.BlendMode.Opaque)
+    render.setDepthMode(render.DepthMode.Normal)
+    ed.targetMesh:setVisible(true,false)
+    local ok,res=pcall(function() return render.mesh(p) end)
+    ed.targetMesh:setVisible(false,false)
+    if not ok or res==false then
+        st.status='Housing scene draw error: '..tostring(res)
+        if not ok then error(res) end
+    end
+end
 rainDynamicSceneCopyState.e1GeometryDraw = function()
     local st=rainDynamicSceneCopyState.e1Geometry
     local primary=rainDynamicSceneCopyState.e1Primary
@@ -12728,11 +13013,7 @@ rainDynamicSceneCopyState.e1PrimaryUI = function()
         r.RAIN_VISOR_LAYER_E1_PRIMARY = not r.RAIN_VISOR_LAYER_E1_PRIMARY
     end
     if not r.RAIN_VISOR_LAYER_E1_PRIMARY then return end
-    if ui.checkbox('Primary actual housing geometry (validation)',r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE) then
-        r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE=not r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE
-    end
-    ui.text(r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and 'Active path: actual housing triangles'
-        or 'Active path: captured housing depth / lit source')
+    ui.text('Active path: captured native housing depth / lit source')
     for _, setting in ipairs({
         {'Primary mode: 0 final / 1 coverage / 2 Fresnel / 3 image / 4 gate / 5 UV / 6 trace', 'RAIN_VISOR_LAYER_E1_PRIMARY_MODE',0,6,'%.0f'},
         {'Primary HDR gain','RAIN_VISOR_LAYER_E1_PRIMARY_GAIN',0,10,'%.2f'},
@@ -12760,7 +13041,7 @@ rainDynamicSceneCopyState.e1PrimaryUI = function()
         end
     else
         ui.textWrapped('Checker diagnostic samples MIP 0. Trace 6: green=hit, red=outside source, blue=no geometry, orange=no crossing, cyan=parallax off. '
-        .. 'Engine capture matrices; metric depth; finite source view. Depth parallax traces visible housing only; no ghost. '
+        .. 'Engine capture matrices; metric depth; finite source view. Depth parallax traces captured housing/actors; no ghost. '
         .. 'EXT band remains above INT. Debug modes replace only covered INT pixels; '
         .. 'final mode adds HDR without hiding existing overlays.')
     end
@@ -15158,6 +15439,7 @@ end)
 ------------------------------------------------------------
 
 function script.update(dt)
+    rainDynamicSceneCopyState.nativeCapturePrepare()
 
     --------------------------------------------------------
     -- Initialize

@@ -89,8 +89,8 @@ def main():
     blob = MODEL.read_bytes()
     manifest = {'model': str(MODEL.relative_to(ROOT)), 'sha256': hashlib.sha256(blob).hexdigest(),
                 'width': WIDTH, 'meshes': {}}
-    for name, key in [('BODY_FRAME_OVERLAY', 'frame'), ('BODY_GLASSLINE_OVERLAY', 'rubber'),
-                      ('BODY_FABRIC_OVERLAY', 'fabric')]:
+    for name, key in [('BODY_FRAME', 'frame'), ('BODY_GLASSLINE', 'rubber'),
+                      ('BODY_FABRIC', 'fabric')]:
         vertices, indices = mesh(blob, name)
         nodes, triangles, count = build(vertices, indices)
         dds(OUT/f'{key}_nodes.dds', nodes)
