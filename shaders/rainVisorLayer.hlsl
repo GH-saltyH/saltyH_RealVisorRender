@@ -100,7 +100,9 @@ float3 rainLayerNormal(float3 n, float3 p, float2 uv)
 {
     if (gLayerUseNormal < 0.5 || gLayerNormalStrength <= 0.0)
         return n;
-    float2 xy = rainLayerSample(txLayerNormal, uv).rg * 2.0 - 1.0;
+    float2 xy = (gLayerKind < 0.5 && gLayerReferenceHousing > 0.5
+        ? rainLayerTextureRepeat(txLayerNormal, uv)
+        : rainLayerSample(txLayerNormal, uv)).rg * 2.0 - 1.0;
     if (gLayerNormalFlipG > 0.5)
         xy.y = -xy.y;
     xy *= gLayerNormalStrength;
@@ -143,6 +145,45 @@ float3 rainLayerAmbient(float3 n, float frameLum)
         * lerp(gLayerAmbFloor, 1.0, up);
 }
 
+// Local ksPerPixelMultiMap reference: utils_ps.fx LightingParams.applyTxMaps
+// and ext_lighting_models default Blinn-Phong. Engine AO, cubemap and local
+// light/shadow resources are not exposed here; keep the existing light inputs.
+float3 rainLayerReferenceHousing(PS_IN pin,float3 ng,float3 view,float frameLum,float3 sunL)
+{
+    float3 n=rainLayerNormal(ng,pin.PosC,pin.Tex);
+    float3 diffuse=gLayerUseDiffuse>0.5
+        ? rainLayerTextureRepeat(txLayerDiffuse,pin.Tex).rgb : gLayerColor;
+    float3 maps=gLayerUseMaps>0.5
+        ? rainLayerTextureRepeat(txLayerMaps,pin.Tex).rgb : float3(1,1,1);
+    float nl=saturate(dot(n,gLayerLightDir));
+    float nv=saturate(dot(n,view));
+    // Keep the user's gloss control, but map G multiplies the base exponent
+    // linearly (+1), rather than being squared inside an invented lobe gain.
+    float baseExponent=lerp(4,256,saturate(gLayerGloss));
+    float exponent=saturate(maps.g)*baseExponent+1;
+    float3 halfVector=view+gLayerLightDir;
+    float halfLength=dot(halfVector,halfVector);
+    float nh=halfLength>1e-12 ? saturate(dot(n,halfVector*rsqrt(max(halfLength,1e-12)))) : 0;
+    float specular=pow(nh,exponent)*nl*max(gLayerSpec,0)*max(maps.r,0);
+    float3 ambient=rainLayerAmbient(n,frameLum)+gLayerBounce
+        +gLayerAmbHorizon*(gLayerBounceFrame*frameLum);
+    float3 direct=sunL*nl;
+    float3 result=diffuse*(ambient+direct)+sunL*specular;
+    if(gLayerMat>1.5) {
+        // Fabric's optional fibre term remains a material extension. It no
+        // longer creates wrapped direct light on the light-facing opposite side.
+        float sheen=pow(1-nv,max(gLayerSheenPower,0.001))*max(gLayerSheen,0);
+        result+=sheen*(ambient+direct)*lerp(diffuse,1,0.35)*saturate(maps.g);
+        result+=sunL*nl*max(gLayerFabricLitLift,0)*max(gLayerSpec,0)*max(maps.r,0);
+    } else {
+        float fresnel=0.04+0.96*pow(1-nv,5);
+        // B scales reflection directly, including zero; this is an ambient
+        // environment proxy until directional cubemap lighting is connected.
+        result+=ambient*fresnel*max(gLayerSpec,0)*max(maps.b,0);
+    }
+    return max(result,0);
+}
+
 float4 main(PS_IN pin)
 {
     float3 toEye = normalize(-pin.PosC);
@@ -168,6 +209,10 @@ float4 main(PS_IN pin)
 
     if (gLayerKind < 0.5)
     {
+        if(gLayerReferenceHousing>0.5) {
+            float3 result=rainLayerReferenceHousing(pin,ng,toEye,frameLum,sunL);
+            return float4(gLayerHDR>0.5 ? result : saturate(result),1);
+        }
         float3 n = rainLayerNormal(ng, pin.PosC, pin.Tex);
         amb = rainLayerAmbient(n, frameLum);
         // s47: non-directional scattered light (interior parts): sun light
