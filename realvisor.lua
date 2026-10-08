@@ -136,6 +136,8 @@ local appFolder =
             HLSL = nil,
         },
 
+        { ID = 'RAINFXE1FOUNDATION', PATH = appFolder .. '/shaders/rainVisorE1Foundation.hlsl', LOADED = false, HLSL = nil },
+
         {
             ID = 'RAINFXVISORLAYER',
             PATH = appFolder .. '/shaders/rainVisorLayer.hlsl',
@@ -931,19 +933,66 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_PROBE_DEBUG = false,
         RAIN_VISOR_LAYER_AMBIENT_MIP = 10.0,
         RAIN_VISOR_LAYER_SUN = 0.50,          -- x light colour (normalised)
-        RAIN_VISOR_LAYER_GLASS_ALPHA = 0.04,  -- faint film of the glass layers
+        RAIN_VISOR_LAYER_GLASS_ALPHA = 0.00,  -- faint film of the glass layers
+        RAIN_VISOR_LAYER_OPTICS = true, -- E2/E3 prototype, inner glass only
+        RAIN_VISOR_LAYER_E1_BASE_IOR = 1.585,
+        RAIN_VISOR_LAYER_E1_BASE_GAIN = 1.0,
+        RAIN_VISOR_LAYER_EXT_RELIEF = 1.0,
+        RAIN_VISOR_LAYER_E1 = false,
+        RAIN_VISOR_LAYER_E1_DOUBLE = true,
+        RAIN_VISOR_LAYER_E1_EXTERIOR = true,
+        RAIN_VISOR_LAYER_E1_IOR = 1.828,
+        RAIN_VISOR_LAYER_E1_VIRTUAL_IOR = 1.068,
+        RAIN_VISOR_LAYER_E1_PATH_GAIN = 49.07,
+        RAIN_VISOR_LAYER_E1_RADIUS_X = 0.525,
+        RAIN_VISOR_LAYER_E1_RADIUS_Y = 0.091,
+        RAIN_VISOR_LAYER_E1_COMPRESSION_X = 2.71,
+        RAIN_VISOR_LAYER_E1_COMPRESSION_Y = 1.14,
+        RAIN_VISOR_LAYER_E1_SOURCE_MIN = 2.01,
+        RAIN_VISOR_LAYER_E1_THICKNESS = 0.0024,
+        RAIN_VISOR_LAYER_E1_THRESHOLD = 0.1308,
+        RAIN_VISOR_LAYER_E1_KNEE = 0.0429,
+        RAIN_VISOR_LAYER_E1_GAIN = 2.38,
+        RAIN_VISOR_LAYER_E1_BLUR_PX = 5.0800,
+        RAIN_VISOR_LAYER_E1_SOURCE_FEATHER = 0.127,
+        RAIN_VISOR_LAYER_E1_DEBUG = false,
+        RAIN_VISOR_LAYER_OPTICS_NORMAL = 0.952,
+        RAIN_VISOR_LAYER_OPTICS_REFRACTION_PX = 48.00,
+        RAIN_VISOR_LAYER_OPTICS_BLUR_PX = 1.52, -- directional hairline split, not area blur
+        RAIN_VISOR_LAYER_OPTICS_RIM_SHARPNESS = 3.96,
+        RAIN_VISOR_LAYER_OPTICS_RIM_PEAK = 0.889,
+        RAIN_VISOR_LAYER_OPTICS_LENS_GAIN = 0.85,
+        RAIN_VISOR_LAYER_OPTICS_TRANSMISSION_LOSS = 0.53,
+        RAIN_VISOR_LAYER_OPTICS_REFLECTION = 0.87,
+        RAIN_VISOR_LAYER_OPTICS_REFLECTION_PX = 98.0,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR = true,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_PX = 25.85,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_NORMAL = 1.78,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BEND_PX = 16.0,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SPLIT_PX = 1.34,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_PX = 3.87,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_AMOUNT = 1.00,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_PX = 4.267,
+        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_AMOUNT = 0.5,
+        RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW = false,
+        RAIN_VISOR_LAYER_OPTICS_BRIGHTNESS = 0.73,
+        RAIN_VISOR_LAYER_OPTICS_RELIEF_SPEC = 1.69,
+        RAIN_VISOR_LAYER_OPTICS_RELIEF_GLOSS = 0.18,
+        RAIN_VISOR_LAYER_OPTICS_RELIEF_SHADE = 0.75,
         RAIN_VISOR_LAYER_BAND_OPACITY = 1.00, -- top band blocks the scene (s55: was 0.92)
-        RAIN_VISOR_LAYER_BAND_ALPHA_MIN = 0.90, -- txDIFF alpha where the band starts (BC alpha < 1)
-        RAIN_VISOR_LAYER_BORDER_GREY = 0.06,  -- BODY_INT_BORDER_GLASSLINE
+        RAIN_VISOR_LAYER_BAND_EXTERNAL_LIGHT = false,
+        RAIN_VISOR_LAYER_BAND_UNLIT_BRIGHTNESS = 0.149,
+        RAIN_VISOR_LAYER_BAND_ALPHA_MIN = 0.064, -- txDIFF alpha where the band starts (BC alpha < 1)
+        RAIN_VISOR_LAYER_BORDER_GREY = 0.00,  -- BODY_INT_BORDER_GLASSLINE
         RAIN_VISOR_LAYER_CULL_FLIP = false,   -- single-sided parts: cull front
         -- V2 housing materials (docs/RAINFX_VISOR_LAYER.md §8)
         RAIN_VISOR_LAYER_NORMAL_FLIP_G = false,
         RAIN_VISOR_LAYER_FRAME_NORMAL = 1.76,
         RAIN_VISOR_LAYER_FRAME_SPEC = 1.03,
         RAIN_VISOR_LAYER_FRAME_GLOSS = 0.72,
-        RAIN_VISOR_LAYER_RUBBER_NORMAL = 1.12,
-        RAIN_VISOR_LAYER_RUBBER_SPEC = 0.53,
-        RAIN_VISOR_LAYER_RUBBER_GLOSS = 0.35,
+        RAIN_VISOR_LAYER_RUBBER_NORMAL = 1.00,
+        RAIN_VISOR_LAYER_RUBBER_SPEC = 0.50,
+        RAIN_VISOR_LAYER_RUBBER_GLOSS = 0.50,
         RAIN_VISOR_LAYER_FABRIC_NORMAL = 1.00,
         RAIN_VISOR_LAYER_FABRIC_SHEEN = 0.74,
         RAIN_VISOR_LAYER_FABRIC_SHEEN_POWER = 1.0,
@@ -11520,8 +11569,17 @@ rainDynamicSceneCopyState.visorLayerDefs = function()
         glass = {
             { mesh = 'GLASS_COATING_OVERLAY', two = true, kind = 2 },
             { rain = true },
-            { mesh = 'GLASS_EXT_OVERLAY', two = true, kind = 1, tex = T .. 'GLASS/GLASS_INT_EXT_4k_txDIFF.dds' },
-            { mesh = 'GLASS_INT_OVERLAY', two = true, kind = 2 },
+            { mesh = 'GLASS_INT_OVERLAY', two = true, kind = 3,
+              band = T .. 'GLASS/GLASS_EXT_BAND_WITH_ALPHAMASK.dds',
+              bandUV = T .. 'GLASS/GLASS_INT_EXT_UV_FIELD.dds',
+              nrm = T .. 'GLASS/GLASS_INT_EXT_4k_txNormal.dds',
+              outline = T .. 'GLASS/GLASS_INT_OUTLINE_MASK.png',
+              lens = T .. 'GLASS/GLASS_INT_LENS_FIELD.dds' },
+            { mesh = 'GLASS_COATING_OVERLAY', two = true, kind = 4 },
+            -- The band owns the final overlap; inner optics never replace it.
+            { mesh = 'GLASS_EXT_OVERLAY', two = true, kind = 1,
+              tex = T .. 'GLASS/GLASS_EXT_BAND_WITH_ALPHAMASK.dds',
+              nrm = T .. 'GLASS/GLASS_INT_EXT_4k_txNormal.dds' },
         },
     }
 end
@@ -11572,10 +11630,47 @@ rainDynamicSceneCopyState.visorLayerParamUI = function(editor, item)
         sl('Fabric lit-zone lift (direct light)', 'RAIN_VISOR_LAYER_FABRIC_LIT_LIFT', 0.0, 3.0, '%.2f')
     elseif item.kind == 1 then
         sl('Glass film alpha (outside the band)', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
+        sl('Top band normal relief', 'RAIN_VISOR_LAYER_EXT_RELIEF', 0.0, 3.0, '%.3f')
         sl('Top band opacity', 'RAIN_VISOR_LAYER_BAND_OPACITY', 0.0, 1.0, '%.2f')
-        sl('Top band starts at texture alpha', 'RAIN_VISOR_LAYER_BAND_ALPHA_MIN', 0.5, 0.99, '%.2f')
+        ck('Top band responds to external light', 'RAIN_VISOR_LAYER_BAND_EXTERNAL_LIGHT')
+        sl('Top band brightness with external light off', 'RAIN_VISOR_LAYER_BAND_UNLIT_BRIGHTNESS', 0.0, 1.0, '%.3f')
+        sl('Top band starts at texture alpha', 'RAIN_VISOR_LAYER_BAND_ALPHA_MIN', 0.0, 0.99, '%.2f')
     elseif item.kind == 2 then
         sl('Glass film alpha (shared by coating / inner glass)', 'RAIN_VISOR_LAYER_GLASS_ALPHA', 0.0, 0.5, '%.3f')
+        ui.separator()
+        ck('E1 mesh-normal Fresnel foundation', 'RAIN_VISOR_LAYER_E1')
+        ck('E1 reflected direction debug', 'RAIN_VISOR_LAYER_E1_DEBUG')
+        sl('E1 polycarbonate IOR', 'RAIN_VISOR_LAYER_E1_BASE_IOR', 1.01, 2.0, '%.3f')
+        sl('E1 reflection gain', 'RAIN_VISOR_LAYER_E1_BASE_GAIN', 0.0, 10.0, '%.3f')
+        ui.text('Camera HDR only; no screen offset, shell warp or scene captures. Offscreen rays have no source.')
+    elseif item.kind == 3 then
+        ck('E2/E3 inner glass optics (prototype)', 'RAIN_VISOR_LAYER_OPTICS')
+        ck('Preview effective sharp rim', 'RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW')
+        sl('Masked optics brightness', 'RAIN_VISOR_LAYER_OPTICS_BRIGHTNESS', 0.0, 2.0, '%.2f')
+        sl('E2 relief normal strength', 'RAIN_VISOR_LAYER_OPTICS_NORMAL', 0.0, 6.0, '%.3f')
+        sl('E3 refraction (pixels)', 'RAIN_VISOR_LAYER_OPTICS_REFRACTION_PX', 0.0, 48.0, '%.2f px')
+        sl('E3 lens slope gain', 'RAIN_VISOR_LAYER_OPTICS_LENS_GAIN', 0.0, 16.0, '%.2f')
+        sl('E3 hairline split (pixels)', 'RAIN_VISOR_LAYER_OPTICS_BLUR_PX', 0.0, 3.0, '%.2f px')
+        sl('Rim peak sharpness (higher = narrower)', 'RAIN_VISOR_LAYER_OPTICS_RIM_SHARPNESS', 1.0, 8.0, '%.2f')
+        sl('Rim normal peak threshold', 'RAIN_VISOR_LAYER_OPTICS_RIM_PEAK', 0.08, 1.0, '%.3f')
+        ui.text('E2 normal-map relief lighting (independent of E3)')
+        sl('Relief highlight', 'RAIN_VISOR_LAYER_OPTICS_RELIEF_SPEC', 0.0, 4.0, '%.2f')
+        sl('Relief gloss', 'RAIN_VISOR_LAYER_OPTICS_RELIEF_GLOSS', 0.0, 1.0, '%.2f')
+        sl('Relief shading', 'RAIN_VISOR_LAYER_OPTICS_RELIEF_SHADE', 0.0, 1.0, '%.2f')
+        sl('Rim transmission loss', 'RAIN_VISOR_LAYER_OPTICS_TRANSMISSION_LOSS', 0.0, 0.8, '%.2f')
+        sl('Rim environment reflection', 'RAIN_VISOR_LAYER_OPTICS_REFLECTION', 0.0, 1.0, '%.2f')
+        sl('Rim reflection reach (pixels)', 'RAIN_VISOR_LAYER_OPTICS_REFLECTION_PX', 0.0, 160.0, '%.1f px')
+        ui.separator()
+        ui.text('Optics inside the outline band (independent of the sharp rim)')
+        ck('Outline band interior refraction', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR')
+        sl('Interior refraction (pixels)', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_PX', 0.0, 48.0, '%.2f px')
+        sl('Interior normal influence', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_NORMAL', 0.0, 6.0, '%.2f')
+        sl('Interior dome thickness (pixels)', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_BEND_PX', 0.0, 16.0, '%.2f px')
+        sl('Interior hairline split (pixels)', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_SPLIT_PX', 0.0, 3.0, '%.2f px')
+        sl('Interior blur radius (pixels)', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_PX', 0.0, 12.0, '%.2f px')
+        sl('Interior blur amount', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_AMOUNT', 0.0, 1.0, '%.2f')
+        sl('Interior soft defocus radius', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_PX', 0.0, 24.0, '%.2f px')
+        sl('Interior soft defocus amount', 'RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_AMOUNT', 0.0, 1.0, '%.2f')
     end
     if item.interior then
         ui.separator()
@@ -11663,6 +11758,27 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     if not e or not e.targetMesh or #e.targetMesh == 0 or e.visible == false then
         return
     end
+    if item.kind == 4 then
+        local ok,err=pcall(function()
+            local shader
+            for _,sh in ipairs(shaders) do if sh.ID=='RAINFXE1FOUNDATION' and sh.LOADED then shader=sh.HLSL end end
+            if not shader then vl.err='E1 foundation shader pending'; return end
+            local params={mesh=e.targetMesh,transform='original',shader=shader,
+                textures={txE1Source=ov.src},values={
+                    gE1Look=ac.getCameraForward(),gE1Side=ac.getCameraSide(),gE1Up=ac.getCameraUp(),
+                    gE1TanFov=math.tan(math.rad(ac.getCameraFOV())*0.5),
+                    gE1Aspect=math.max(ov.w or 1280,1)/math.max(ov.h or 720,1),
+                    gE1IOR=r.RAIN_VISOR_LAYER_E1_BASE_IOR or 1.585,
+                    gE1Gain=r.RAIN_VISOR_LAYER_E1_BASE_GAIN or 1.0,
+                    gE1Debug=r.RAIN_VISOR_LAYER_E1_DEBUG and 1 or 0}}
+            render.setCullMode(render.CullMode.None)
+            e.targetMesh:setVisible(true,false)
+            render.mesh(params)
+        end)
+        e.targetMesh:setVisible(false,false)
+        if not ok then vl.err='E1 foundation: '..tostring(err);ac.log(vl.err) end
+        return
+    end
     local shader = vl.shader
     if not shader then return end
     local sim = ac.getSim()
@@ -11677,7 +11793,7 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     item.params = item.params or {
         mesh = e.targetMesh, transform = 'original', shader = shader,
         textures = { txLayerDiffuse = false, txLayerSource = false,
-            txLayerNormal = false, txLayerMaps = false,
+            txLayerNormal = false, txLayerMaps = false, txLayerOutline = false, txLayerLens = false, txLayerBand = false, txLayerBandUV = false,
             txLayerProbe = false },
         values = {},
     }
@@ -11686,6 +11802,10 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     p.textures.txLayerDiffuse = item.tex or ov.src
     p.textures.txLayerSource = ov.src
     p.textures.txLayerNormal = item.nrm or ov.src
+    p.textures.txLayerOutline = item.outline or ov.src
+    p.textures.txLayerLens = item.lens or ov.src
+    p.textures.txLayerBand = item.band or ov.src
+    p.textures.txLayerBandUV = item.bandUV or ov.src
     p.textures.txLayerMaps = item.maps or ov.src
     local v = p.values
     local M = item.mat or 'FRAME'
@@ -11697,7 +11817,7 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     v.gLayerUseNormal = item.nrm and 1.0 or 0.0
     v.gLayerUseMaps = item.maps and 1.0 or 0.0
     v.gLayerNormalFlipG = r.RAIN_VISOR_LAYER_NORMAL_FLIP_G and 1.0 or 0.0
-    v.gLayerNormalStrength = mr('NORMAL', 1.0)
+    v.gLayerNormalStrength = item.kind == 1 and (r.RAIN_VISOR_LAYER_EXT_RELIEF or 1.0) or mr('NORMAL', 1.0)
     v.gLayerSpec = mr('SPEC', 0.0)
     v.gLayerGloss = mr('GLOSS', 0.5)
     v.gLayerSheen = mr('SHEEN', 0.0)
@@ -11752,7 +11872,53 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     end
     v.gLayerAmbientMip = r.RAIN_VISOR_LAYER_AMBIENT_MIP
     v.gLayerGlassAlpha = r.RAIN_VISOR_LAYER_GLASS_ALPHA
-    v.gLayerBandOpacity = r.RAIN_VISOR_LAYER_BAND_OPACITY
+    v.gLayerOptics = (item.kind == 3 and r.RAIN_VISOR_LAYER_OPTICS) and 1.0 or 0.0
+    v.gLayerOpticsNormal = r.RAIN_VISOR_LAYER_OPTICS_NORMAL
+    v.gLayerOpticsRefractionPx = r.RAIN_VISOR_LAYER_OPTICS_REFRACTION_PX
+    v.gLayerOpticsBlurPx = r.RAIN_VISOR_LAYER_OPTICS_BLUR_PX
+    v.gLayerOpticsRimSharpness = r.RAIN_VISOR_LAYER_OPTICS_RIM_SHARPNESS
+    v.gLayerOpticsRimPeak = r.RAIN_VISOR_LAYER_OPTICS_RIM_PEAK
+    v.gLayerOpticsLensGain = r.RAIN_VISOR_LAYER_OPTICS_LENS_GAIN
+    v.gLayerOpticsTransmissionLoss = r.RAIN_VISOR_LAYER_OPTICS_TRANSMISSION_LOSS
+    v.gLayerOpticsReflection = r.RAIN_VISOR_LAYER_OPTICS_REFLECTION
+    v.gLayerOpticsReflectionPx = r.RAIN_VISOR_LAYER_OPTICS_REFLECTION_PX
+    v.gLayerOpticsMaskPreview = r.RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW and 1.0 or 0.0
+    v.gLayerOpticsBrightness = r.RAIN_VISOR_LAYER_OPTICS_BRIGHTNESS
+    v.gLayerOpticsReliefSpec = r.RAIN_VISOR_LAYER_OPTICS_RELIEF_SPEC
+    v.gLayerOpticsReliefGloss = r.RAIN_VISOR_LAYER_OPTICS_RELIEF_GLOSS
+    v.gLayerOpticsReliefShade = r.RAIN_VISOR_LAYER_OPTICS_RELIEF_SHADE
+    v.gLayerOpticsInterior = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR and 1.0 or 0.0
+    v.gLayerOpticsInteriorPx = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_PX
+    v.gLayerOpticsInteriorNormal = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_NORMAL
+    v.gLayerOpticsInteriorBendPx = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_BEND_PX
+    v.gLayerOpticsInteriorSplitPx = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_SPLIT_PX
+    v.gLayerOpticsInteriorBlurPx = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_PX
+    v.gLayerOpticsInteriorBlurAmount = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_AMOUNT
+    v.gLayerOpticsInteriorSoftPx = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_PX or 4.0
+    v.gLayerOpticsInteriorSoftAmount = r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_AMOUNT or 1.0
+    v.gLayerCameraSide = sim.cameraSide
+    v.gLayerCameraUp = sim.cameraUp
+    v.gLayerCameraLook = sim.cameraLook
+    v.gLayerCameraTanFov = math.tan(math.rad(sim.cameraFOV or 60.0) * 0.5)
+    v.gLayerE1 = r.RAIN_VISOR_LAYER_E1 and 1.0 or 0.0
+    v.gLayerE1Double = r.RAIN_VISOR_LAYER_E1_DOUBLE and 1.0 or 0.0
+    v.gLayerE1Exterior = r.RAIN_VISOR_LAYER_E1_EXTERIOR and 1.0 or 0.0
+    v.gLayerE1F0 = ((r.RAIN_VISOR_LAYER_E1_IOR - 1.0) / (r.RAIN_VISOR_LAYER_E1_IOR + 1.0)) ^ 2
+    v.gLayerE1IOR = r.RAIN_VISOR_LAYER_E1_BASE_IOR or 1.585
+    v.gLayerE1VirtualIOR = r.RAIN_VISOR_LAYER_E1_VIRTUAL_IOR
+    v.gLayerE1PathGain = r.RAIN_VISOR_LAYER_E1_PATH_GAIN
+    v.gLayerE1Radius = vec2(r.RAIN_VISOR_LAYER_E1_RADIUS_X, r.RAIN_VISOR_LAYER_E1_RADIUS_Y)
+    v.gLayerE1Compression = vec2(r.RAIN_VISOR_LAYER_E1_COMPRESSION_X, r.RAIN_VISOR_LAYER_E1_COMPRESSION_Y)
+    v.gLayerE1Thickness = r.RAIN_VISOR_LAYER_E1_THICKNESS
+    v.gLayerE1Threshold = r.RAIN_VISOR_LAYER_E1_THRESHOLD
+    v.gLayerE1Knee = r.RAIN_VISOR_LAYER_E1_KNEE
+    v.gLayerE1Gain = r.RAIN_VISOR_LAYER_E1_BASE_GAIN or 1.0
+    v.gLayerE1BlurPx = r.RAIN_VISOR_LAYER_E1_BLUR_PX
+    v.gLayerE1SourceFeather = r.RAIN_VISOR_LAYER_E1_SOURCE_FEATHER
+    v.gLayerE1Debug = r.RAIN_VISOR_LAYER_E1_DEBUG and 1.0 or 0.0
+    v.gLayerBandOpacity = item.kind == 3 and 0.0 or r.RAIN_VISOR_LAYER_BAND_OPACITY
+    v.gLayerBandExternalLight = r.RAIN_VISOR_LAYER_BAND_EXTERNAL_LIGHT and 1.0 or 0.0
+    v.gLayerBandUnlitBrightness = r.RAIN_VISOR_LAYER_BAND_UNLIT_BRIGHTNESS
     v.gLayerBandAlphaMin = r.RAIN_VISOR_LAYER_BAND_ALPHA_MIN or 0.90
     local probeOn = item.mat ~= nil
         and r.RAIN_VISOR_LAYER_SHADOW_PROBE and vl.probeReady and vl.probeCanvas ~= nil
@@ -11882,7 +12048,59 @@ rainDynamicSceneCopyState.visorProbeCopy = function(sim)
 end
 
 -- s53 scene stack: called from the in-scene drop callback.
+-- All inner optics use a stable copy AFTER rain colour, before lens draws.
+-- Never sample the live render target or the pre-rain tone snapshot here.
+rainDynamicSceneCopyState.visorOpticsCapture = function(w, h)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    local r = cfg.RUNTIME
+    local soft = r.RAIN_VISOR_LAYER_OPTICS and r.RAIN_VISOR_LAYER_OPTICS_INTERIOR
+        and (r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_PX or 4.0) > 0
+        and (r.RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_AMOUNT or 1.0) > 0
+    local mips = soft and 6 or 1
+    if not vl.opticsSource or vl.opticsW ~= w or vl.opticsH ~= h or vl.opticsMips ~= mips then
+        if vl.opticsSource then vl.opticsSource:dispose() end
+        vl.opticsSource = ui.ExtraCanvas(vec2(w, h), mips, render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        vl.opticsSource:setName('Visor inner optics source (scene + rain)')
+        vl.opticsW, vl.opticsH = w, h
+        vl.opticsMips = mips
+    end
+    local ok, err = pcall(function()
+        vl.opticsSource:copyFrom('dynamic::hdr')
+        if mips > 1 and vl.opticsSource:mipsUpdate() == false then error('Optics MIP generation pending') end
+    end)
+    vl.opticsReady = ok
+    if not ok then vl.err = 'post-rain optics capture: ' .. tostring(err); return nil end
+    return vl.opticsSource
+end
 -- phase 'pre'  : housing (opaque, depth write) + glass items before rain
+rainDynamicSceneCopyState.visorE1Prefilter = function(source, w, h)
+    local vl = rainDynamicSceneCopyState.visorLayer
+    if not vl.e1Source or vl.e1W ~= w or vl.e1H ~= h then
+        if vl.e1Source then vl.e1Source:dispose() end
+        vl.e1Source = ui.ExtraCanvas(vec2(w, h), 5, render.AntialiasingMode.None,
+            render.TextureFormat.R16G16B16A16.Float)
+        vl.e1Source:setName('E1 bright HDR source with MIPs')
+        vl.e1W, vl.e1H = w, h
+    end
+    local ok, ready = pcall(function()
+        local drawn = vl.e1Source:updateSceneWithShader({
+            async = true, textures = { txInput = source },
+            values = { gMin = cfg.RUNTIME.RAIN_VISOR_LAYER_E1_SOURCE_MIN },
+            shader = [[float4 main(PS_IN pin) {
+                float3 c = max(txInput.SampleLevel(samLinearClamp, pin.Tex, 0).rgb, 0.0);
+                float l = dot(c, float3(0.2126, 0.7152, 0.0722));
+                float gate = smoothstep(gMin, gMin + max(gMin * 0.25, 0.05), l);
+                return float4(c * gate, 1.0);
+            }]]
+        })
+        if drawn == false then return false end
+        vl.e1Source:mipsUpdate()
+        return true
+    end)
+    vl.e1SourceReady = ok and ready
+    if not ok then vl.err = 'E1 prefilter: ' .. tostring(ready) end
+end
 -- phase 'post' : glass items after rain (before the drop depth pass)
 rainDynamicSceneCopyState.visorSceneStack = function(phase)
     local r = cfg.RUNTIME
@@ -11902,6 +12120,15 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
     sov.src, sov.hdr = src, true
     sov.w = math.max(1, st.mainTargetWidth or 1280)
     sov.h = math.max(1, st.mainTargetHeight or 720)
+    if phase == 'post' and (r.RAIN_VISOR_LAYER_OPTICS or r.RAIN_VISOR_LAYER_E1) then
+        local opticsSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h)
+        if opticsSource then
+            sov.src = opticsSource
+            if r.RAIN_VISOR_LAYER_E1 then
+                vl.e1SourceReady = true -- foundation uses the unfiltered post-rain HDR
+            end
+        end
+    end
     if phase == 'pre' then
         rainDynamicSceneCopyState.visorLayerSceneHide(true)
         render.setBlendMode(render.BlendMode.Opaque)
@@ -11917,7 +12144,12 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
         elseif (phase == 'pre' and not afterRain) or (phase == 'post' and afterRain) then
             render.setBlendMode(render.BlendMode.BlendPremultiplied)
             render.setDepthMode(render.DepthMode.ReadOnly)
-            rainDynamicSceneCopyState.visorLayerDrawItem(item, sov)
+            if not ((item.kind == 4 and (not r.RAIN_VISOR_LAYER_E1 or not vl.e1SourceReady))
+                    or (phase == 'post' and not vl.opticsReady
+                        and ((item.kind == 3 and r.RAIN_VISOR_LAYER_OPTICS)
+                            or item.kind == 4))) then
+                rainDynamicSceneCopyState.visorLayerDrawItem(item, sov)
+            end
         end
     end
     -- state the rain draw / depth pass expect
@@ -13969,6 +14201,11 @@ local function initShaders()
             if file then
                 source = file:read('*a')
                 file:close()
+                -- CSP appends this source after its shader template. A UTF-8
+                -- BOM is only legal at the start of the complete HLSL file.
+                if source and source:sub(1, 3) == string.char(239, 187, 191) then
+                    source = source:sub(4)
+                end
             end
             if source and #source > 0 then
                 shader.HLSL = source
