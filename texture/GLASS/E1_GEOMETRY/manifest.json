@@ -1,25 +1,37 @@
 {
-  "model": "visors\\visor_lando_2025Champion_maxquality_diet.kn5",
-  "sha256": "a508c7c1432cda6e0844b66b3ddb82e77ff6c6c38d3a2605478555006b3adff3",
+  "model": "visors/visor_lando_2025Champion_maxquality_diet_face.kn5",
+  "sha256": "d0bd236f2edb9f56f8c3efa7887a3b6a3028406b8de41cd484988bb5f08983ec",
   "width": 1024,
   "meshes": {
     "frame": {
-      "name": "BODY_FRAME_OVERLAY",
+      "name": "BODY_FRAME",
       "vertices": 35586,
       "triangles": 65289,
       "nodes": 16383
     },
     "rubber": {
-      "name": "BODY_GLASSLINE_OVERLAY",
+      "name": "BODY_GLASSLINE",
       "vertices": 23216,
       "triangles": 43672,
       "nodes": 16383
     },
     "fabric": {
-      "name": "BODY_FABRIC_OVERLAY",
+      "name": "BODY_FABRIC",
       "vertices": 34869,
       "triangles": 65415,
       "nodes": 16383
+    },
+    "face": {
+      "name": "DRIVER_FACE",
+      "vertices": 2004,
+      "triangles": 3088,
+      "nodes": 1023
+    },
+    "balaklava": {
+      "name": "DRIVER_BALAKLAVA",
+      "vertices": 636,
+      "triangles": 1098,
+      "nodes": 403
     }
   }
 }

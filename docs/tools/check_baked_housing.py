@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
     end=source.index('render.onSceneReady',start)
     lua.execute(source[start:end])
     start=source.index('rainDynamicSceneCopyState.e1ReflectionActors = function()')
-    end=source.index('rainDynamicSceneCopyState.e1SourceDepthDraw = function()',start)
+    end=source.index('rainDynamicSceneCopyState.e1SourceDepthDraw = function(',start)
     lua.execute(source[start:end])
     lua.execute('''
         local st=rainDynamicSceneCopyState

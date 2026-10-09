@@ -943,6 +943,20 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW = false,
         RAIN_VISOR_LAYER_E1_SOURCE_MODE = 0, -- 0 lit, 1 shared aperture weight
         RAIN_VISOR_LAYER_E1_SOURCE_OFFSET = 0.025, -- metres toward opening
+        RAIN_VISOR_LAYER_E1_SOURCE_HEIGHT = 0.0, -- metres upward in helmet coordinates
+        RAIN_VISOR_LAYER_E1_SOURCE_PITCH = 0.0, -- positive degrees look downward
+        RAIN_VISOR_LAYER_E1_ANCHOR_SAVED = false,
+        RAIN_VISOR_LAYER_E1_ANCHOR_X = 0.0,
+        RAIN_VISOR_LAYER_E1_ANCHOR_Y = 0.0,
+        RAIN_VISOR_LAYER_E1_ANCHOR_Z = 0.0,
+        RAIN_VISOR_LAYER_E1_MULTIVIEW = false, -- experiment A: manual source selection
+        RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA = false, -- BVH colour from reflected current eye
+        RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_Z = 0.10, -- representative visor plane, helmet local metres
+        RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_PITCH = 0,
+        RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_YAW = 0,
+        RAIN_VISOR_LAYER_E1_SOURCE_SLOT = 0, -- 0 centre / 1 left / 2 right
+        RAIN_VISOR_LAYER_E1_SOURCE_SPACING = 0.030, -- metres, helmet-local X
+        RAIN_VISOR_LAYER_E1_SIDE_QUALITY = 1,
         RAIN_VISOR_LAYER_E1_SOURCE_FOV = 120.0,
         RAIN_VISOR_LAYER_E1_SOURCE_QUALITY = 2, -- 0:384, 1:768, 2:1536, 3:3072 wide
         RAIN_VISOR_LAYER_E1_SOURCE_SUN_WEIGHT = 1.0,
@@ -953,6 +967,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_E1_PRIMARY_THRESHOLD = 1.0,
         RAIN_VISOR_LAYER_E1_PRIMARY_KNEE = 0.5,
         RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR = 0.01,
+        RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE = false,
+        RAIN_VISOR_LAYER_E1_HIGHLIGHT_ISOLATION = 0.0, -- remove reference luminance without shifting hue
         RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX = true,
         RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE = 1.5,
         RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_SAMPLES = 32, -- measured cost/quality baseline
@@ -969,6 +985,8 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_NATIVE_FRESNEL = 0.04,
         RAIN_VISOR_LAYER_NATIVE_FRESNEL_MAX = 0.5,
         RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE = false, -- preserved BVH comparison; resume capture-depth path
+        RAIN_VISOR_LAYER_E1_GEOMETRY_WIDTH = 512, -- colour reprojection experiment resolution
+        RAIN_VISOR_LAYER_E1_COLOUR_TOLERANCE = 0.003, -- source metric-depth agreement, metres
         RAIN_VISOR_LAYER_OPTICS = true, -- E2/E3 prototype, inner glass only
 
 
@@ -5148,6 +5166,59 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
         },
         
         
+
+        {
+            id = 'FACEHQ',
+
+            meshName =
+                'DRIVER_FACE',
+
+            materialName =
+                'mtHQFACE',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters =
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+        
+
+        {
+            id = 'BALAKLAVA',
+
+            meshName =
+                'DRIVER_BALAKLAVA',
+
+            materialName =
+                'mtBalaklava',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters =
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
+
         {
             id = 'GLASSINT',
 
@@ -12128,8 +12199,16 @@ end
 -- Stage 2: capture available helmet housing only. No world pass, visor,
 -- RainFX, UI, or E1 reflection can feed back into this source.
 rainDynamicSceneCopyState.e1Source = {updates = 0, calls = 0}
-rainDynamicSceneCopyState.e1SourceDispose = function()
-    local st = rainDynamicSceneCopyState.e1Source
+rainDynamicSceneCopyState.e1Multi = {single=rainDynamicSceneCopyState.e1Source,slots={},frame=0}
+rainDynamicSceneCopyState.e1SourceDispose = function(st)
+    if not st then
+        local multi=rainDynamicSceneCopyState.e1Multi
+        rainDynamicSceneCopyState.e1SourceDispose(multi.single)
+        for _,slot in ipairs(multi.slots) do rainDynamicSceneCopyState.e1SourceDispose(slot) end
+        multi.slots={};multi.anchor=nil
+        rainDynamicSceneCopyState.e1Source=multi.single
+        return
+    end
     for _, key in ipairs({'shot', 'positionShot', 'lightFrame', 'preview'}) do
         if st[key] then st[key]:dispose(); st[key] = nil end
     end
@@ -12212,6 +12291,7 @@ rainDynamicSceneCopyState.nativeCapturePrepare = function()
                 st.root:getTransformationRaw():set(visor:getTransformationRaw())
                 if st.captureRefs then st.captureRefs:setVisible(true,false) end
             end
+            st.prepared=enabled or false
         end
     end
 end
@@ -12240,7 +12320,7 @@ rainDynamicSceneCopyState.nativeCaptureRefs = function(includeActors)
         if not st.root then error('Cannot load registered housing capture model') end
         st.root:findMeshes('*'):setVisible(false,false)
         st.root:findMeshes('*'):setShadows(false) -- copies must not affect scene shadows
-        st.owner=visor;st.refs={}
+        st.owner=visor;st.refs={};st.prepared=false
         rainDynamicSceneCopyState.nativeHousing.generation=
             (rainDynamicSceneCopyState.nativeHousing.generation or 0)+1
     end
@@ -12310,8 +12390,8 @@ rainDynamicSceneCopyState.nativeCaptureUpdate = function(shot,refs,origin,look,u
     if not ok then error(res) end
     return res
 end
-rainDynamicSceneCopyState.e1SourceDepthDraw = function()
-    local st = rainDynamicSceneCopyState.e1Source
+rainDynamicSceneCopyState.e1SourceDepthDraw = function(st)
+    st = st or rainDynamicSceneCopyState.e1Source
     st.depthCalls = (st.depthCalls or 0) + 1
     st.depthParams = st.depthParams or {}
     local restore = {}
@@ -12354,11 +12434,11 @@ rainDynamicSceneCopyState.e1SourceDepthDraw = function()
     render.setBlendMode(render.BlendMode.BlendPremultiplied)
     if not ok then error(err) end
 end
-rainDynamicSceneCopyState.e1SourceUpdate = function()
-    local st = rainDynamicSceneCopyState.e1Source
+rainDynamicSceneCopyState.e1SourceUpdate = function(st, originOverride, qualityOverride, cameraOverride)
+    st = st or rainDynamicSceneCopyState.e1Source
     local r = cfg.RUNTIME
     if not r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW and not r.RAIN_VISOR_LAYER_E1_PRIMARY then
-        if st.shot then rainDynamicSceneCopyState.e1SourceDispose() end
+        if st.shot then rainDynamicSceneCopyState.e1SourceDispose(st) end
         return
     end
     st.ready = false
@@ -12367,7 +12447,7 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
     if not vl.shader or not axisRollNode or not sim then
         st.status = 'Waiting for housing shader / helmet pose'; return
     end
-    local quality=math.min(3,math.max(0,math.floor(r.RAIN_VISOR_LAYER_E1_SOURCE_QUALITY+0.5)))
+    local quality=math.min(3,math.max(0,math.floor((qualityOverride or r.RAIN_VISOR_LAYER_E1_SOURCE_QUALITY)+0.5)))
     local sourceWidth=384*2^quality
     local sourceHeight=256*2^quality
     local sourceMips=9+quality
@@ -12379,11 +12459,14 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
         end
         nativeRef=rainDynamicSceneCopyState.nativeCaptureRefs(true)
         if not nativeRef then st.status='Waiting for registered source geometry';return end
+        if not rainDynamicSceneCopyState.nativeCaptureModel.source.prepared then
+            st.status='Waiting for engine preparation of native source';return
+        end
     end
     if st.shot and (st.width~=sourceWidth or st.nativeCapture~=nativeCapture
         or (nativeCapture and (st.nativeGeneration~=rainDynamicSceneCopyState.nativeHousing.generation
             or st.dedicatedShadows~=r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS))) then
-        rainDynamicSceneCopyState.e1SourceDispose()
+        rainDynamicSceneCopyState.e1SourceDispose(st)
     end
     if not st.shot then
         st.width,st.height=sourceWidth,sourceHeight
@@ -12438,7 +12521,7 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
             st.shot:setOpaqueAlphaFix(true)
             st.shot:setTransparentPass(true) -- preserve alpha materials on optional face/balaclava
         end
-        st.positionShot = ac.GeometryShot({opaque=rainDynamicSceneCopyState.e1SourceDepthDraw},
+        st.positionShot = ac.GeometryShot({opaque=function() rainDynamicSceneCopyState.e1SourceDepthDraw(st) end},
             vec2(sourceWidth,sourceHeight),1,true,render.AntialiasingMode.None,
             render.TextureFormat.R16G16B16A16.Float)
         st.positionShot:setName('E1 source metric depth and coverage')
@@ -12454,17 +12537,26 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
     local pose = axisRollNode:getWorldTransformationRaw()
     local forward = pose:transformVector(vec3(0, 0, 1)):normalize()
     local up = pose:transformVector(vec3(0, 1, 0)):normalize()
-    local origin = sim.cameraPosition + forward * r.RAIN_VISOR_LAYER_E1_SOURCE_OFFSET
-    st.look, st.up = -forward, up
+    local origin = originOverride or (sim.cameraPosition + forward * r.RAIN_VISOR_LAYER_E1_SOURCE_OFFSET
+        + up * r.RAIN_VISOR_LAYER_E1_SOURCE_HEIGHT)
+    -- Rotate both camera axes together; colour and metric depth must use
+    -- exactly the same pitched view. Positive pitch looks towards helmet -Y.
+    local pitch=math.rad(r.RAIN_VISOR_LAYER_E1_SOURCE_PITCH)
+    local look=-forward*math.cos(pitch)-up*math.sin(pitch)
+    up=up*math.cos(pitch)-forward*math.sin(pitch)
+    if cameraOverride then
+        origin=cameraOverride.origin;look=cameraOverride.look;up=cameraOverride.up
+    end
+    st.look, st.up = look, up
     st.side = up:cross(st.look):normalize()
     st.tanFov = math.tan(math.rad(r.RAIN_VISOR_LAYER_E1_SOURCE_FOV) * 0.5)
     local callsBefore = st.calls
     local updated
     if nativeCapture then
         updated=rainDynamicSceneCopyState.nativeCaptureUpdate(st.shot,st.nativeRef,
-            origin,-forward,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
+            origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
     else
-        updated=st.shot:update(origin,-forward,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
+        updated=st.shot:update(origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
     end
     if updated == false then
         error('Source shot update pending')
@@ -12475,7 +12567,7 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
     st.projection = st.shot:projectionMatrix():clone()
     st.origin = origin:clone()
     local depthCallsBefore = st.depthCalls or 0
-    if st.positionShot:update(origin,-forward,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)==false then
+    if st.positionShot:update(origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)==false then
         error('Metric depth capture pending')
     end
     if (st.depthCalls or 0)==depthCallsBefore then error('Metric depth callback did not run') end
@@ -12489,8 +12581,15 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
         values = {gE1Opening = st.opening, gE1Mode = r.RAIN_VISOR_LAYER_E1_SOURCE_MODE},
         shader = [[float4 main(PS_IN pin) {
             float4 c = txE1Source.SampleLevel(samLinearClamp, pin.Tex, 0);
-            float3 mapped = max(c.rgb, 0) / (1 + max(c.rgb, 0));
-            if (gE1Mode > 0.5 && gE1Mode < 1.5) mapped = gE1Opening.xxx * saturate(c.a);
+            // A shared RGB divisor preserves hue in this preview. Per-channel
+            // compression made strong coloured highlights converge to white.
+            float3 rgb=max(c.rgb,0);
+            float3 mapped = rgb / (1 + max(max(rgb.r,rgb.g),rgb.b));
+            // Native lit coverage, not a global sun-direction aperture weight.
+            if (gE1Mode > 0.5 && gE1Mode < 1.5) {
+                float lum=dot(max(c.rgb,0)/max(c.a,0.01),float3(0.2126,0.7152,0.0722));
+                mapped=(lum/(1+lum)).xxx*saturate(c.a);
+            }
             if (gE1Mode>2.5) {
                 float4 metric=txE1MetricDepth.SampleLevel(samLinearClamp,pin.Tex,0);
                 mapped=saturate(metric.r/0.5).xxx*metric.a;
@@ -12503,8 +12602,93 @@ rainDynamicSceneCopyState.e1SourceUpdate = function()
     st.ready = true
     st.status = 'Capture API succeeded; evaluate the preview in game'
 end
+-- Each slot owns its view/depth/colour. Publish only the selected completed
+-- slot to the existing primary and resolve paths, never mix different frames.
+-- Reflect the current eye and both camera axes about a representative visor
+-- plane. BVH intersection remains exact; only native colour capture changes.
+rainDynamicSceneCopyState.e1ReflectionCamera = function()
+    local pose=axisRollNode and axisRollNode:getWorldTransformationRaw()
+    if not pose then return nil end
+    local r=cfg.RUNTIME;local sim=ac.getSim()
+    local pitch=math.rad(r.RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_PITCH)
+    local yaw=math.rad(r.RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_YAW)
+    local normal=pose:transformVector(vec3(math.sin(yaw)*math.cos(pitch),
+        -math.sin(pitch),math.cos(yaw)*math.cos(pitch))):normalize()
+    local point=pose:transformPoint(vec3(0,0,r.RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_Z))
+    local function reflect(v) return v-normal*(2*v:dot(normal)) end
+    return {origin=point+reflect(sim.cameraPosition-point),
+        look=reflect(sim.cameraLook):normalize(),up=reflect(sim.cameraUp):normalize()}
+end
+rainDynamicSceneCopyState.e1MultiUpdate = function()
+    local multi=rainDynamicSceneCopyState.e1Multi
+    local r=cfg.RUNTIME
+    if r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA then
+        for _,slot in ipairs(multi.slots) do rainDynamicSceneCopyState.e1SourceDispose(slot) end
+        multi.slots={}
+        rainDynamicSceneCopyState.e1Source=multi.single
+        multi.single.ready=false
+        local camera=rainDynamicSceneCopyState.e1ReflectionCamera()
+        if not camera then multi.single.status='Reflection camera waiting for helmet pose';return end
+        rainDynamicSceneCopyState.e1SourceUpdate(multi.single,camera.origin,
+            r.RAIN_VISOR_LAYER_E1_SOURCE_QUALITY,camera)
+        return
+    end
+    if not r.RAIN_VISOR_LAYER_E1_MULTIVIEW
+        or not (r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW or r.RAIN_VISOR_LAYER_E1_PRIMARY) then
+        for _,slot in ipairs(multi.slots) do rainDynamicSceneCopyState.e1SourceDispose(slot) end
+        multi.slots={};multi.anchor=nil
+        rainDynamicSceneCopyState.e1Source=multi.single
+        rainDynamicSceneCopyState.e1SourceUpdate(multi.single)
+        return
+    end
+    local pose=axisRollNode and axisRollNode:getWorldTransformationRaw()
+    if not pose then
+        rainDynamicSceneCopyState.e1Source.ready=false
+        rainDynamicSceneCopyState.e1Source.status='Multiview waiting for helmet pose';return
+    end
+    if multi.owner~=visor then multi.anchor=nil;multi.owner=visor end
+    if r.RAIN_VISOR_LAYER_NATIVE_HOUSING and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE~=2 then
+        rainDynamicSceneCopyState.nativeHousingEnsure()
+        rainDynamicSceneCopyState.nativeCaptureRefs(true)
+        if not rainDynamicSceneCopyState.nativeCaptureModel.source.prepared then
+            rainDynamicSceneCopyState.e1Source.ready=false
+            rainDynamicSceneCopyState.e1Source.status='Waiting for engine preparation before source anchor';return
+        end
+    end
+    if not multi.anchor then
+        if r.RAIN_VISOR_LAYER_E1_ANCHOR_SAVED then
+            multi.anchor=vec3(r.RAIN_VISOR_LAYER_E1_ANCHOR_X,r.RAIN_VISOR_LAYER_E1_ANCHOR_Y,r.RAIN_VISOR_LAYER_E1_ANCHOR_Z)
+        else
+            multi.anchor=pose:inverse():transformPoint(ac.getSim().cameraPosition)
+            r.RAIN_VISOR_LAYER_E1_ANCHOR_X=multi.anchor.x
+            r.RAIN_VISOR_LAYER_E1_ANCHOR_Y=multi.anchor.y
+            r.RAIN_VISOR_LAYER_E1_ANCHOR_Z=multi.anchor.z
+            r.RAIN_VISOR_LAYER_E1_ANCHOR_SAVED=true
+            if rainDynamicSceneCopyState.materialSettings then rainDynamicSceneCopyState.materialSettings:markDirty() end
+        end
+    end
+    if multi.single.shot then rainDynamicSceneCopyState.e1SourceDispose(multi.single) end
+    multi.pending=multi.pending or {updates=0,calls=0,ready=false,status='Multiview capture in progress'}
+    rainDynamicSceneCopyState.e1Source=multi.pending
+    multi.frame=multi.frame+1
+    for i=1,3 do
+        local slot=multi.slots[i] or {updates=0,calls=0}
+        multi.slots[i]=slot;slot.ready=false
+        local lateral=(i==2 and -1 or i==3 and 1 or 0)*r.RAIN_VISOR_LAYER_E1_SOURCE_SPACING
+        local origin=pose:transformPoint(multi.anchor+vec3(lateral,r.RAIN_VISOR_LAYER_E1_SOURCE_HEIGHT,r.RAIN_VISOR_LAYER_E1_SOURCE_OFFSET))
+        local quality=i==1 and r.RAIN_VISOR_LAYER_E1_SOURCE_QUALITY or r.RAIN_VISOR_LAYER_E1_SIDE_QUALITY
+        local ok,err=pcall(rainDynamicSceneCopyState.e1SourceUpdate,slot,origin,quality)
+        if not ok then
+            rainDynamicSceneCopyState.e1SourceDispose(slot)
+            slot.status='Slot capture error: '..tostring(err)
+        end
+        slot.frame=multi.frame
+    end
+    local selected=math.max(0,math.min(2,math.floor(r.RAIN_VISOR_LAYER_E1_SOURCE_SLOT+0.5)))+1
+    rainDynamicSceneCopyState.e1Source=multi.slots[selected]
+end
 render.onSceneReady(function()
-    local ok, err = pcall(rainDynamicSceneCopyState.e1SourceUpdate)
+    local ok, err = pcall(rainDynamicSceneCopyState.e1MultiUpdate)
     rainDynamicSceneCopyState.nativeCaptureHide()
     if not ok then
         rainDynamicSceneCopyState.e1Source.ready = false
@@ -12518,38 +12702,90 @@ rainDynamicSceneCopyState.e1SourceUI = function()
     local st = rainDynamicSceneCopyState.e1Source
     ui.separator()
     ui.text('E1 stage 2: internal source preview (no reflection)')
+    if ui.checkbox('BVH reflected camera colour experiment',r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA) then
+        r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA=not r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA
+        rainDynamicSceneCopyState.e1SourceDispose()
+        if rainDynamicSceneCopyState.materialSettings then rainDynamicSceneCopyState.materialSettings:markDirty() end
+    end
+    if r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA then
+        for _,setting in ipairs({
+            {'Reflection plane local Z','RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_Z',-0.10,0.30,'%.3f m'},
+            {'Reflection plane pitch','RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_PITCH',-45,45,'%.1f deg'},
+            {'Reflection plane yaw','RAIN_VISOR_LAYER_E1_REFLECTION_PLANE_YAW',-60,60,'%.1f deg'},
+        }) do
+            local v,changed=ui.slider(setting[1],r[setting[2]],setting[3],setting[4],setting[5])
+            if changed then
+                r[setting[2]]=v
+                if rainDynamicSceneCopyState.materialSettings then rainDynamicSceneCopyState.materialSettings:markDirty() end
+            end
+        end
+        ui.textWrapped('Single native capture from reflected current eye; BVH hits unchanged. Source FOV/quality apply; anchor, offset, height, pitch and multiview are bypassed. Tune the representative visor plane; curved edges remain approximate.')
+    end
+    if not r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA and ui.checkbox('E1 multiview experiment (manual selection)',r.RAIN_VISOR_LAYER_E1_MULTIVIEW) then
+        r.RAIN_VISOR_LAYER_E1_MULTIVIEW=not r.RAIN_VISOR_LAYER_E1_MULTIVIEW
+        rainDynamicSceneCopyState.e1SourceDispose()
+    end
+    if r.RAIN_VISOR_LAYER_E1_MULTIVIEW and not r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA then
+        for _,setting in ipairs({
+            {'Source slot: 0 centre / 1 left / 2 right','RAIN_VISOR_LAYER_E1_SOURCE_SLOT',0,2,'%.0f'},
+            {'Lateral source spacing','RAIN_VISOR_LAYER_E1_SOURCE_SPACING',0,0.100,'%.3f m'},
+            {'Side source quality','RAIN_VISOR_LAYER_E1_SIDE_QUALITY',0,3,'%.0f'},
+        }) do
+            local v,changed=ui.slider(setting[1],r[setting[2]],setting[3],setting[4],setting[5])
+            if changed then r[setting[2]]=setting[2]=='RAIN_VISOR_LAYER_E1_SOURCE_SPACING' and v or math.floor(v+0.5) end
+        end
+        if ui.button('Reset source anchor from current eye') then
+            rainDynamicSceneCopyState.e1Multi.anchor=nil;r.RAIN_VISOR_LAYER_E1_ANCHOR_SAVED=false
+        end
+        ui.textWrapped('Three current-frame sources; selected slot drives preview and reflection. Anchor follows helmet, not eye translation.')
+        for i,slot in ipairs(rainDynamicSceneCopyState.e1Multi.slots) do
+            ui.text(string.format('%s: frame %d / %s / %dx%d',
+                ({'Centre','Left','Right'})[i],slot.frame or 0,slot.ready and 'ready' or 'unavailable',slot.width or 0,slot.height or 0))
+            if not slot.ready then ui.textWrapped(slot.status or 'Waiting') end
+        end
+    end
     if ui.checkbox('E1 internal source preview', r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW) then
         r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW = not r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW
         if not r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW and not r.RAIN_VISOR_LAYER_E1_PRIMARY then rainDynamicSceneCopyState.e1SourceDispose() end
     end
     if not r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW then return end
     for _, setting in ipairs({
-        {'Source mode: 0 lit / 1 aperture / 2 checker / 3 metric depth', 'RAIN_VISOR_LAYER_E1_SOURCE_MODE', 0, 3, '%.0f'},
+        {'Source mode: 0 lit / 1 lit luminance / 2 checker / 3 metric depth', 'RAIN_VISOR_LAYER_E1_SOURCE_MODE', 0, 3, '%.0f'},
         {'Source origin offset toward opening', 'RAIN_VISOR_LAYER_E1_SOURCE_OFFSET', -0.05, 0.15, '%.3f m'},
+        {'Source height above eye', 'RAIN_VISOR_LAYER_E1_SOURCE_HEIGHT', -0.060, 0.060, '%.3f m'},
+        {'Source pitch (positive looks down)', 'RAIN_VISOR_LAYER_E1_SOURCE_PITCH', -30, 30, '%.1f deg'},
         {'Source field of view', 'RAIN_VISOR_LAYER_E1_SOURCE_FOV', 60, 150, '%.0f deg'},
         {'Source quality: 0=384 / 1=768 / 2=1536 / 3=3072', 'RAIN_VISOR_LAYER_E1_SOURCE_QUALITY', 0, 3, '%.0f'},
         {'E1 source directional light weight', 'RAIN_VISOR_LAYER_E1_SOURCE_SUN_WEIGHT', 0, 1, '%.2f'},
     }) do
-        local v, changed = ui.slider(setting[1], r[setting[2]], setting[3], setting[4], setting[5])
-        if changed then r[setting[2]] = (setting[2] == 'RAIN_VISOR_LAYER_E1_SOURCE_MODE'
-            or setting[2] == 'RAIN_VISOR_LAYER_E1_SOURCE_QUALITY') and math.floor(v + 0.5) or v end
+        local bypassed=r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA and
+            (setting[2]=='RAIN_VISOR_LAYER_E1_SOURCE_OFFSET' or setting[2]=='RAIN_VISOR_LAYER_E1_SOURCE_HEIGHT'
+                or setting[2]=='RAIN_VISOR_LAYER_E1_SOURCE_PITCH')
+        if not bypassed then
+            local v, changed = ui.slider(setting[1], r[setting[2]], setting[3], setting[4], setting[5])
+            if changed then
+                r[setting[2]] = (setting[2] == 'RAIN_VISOR_LAYER_E1_SOURCE_MODE'
+                    or setting[2] == 'RAIN_VISOR_LAYER_E1_SOURCE_QUALITY') and math.floor(v + 0.5) or v
+                if rainDynamicSceneCopyState.materialSettings then rainDynamicSceneCopyState.materialSettings:markDirty() end
+            end
+        end
     end
     ui.text('Updates / housing callbacks: ' .. st.updates .. ' / ' .. st.calls)
     if st.width then ui.text(string.format('Source capture: %d x %d',st.width,st.height)) end
     ui.textWrapped(st.status or 'Waiting for capture')
     if st.ready then
-        ui.text(string.format('Opening weight %.3f / directional HDR luminance %.5f', st.opening or 0, st.sunLum or 0))
+        ui.text(string.format('Legacy opening weight %.3f (unused) / directional HDR luminance %.5f', st.opening or 0, st.sunLum or 0))
         ui.image(st.preview, vec2(384, 256))
     end
     ui.text(string.format('Optional reflection actors: %d / 2 (DRIVER_FACE, DRIVER_BALAKLAVA)',
         #rainDynamicSceneCopyState.e1ReflectionActors()))
     ui.textWrapped('Housing/liner plus optional face/balaclava; no cockpit source. '
-        .. 'Mode 1 is the shared directional aperture weight, not spatial occlusion. '
-        .. 'Lit preview uses C/(1+C); source retains HDR. Glass is unchanged.')
+        .. 'Mode 1 displays native lit luminance, including local lights; it is not geometric aperture visibility. '
+        .. 'Lit preview preserves RGB ratios; source retains HDR. Glass is unchanged.')
     if r.RAIN_VISOR_LAYER_NATIVE_HOUSING then
         ui.textWrapped('Lit source: native engine materials, original lighting, '
             ..(r.RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS and 'dedicated shadows' or 'shared scene shadows')
-            ..'. Aperture weight is diagnostic only; no legacy shadow probe.')
+            ..'. Legacy opening weight is diagnostic only; no legacy shadow probe.')
     else
         ui.textWrapped('Legacy custom source: main-camera shadow probe disabled for this capture view.')
     end
@@ -12878,11 +13114,35 @@ end)
 -- Geometry verification path: trace actual housing triangles at reduced
 -- resolution, then composite on INT. Capture origin/FOV/depth is not input.
 rainDynamicSceneCopyState.e1Geometry = {}
+rainDynamicSceneCopyState.e1GeometryValidate = function()
+    local st=rainDynamicSceneCopyState.e1Geometry
+    local model=cfg.RUNTIME.MODEL_PATH
+    if st.dataModel~=model then
+        st.dataModel=model;st.dataValid=false;st.dataStatus='Checking BVH model hash'
+        local file=io.open(appFolder..'/texture/GLASS/E1_GEOMETRY/manifest.verify','rb')
+        if not file then st.dataStatus='Missing five-mesh BVH manifest; run bake tool';return false end
+        local data=file:read('*a');file:close()
+        local path,hash=data:match('^([^\r\n]+)\r?\n([0-9a-f]+)')
+        if path~=model:gsub('\\','/') or not hash or #hash~=64 then
+            st.dataStatus='BVH manifest/model mismatch';return false
+        end
+        for _,name in ipairs({'BODY_FRAME','BODY_GLASSLINE','BODY_FABRIC','DRIVER_FACE','DRIVER_BALAKLAVA'}) do
+            if not data:find('\n'..name..'\r?\n') then st.dataStatus='BVH manifest missing '..name;return false end
+        end
+        io.checksumSHA256(appFolder..'/'..model,function(err,actual)
+            if st.dataModel~=model then return end
+            st.dataValid=not err and actual==hash
+            st.dataStatus=st.dataValid and 'Five-mesh BVH SHA256 verified' or ('BVH hash mismatch/error: '..tostring(err or actual))
+        end)
+    end
+    return st.dataValid
+end
 render.onSceneReady(function()
     local st=rainDynamicSceneCopyState.e1Geometry
     if st.shot and (not cfg.RUNTIME.RAIN_VISOR_LAYER_E1_PRIMARY
         or not cfg.RUNTIME.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE) then
         st.shot:dispose();st.shot=nil;st.ready=false
+        if st.preview then st.preview:dispose();st.preview=nil end
     end
     if cfg.RUNTIME.RAIN_VISOR_LAYER_E1_PRIMARY and cfg.RUNTIME.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE then
         st.ready=false
@@ -12897,13 +13157,13 @@ rainDynamicSceneCopyState.e1GeometryUpdate = function()
     local r=cfg.RUNTIME
     local st=rainDynamicSceneCopyState.e1Geometry
     local primary=rainDynamicSceneCopyState.e1Primary
-    if r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0 or r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==4 then
-        primary.status='Geometry validation: use modes 1/2/3/5/6; lit final/gate not connected'
+    st.ready=false
+    if (r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0 or r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==4)
+        and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE~=0 then
+        primary.status='Geometry final/gate requires source mode 0 lit'
         return
     end
-    if r.MODEL_PATH~='visors/visor_lando_2025Champion_maxquality_diet_face.kn5' then
-        primary.status='Geometry data model mismatch';return
-    end
+    if not rainDynamicSceneCopyState.e1GeometryValidate() then primary.status=st.dataStatus;return end
     local e=rainDynamicSceneCopyState.visorLayerEditor('GLASS_INT_OVERLAY')
     if not e or not e.targetMesh or #e.targetMesh~=1 or e.visible==false then return end
     local sim=ac.getSim()
@@ -12913,10 +13173,12 @@ rainDynamicSceneCopyState.e1GeometryUpdate = function()
         st.shader=file:read('*a');file:close()
         if st.shader:sub(1,3)==string.char(239,187,191) then st.shader=st.shader:sub(4) end
     end
-    local w=256
+    local mode=r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE
+    local colourMode=mode==0 or mode==4 or mode>=9 or (mode==3 and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE~=2)
+    local w=colourMode and math.max(128,math.min(1024,math.floor(r.RAIN_VISOR_LAYER_E1_GEOMETRY_WIDTH+0.5))) or 256
     local h=math.max(64,math.floor(w*(rainDynamicSceneCopyState.mainTargetHeight or 720)
         /math.max(rainDynamicSceneCopyState.mainTargetWidth or 1280,1)+0.5))
-    if not st.shot or st.h~=h then
+    if not st.shot or st.h~=h or st.w~=w then
         if st.shot then st.shot:dispose() end
         st.shot=ac.GeometryShot({opaque=function()
             local mesh=st.params.mesh
@@ -12936,21 +13198,45 @@ rainDynamicSceneCopyState.e1GeometryUpdate = function()
         end},vec2(w,h),1,true,render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
         st.shot:setSky(false);st.shot:setParticles(false)
         st.shot:setClearColor(rgbm(0,0,0,0))
-        st.h=h
+        st.w,st.h=w,h
     end
     st.params=st.params or {transform='original',async=false,textures={},values={}}
     local p=st.params
     p.mesh=e.targetMesh;p.shader=st.shader
     local v=p.values
     v.gE1Eye=sim.cameraPosition
+    v.gE1LocalOrigin=axisRollNode:getWorldTransformationRaw():transformPoint(vec3(0,0,0))
     v.gE1Range=r.RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE
     v.gE1Mode=r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE
     v.gE1Checker=r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==2 and 1.0 or 0.0
     v.gE1RubberGrey=r.RAIN_VISOR_LAYER_BORDER_GREY
+    v.gE1Gain=r.RAIN_VISOR_LAYER_E1_PRIMARY_GAIN
+    v.gE1Threshold=r.RAIN_VISOR_LAYER_E1_PRIMARY_THRESHOLD
+    v.gE1Knee=r.RAIN_VISOR_LAYER_E1_PRIMARY_KNEE
+    v.gE1MeanFloor=r.RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR
+    v.gE1FixedReference=r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE and 1 or 0
+    v.gE1Isolation=r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_ISOLATION
+    v.gE1ColourTolerance=r.RAIN_VISOR_LAYER_E1_COLOUR_TOLERANCE
+    local multi=rainDynamicSceneCopyState.e1Multi
+    for i=0,2 do
+        local src
+        if r.RAIN_VISOR_LAYER_E1_MULTIVIEW and not r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA then src=multi.slots[i+1]
+        elseif i==0 then src=rainDynamicSceneCopyState.e1Source end
+        local active=src and src.ready and src.nativeCapture and src.origin and src.view and src.projection
+            and (r.RAIN_VISOR_LAYER_E1_REFLECTION_CAMERA or not r.RAIN_VISOR_LAYER_E1_MULTIVIEW or src.frame==multi.frame)
+            and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==0
+        v['gE1SourceActive'..i]=active and 1 or 0
+        v['gE1View'..i]=active and src.view or axisRollNode:getWorldTransformationRaw()
+        v['gE1Projection'..i]=active and src.projection or axisRollNode:getWorldTransformationRaw()
+        v['gE1EyeToSource'..i]=active and (sim.cameraPosition-src.origin) or vec3(0,0,0)
+        p.textures['txE1Colour'..i]=active and src.shot or false
+        p.textures['txE1Depth'..i]=active and src.positionShot or false
+    end
     local T=appFolder..'/texture/GLASS/E1_GEOMETRY/'
     for _,pair in ipairs({{'frame','Frame','BODY_FRAME'},
-        {'rubber','Rubber','BODY_GLASSLINE'},{'fabric','Fabric','BODY_FABRIC'}}) do
-        local ed=rainDynamicSceneCopyState.visorLayerEditor(pair[3])
+        {'rubber','Rubber','BODY_GLASSLINE'},{'fabric','Fabric','BODY_FABRIC'},
+        {'face','Face','DRIVER_FACE'},{'balaklava','Balaklava','DRIVER_BALAKLAVA'}}) do
+        local ed=rainDynamicSceneCopyState.e1SourceEditor(pair[3])
         if not ed or not ed.targetMesh or #ed.targetMesh~=1 then
             primary.status='Geometry requires one mesh: '..pair[3];return
         end
@@ -12982,7 +13268,6 @@ rainDynamicSceneCopyState.nativeHousingEnsure = function()
     r.RAIN_VISOR_LAYER_NATIVE_HOUSING=true
     r.RAIN_VISOR_LAYER_NATIVE_SCENE_PASS=false
     r.RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW=false
-    r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE=false -- old packed BVHs require a new bake
     for _,name in ipairs({'BODY_FRAME_OVERLAY','BODY_GLASSLINE_OVERLAY','BODY_FABRIC_OVERLAY'}) do
         local ed=rainDynamicSceneCopyState.visorLayerEditor(name)
         if ed then
@@ -13138,13 +13423,32 @@ rainDynamicSceneCopyState.e1GeometryDraw = function()
     local ok,err=pcall(function()
         st.composite=st.composite or {transform='original',async=false,textures={},values={},shader=[[
             float4 main(PS_IN pin) {
-                return txE1Geometry.SampleLevel(samLinearClamp,pin.PosH.xy*gE1InvTarget,0);
+                float2 uv=pin.PosH.xy*gE1InvTarget;
+                float4 c=txE1Geometry.SampleLevel(samLinearClamp,uv,0);
+                if(gE1Final<0.5) return c;
+                float distance=txE1Geometry.SampleLevel(samPointClamp,uv,0).a;
+                if(distance<=0 || abs(distance-length(pin.PosC))>max(0.002,2*fwidth(length(pin.PosC))*gE1Scale)) return 0;
+                float2 radius=gE1Blur*gE1InvBuffer;
+                float3 sum=c.rgb*4;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv+float2(radius.x,0),0).rgb*2;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv-float2(radius.x,0),0).rgb*2;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv+float2(0,radius.y),0).rgb*2;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv-float2(0,radius.y),0).rgb*2;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv+radius,0).rgb;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv-radius,0).rgb;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv+float2(radius.x,-radius.y),0).rgb;
+                sum+=txE1Geometry.SampleLevel(samLinearClamp,uv+float2(-radius.x,radius.y),0).rgb;
+                return float4(max(sum/16,0),0);
             }
         ]]}
         local c=st.composite
         c.mesh=e.targetMesh;c.textures.txE1Geometry=st.shot
         local targetSize=render.getRenderTargetSize()
         c.values.gE1InvTarget=vec2(1/math.max(targetSize.x,1),1/math.max(targetSize.y,1))
+        c.values.gE1InvBuffer=vec2(1/st.w,1/st.h)
+        c.values.gE1Scale=math.max(targetSize.x/st.w,targetSize.y/st.h)
+        c.values.gE1Blur=cfg.RUNTIME.RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR
+        c.values.gE1Final=cfg.RUNTIME.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0 and 1 or 0
         local visible=e.targetMesh:isVisible(1)
         render.setCullMode(render.CullMode.None)
         render.setDepthMode(render.DepthMode.ReadOnly)
@@ -13171,34 +13475,86 @@ rainDynamicSceneCopyState.e1PrimaryUI = function()
         r.RAIN_VISOR_LAYER_E1_PRIMARY = not r.RAIN_VISOR_LAYER_E1_PRIMARY
     end
     if not r.RAIN_VISOR_LAYER_E1_PRIMARY then return end
-    ui.text('Active path: captured native housing depth / lit source')
+    if ui.checkbox('Primary actual geometry (five-mesh validation)',r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE) then
+        r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE=not r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE
+        rainDynamicSceneCopyState.e1Geometry.ready=false
+        if r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE then r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE=6 end
+        if not r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE>6 then
+            r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE=6
+        end
+    end
+    ui.text(r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and 'Active path: five-mesh BVH geometry diagnostics'
+        or 'Active path: captured native housing depth / lit source')
     for _, setting in ipairs({
-        {'Primary mode: 0 final / 1 coverage / 2 Fresnel / 3 image / 4 gate / 5 UV / 6 trace', 'RAIN_VISOR_LAYER_E1_PRIMARY_MODE',0,6,'%.0f'},
-        {'Primary HDR gain','RAIN_VISOR_LAYER_E1_PRIMARY_GAIN',0,10,'%.2f'},
+        {'Primary mode: 0 final / 1 coverage / 2 Fresnel / 3 image / 4 gate / 5 UV / 6 trace / 7 distance / 8 position / 9 colour coverage / 10 source', 'RAIN_VISOR_LAYER_E1_PRIMARY_MODE',0,r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and 10 or 6,'%.0f'},
+        {'Primary HDR gain','RAIN_VISOR_LAYER_E1_PRIMARY_GAIN',0,r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and 100 or 10,'%.2f'},
         {'Primary source blur MIP','RAIN_VISOR_LAYER_E1_PRIMARY_MIP',0,5,'%.2f'},
         {'Primary relative luminance threshold','RAIN_VISOR_LAYER_E1_PRIMARY_THRESHOLD',0,5,'%.2f'},
         {'Primary threshold soft knee','RAIN_VISOR_LAYER_E1_PRIMARY_KNEE',0.01,2,'%.2f'},
-        {'Primary mean luminance floor','RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR',0.001,0.2,'%.3f'},
+        {r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and (r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE
+            and 'Highlight fixed reference (HDR luminance)' or 'Highlight reference minimum (HDR luminance)')
+            or 'Primary mean luminance floor','RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR',0.001,
+            r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and 200 or 0.2,'%.3f'},
         {'Primary trace range','RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE',0.1,3.0,'%.2f m'},
         {'Primary trace sample budget','RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_SAMPLES',32,512,'%.0f'},
         {'Primary reflection-space blur (0 bypass)','RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR',0,4,'%.2f px'},
         {'Primary reflection trace scale','RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_SCALE',0.5,1,'%.2f'},
     }) do
-        local v,changed = ui.slider(setting[1],r[setting[2]],setting[3],setting[4],setting[5])
-        if changed then r[setting[2]] = setting[2] == 'RAIN_VISOR_LAYER_E1_PRIMARY_MODE' and math.floor(v+0.5) or v end
+        local unused=r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and (setting[2]=='RAIN_VISOR_LAYER_E1_PRIMARY_MIP'
+            or setting[2]=='RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_SAMPLES' or setting[2]=='RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_SCALE')
+        if not unused then
+            local v,changed = ui.slider(setting[1],r[setting[2]],setting[3],setting[4],setting[5])
+            if changed then
+                r[setting[2]] = setting[2] == 'RAIN_VISOR_LAYER_E1_PRIMARY_MODE' and math.floor(v+0.5) or v
+                rainDynamicSceneCopyState.materialSettings:markDirty()
+            end
+        end
     end
-    if ui.checkbox('Primary near-field depth parallax',r.RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX) then
+    if not r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE and ui.checkbox('Primary near-field depth parallax',r.RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX) then
         r.RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX = not r.RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX
     end
     ui.text('Primary draw attempts: '..st.attempts)
     ui.textWrapped(st.status or 'Waiting for INT draw and a ready source')
     if r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE then
+        if ui.checkbox('Highlight fixed HDR reference',r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE) then
+            r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE=not r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE
+            rainDynamicSceneCopyState.materialSettings:markDirty()
+        end
+        local isolation,changed=ui.slider('Highlight baseline removal',r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_ISOLATION,0,1,'%.2f')
+        if changed then r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_ISOLATION=isolation;rainDynamicSceneCopyState.materialSettings:markDirty() end
+        ui.textWrapped('Automatic reference uses source mean, clamped by the minimum; the minimum has no effect below that mean. '
+            .. 'Fixed reference makes the HDR value the active highlight baseline. Mode 4 shows gate; mode 0 applies baseline removal and gain. '
+            .. 'BVH uses validated MIP 0 taps: use reflection-space blur for sharpness and geometry output width for resolution.')
+        for _,setting in ipairs({
+            {'Geometry colour output width','RAIN_VISOR_LAYER_E1_GEOMETRY_WIDTH',128,1024,'%.0f px'},
+            {'Geometry colour depth tolerance','RAIN_VISOR_LAYER_E1_COLOUR_TOLERANCE',0.001,0.010,'%.4f m'},
+        }) do
+            local v,changed=ui.slider(setting[1],r[setting[2]],setting[3],setting[4],setting[5])
+            if changed then r[setting[2]]=v;rainDynamicSceneCopyState.materialSettings:markDirty() end
+        end
+        if ui.button('Recheck geometry model hash') then rainDynamicSceneCopyState.e1Geometry.dataModel=nil end
         ui.textWrapped('Geometry validation: source offset/FOV and depth-parallax toggle do not affect intersections. '
-            .. '6: green=hit, red=miss, blue=traversal budget. 3: checker/albedo at hit housing UV. Final lighting not connected.')
+            .. '6: green=hit, red=miss, blue=traversal budget. 3 + source checker: frame red / rubber green / fabric blue / face yellow / balaclava magenta. '
+            .. '7: distance/range. 8: hit position relative to helmet origin, in world axes. '
+            .. 'Source lit + 9: red geometry miss / orange colour unseen / green validated colour / blue traversal limit. '
+            .. '10: dominant centre red / left green / right blue. 3 lit: raw HDR. 0: final. '
+            .. 'Colour taps use MIP 0 with depth/ID validation; final blur is applied after reprojection.')
         local geometry=rainDynamicSceneCopyState.e1Geometry
         if geometry.ready and geometry.shot then
-            ui.text('Actual geometry output before INT composite')
-            ui.image(geometry.shot,vec2(384,216))
+            ui.text('Geometry output preview (opaque; HDR compressed)')
+            geometry.preview=geometry.preview or ui.ExtraCanvas(vec2(384,216),1,
+                render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+            local shown=geometry.preview:updateSceneWithShader({async=false,textures={txGeometryPreview=geometry.shot},
+                values={gPreviewHDR=(r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0
+                    or (r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==3 and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==0)) and 1 or 0},
+                shader=[[
+                    float4 main(PS_IN pin) {
+                        float3 c=max(txGeometryPreview.SampleLevel(samLinearClamp,pin.Tex,0).rgb,0);
+                        if(gPreviewHDR>0.5) c/=1+max(max(c.r,c.g),c.b);
+                        return float4(c,1);
+                    }
+                ]]})
+            if shown~=false then ui.image(geometry.preview,vec2(384,216)) end
         end
     else
         ui.textWrapped('Checker diagnostic samples MIP 0. Trace 6: green=hit, red=outside source, blue=no geometry, orange=no crossing, cyan=parallax off. '

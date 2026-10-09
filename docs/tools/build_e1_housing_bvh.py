@@ -8,12 +8,15 @@ import hashlib
 import json
 import re
 import struct
+import argparse
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-MODEL = ROOT / 'visors/visor_lando_2025Champion_maxquality_diet.kn5'
+MODEL = ROOT / 'visors/visor_lando_2025Champion_maxquality_diet_face.kn5'
 OUT = ROOT / 'texture/GLASS/E1_GEOMETRY'
 WIDTH = 1024
+MESHES = [('BODY_FRAME', 'frame'), ('BODY_GLASSLINE', 'rubber'),
+          ('BODY_FABRIC', 'fabric'), ('DRIVER_FACE', 'face'), ('DRIVER_BALAKLAVA', 'balaklava')]
 
 
 def dds(path, records):
@@ -30,6 +33,8 @@ def dds(path, records):
 def mesh(blob, name):
     matches = []
     for match in re.finditer(name.encode(), blob):
+        if match.start()<8 or struct.unpack_from('<I',blob,match.start()-4)[0]!=len(name):
+            continue  # reject material names and names with _OVERLAY/_MIRROR suffixes
         if struct.unpack_from('<I', blob, match.start()-8)[0] != 2:
             continue
         p = match.end()
@@ -85,20 +90,32 @@ def build(vertices, indices):
 
 
 def main():
-    OUT.mkdir(parents=True, exist_ok=True)
-    blob = MODEL.read_bytes()
-    manifest = {'model': str(MODEL.relative_to(ROOT)), 'sha256': hashlib.sha256(blob).hexdigest(),
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--model',type=Path,default=MODEL)
+    args=parser.parse_args()
+    model=args.model.resolve()
+    blob = model.read_bytes()
+    if not blob:
+        raise SystemExit(f'Cannot bake BVH: model is empty: {model}. Existing BVH files unchanged.')
+    model_name=args.model.absolute().relative_to(ROOT).as_posix()
+    manifest = {'model': model_name, 'sha256': hashlib.sha256(blob).hexdigest(),
                 'width': WIDTH, 'meshes': {}}
-    for name, key in [('BODY_FRAME', 'frame'), ('BODY_GLASSLINE', 'rubber'),
-                      ('BODY_FABRIC', 'fabric')]:
+    packed=[]
+    for name, key in MESHES:
         vertices, indices = mesh(blob, name)
         nodes, triangles, count = build(vertices, indices)
-        dds(OUT/f'{key}_nodes.dds', nodes)
-        dds(OUT/f'{key}_triangles.dds', triangles)
+        assert count<=65536, (name,'exceeds shader traversal limit',count)
+        packed.append((key,nodes,triangles))
         manifest['meshes'][key] = {'name': name, 'vertices': len(vertices),
                                  'triangles': len(indices), 'nodes': count}
         print(key, manifest['meshes'][key])
+    OUT.mkdir(parents=True, exist_ok=True)
+    for key,nodes,triangles in packed:
+        dds(OUT/f'{key}_nodes.dds',nodes)
+        dds(OUT/f'{key}_triangles.dds',triangles)
     (OUT/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n', encoding='utf-8')
+    (OUT/'manifest.verify').write_text(model_name+'\n'+manifest['sha256']+'\n'
+        +'\n'.join(name for name,_ in MESHES)+'\n',encoding='utf-8')
 
 
 if __name__ == '__main__':
