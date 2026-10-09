@@ -44,7 +44,8 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
             'BODY_FRAME_OVERLAY','BODY_GLASSLINE_OVERLAY','BODY_FABRIC_OVERLAY',
             'DRIVER_FACE','DRIVER_BALAKLAVA','GLASS_COATING_OVERLAY','BODY_FRAME_MIRROR','UNRELATED'}
         function model()
-            local m={meshes={}}
+            local m={meshes={},pose={value=0}}
+            m.pose.set=function(self,other) self.value=other.value end
             for _,name in ipairs(names) do
                 m.meshes[name]=refs({{name=name,visible=true,shadows=true,material=name..'-original'}})
             end
@@ -53,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
                 local r=refs();for _,v in pairs(self.meshes) do r:append(v) end;return r
             end
             function m:setVisible(v) self.visible=v end
-            function m:getTransformationRaw() return {set=function() end} end
+            function m:getTransformationRaw() return self.pose end
             function m:dispose() self.disposed=true end
             return m
         end
@@ -91,8 +92,13 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
             assert(not ref[1].visible) -- allowlist selection must not leak a scene draw
         end
         assert(not visor.meshes.DRIVER_FACE[1].visible and not visor.meshes.DRIVER_BALAKLAVA[1].visible)
+        for _,actor in ipairs(st.e1ReflectionActors()) do assert(actor.two==true) end
         st.nativeCaptureHide();assert(not capture.visible)
         local shot={update=function()
+            assert(capture.visible)
+            assert(st.nativeCaptureActive==1)
+            -- Simulate a scene callback dispatched by the nested native shot.
+            st.nativeCaptureHide()
             assert(capture.visible)
             for name,ref in pairs(capture.meshes) do
                 assert(ref[1].visible==(allowed[name] or false))
@@ -100,15 +106,39 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
             return true
         end}
         assert(st.nativeCaptureUpdate(shot,selected)==true)
+        assert(st.nativeCaptureActive==0)
         assert(not capture.visible)
         for _,m in ipairs(selected) do assert(not m.visible) end
         cfg.RUNTIME.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW=true
         st.nativeCapturePrepare()
         assert(capture.visible)
-        for _,ref in pairs(capture.meshes) do assert(not ref[1].visible) end
+        for name,ref in pairs(capture.meshes) do assert(ref[1].visible==(allowed[name] or false)) end
         assert(st.nativeCaptureUpdate(shot,selected)==true and not capture.visible)
+        -- Simulate native engine transforms updating only visible renderables.
+        -- A late visibility toggle at shot:update cannot repair a stale frame.
+        for _,position in ipairs({10,250,-90}) do
+            visor.pose.value=position
+            st.nativeCapturePrepare()
+            assert(capture.pose.value==position)
+            for _,ref in pairs(capture.meshes) do
+                if capture.visible and ref[1].visible then ref[1].cachedPose=capture.pose.value end
+            end
+            local movingShot={update=function()
+                st.nativeCaptureHide() -- nested scene callback must not interrupt capture
+                for _,m in ipairs(selected) do assert(m.cachedPose==position and m.visible) end
+                return true
+            end}
+            assert(st.nativeCaptureUpdate(movingShot,selected)==true)
+            assert(not capture.visible)
+            for _,ref in pairs(capture.meshes) do assert(not ref[1].visible) end
+        end
+        cfg.RUNTIME.RAIN_VISOR_LAYER_E1_SOURCE_MODE=2
+        st.nativeCapturePrepare();assert(not capture.visible)
+        for _,ref in pairs(capture.meshes) do assert(not ref[1].visible) end
+        cfg.RUNTIME.RAIN_VISOR_LAYER_E1_SOURCE_MODE=0
         shot.update=function() error('capture failed') end
         assert(not pcall(st.nativeCaptureUpdate,shot,selected))
+        assert(st.nativeCaptureActive==0)
         assert(not capture.visible)
         for _,m in ipairs(selected) do assert(not m.visible) end
         shot.update=function() return false end
@@ -120,4 +150,4 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
         assert(#st.e1ReflectionActors()==0)
         assert(#st.nativeCaptureRefs(true)==2)
     ''')
-    print('PASS: authored materials; retired overlays excluded; capture visibility scoped through frame preparation, success, failure and pending; optional/missing meshes')
+    print('PASS: authored materials; capture allowlist; moving native transform preparation; capture cleanup/nested callbacks; checker mode; optional/missing meshes')

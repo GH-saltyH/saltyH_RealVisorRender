@@ -5822,6 +5822,13 @@ local function applyMaterialParams(editor)
     return allOk
 end
 
+rainDynamicSceneCopyState.materialSettings = dofile(appFolder .. '/material_settings.lua')({
+    path=appFolder .. '/settings_mats.ini', editors=MATERIAL_EDITORS, runtime=cfg.RUNTIME,
+    read=loadMaterialParams, apply=applyMaterialParams,
+    customItem=function(name)
+        return rainDynamicSceneCopyState.visorLayerItemFor and rainDynamicSceneCopyState.visorLayerItemFor(name)
+    end,
+})
 
 ------------------------------------------------------------
 -- Apply scale
@@ -11763,10 +11770,12 @@ rainDynamicSceneCopyState.visorLayerParamUI = function(editor, item)
     local r = cfg.RUNTIME
     local function sl(label, key, a, b, fmt)
         local v, ch = ui.slider(label, r[key], a, b, fmt)
-        if ch then r[key] = v end
+        if ch then r[key] = v;rainDynamicSceneCopyState.materialSettings:markDirty() end
     end
     local function ck(label, key)
-        if ui.checkbox(label, r[key]) then r[key] = not r[key] end
+        if ui.checkbox(label, r[key]) then
+            r[key] = not r[key];rainDynamicSceneCopyState.materialSettings:markDirty()
+        end
     end
     if item.retired then
         ui.textWrapped('Retired housing overlay: hidden and excluded from rendering and reflection capture.')
@@ -12138,7 +12147,7 @@ rainDynamicSceneCopyState.e1ReflectionActors = function()
                 local ref=visor:findMeshes(name)
                 if ref and #ref>0 then
                     ref:setVisible(false,false)
-                    st.actors[#st.actors+1]={mesh=name,mat='FACE',targetMesh=ref,visible=true}
+                    st.actors[#st.actors+1]={mesh=name,mat='FACE',two=true,targetMesh=ref,visible=true}
                 end
             end
         end
@@ -12154,9 +12163,9 @@ rainDynamicSceneCopyState.e1SourceEditor = function(name)
     end
 end
 -- Registered capture roots participate in engine transform/render-list updates.
--- Their transforms are prepared before rendering, but their meshes stay hidden
--- except during the synchronous GeometryShot update. A late colour-pass hide
--- alone can leave duplicate polygons in earlier depth/render-list passes.
+-- Native mesh world transforms/render lists need participation in the engine
+-- frame update. Prepare the allowlist after the helmet pose is final, then hide
+-- it immediately after the offscreen capture, before main-camera rendering.
 rainDynamicSceneCopyState.nativeCaptureModel = {}
 rainDynamicSceneCopyState.nativeOccluderEnsure = function()
     local models=rainDynamicSceneCopyState.nativeCaptureModel
@@ -12189,17 +12198,24 @@ rainDynamicSceneCopyState.nativeCapturePrepare = function()
     for kind,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
         if st.root then
             local enabled=r.RAIN_VISOR_LAYER_NATIVE_HOUSING and st.owner==visor
-                and (kind=='source' and (r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW or r.RAIN_VISOR_LAYER_E1_PRIMARY)
+                and (kind=='source' and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE~=2
+                        and (r.RAIN_VISOR_LAYER_E1_SOURCE_PREVIEW or r.RAIN_VISOR_LAYER_E1_PRIMARY)
                     or kind=='housing' and r.RAIN_VISOR_LAYER_NATIVE_SCENE_PASS
                         and r.RAIN_VISOR_SCENE_STACK and r.RAIN_VISOR_LAYER
                     or kind=='occluder' and r.RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW and (st.count or 0)>0)
             st.root:setVisible(enabled or false,false)
             if kind~='occluder' then st.root:findMeshes('*'):setVisible(false,false) end
-            if enabled then st.root:getTransformationRaw():set(visor:getTransformationRaw()) end
+            if enabled then
+                st.root:getTransformationRaw():set(visor:getTransformationRaw())
+                if st.captureRefs then st.captureRefs:setVisible(true,false) end
+            end
         end
     end
 end
 rainDynamicSceneCopyState.nativeCaptureHide = function()
+    -- GeometryShot with Main shaders can enter scene render callbacks too.
+    -- Those callbacks must not hide the geometry of the capture in progress.
+    if (rainDynamicSceneCopyState.nativeCaptureActive or 0)>0 then return end
     for _,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
         if st.root then
             st.root:findMeshes('*'):setVisible(false,false)
@@ -12261,6 +12277,7 @@ rainDynamicSceneCopyState.nativeCaptureRefs = function(includeActors)
         end
     end
     st.casterCount,st.meshCount=casterCount,meshCount
+    st.captureRefs=union
     -- Keep the root registered for transform updates, but capture ONLY the allowlist.
     return union
 end
@@ -12272,6 +12289,7 @@ rainDynamicSceneCopyState.nativeCaptureUpdate = function(shot,refs,origin,look,u
         local ref=refs:at(i)
         restore[#restore+1]={ref=ref,visible=refs:isVisible(i)}
     end
+    rainDynamicSceneCopyState.nativeCaptureActive=(rainDynamicSceneCopyState.nativeCaptureActive or 0)+1
     local ok,res=pcall(function()
         for kind,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
             if kind~='occluder' and st.root and st.owner==visor then
@@ -12281,6 +12299,7 @@ rainDynamicSceneCopyState.nativeCaptureUpdate = function(shot,refs,origin,look,u
         for _,entry in ipairs(restore) do entry.ref:setVisible(true,false) end
         return shot:update(origin,look,up,fov)
     end)
+    rainDynamicSceneCopyState.nativeCaptureActive=rainDynamicSceneCopyState.nativeCaptureActive-1
     for _,entry in ipairs(restore) do entry.ref:setVisible(entry.visible,false) end
     -- End capture visibility now, before any main-camera pass can see it.
     -- Do this on pending/failed updates as well as successful captures.
@@ -13285,6 +13304,9 @@ rainDynamicSceneCopyState.hudLiftRelease = function()
     hl.lifted = {}
 end
 ac.onRelease(function()
+    if rainDynamicSceneCopyState.materialSettings.dirty then
+        rainDynamicSceneCopyState.materialSettings:save(false)
+    end
     rainDynamicSceneCopyState.hudLiftRelease()
     if rainDynamicSceneCopyState.visorLayer.hidden then
         pcall(rainDynamicSceneCopyState.visorLayerSceneHide, false)
@@ -14759,6 +14781,7 @@ local function initializeScene()
 
     applyActiveProfileToRuntime()
 
+    rainDynamicSceneCopyState.materialSettings:load()
 
     --------------------------------------------------------
     -- Apply initial transforms
@@ -15439,7 +15462,9 @@ end)
 ------------------------------------------------------------
 
 function script.update(dt)
-    rainDynamicSceneCopyState.nativeCapturePrepare()
+    -- Close any previous/aborted frame before early returns or model reloads.
+    rainDynamicSceneCopyState.nativeCaptureHide()
+    rainDynamicSceneCopyState.materialSettings:flush()
 
     --------------------------------------------------------
     -- Initialize
@@ -15538,6 +15563,9 @@ function script.update(dt)
         rainDynamicSceneCopyState.visorClearMotion()
     end
 
+    -- After camera tracking, offset, motion and calibration. Engine world-matrix
+    -- updates follow this callback; enabling only at onSceneReady is too late.
+    rainDynamicSceneCopyState.nativeCapturePrepare()
 end
 
 
@@ -15600,6 +15628,7 @@ local function drawFloatParam(editor, label, paramName, fmt)
 
             entry.value = 
             numberValue
+            entry.edited = true
         end
     end
 
@@ -15638,6 +15667,7 @@ local function drawBoolParam(editor, label, paramName)
 
         entry.value = 
         not entry.value
+        entry.edited = true
     end
 end
 
@@ -15664,6 +15694,7 @@ local function drawVec2Param(editor, labelX, labelY, paramName, minV, maxV, fmt)
 
     if changedX then
         entry.value.x = nx
+        entry.edited = true
     end
 
 
@@ -15682,6 +15713,7 @@ local function drawVec2Param(editor, labelX, labelY, paramName, minV, maxV, fmt)
 
     if changedY then
         entry.value.y = ny
+        entry.edited = true
     end
 end
 
@@ -15697,13 +15729,13 @@ local function drawVec3Param(editor, label, paramName, minV, maxV, fmt)
     ui.text(label)
 
     local nx, cx = ui.slider(label .. ' R', entry.value.x, minV, maxV, fmt or '%.3f')
-    if cx then entry.value.x = nx end
+    if cx then entry.value.x = nx;entry.edited = true end
 
     local ny, cy = ui.slider(label .. ' G', entry.value.y, minV, maxV, fmt or '%.3f')
-    if cy then entry.value.y = ny end
+    if cy then entry.value.y = ny;entry.edited = true end
 
     local nz, cz = ui.slider(label .. ' B', entry.value.z, minV, maxV, fmt or '%.3f')
-    if cz then entry.value.z = nz end
+    if cz then entry.value.z = nz;entry.edited = true end
 end    
 
 
@@ -15883,7 +15915,9 @@ local function drawMaterialEditorWindow(editor)
             or materialInputApplyRequested then
 
                 materialInputApplyRequested = false
-                applyMaterialParams(editor)
+                if rainDynamicSceneCopyState.materialSettings:applyEditor(editor) then
+                    rainDynamicSceneCopyState.materialSettings:save(false)
+                end
         end
 
 
@@ -15910,6 +15944,13 @@ local function drawMaterialEditorWindow(editor)
 
         if editor.lastError then
             ui.text('Last error: ' .. editor.lastError)
+        end
+        ui.separator()
+        if ui.button('Apply & save all materials') then
+            rainDynamicSceneCopyState.materialSettings:save(true)
+        end
+        if rainDynamicSceneCopyState.materialSettings.status then
+            ui.textWrapped(rainDynamicSceneCopyState.materialSettings.status)
         end
 
         -- s56 fix: every successful beginPopup needs endPopup (it was
@@ -17947,6 +17988,12 @@ function windowMain(dt)
     ui.separator()
 
     ui.text('Model Config & Debug')
+    if ui.button('Apply & save all materials##KN5') then
+        rainDynamicSceneCopyState.materialSettings:save(true)
+    end
+    if rainDynamicSceneCopyState.materialSettings.status then
+        ui.textWrapped(rainDynamicSceneCopyState.materialSettings.status)
+    end
 
     ui.text('\tVisible')
     ui.text('\t')
