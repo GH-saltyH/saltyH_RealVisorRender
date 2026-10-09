@@ -955,6 +955,9 @@ local cfg = scriptSettings:mapConfig({
         RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR = 0.01,
         RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX = true,
         RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE = 1.5,
+        RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_SAMPLES = 32, -- measured cost/quality baseline
+        RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR = 1.5, -- reflection-space pixels; 0 bypasses resolve
+        RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_SCALE = 0.75, -- linear resolution of traced reflection
         RAIN_VISOR_LAYER_REFERENCE_HOUSING = true,
         RAIN_VISOR_LAYER_NATIVE_HOUSING = true, -- KN5-authored native materials; no automatic replacements
         RAIN_VISOR_LAYER_NATIVE_SCENE_PASS = false, -- archived HDR capture/custom output experiment
@@ -12330,12 +12333,15 @@ rainDynamicSceneCopyState.e1SourceDepthDraw = function()
                 local p = st.depthParams[index] or {transform='original', async=false, values={}, shader=[[
                     float4 main(PS_IN pin) {
                         float3 viewRelative = mul(float4(pin.PosC,0),gE1CaptureView).xyz;
-                        return float4(abs(viewRelative.z),0,0,1);
+                        return float4(abs(viewRelative.z),gE1SurfaceId,0,1);
                     }
                 ]]}
                 st.depthParams[index]=p
                 p.mesh=e.targetMesh
                 p.values.gE1CaptureView=st.view
+                p.values.gE1SurfaceId=item.mesh=='DRIVER_FACE' and 4
+                    or item.mesh=='DRIVER_BALAKLAVA' and 5
+                    or item.mat=='FRAME' and 1 or item.mat=='RUBBER' and 2 or 3
                 e.targetMesh:setVisible(true,false)
                 if render.mesh(p)==false then error('Metric depth shader pending: '..item.mesh) end
                 e.targetMesh:setVisible(false,false)
@@ -12553,16 +12559,22 @@ end
 -- Source-depth parallax intersects housing and optional face/balaclava within the finite capture.
 -- Missing/occluded source layers and the INT/EXT ghost remain future work.
 rainDynamicSceneCopyState.e1Primary = {attempts = 0}
-rainDynamicSceneCopyState.e1PrimaryDraw = function()
+rainDynamicSceneCopyState.e1PrimaryDraw = function(capture)
     local r = cfg.RUNTIME
     local source = rainDynamicSceneCopyState.e1Source
     local st = rainDynamicSceneCopyState.e1Primary
+    if st.resolving and not capture then return end
     if not r.RAIN_VISOR_LAYER_E1_PRIMARY then return end
     if r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE then
         rainDynamicSceneCopyState.e1GeometryDraw()
         return
     end
     if not source.ready or not source.shot then return end
+    if not capture and r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0
+        and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==0 and r.RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR>0 then
+        rainDynamicSceneCopyState.e1PrimaryResolveDraw()
+        return
+    end
     if r.RAIN_VISOR_LAYER_E1_SOURCE_MODE == 2 and r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE == 0 then
         st.status = 'Material checker source: final radiance output blocked; use mode 3'
         return
@@ -12600,8 +12612,15 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
             valid=valid && e1ClipPlane(0.98*a.w-a.y,0.98*b.w-b.y,lo,hi);
             return valid && hi>lo;
         }
-        float e1Depth(float2 uv) {
-            return txE1Depth.SampleLevel(samPointClamp,saturate(uv),0).r;
+        float4 e1Metric(float2 uv) {
+            float4 nearestMetric=txE1Depth.SampleLevel(samPointClamp,saturate(uv),0);
+            float4 smoothMetric=txE1Depth.SampleLevel(samLinearClamp,saturate(uv),0);
+            // Interpolate continuous surfaces, but never fill empty coverage or
+            // blend across a large depth jump into a fictitious reflector.
+            float tolerance=max(0.002,nearestMetric.r*0.01);
+            return nearestMetric.a>=0.5 && smoothMetric.a>0.999
+                && abs(smoothMetric.g-nearestMetric.g)<0.001
+                && abs(smoothMetric.r-nearestMetric.r)<tolerance ? smoothMetric : nearestMetric;
         }
         float4 main(PS_IN pin) {
             float3 V = normalize(-pin.PosC);
@@ -12621,21 +12640,34 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
                 hit=0;
                 float rayLo,rayHi;
                 bool inFrustum=e1ClipRay(pv,rv,rayLo,rayHi);
+                uint depthWidth,depthHeight;
+                txE1Depth.GetDimensions(depthWidth,depthHeight);
+                float startW,endW;
+                float2 startUV=e1Project(pv+rv*rayLo,startW);
+                float2 endUV=e1Project(pv+rv*rayHi,endW);
+                float projectedPixels=length((endUV-startUV)*float2(depthWidth,depthHeight));
+                int steps=(int)clamp(ceil(projectedPixels/2)+1,2,clamp(gE1TraceSamples,32,512));
+                float invStartW=rcp(max(startW,1e-5)),invEndW=rcp(max(endW,1e-5));
                 float previousT=rayLo,previousGap=0;
+                float previousSurface=0;
                 bool previousValid=false;
-                [loop] for (int j=0;j<32 && inFrustum;j++) {
-                    float t=lerp(rayLo,rayHi,j/31.0);
+                [loop] for (int j=0;j<steps && inFrustum;j++) {
+                    // Uniform projected steps, with perspective-correct ray t.
+                    // Uniform metre steps undersample nearby stretched surfaces.
+                    float s=j/(float)(steps-1);
+                    float t=lerp(rayLo*invStartW,rayHi*invEndW,s)
+                        /lerp(invStartW,invEndW,s);
                     float3 rayPoint=pv+rv*t;
                     float2 candidate=e1Project(rayPoint,w);
                     if (e1Edge(candidate,w)<=0) { previousValid=false;continue; }
                     entered=true;
-                    float4 metric=txE1Depth.SampleLevel(samPointClamp,candidate,0);
+                    float4 metric=e1Metric(candidate);
                     if (metric.a<0.5) { previousValid=false;continue; }
                     sawGeometry=true;
                     float gap=metric.r-abs(rayPoint.z);
                     // Direct near-surface samples need no invented bracket.
-                    if (abs(gap)<0.001) {uv=candidate;hit=1;break;}
-                    if (previousValid && gap*previousGap<=0) {
+                    if (abs(gap)<0.00025) {uv=candidate;hit=1;break;}
+                    if (previousValid && abs(metric.g-previousSurface)<0.001 && gap*previousGap<=0) {
                         // Both front-to-back and back-to-front intersections
                         // are legitimate for these two-sided source surfaces.
                         float lo=previousT,hi=t,loGap=previousGap;
@@ -12645,20 +12677,23 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
                             float3 mp=pv+rv*mid;
                             float mw;
                             float2 mu=e1Project(mp,mw);
-                            float4 md=txE1Depth.SampleLevel(samPointClamp,mu,0);
-                            if (e1Edge(mu,mw)<=0 || md.a<0.5) {validBracket=false;break;}
+                            float4 md=e1Metric(mu);
+                            if (e1Edge(mu,mw)<=0 || md.a<0.5
+                                || abs(md.g-metric.g)>0.001) {validBracket=false;break;}
                             float mg=md.r-abs(mp.z);
                             if (mg*loGap>0) {lo=mid;loGap=mg;}else hi=mid;
                         }
                         float3 hp=pv+rv*((lo+hi)*0.5);
                         candidate=e1Project(hp,w);
-                        float4 hd=txE1Depth.SampleLevel(samPointClamp,candidate,0);
+                        float4 hd=e1Metric(candidate);
                         float residual=abs(hd.r-abs(hp.z));
-                        if (validBracket && hd.a>=0.5 && residual<0.002 && e1Edge(candidate,w)>0) {
+                        if (validBracket && hd.a>=0.5 && abs(hd.g-metric.g)<0.001
+                            && residual<0.002 && e1Edge(candidate,w)>0) {
                             uv=candidate;hit=1;break;
                         }
                     }
                     previousT=t;previousGap=gap;previousValid=true;
+                    previousSurface=metric.g;
                 }
             }
             if (gE1Mode>5.5) {
@@ -12684,7 +12719,8 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
             float meanLum=dot(meanColor,float3(0.2126,0.7152,0.0722));
             float lum=dot(image,float3(0.2126,0.7152,0.0722));
             float q=lum/max(meanLum,gE1MeanFloor);
-            float gate=smoothstep(gE1Threshold,gE1Threshold+max(gE1Knee,0.001),q);
+            float gateWidth=max(max(gE1Knee,0.001),fwidth(q));
+            float gate=smoothstep(gE1Threshold,gE1Threshold+gateWidth,q);
             float c=1-saturate(dot(N,V));
             float fresnel=0.05135+0.94865*c*c*c*c*c;
             if (gE1Mode>0.5) {
@@ -12700,7 +12736,8 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
                 if(gE1Mode>2.5 && gE1Mode<3.5 && gE1Checker<0.5) debugColor=image;
                 return float4(debugColor*coverage,coverage);
             }
-            return float4(image*coverage*gate*fresnel*max(gE1Gain,0),0);
+            // Resolve alpha carries reflector distance, not source coverage.
+            return float4(image*coverage*gate*fresnel*max(gE1Gain,0),gE1Resolve>0.5 ? length(pin.PosC) : 0);
         }]]}
     local p = st.params
     p.mesh = e.targetMesh
@@ -12713,6 +12750,7 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
     v.gE1EyeToSource = ac.getSim().cameraPosition - source.origin
     v.gE1Parallax = r.RAIN_VISOR_LAYER_E1_PRIMARY_PARALLAX and 1.0 or 0.0
     v.gE1TraceRange = r.RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE
+    v.gE1TraceSamples = r.RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_SAMPLES
     v.gE1Mode = r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE
     v.gE1Gain = r.RAIN_VISOR_LAYER_E1_PRIMARY_GAIN
     v.gE1Mip = r.RAIN_VISOR_LAYER_E1_SOURCE_MODE == 2 and 0.0 or r.RAIN_VISOR_LAYER_E1_PRIMARY_MIP
@@ -12720,11 +12758,12 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
     v.gE1Threshold = r.RAIN_VISOR_LAYER_E1_PRIMARY_THRESHOLD
     v.gE1Knee = r.RAIN_VISOR_LAYER_E1_PRIMARY_KNEE
     v.gE1MeanFloor = r.RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR
+    v.gE1Resolve = capture and 1.0 or 0.0
     local wasVisible = {}
     for i = 1, #e.targetMesh do wasVisible[i] = e.targetMesh:isVisible(i) end
     render.setCullMode(render.CullMode.None)
-    render.setDepthMode(render.DepthMode.ReadOnly)
-    render.setBlendMode(render.BlendMode.BlendPremultiplied)
+    render.setDepthMode(capture and render.DepthMode.Normal or render.DepthMode.ReadOnly)
+    render.setBlendMode(capture and render.BlendMode.Opaque or render.BlendMode.BlendPremultiplied)
     st.attempts = st.attempts + 1
     local ok, result = pcall(function()
         e.targetMesh:setVisible(true,false)
@@ -12735,7 +12774,107 @@ rainDynamicSceneCopyState.e1PrimaryDraw = function()
     render.setDepthMode(render.DepthMode.ReadOnly)
     render.setBlendMode(render.BlendMode.BlendPremultiplied)
     st.status = ok and ('Draw API: '..tostring(result)..'; verify visually') or ('Draw error: '..tostring(result))
+    if capture and (not ok or result==false) then error(st.status) end
 end
+-- Trace once into an HDR reflection buffer; filter AFTER hit selection so small
+-- hit/miss gaps and fine colour aliasing are treated for every source material.
+-- No previous frame or material-specific image is accumulated here.
+rainDynamicSceneCopyState.e1PrimaryResolve = {ready=false}
+rainDynamicSceneCopyState.e1PrimaryResolveDispose = function()
+    local st=rainDynamicSceneCopyState.e1PrimaryResolve
+    if st.shot then st.shot:dispose();st.shot=nil end
+    st.ready=false
+end
+rainDynamicSceneCopyState.e1PrimaryResolveUpdate = function()
+    local r=cfg.RUNTIME
+    local st=rainDynamicSceneCopyState.e1PrimaryResolve
+    st.ready=false
+    if not (r.RAIN_VISOR_LAYER_E1_PRIMARY and r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0
+        and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==0 and r.RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR>0
+        and not r.RAIN_VISOR_LAYER_E1_GEOMETRY_TRACE) then
+        rainDynamicSceneCopyState.e1PrimaryResolveDispose();return
+    end
+    if not rainDynamicSceneCopyState.e1Source.ready then return end
+    local sim=ac.getSim()
+    local scale=math.max(0.5,math.min(1,r.RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_SCALE))
+    local w=math.max(64,math.floor((rainDynamicSceneCopyState.mainTargetWidth or sim.windowWidth or 1280)*scale))
+    local h=math.max(64,math.floor((rainDynamicSceneCopyState.mainTargetHeight or sim.windowHeight or 720)*scale))
+    if st.shot and (st.w~=w or st.h~=h) then rainDynamicSceneCopyState.e1PrimaryResolveDispose() end
+    if not st.shot then
+        st.w,st.h=w,h
+        st.shot=ac.GeometryShot({opaque=function() rainDynamicSceneCopyState.e1PrimaryDraw(true) end},
+            vec2(w,h),1,true,render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+        st.shot:setName('E1 current-frame primary reflection resolve')
+        st.shot:setSky(false);st.shot:setParticles(false)
+        st.shot:setClearColor(rgbm(0,0,0,0))
+    end
+    st.shot:setClippingPlanes(math.max(sim.cameraClipNear or 0.001,0.001),sim.cameraClipFar or 1000)
+    rainDynamicSceneCopyState.e1Primary.resolving=true
+    local ok,res=pcall(function()
+        return st.shot:update(sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)
+    end)
+    rainDynamicSceneCopyState.e1Primary.resolving=false
+    if not ok then error(res) end
+    if res==false then error('Primary reflection resolve pending') end
+    st.view=st.shot:viewMatrix():clone();st.projection=st.shot:projectionMatrix():clone()
+    st.eye=sim.cameraPosition:clone()
+    st.ready=true
+end
+rainDynamicSceneCopyState.e1PrimaryResolveDraw = function()
+    local st=rainDynamicSceneCopyState.e1PrimaryResolve
+    if not st.ready then return end
+    local ed=rainDynamicSceneCopyState.visorLayerEditor('GLASS_INT_OVERLAY')
+    if not ed or ed.visible==false or not ed.targetMesh or #ed.targetMesh==0 then return end
+    st.params=st.params or {transform='original',async=false,textures={},values={},shader=[[
+        float4 main(PS_IN pin) {
+            float3 p=mul(float4(pin.PosC+gResolveEyeDelta,0),gResolveView).xyz;
+            float4 clipPos=mul(float4(p,1),gResolveProjection);
+            float2 uv=float2(clipPos.x/clipPos.w*0.5+0.5,0.5-clipPos.y/clipPos.w*0.5);
+            float reflectorDistance=length(pin.PosC+gResolveEyeDelta);
+            float capturedDistance=txResolve.SampleLevel(samPointClamp,uv,0).a;
+            // A read-only main draw must not add the nearest reflection again
+            // on an overlapping rear INT surface.
+            float distanceTolerance=max(0.002,2*fwidth(reflectorDistance)/gResolveScale);
+            if (capturedDistance<=0 || abs(capturedDistance-reflectorDistance)>distanceTolerance)
+                return float4(0,0,0,0);
+            float2 radius=gResolveRadius/gResolveSize;
+            float4 sum=txResolve.SampleLevel(samLinearClamp,uv,0)*4;
+            sum+=txResolve.SampleLevel(samLinearClamp,uv+float2(radius.x,0),0)*2;
+            sum+=txResolve.SampleLevel(samLinearClamp,uv-float2(radius.x,0),0)*2;
+            sum+=txResolve.SampleLevel(samLinearClamp,uv+float2(0,radius.y),0)*2;
+            sum+=txResolve.SampleLevel(samLinearClamp,uv-float2(0,radius.y),0)*2;
+            sum+=txResolve.SampleLevel(samLinearClamp,uv+radius,0);
+            sum+=txResolve.SampleLevel(samLinearClamp,uv-radius,0);
+            sum+=txResolve.SampleLevel(samLinearClamp,uv+float2(radius.x,-radius.y),0);
+            sum+=txResolve.SampleLevel(samLinearClamp,uv+float2(-radius.x,radius.y),0);
+            // Filter premultiplied radiance directly; do not divide by coverage
+            // and amplify bright values at empty hit boundaries.
+            return float4(max(sum.rgb/16,0),0);
+        }]]}
+    local p=st.params
+    p.mesh=ed.targetMesh;p.textures.txResolve=st.shot
+    p.values.gResolveView=st.view;p.values.gResolveProjection=st.projection
+    p.values.gResolveEyeDelta=ac.getSim().cameraPosition-st.eye
+    p.values.gResolveSize=vec2(st.w,st.h)
+    p.values.gResolveRadius=cfg.RUNTIME.RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR
+    p.values.gResolveScale=cfg.RUNTIME.RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_SCALE
+    local visible={}
+    for i=1,#ed.targetMesh do visible[i]=ed.targetMesh:isVisible(i) end
+    render.setCullMode(render.CullMode.None)
+    render.setDepthMode(render.DepthMode.ReadOnly)
+    render.setBlendMode(render.BlendMode.BlendPremultiplied)
+    local ok,res=pcall(function() ed.targetMesh:setVisible(true,false);return render.mesh(p) end)
+    for i=1,#ed.targetMesh do ed.targetMesh:at(i):setVisible(visible[i],false) end
+    if not ok or res==false then rainDynamicSceneCopyState.e1Primary.status='Resolve draw error: '..tostring(res) end
+end
+render.onSceneReady(function()
+    local ok,err=pcall(rainDynamicSceneCopyState.e1PrimaryResolveUpdate)
+    if not ok then
+        rainDynamicSceneCopyState.e1Primary.resolving=false
+        rainDynamicSceneCopyState.e1PrimaryResolveDispose()
+        rainDynamicSceneCopyState.e1Primary.status='Resolve error: '..tostring(err)
+    end
+end)
 -- Geometry verification path: trace actual housing triangles at reduced
 -- resolution, then composite on INT. Capture origin/FOV/depth is not input.
 rainDynamicSceneCopyState.e1Geometry = {}
@@ -13041,6 +13180,9 @@ rainDynamicSceneCopyState.e1PrimaryUI = function()
         {'Primary threshold soft knee','RAIN_VISOR_LAYER_E1_PRIMARY_KNEE',0.01,2,'%.2f'},
         {'Primary mean luminance floor','RAIN_VISOR_LAYER_E1_PRIMARY_MEAN_FLOOR',0.001,0.2,'%.3f'},
         {'Primary trace range','RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_RANGE',0.1,3.0,'%.2f m'},
+        {'Primary trace sample budget','RAIN_VISOR_LAYER_E1_PRIMARY_TRACE_SAMPLES',32,512,'%.0f'},
+        {'Primary reflection-space blur (0 bypass)','RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_BLUR',0,4,'%.2f px'},
+        {'Primary reflection trace scale','RAIN_VISOR_LAYER_E1_PRIMARY_RESOLVE_SCALE',0.5,1,'%.2f'},
     }) do
         local v,changed = ui.slider(setting[1],r[setting[2]],setting[3],setting[4],setting[5])
         if changed then r[setting[2]] = setting[2] == 'RAIN_VISOR_LAYER_E1_PRIMARY_MODE' and math.floor(v+0.5) or v end
