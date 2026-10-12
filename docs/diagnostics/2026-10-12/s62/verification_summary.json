@@ -1,0 +1,22 @@
+{
+  "step": "s62",
+  "all_checks_passed": true,
+  "rain_glass_shader_variants_warning_free": 16,
+  "optics_variants_strict_compilation": 13,
+  "settings_preserved": {
+    "settings.ini": true,
+    "settings_mats.ini": true
+  },
+  "numeric_tuning_preserved": true,
+  "gpu_results": "output_gpu_checks.json",
+  "game_fps_after_fix": "unmeasured",
+  "source_hashes": {
+    "realvisor.lua": "6122e1c39af5024b74c2fdf97b637378b7000f780043b234cc749f4af69b07e8",
+    "rain_surface.lua": "dfcbf2b67d799f29a8f3d940606bf75e40184d515588b303989e4f93686acac6",
+    "visor_optics.lua": "c086061385193306e24ff519d4c95a0c37a92f6d7dc4cee2c809b4dd1451c510",
+    "shaders/rainSurfaceMetric.hlsl": "2742479f6e41cc6a7b15e29a9803ce97fd12adad5888661b3ecfa2db438c006c",
+    "shaders/rainVisorLayer.hlsl": "6bf7ff853315b72e9d07c0da26429d1d0e0bd774b6eaf8f4f95d0129d11c7df5",
+    "shaders/rainVisorDynamicDrop.hlsl": "12f82eac5383c6cc3e9f9483189cfdd8f25305cd87e486ead70d4d19f6ba11f8",
+    "texture/GLASS/FX/ext_txBand.png": "0d4fe8ab2bca38884c6da875abae02dbac54ae3bb258d79f522416e2eda9a519"
+  }
+}

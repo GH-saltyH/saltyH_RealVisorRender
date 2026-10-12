@@ -1,0 +1,37 @@
+[
+  {
+    "case": "flat INT remains neutral with saved brightness/loss",
+    "view_x": 0,
+    "max_delta": 0.0
+  },
+  {
+    "case": "flat INT remains neutral with saved brightness/loss",
+    "view_x": 0.13,
+    "max_delta": 0.0
+  },
+  {
+    "case": "bevel response changes with viewing angle",
+    "mean_change": 0.0031635998748242855
+  },
+  {
+    "case": "EXT opaque coverage only inside band, alpha threshold .06",
+    "opaque_fraction": 0.13074207305908203
+  },
+  {
+    "case": "production micro bake has active interiors at 60% rain",
+    "active_fraction": 0.018232421875
+  },
+  {
+    "case": "4096 GPU per-drop physical frames valid",
+    "records": 4096
+  },
+  {
+    "case": "signed actual UV velocities survive .125 legacy range inside SDK 0..1 encoding",
+    "u": -0.4000001549720764,
+    "v": 1.7000006437301636
+  },
+  {
+    "case": "pending/unbound micro texture cannot make a visor-wide lens",
+    "maximum": 0.0
+  }
+]

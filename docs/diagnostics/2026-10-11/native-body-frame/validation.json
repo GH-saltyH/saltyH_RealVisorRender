@@ -1,0 +1,275 @@
+{
+  "sources": {
+    "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\ModelWorks\\_2_blender_f1-helmet-lando_2025championWinner\\texture\\BODY_FRAME_1K_txNormal.dds": "9cb57670335f077747e828ea8abe2e28b1cd2e9b0bd392956d719d9f60c8e7a6",
+    "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\ModelWorks\\_2_blender_f1-helmet-lando_2025championWinner\\texture\\BODY_FRAME_2K_txDiff.dds": "f367e0abcf0d3b00d2d84a9b08cc58506bb96984765ffd7919baec40689c26e6",
+    "E:\\_db_OS_Core\\다운로드\\LANDO NORRIS 2025 HELMET F1 WORLD CHAMPION\\collection\\BODY_FRAME_4K_METALLIC.png": "42c9fff839c986fcb0d4695a6a5f7f07650d8681eeb0f522333f94fa5bb86d16",
+    "E:\\_db_OS_Core\\다운로드\\LANDO NORRIS 2025 HELMET F1 WORLD CHAMPION\\collection\\BODY_FRAME_4K_NOTUSED.png": "cb29cf40513f0374754e6eeb68aa20e2fe9f3812c8fa0d8d251f50d32c34cff5"
+  },
+  "fixed_diffuse_normal_copies_byte_identical": true,
+  "originals_unchanged": true,
+  "outputs": {
+    "BODY_FRAME_1K_txNormal.dds": "9cb57670335f077747e828ea8abe2e28b1cd2e9b0bd392956d719d9f60c8e7a6",
+    "BODY_FRAME_2K_txDiff.dds": "f367e0abcf0d3b00d2d84a9b08cc58506bb96984765ffd7919baec40689c26e6",
+    "BODY_FRAME_balanced_txMaps.dds": "b26e10fe2d79dae4d0246c679a2fd501d931891870cde583138bb0ddb5815d05",
+    "BODY_FRAME_crisp_txMaps.dds": "2e3713fd5964a7b515984cd1125b3db3db777c7473e8a24b72e8049e6c047d4e",
+    "BODY_FRAME_pbr_txMaps.dds": "79ba218d01b45ddce1f9368c7d324b64f17870436057bc6ea8abefa19a19927a",
+    "neutral_black.dds": "f56ca6e31abd47be92a91ed7c83a1babb2e1396851747978efe0c3437f4d170c",
+    "neutral_white.dds": "37f551237b9851b6e16cd20c0ec45339bdf2e8650ccd65338c0f6469a1b64577"
+  },
+  "profiles": {
+    "legacy": {
+      "ksAmbient": 0.4,
+      "ksDiffuse": 0.6,
+      "ksSpecular": 0.65,
+      "ksSpecularEXP": 255,
+      "ksEmissive": [
+        0,
+        0,
+        0
+      ],
+      "ksAlphaRef": 0,
+      "fresnelC": 0.08,
+      "fresnelEXP": 5,
+      "fresnelMaxLevel": 0.85,
+      "isAdditive": 0,
+      "useDetail": 0,
+      "detailUVMultiplier": 1,
+      "nmObjectSpace": 0,
+      "extColoredReflection": 2,
+      "extColoredReflectionNorm": 0,
+      "shadowBiasMult": 0
+    },
+    "gamma": {
+      "ksAmbient": 0.25,
+      "ksDiffuse": 0.6,
+      "ksSpecular": 0.65,
+      "ksSpecularEXP": 255,
+      "ksEmissive": [
+        0,
+        0,
+        0
+      ],
+      "ksAlphaRef": 0,
+      "fresnelC": 0.282842712474619,
+      "fresnelEXP": 2.2727272727272725,
+      "fresnelMaxLevel": 0.9219544457292888,
+      "isAdditive": 0,
+      "useDetail": 0,
+      "detailUVMultiplier": 1,
+      "nmObjectSpace": 0,
+      "extColoredReflection": 2,
+      "extColoredReflectionNorm": 0,
+      "shadowBiasMult": 0
+    },
+    "pbr": {
+      "ksAmbient": 1,
+      "ksDiffuse": 1,
+      "ksSpecular": 0.65,
+      "ksSpecularEXP": 255,
+      "ksEmissive": [
+        0,
+        0,
+        0
+      ],
+      "ksAlphaRef": 0,
+      "fresnelC": 0.08,
+      "fresnelEXP": 5,
+      "fresnelMaxLevel": 0.85,
+      "isAdditive": 0,
+      "useDetail": 0,
+      "detailUVMultiplier": 1,
+      "nmObjectSpace": 0,
+      "extColoredReflection": 0,
+      "extColoredReflectionNorm": 0,
+      "shadowBiasMult": 0,
+      "pbOcclusion": [
+        0,
+        1
+      ],
+      "pbSmoothness": [
+        0,
+        1
+      ],
+      "pbMetalness": [
+        0,
+        1
+      ],
+      "pbReflectance": [
+        0.04,
+        0.04
+      ],
+      "pbColorSource": 0,
+      "pbOcclusionSource": 2,
+      "pbOcclusionMult": 1,
+      "pbReflectionBlurEnv": 0,
+      "extStickersMode_uint": 0,
+      "pbClearCoatSmoothness": [
+        0.82,
+        0.96
+      ],
+      "pbClearCoatIntensity": 0,
+      "pbClearCoatF0": 0.04,
+      "pbClearCoatNormalShare": 0
+    },
+    "clearcoat": {
+      "ksAmbient": 1,
+      "ksDiffuse": 1,
+      "ksSpecular": 0.65,
+      "ksSpecularEXP": 255,
+      "ksEmissive": [
+        0,
+        0,
+        0
+      ],
+      "ksAlphaRef": 0,
+      "fresnelC": 0.08,
+      "fresnelEXP": 5,
+      "fresnelMaxLevel": 0.85,
+      "isAdditive": 0,
+      "useDetail": 0,
+      "detailUVMultiplier": 1,
+      "nmObjectSpace": 0,
+      "extColoredReflection": 0,
+      "extColoredReflectionNorm": 0,
+      "shadowBiasMult": 0,
+      "pbOcclusion": [
+        0,
+        1
+      ],
+      "pbSmoothness": [
+        0,
+        1
+      ],
+      "pbMetalness": [
+        0,
+        1
+      ],
+      "pbReflectance": [
+        0.04,
+        0.04
+      ],
+      "pbColorSource": 0,
+      "pbOcclusionSource": 2,
+      "pbOcclusionMult": 1,
+      "pbReflectionBlurEnv": 0,
+      "extStickersMode_uint": 0,
+      "pbClearCoatSmoothness": [
+        0.82,
+        0.96
+      ],
+      "pbClearCoatIntensity": 0.25,
+      "pbClearCoatF0": 0.04,
+      "pbClearCoatNormalShare": 0
+    }
+  },
+  "scope": "D3D11 WARP native shader source; artificial UV cylinder, synthetic studio cube; not game/mesh/DLSS",
+  "pbr_fixture_resources": "512-sample synthetic split-sum GGX LUT, not the installed CSP LUT",
+  "pbr_compile_features": [
+    "ALLOW_PBR_EXTRAS_BASE",
+    "ALLOW_CLEARCOAT"
+  ],
+  "pbr_shader": "nePBR_MultiMap_ClearCoat; coat intensity0 / .25 comparison",
+  "fixed_normal_vs_flat_max_rgb_difference": 7.111929416656494,
+  "probe_uv": {
+    "paint": [
+      0.654052734375,
+      0.26806640625
+    ],
+    "silver": [
+      0.510986328125,
+      0.65283203125
+    ]
+  },
+  "probes": {
+    "legacy_paint": [
+      0.5069422721862793,
+      0.6835730075836182,
+      0.00181421241723001,
+      1.0
+    ],
+    "legacy_paint_env_only": [
+      0.0012593320570886135,
+      0.0013926730025559664,
+      0.0015556453727185726,
+      1.0
+    ],
+    "legacy_silver": [
+      0.5528106093406677,
+      0.5449420213699341,
+      0.5532035231590271,
+      1.0
+    ],
+    "legacy_silver_env_only": [
+      0.001669983728788793,
+      0.0018240237841382623,
+      0.0020629209466278553,
+      1.0
+    ],
+    "legacy_dark": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "pbr_paint": [
+      0.42294347286224365,
+      0.5632006525993347,
+      0.021866533905267715,
+      1.0
+    ],
+    "pbr_paint_env_only": [
+      0.02153981477022171,
+      0.02165161818265915,
+      0.02178826928138733,
+      1.0
+    ],
+    "pbr_silver": [
+      0.31908848881721497,
+      0.3212985694408417,
+      0.3239997327327728,
+      1.0
+    ],
+    "pbr_silver_env_only": [
+      0.3087350130081177,
+      0.3109450936317444,
+      0.31364625692367554,
+      1.0
+    ],
+    "pbr_dark": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "pbr_silver_no_metal_env_only": [
+      0.015231730416417122,
+      0.015340765938162804,
+      0.015474029816687107,
+      1.0
+    ]
+  },
+  "maps_resolution": [
+    2048,
+    1024
+  ],
+  "maps_mips": 12,
+  "fixed_source_mips": {
+    "normal": 11,
+    "diffuse": 12
+  },
+  "bright_patch_fraction": 0.0024161338806152344,
+  "maps_channels": {
+    "ksPerPixelMultiMap": [
+      "specular strength",
+      "specular exponent control",
+      "reflection strength",
+      "CSP reflection tint mask"
+    ],
+    "nePBR_MultiMap_ClearCoat": [
+      "smoothness",
+      "metalness",
+      "reflectance selector (constant .04 profile)",
+      "occlusion"
+    ]
+  }
+}

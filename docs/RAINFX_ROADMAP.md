@@ -1,6 +1,55 @@
-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-07
+# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-12
 
 See `docs/README.md` for the document index and working rules.
+
+## Latest s66 startup and missing glass follow-up (2026-10-12)
+
+The installed native occlusion module was still absent, blocking both glass
+passes and their diagnostic. Measured cold head-kernel compilation at about
+50 seconds; shared channel loops reduce this to about 1.5 seconds with identical
+water RGB. Shader/model loading is asynchronous, pending GPU builds avoid CPU
+fallback, and the obsolete full UV lookup is skipped in the shared GPU mode.
+Glass and E1 tests have independent pending/Rain-off routing. Scoped offscreen
+captures and explicit generated Rain shadow disable address additional state
+risks. Wrapped colour/depth warning now reproduces and is fixed without
+suppression. Settings and current concurrent tuning edits retained. Complete
+game installation, load/FPS/visibility/sunlight verification remains required.
+See `RAINFX_S66_STARTUP_AND_GLASS_DIAGNOSIS.md`.
+
+## Latest s65 rendering/cost follow-up (2026-10-12)
+
+Previous game experiment omitted both native modules, so its FPS/lighting and
+layer results are not a complete-runtime baseline. User supplied CPU profiling
+(scene-ready 3.18 ms, merge/tap hotspots), reports ordinary mesh occlusion fixed
+and remaining FX hidden. Fixed the unset post-rain INT readiness flag, added
+Rain's scene/native depth rejection and explicit submission state. Smear uses
+filtered class mixing and a parameter-only 4:1 mask cache. Physical ribbons and
+supported preview/history connect, and current GPU sweeps refresh wipe paths
+without raising the CPU 384-stamp budget. Bounded/sparse tile work and specialized
+depth remove repeated work. Saved settings and actual GPU physics remain.
+Game GPU timings and recovery to former total cost remain pending.
+See `RAINFX_S65_LAYER_TRAIL_COST.md`.
+
+## Latest s64 urgent performance follow-up (2026-10-12)
+
+User reports daytime 60% rain falling to 15 FPS while driving. Reproduced an
+unmeasured merge CPU hot path (roughly 20 ms to 2.2 ms in the current 2000-record
+offline replay), removed unsupported predicted grid entries/string keys,
+reused adaptive GPU Jacobians, gated empty merge/wet-path/held-state work and
+disposed CPU readback copies. Corrected downward airflow and the missed live
+s63 native-glass mask hook; added native hard-shadow comparison and actual
+Render Stats CPU/GPU intervals. Existing E2/E3/tuning retained. Actual recovery
+to the previous game FPS remains pending. See `RAINFX_S64_BOTTLENECK_AIRFLOW_LIGHTING.md`.
+
+## Latest s63 follow-up (2026-10-12)
+
+User accepts E2/E3 and the new physical drop directions. Daytime 60% rain still
+reports below 36 FPS versus the former 56–60 FPS. Fixed a zero-Jacobian inverse
+that could expand wipe/trail/splash kernels across the visor; bounded CPU paths
+and placed splash pieces in the actual surface plane. Added non-compositing
+native exterior glass occlusion for custom glass/E4 output and further GPU/CPU
+head-work reductions. Offline checks pass; new game performance/appearance is
+pending. See `RAINFX_S63_GLITCH_AND_NATIVE_OCCLUSION.md`.
 
 ## R1. GPU drops pre-laid like the micro pattern — accepted for 0.6.0 (2026-10-07) (`RAINFX_GPU_PRELAID.md`)
 
@@ -56,3 +105,30 @@ Work and open items: `RAINFX_VISOR_LAYER.md` §17–§20.
 - `RAINFX_WATER_FIELD.md` backlog #3 (metallic non-sky contrast with many
   large drops): **closed 2026-10-05**, not important; re-open if it recurs
   in the latest build.
+
+
+## s61 — new KN5 / independent 4:1 UV migration (2026-10-12)
+
+User authorized adapting all affected processing to the rebuilt KN5. Completed:
+new FX/Rain mesh names; geometry Jacobians and physical birth/merge/transport;
+absorbing holes/edges; coating/bare-glass coefficients; rectangular surface
+canvases and independently transferred materials; E1 eight-mesh captures and
+native FRAME_MAIN two-sided output; native Visible preservation; optional water
+mirror pass with no glass-optics captures; stale asset gates and ordered rebuild.
+
+Offline Lua, geometry, shader compilation and D3D11 WARP checks pass. Actual CSP
+appearance and frame time remain to be verified. See
+`RAINFX_KN5_4_TO_1_MIGRATION.md` for assets, commands and diagnostic views.
+This is the user-requested coordinate/KN5 migration; the separate creative
+RainFX movement finish listed above remains deferred.
+
+
+## s62 — output / warning / cost correction (2026-10-12)
+
+User game captures exposed black EXT, fixed E2/E3 marks, broad rain ghosts,
+missing micro drops and increased cost after s61. Corrected band-alpha semantics,
+optical frame/incidence/delta composition, DLSS source alignment and micro
+pending/metadata handling. Added per-drop metric cache and bounded physical
+birth lookup; removed unused mesh uploads and CPU cap triangle expansion.
+Strict warning-free shaders and D3D11 WARP/Lua checks pass. Actual new game FPS
+and reference matching remain unmeasured. See RAINFX_S62_OUTPUT_AND_COST_FIXES.md.

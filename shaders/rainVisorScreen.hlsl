@@ -56,7 +56,7 @@ float rainCanonicalDrop(
     float radius
 )
 {
-    float distanceToDrop = length(pin.Tex - position);
+    float distanceToDrop = rainMetricLength(position,pin.Tex-position);
 
     return 1.0 - smoothstep(
         radius * 0.30,
@@ -121,7 +121,7 @@ float3 rainDebugNormalWorld(float2 p)
 {
     float3 n = txRainSurfaceNormal.SampleLevel(
         samLinearRain,
-        p,
+        float2(p.x,p.y+1),
         0.0
     ).rgb * 2.0 - 1.0;
 
@@ -129,34 +129,10 @@ float3 rainDebugNormalWorld(float2 p)
     return normalize(mul(n, (float3x3)gRainObjectToWorld));
 }
 
-float2 rainDebugProjectWorldVector(float3 forceWorld, float3 normalWorld)
+float2 rainDebugProjectWorldVector(float3 forceWorld,float2 position)
 {
-    float3 normalObject = normalize(
-        mul(normalWorld, transpose((float3x3)gRainObjectToWorld))
-    );
-
-    float3 u = float3(1.0, 0.0, 0.0);
-    u -= normalObject * dot(u, normalObject);
-
-    if (length(u) < 0.0001)
-    {
-        u = float3(0.0, 0.0, 1.0);
-        u -= normalObject * dot(u, normalObject);
-    }
-
-    u = normalize(u);
-
-    float3 v = normalize(cross(normalObject, u));
-    if (dot(v, float3(0.0, -1.0, 0.0)) < 0.0)
-        v = -v;
-
-    float3 uWorld = normalize(mul(u, (float3x3)gRainObjectToWorld));
-    float3 vWorld = normalize(mul(v, (float3x3)gRainObjectToWorld));
-
-    return float2(
-        dot(forceWorld, uWorld),
-        dot(forceWorld, vWorld)
-    );
+    float scale=max(length(gRainObjectToWorld[0].xyz),1e-6);
+    return rainMetricProject(position,mul(forceWorld,transpose((float3x3)gRainObjectToWorld))/scale);
 }
 
 float3 rainDebugAirflow(float3 normalWorld, float radius)
@@ -227,7 +203,7 @@ float4 rainNormalObjectDebug(PS_IN pin)
     float3 n =
         txRainSurfaceNormal.SampleLevel(
             samLinearRain,
-            pin.Tex,
+            float2(pin.Tex.x,pin.Tex.y+1),
             0.0
         ).rgb;
 
@@ -339,7 +315,7 @@ float4 rainForceDirectionDebug(PS_IN pin)
         float2 forceUV =
             rainDebugProjectWorldVector(
                 forceWorld,
-                normalWorld
+                state.rg
             );
 
         float magnitude = length(forceUV);
@@ -357,12 +333,13 @@ float4 rainForceDirectionDebug(PS_IN pin)
             + dir * magnitude * gRainDebugForceArrowScale;
 
         float2 shaft = tip - state.rg;
-        float shaftLength = length(shaft);
-        float2 toPoint = pin.Tex - state.rg;
+        float2 physicalShaft=rainMetricPlane(state.rg,shaft);
+        float shaftLength=length(physicalShaft);
+        float2 toPoint = rainMetricPlane(state.rg,pin.Tex-state.rg);
 
         float along =
             shaftLength > 0.000001
-            ? dot(toPoint, shaft) / (shaftLength * shaftLength)
+            ? dot(toPoint, physicalShaft) / (shaftLength * shaftLength)
             : 0.0;
 
         float2 closest =
@@ -374,7 +351,7 @@ float4 rainForceDirectionDebug(PS_IN pin)
             - smoothstep(
                 max(meta.r * 0.20, 0.00015),
                 max(meta.r * 0.60, 0.00030),
-                length(pin.Tex - closest)
+                rainMetricLength(state.rg,pin.Tex-closest)
             );
 
         float dropMask =
@@ -423,7 +400,7 @@ float4 rainPhysicalStateViewerDebug(PS_IN pin)
             continue;
 
         float speed =
-            length(state.ba);
+            rainMetricLength(state.rg,state.ba);
 
         float normalizedSpeed =
             saturate(
@@ -453,11 +430,7 @@ float4 rainPhysicalStateViewerDebug(PS_IN pin)
 
 float4 rainBoundaryMaskDebug(PS_IN pin)
 {
-    float mask = txRainBoundaryMask.SampleLevel(
-        samLinearRain,
-        pin.Tex,
-        0.0
-    ).r;
+    float mask=rainValid(pin.Tex);
 
     return float4(mask, mask, mask, 1.0);
 }
@@ -555,7 +528,7 @@ float4 rainPhysicalStateDebug(PS_IN pin)
 
         moving = max(
             moving,
-            step(0.00001, length(state.ba))
+            step(0.00001, rainMetricLength(state.rg,state.ba))
         );
 
         result = max(
@@ -588,6 +561,15 @@ float4 rainPhysicalStateDebug(PS_IN pin)
 
 float4 main(PS_IN pin)
 {
+    if(gRainDebug==7) {
+        float valid=rainValid(pin.Tex);
+        return float4(lerp(float3(1,.35,.05),float3(.05,.8,1),rainCoating(pin.Tex))*valid,1);
+    }
+    if(gRainDebug==8) {
+        float3 u,v;rainMetric(pin.Tex,u,v);
+        float skew=abs(dot(normalize(u),normalize(v)));
+        return float4(saturate(float3(length(u),length(v)*4,skew))*rainValid(pin.Tex),1);
+    }
     if (gRainDebug == 1)
         return rainNormalObjectDebug(pin);
 

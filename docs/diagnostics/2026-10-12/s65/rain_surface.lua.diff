@@ -1,0 +1,98 @@
+--- s64/rain_surface.lua
++++ s65/rain_surface.lua
+@@ -104,21 +104,54 @@
+     function st:segment(u,v,U,V)
+         if not self:valid(u,v) or not self:valid(U,V) then return false end
+         local length=self:length(u,v,U-u,V-v)
+-        if length*self:unit()>.02 then return false end
++        if length*self:unit()>.128 then return false end
+         local _,_,_,safe=tap('du',u,v)
+         -- du.A is the baked conservative distance in 4096x1024 mask pixels.
+         -- Most short movements are interior: no eight-point boundary walk.
+         if math.max(math.abs(U-u)*4096,math.abs(V-v)*1024)<=math.max(0,(safe-1)*.75) then return true end
+-        for i=1,7 do local t=i/8
++        local steps=math.max(8,math.ceil(length*self:unit()/.001))
++        for i=1,steps-1 do local t=i/steps
+             if not self:valid(u+(U-u)*t,v+(V-v)*t) then return false end
+         end
+         local x,y,z=self:point(u,v);local X,Y,Z=self:point(U,V)
+         local chord=math.sqrt((X-x)^2+(Y-y)^2+(Z-z)^2)
+         return chord<=math.max(length*2,.0005/self:unit())
+     end
+-    function st:preview(u,v,du,dv,age)
+-        local U,V=u+du*age,v+dv*age
+-        if self:segment(u,v,U,V) then return U,V end
++    function st:preview(u,v,du,dv,age,index)
++        if not self:valid(u,v) or age<=0 then return u,v end
++        local entry
++        if index then
++            self.previews=self.previews or {};entry=self.previews[index]
++            if entry and entry[1]==u and entry[2]==v and entry[3]==du and entry[4]==dv and entry[5]==age then
++                return entry[6],entry[7]
++            end
++            entry=entry or {};self.previews[index]=entry
++            entry[1],entry[2],entry[3],entry[4],entry[5]=u,v,du,dv,age
++        end
++        -- Match geometric GPU transport instead of extrapolating one UV basis
++        -- across many triangles. The last supported point survives a boundary.
++        local remaining=math.min(age,.05)
++        local step=remaining*.5
++        for i=1,2 do
++            local x,y,z=tap('du',u,v);local X,Y,Z=tap('dv',u,v)
++            local mx,my,mz=x*du+X*dv,y*du+Y*dv,z*du+Z*dv
++            local speed=math.sqrt(mx*mx+my*my+mz*mz)
++            if remaining<=1e-7 or speed<1e-9 then break end
++            -- Two visual samples bound readback work independently of speed.
++            -- Actual collision/physics remains the finer adaptive GPU solver.
++            local U,V=u+du*step,v+dv*step
++            if not self:segment(u,v,U,V) then break end
++            local a,b,c=self:metric(U,V)
++            local nx,ny,nz=tap('du',U,V);local vx,vy,vz=tap('dv',U,V)
++            local pu=(nx*mx+ny*my+nz*mz)/a
++            local pv=(vx*mx+vy*my+vz*mz-b*pu)/c
++            local moved=math.sqrt(pu*pu+pv*pv)
++            if moved<1e-9 then break end
++            pv=pv*speed/moved;pu=pu*speed/moved
++            dv=pv/c;du=(pu-b*dv)/a
++            u,v=U,V;remaining=remaining-step
++        end
++        if entry then entry[6],entry[7]=u,v end
+         return u,v
+     end
+     function st:length(u,v,dx,dy) local x,y=self:plane(u,v,dx,dy);return math.sqrt(x*x+y*y) end
+@@ -133,13 +166,15 @@
+         local data=arrays.position.p
+         local fx,fy=u*2048-.5,(v+1)*512-.5
+         local x,y=math.floor(fx),math.floor(fy);fx,fy=fx-x,fy-y
+-        local X,Y,Z=0,0,0
++        local X,Y,Z,weight=0,0,0,0
+         for dy=0,1 do for dx=0,1 do
+             local i=(math.max(0,math.min(511,y+dy))*2048+math.max(0,math.min(2047,x+dx)))*4
+             local w=(dx==0 and 1-fx or fx)*(dy==0 and 1-fy or fy)
++            if tonumber(data[i+3])<.5 then w=0 end
++            weight=weight+w
+             X=X+tonumber(data[i])*w;Y=Y+tonumber(data[i+1])*w;Z=Z+tonumber(data[i+2])*w
+         end end
+-        local k=self:unit();return X/k,Y/k,Z/k
++        local k=self:unit()*math.max(weight,1e-9);return X/k,Y/k,Z/k
+     end
+     function st:shift(cx,cy,x,y,size)
+         local dx,dy=self:offset(cx/size,cy/size-1,x/size,y/size)
+@@ -147,8 +182,15 @@
+     end
+     function st:ribbon(q1,q2,q3,q4,x0,y0,x1,y1,halfWidth,ux,uy,size)
+         if not self:segment(x0/size,y0/size-1,x1/size,y1/size-1) then return false end
+-        local dx,dy=self:offset(x0/size,y0/size-1,-uy*halfWidth/size,ux*halfWidth/size)
+-        local X,Y=self:offset(x1/size,y1/size-1,-uy*halfWidth/size,ux*halfWidth/size)
++        -- Each endpoint has its own orthonormal frame. Reusing the far
++        -- endpoint's plane direction at both ends twists a skewed UV ribbon.
++        local ax,ay=self:plane(x0/size,y0/size-1,(x1-x0)/size,(y1-y0)/size)
++        local bx,by=self:plane(x1/size,y1/size-1,(x1-x0)/size,(y1-y0)/size)
++        local a,b=math.sqrt(ax*ax+ay*ay),math.sqrt(bx*bx+by*by)
++        if a>1e-9 then ax,ay=ax/a,ay/a else ax,ay=ux,uy end
++        if b>1e-9 then bx,by=bx/b,by/b else bx,by=ux,uy end
++        local dx,dy=self:offset(x0/size,y0/size-1,-ay*halfWidth/size,ax*halfWidth/size)
++        local X,Y=self:offset(x1/size,y1/size-1,-by*halfWidth/size,bx*halfWidth/size)
+         q1:set(x0-dx*size,y0-dy*size);q2:set(x1-X*size,y1-Y*size)
+         q3:set(x1+X*size,y1+Y*size);q4:set(x0+dx*size,y0+dy*size)
+         return true

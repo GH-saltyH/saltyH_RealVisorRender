@@ -84,16 +84,17 @@ float4 rainLayerSample(Texture2D tx, float2 uv)
 // Schüler cotangent frame from screen derivatives.
 float3x3 rainLayerTBN(float3 n, float3 p, float2 uv)
 {
-    float3 dp1 = ddx(p);
-    float3 dp2 = ddy(p);
-    float2 duv1 = ddx(uv);
-    float2 duv2 = ddy(uv);
-    float3 dp2perp = cross(dp2, n);
-    float3 dp1perp = cross(n, dp1);
-    float3 t = dp2perp * duv1.x + dp1perp * duv2.x;
-    float3 b = dp2perp * duv1.y + dp1perp * duv2.y;
-    float invmax = rsqrt(max(max(dot(t, t), dot(b, b)), 1e-20));
-    return float3x3(t * invmax, b * invmax, n);
+    float3 dp1=ddx(p),dp2=ddy(p);
+    float2 q1=ddx(uv),q2=ddy(uv);
+    float det=q1.x*q2.y-q1.y*q2.x;
+    float safeDet=abs(det)>1e-12 ? det : (det<0 ? -1e-12 : 1e-12);
+    float3 t=(dp1*q2.y-dp2*q1.y)/safeDet;
+    float3 rawB=(dp2*q1.x-dp1*q2.x)/safeDet;
+    t-=n*dot(t,n);
+    if(dot(t,t)<1e-12)t=cross(abs(n.y)<.9?float3(0,1,0):float3(1,0,0),n);
+    t*=rsqrt(max(dot(t,t),1e-12));
+    float3 b=cross(n,t);b*=dot(b,rawB)<0 ? -1 : 1;
+    return float3x3(t,b,n);
 }
 
 float3 rainLayerNormal(float3 n, float3 p, float2 uv)
@@ -186,6 +187,12 @@ float3 rainLayerReferenceHousing(PS_IN pin,float3 ng,float3 view,float frameLum,
 
 float4 main(PS_IN pin)
 {
+    if(gLayerNativeOn>.5 && gLayerKind>.5) {
+        float depth=txLayerNativeDepth.Load(int3((int2)(pin.PosH.xy*gLayerNativePixelScale),0)).r;
+        // Exterior ownership is coverage, not translucent depth blending.
+        // FX and native meshes are independently modelled and can interleave.
+        clip(depth>0 ? -1 : 1);
+    }
     float3 toEye = normalize(-pin.PosC);
     float3 outwardNormal = normalize(pin.NormalW);
     float3 ng = outwardNormal;
@@ -304,8 +311,17 @@ float4 main(PS_IN pin)
         relief *= gLayerOpticsNormal;
         float3 rn = mul(normalize(float3(relief, 1.0)), tbn);
         rn = dot(rn, rn) > 1e-12 ? normalize(rn) : ng;
-        float2 direction = float2(dot(perturbation, gLayerCameraSide),
-            -dot(perturbation, gLayerCameraUp));
+        // Difference between flat and bevel Snell rays: the same ridge
+        // changes strength and direction with incidence instead of stamping
+        // a fixed screen shift from the texture's XY normal.
+        float3 lensNormal=normalize(mul(normalize(float3(lensSlope,1)),tbn));
+        float3 flatRay=refract(-toEye,ng,1.0/1.49);
+        float3 bentRay=refract(-toEye,lensNormal,1.0/1.49);
+        float2 flatProjection=float2(dot(flatRay,gLayerCameraSide),-dot(flatRay,gLayerCameraUp))/max(dot(flatRay,gLayerCameraLook),.05);
+        float2 bentProjection=float2(dot(bentRay,gLayerCameraSide),-dot(bentRay,gLayerCameraUp))/max(dot(bentRay,gLayerCameraLook),.05);
+        float2 direction=bentProjection-flatProjection;
+        direction/=max(length(direction),1);
+
         float2 pixel = gLayerInvShotSize;
         float2 lo = pixel * 0.5;
         float2 hi = 1.0 - lo;
@@ -338,9 +354,12 @@ float4 main(PS_IN pin)
         float fresnel = 0.04 + 0.96 * pow(1.0 - saturate(dot(rn, toEye)), 5.0);
         float viewBevel = clamp(dot(rn - ng, toEye), -1.0, 1.0);
         float skyBevel = clamp(rn.y - ng.y, -1.0, 1.0);
-        float transmission = saturate(1.0 - gLayerOpticsTransmissionLoss
-            + (viewBevel + skyBevel) * gLayerOpticsReliefShade);
-        float reflection = saturate(gLayerOpticsReflection * (0.15 + fresnel));
+        float flatCosine=saturate(dot(ng,toEye));
+        float incidence=saturate(abs(viewBevel)*4+pow(1-flatCosine,2));
+        float transmission=saturate(1-gLayerOpticsTransmissionLoss*reliefSupport*incidence
+            +(viewBevel+skyBevel)*gLayerOpticsReliefShade);
+        float flatFresnel=.04+.96*pow(1-flatCosine,5);
+        float reflection=saturate(gLayerOpticsReflection*abs(fresnel-flatFresnel)*reliefSupport);
         float2 reflectionUV = clamp(uv - direction * gLayerOpticsReflectionPx * pixel, lo, hi);
         float3 environment = rainLayerOpticsScene(reflectionUV, uv, bandTex, bandTexDx, bandTexDy, bandLight, bandFloor);
         float3 rim = lerp(warped * transmission, environment, reflection) + highlight;
@@ -399,13 +418,13 @@ float4 main(PS_IN pin)
                 soft += txLayerSource.SampleLevel(samLinearClamp,clamp(interiorUV+float2(-radius.x,radius.y),lo,hi),lod).rgb * 0.0625;
                 interior = lerp(interior,soft,saturate(gLayerOpticsInteriorSoftAmount));
             }
-            interiorDelta = interior - base;
+            float interiorActivity=saturate(length(offset)/max(gLayerOpticsInteriorPx+gLayerOpticsInteriorBendPx,1)*3);
+            interiorDelta=(interior-base)*interiorActivity;
         }
         // Clear glass adds a scene difference to preserve existing rain.
         // Band overlap REPLACES the covered destination: an alpha-zero delta
         // assumes an identical base, and cannot guarantee outside occlusion.
-        float3 opticalImage = rim * ridge + (base + interiorDelta) * (1.0 - ridge);
-        opticalImage *= max(gLayerOpticsBrightness, 0.0);
+        float3 opticalImage=base+((rim-base)*ridge+interiorDelta*(1-ridge))*max(gLayerOpticsBrightness,0);
         float bandReplace = bandFloor * saturate(gLayerBandOpacity);
         float3 output = lerp(opticalImage - base, opticalImage, bandReplace) * coverage;
         return float4(output, bandReplace * coverage);

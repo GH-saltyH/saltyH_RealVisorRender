@@ -1,0 +1,12 @@
+{
+  "invalid_cells_rejected": 535983,
+  "valid_kernel_samples": 2003,
+  "maximum_sampled_4px_quad_extent": 58.490020484865454,
+  "splash_kernels": 1354,
+  "native_stable_frames": 1000,
+  "native_stable_capture_updates": 1,
+  "settled_head_cpu_metric_calls_before": 96,
+  "settled_head_cpu_metric_calls_after": 0,
+  "wipe_width_mm": "max(0.25/(2048*0.0029296875), diameter_mm*0.980 + 0.0)",
+  "wipe_minimum_width_mm": 0.041666666666666664
+}

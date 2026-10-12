@@ -1,37 +1,55 @@
 {
   "model": "visors/visor_lando_2025Champion_maxquality_diet_face.kn5",
-  "sha256": "d0bd236f2edb9f56f8c3efa7887a3b6a3028406b8de41cd484988bb5f08983ec",
+  "sha256": "2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",
   "width": 1024,
   "meshes": {
     "frame": {
-      "name": "BODY_FRAME",
-      "vertices": 35586,
-      "triangles": 65289,
+      "name": "FRAME_MAIN",
+      "vertices": 20938,
+      "triangles": 38872,
       "nodes": 16383
     },
     "rubber": {
-      "name": "BODY_GLASSLINE",
-      "vertices": 23216,
+      "name": "BAND_INNER",
+      "vertices": 23345,
       "triangles": 43672,
       "nodes": 16383
     },
     "fabric": {
-      "name": "BODY_FABRIC",
-      "vertices": 34869,
-      "triangles": 65415,
+      "name": "BODY_FABRIC_TRACE",
+      "vertices": 26023,
+      "triangles": 50115,
       "nodes": 16383
     },
     "face": {
       "name": "DRIVER_FACE",
-      "vertices": 2004,
+      "vertices": 1636,
       "triangles": 3088,
       "nodes": 1023
     },
     "balaklava": {
       "name": "DRIVER_BALAKLAVA",
-      "vertices": 636,
-      "triangles": 1098,
-      "nodes": 403
+      "vertices": 599,
+      "triangles": 1028,
+      "nodes": 263
+    },
+    "cam": {
+      "name": "CAM",
+      "vertices": 10534,
+      "triangles": 17674,
+      "nodes": 6675
+    },
+    "camCover": {
+      "name": "CAM_COVER",
+      "vertices": 1666,
+      "triangles": 3072,
+      "nodes": 1023
+    },
+    "camFabric": {
+      "name": "CAM_FABRIC",
+      "vertices": 5689,
+      "triangles": 9195,
+      "nodes": 4053
     }
   }
 }

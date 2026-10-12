@@ -1,0 +1,38 @@
+{
+  "settings.ini": {
+    "GENERAL/active": [
+      "1",
+      "2"
+    ],
+    "PROFILE_1/offset_z": [
+      "0.786400",
+      "-0.034400"
+    ],
+    "PROFILE_1/yaw": [
+      "179.000000",
+      "0.000000"
+    ],
+    "MESH_VISIBILITY/glass_int_mrr": [
+      "0",
+      "1"
+    ],
+    "MESH_VISIBILITY/glass_coat_mrr": [
+      "0",
+      "1"
+    ],
+    "MESH_VISIBILITY/glass_sticker_mrr": [
+      "0",
+      "1"
+    ],
+    "MESH_VISIBILITY/glass_ext_mrr": [
+      "0",
+      "1"
+    ]
+  },
+  "settings_mats.ini": {
+    "CUSTOM_SHADER/rain_surface_coat_retention": [
+      "0.65000000000000002",
+      "1"
+    ]
+  }
+}

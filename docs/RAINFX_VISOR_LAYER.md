@@ -792,3 +792,16 @@ region) start reading as band, raise the threshold.
   `GLASS_RAINFX_OVERLAY` points to the RainFX tab. The sliders were removed
   from the RainFX tab (a pointer text remains). Values are runtime config
   (`RAIN_VISOR_LAYER_*`), as before.
+
+
+## 2026-10-12 s61 naming / visibility amendment
+
+The new KN5 replaces the previous DUMMY/OVERLAY rain/glass naming contract.
+Current custom sheets: GLASS_COAT_FX, GLASS_EXT_FX, GLASS_INT_FX, GLASS_RAINFX.
+Each has independent 4:1 UVs. The fourth is the RainFX target. These dummy originals
+are hidden in native colour/shadow preparation; custom visibility follows the
+editor Visible control. Other native meshes remain visible in all views.
+FRAME_MAIN uses its authored native material with two-sided culling. E1 includes
+BODY_FABRIC_TRACE, BAND_INNER and the camera assembly. Mirrors optionally draw
+water only, without COAT/EXT/INT optics captures. See
+RAINFX_KN5_4_TO_1_MIGRATION.md for the complete s61 contract and asset rebuild.

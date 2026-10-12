@@ -1,4 +1,4 @@
-"""Compare the actual five-mesh packed BVH against original KN5 triangles."""
+"""Compare the actual eight-mesh packed BVH against original KN5 triangles."""
 from pathlib import Path
 import importlib.util, json, hashlib, subprocess, tempfile
 import numpy as np
@@ -72,12 +72,12 @@ for name,key in bake.MESHES:
             uvx=ah[1]@tri[ah[0],:3,3];uvy=ah[1]@tri[ah[0],3,:3]
             assert np.isfinite([uvx,uvy]).all()
         maximum=max(maximum,visits);tested+=1
-print(f'PASS: SHA256, five exact mesh names, {tested} KN5 vs packed BVH rays within 2um; max visits {maximum}')
+print(f'PASS: SHA256, eight exact mesh names, {tested} KN5 vs packed BVH rays within 2um; max visits {maximum}')
 
 header='struct PS_IN {float4 PosH:SV_POSITION;float3 PosC:TEXCOORD0;float3 NormalW:TEXCOORD1;};\n'
-for key in ['Frame','Rubber','Fabric','Face','Balaklava']:
-    header+=f'Texture2D txE1{key}Nodes,txE1{key}Triangles;float4x4 gE1{key}Inverse;float gE1{key}Visible;\n'
-header+='Texture2D txE1FrameDiffuse,txE1FabricDiffuse;float3 gE1Eye,gE1LocalOrigin;float gE1Range,gE1Mode,gE1Checker,gE1RubberGrey;\n'
+for key in ['Frame','Rubber','Fabric','Face','Balaklava','Cam','CamCover','CamFabric']:
+    header+=f'float3 gE1{key}Records;float4x4 gE1{key}Inverse;float gE1{key}Visible;\n'
+header+='Texture2D txE1Geometry,txE1FrameDiffuse,txE1FabricDiffuse;float3 gE1Eye,gE1LocalOrigin;float gE1Range,gE1Mode,gE1Checker,gE1RubberGrey;\n'
 header+='float gE1ColourTolerance,gE1MeanFloor,gE1Threshold,gE1Knee,gE1Gain,gE1FixedReference,gE1Isolation;\n'
 for i in range(3):
     header+=f'Texture2D txE1Colour{i},txE1Depth{i};float4x4 gE1View{i},gE1Projection{i};float3 gE1EyeToSource{i};float gE1SourceActive{i};\n'
@@ -101,4 +101,4 @@ with tempfile.TemporaryDirectory(prefix='e1_geometry_',dir=root/'docs/tools') as
     path.write_text(header+preview,encoding='utf-8')
     subprocess.run(['C:/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64/fxc.exe',
         '/nologo','/T','ps_5_0','/E','main','/Ges','/WX','/Fo',str(Path(tmp)/'preview.cso'),str(path)],check=True)
-print('PASS: actual five-mesh geometry HLSL FXC ps_5_0 /Ges /WX')
+print('PASS: actual eight-mesh geometry HLSL FXC ps_5_0 /Ges /WX')

@@ -1,0 +1,18 @@
+[
+  {
+    "case": "actual native geometry capture shader compiles warning-free and writes metric distance"
+  },
+  {
+    "case": "visible native exterior owns pixels despite FX depth differences; absent native retains output",
+    "front_max": 0.0
+  },
+  {
+    "case": "cached E4 front native rejects all HDR contribution",
+    "front_max": 0.0
+  },
+  {
+    "case": "early physical extent rejection preserves actual binned head output",
+    "max_delta": 0.0,
+    "slots": 96
+  }
+]

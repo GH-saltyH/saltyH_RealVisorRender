@@ -1,4 +1,4 @@
-# RealVisor RainFX — docs index and working rules (2026-10-07)
+# RealVisor RainFX — docs index and working rules (2026-10-12)
 
 Start here. This file lists every document in `docs/` with its state, the
 current architecture in one screen, and the rules for working on the
@@ -13,7 +13,7 @@ project.
     - `rainStateUpdateParams`: position and velocity (RGBA texels);
     - `rainStateMetaUpdateParams`: radius, mass and lifecycle.
 - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
-  rain surface mesh (built from `GLASS_EXT_DUMMY`) with `render.mesh` in an
+  rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
   in-scene stage. The stage is `main.smoke` by user setting
   (`RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG`).
   - Water field: drops, trails, film.
@@ -23,12 +23,12 @@ project.
   tone mode 3 (frame-first composite; rules in `RAINFX_NEAR_OBJECTS.md`
   §10).
 - **Visor stack (scene stack, current work).**
-  `shaders/rainVisorLayer.hlsl` draws the KN5 `*_OVERLAY` meshes in the same
+  `shaders/rainVisorLayer.hlsl` draws the KN5 `*_FX` meshes in the same
   callback:
   1. housing (opaque, depth write);
-  2. `GLASS_COATING`;
+  2. `GLASS_COAT_FX`;
   3. the rain mesh;
-  4. `GLASS_EXT` (band) and `GLASS_INT`;
+  4. `GLASS_EXT_FX` (band) and `GLASS_INT_FX`;
   5. the drop depth pass.
 
   Output is HDR. See `RAINFX_VISOR_LAYER.md` §17–§20, and §18 for the KN5
@@ -51,6 +51,13 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+| `RAINFX_S66_STARTUP_AND_GLASS_DIAGNOSIS.md` | ACTIVE | missing installed module, measured cold compile stall, async startup, independent glass/test routing and shadow/capture isolation; game confirmation pending |
+| `RAINFX_S62_OUTPUT_AND_COST_FIXES.md` | REFERENCE | user game-output follow-up: warning-free shaders, EXT/E2/E3/micro fixes, cost reductions and verification limits |
+| `RAINFX_S63_GLITCH_AND_NATIVE_OCCLUSION.md` | REFERENCE | bounded wipe/trail/splash geometry, physical splash positions, native exterior ownership and additional cost fixes |
+| `RAINFX_S64_BOTTLENECK_AIRFLOW_LIGHTING.md` | REFERENCE | reproduced merge CPU bottleneck, cheaper physical transport, corrected downward airflow/live native hook, sunlight shadow policy and engine CPU/GPU timings |
+| `RAINFX_S65_LAYER_TRAIL_COST.md` | REFERENCE | incomplete-install correction, live INT/source gate, Rain occlusion, cached smooth smear, physical trail frames, GPU swept wipe and bounded rendering costs |
+| `RAINFX_KN5_4_TO_1_MIGRATION.md` | REFERENCE | s61: independent glass UVs, physical Rain geometry, E1/mirror visibility, rebuild and validation |
+| `VISOR_CACHED_OPTICS.md` | REFERENCE | cached optics, post-rain source, E1 capture and dated verification |
 | `RAINFX_GPU_PRELAID.md` | REFERENCE | R1 GPU pre-laid drops: CPU A/B, tile-binning heads, R1.2 birth-site atlas prototype |
 | `RAINFX_IMPACT_FILM.md` | REFERENCE | local impact film, trigger, layer composition and validation |
 | `RAINFX_UI.md` | REFERENCE | grouped popup controls, conditional settings, and validation |
@@ -140,11 +147,13 @@ States:
 ### KN5
 
 10. **Naming rules** are in `RAINFX_VISOR_LAYER.md` §18:
-    - `*_OVERLAY`: our shaders, hidden in the scene;
-    - `*_MIRROR`: mirror-only shape, never touched;
-    - stock meshes: follow their Visible box.
+    - `GLASS_COAT_FX`, `GLASS_EXT_FX`, `GLASS_INT_FX`: custom glass passes;
+    - `GLASS_RAINFX`: water target and optional water-only mirror pass;
+    - these four originals are dummy alpha-zero sheets, hidden from native colour/shadows;
+    - all other native meshes, including `*_MRR`, follow their Visible box in every view.
 
-    Keep `GLASS_EXT_DUMMY`: it is the rain target.
+    Each glass mesh has independent 4:1 UVs. The s61 contract and required rebuild
+    order are in `RAINFX_KN5_4_TO_1_MIGRATION.md`; they supersede earlier naming rules.
 
 ### Priority
 

@@ -51,23 +51,23 @@ bool e1Box(float3 origin, float3 direction, float3 lo, float3 hi, float best) {
     }
     return last>=first;
 }
-bool e1Mesh(Texture2D nodes,Texture2D triangles,float4x4 inverseWorld,
+bool e1Mesh(float3 records,float4x4 inverseWorld,
     float3 origin,float3 direction,inout float best,out float2 uv,out bool complete) {
     float3 o=mul(float4(origin,1),inverseWorld).xyz;
     // Keep transformed direction unnormalised: t remains world metres.
     float3 d=mul(float4(direction,0),inverseWorld).xyz;
     int node=0;
-    int total=(int)e1Record(nodes,1).w;
+    int total=(int)e1Record(txE1Geometry,(int)records.x+1).w;
     bool found=false;
     uv=0;
     [loop] for (int iteration=0;iteration<65536 && node<total;iteration++) {
-        float4 a=e1Record(nodes,node*2),b=e1Record(nodes,node*2+1);
+        float4 a=e1Record(txE1Geometry,(int)records.x+node*2),b=e1Record(txE1Geometry,(int)records.x+node*2+1);
         if (!e1Box(o,d,a.xyz,b.xyz,best)) {node=(int)b.w;continue;}
         if (a.w<0) {node++;continue;}
         int start=(int)a.w >> 4,count=(int)a.w & 15;
         [loop] for(int k=0;k<count;k++) {
             int record=(start+k)*4;
-            float4 va=e1Record(triangles,record),vb=e1Record(triangles,record+1),vc=e1Record(triangles,record+2);
+            float4 va=e1Record(txE1Geometry,(int)records.y+record),vb=e1Record(txE1Geometry,(int)records.y+record+1),vc=e1Record(txE1Geometry,(int)records.y+record+2);
             float3 ab=vb.xyz-va.xyz,ac=vc.xyz-va.xyz;
             float3 p=cross(d,ac);
             float det=dot(ab,p);
@@ -81,7 +81,7 @@ bool e1Mesh(Texture2D nodes,Texture2D triangles,float4x4 inverseWorld,
             float t=dot(ac,q)/det;
             if(t<=0.0005 || t>=best) continue;
             float3 weights=float3(1-u-v,u,v);
-            float3 vy=e1Record(triangles,record+3).xyz;
+            float3 vy=e1Record(txE1Geometry,(int)records.y+record+3).xyz;
             uv=float2(dot(weights,float3(va.w,vb.w,vc.w)),dot(weights,vy));
             best=t;found=true;
         }
@@ -99,24 +99,32 @@ float4 main(PS_IN pin) {
     float2 uv=0,candidate=0;
     bool complete=true,done;
     if(gE1FrameVisible>0.5) {
-        if(e1Mesh(txE1FrameNodes,txE1FrameTriangles,gE1FrameInverse,origin,ray,best,candidate,done)) {material=0;uv=candidate;}
+        if(e1Mesh(gE1FrameRecords,gE1FrameInverse,origin,ray,best,candidate,done)) {material=0;uv=candidate;}
         complete=complete && done;
     }
     if(gE1RubberVisible>0.5) {
-        if(e1Mesh(txE1RubberNodes,txE1RubberTriangles,gE1RubberInverse,origin,ray,best,candidate,done)) {material=1;uv=candidate;}
+        if(e1Mesh(gE1RubberRecords,gE1RubberInverse,origin,ray,best,candidate,done)) {material=1;uv=candidate;}
         complete=complete && done;
     }
     if(gE1FabricVisible>0.5) {
-        if(e1Mesh(txE1FabricNodes,txE1FabricTriangles,gE1FabricInverse,origin,ray,best,candidate,done)) {material=2;uv=candidate;}
+        if(e1Mesh(gE1FabricRecords,gE1FabricInverse,origin,ray,best,candidate,done)) {material=2;uv=candidate;}
         complete=complete && done;
     }
     if(gE1FaceVisible>0.5) {
-        if(e1Mesh(txE1FaceNodes,txE1FaceTriangles,gE1FaceInverse,origin,ray,best,candidate,done)) {material=3;uv=candidate;}
+        if(e1Mesh(gE1FaceRecords,gE1FaceInverse,origin,ray,best,candidate,done)) {material=3;uv=candidate;}
         complete=complete && done;
     }
     if(gE1BalaklavaVisible>0.5) {
-        if(e1Mesh(txE1BalaklavaNodes,txE1BalaklavaTriangles,gE1BalaklavaInverse,origin,ray,best,candidate,done)) {material=4;uv=candidate;}
+        if(e1Mesh(gE1BalaklavaRecords,gE1BalaklavaInverse,origin,ray,best,candidate,done)) {material=4;uv=candidate;}
         complete=complete && done;
+    }
+    if(gE1CamVisible>.5) {
+        if(e1Mesh(gE1CamRecords,gE1CamInverse,origin,ray,best,candidate,done)) {material=5;uv=candidate;}
+        complete=complete&&done;
+    }
+    if(gE1CamFabricVisible>.5) {
+        if(e1Mesh(gE1CamFabricRecords,gE1CamFabricInverse,origin,ray,best,candidate,done)) {material=7;uv=candidate;}
+        complete=complete&&done;
     }
     if(gE1Mode>5.5 && gE1Mode<6.5) {
         float3 c=!complete?float3(0,0,1):material>=0?float3(0,1,0):float3(1,0,0);

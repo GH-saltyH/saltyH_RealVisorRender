@@ -1,0 +1,363 @@
+{
+  "frame": {
+    "mesh": "FRAME_MAIN",
+    "material": "mtBODY_FRAME",
+    "textures": {
+      "txDiffuse": "frame_txDiffuse.dds",
+      "txNormal": "frame_txNormal.dds",
+      "txMaps": "frame_txMaps.dds"
+    },
+    "properties": {
+      "ksAmbient": 0.4000000059604645,
+      "ksDiffuse": 0.6000000238418579,
+      "ksSpecular": 0.6499999761581421,
+      "ksSpecularEXP": 255.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.07999999821186066,
+      "fresnelEXP": 5.0,
+      "fresnelMaxLevel": 0.8500000238418579,
+      "nmObjectSpace": 0.0,
+      "isAdditive": 0.0,
+      "useDetail": 0.0,
+      "detailUVMultiplier": 0.0,
+      "shadowBiasMult": 0.0,
+      "damageZones": 0.0,
+      "dirt": 0.0,
+      "sunSpecular": 0.0,
+      "sunSpecularEXP": 0.0
+    },
+    "bounds": [
+      -0.13492776453495026,
+      -0.172017902135849,
+      -0.18643885850906372,
+      0.13967783749103546,
+      0.19109737873077393,
+      0.14090092480182648
+    ],
+    "records": [
+      0,
+      32766,
+      188254
+    ]
+  },
+  "rubber": {
+    "mesh": "BAND_INNER",
+    "material": "mtBODY_GLASSLINE",
+    "textures": {
+      "txDiffuse": "rubber_txDiffuse.png",
+      "txNormal": "rubber_txNormal.dds"
+    },
+    "properties": {
+      "ksAmbient": 0.05087609961628914,
+      "ksDiffuse": 0.4000000059604645,
+      "ksSpecular": 0.5,
+      "ksSpecularEXP": 63.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.0,
+      "fresnelEXP": 0.0,
+      "nmObjectSpace": 0.0,
+      "isAdditive": 0.0,
+      "fresnelMaxLevel": 0.0,
+      "boh": 0.0
+    },
+    "bounds": [
+      -0.11607164144515991,
+      -0.15833896398544312,
+      -0.07353483140468597,
+      0.12066299468278885,
+      -0.05209988355636597,
+      -0.0014164876192808151
+    ],
+    "records": [
+      304870,
+      337636,
+      512324
+    ]
+  },
+  "fabric": {
+    "mesh": "BODY_FABRIC_TRACE",
+    "material": "mtBODY_FABRIC",
+    "textures": {
+      "txDiffuse": "fabric_txDiffuse.dds",
+      "txNormal": "fabric_txNormal.dds",
+      "txMaps": "fabric_txMaps.png"
+    },
+    "properties": {
+      "ksAmbient": 0.05000000074505806,
+      "ksDiffuse": 0.30000001192092896,
+      "ksSpecular": 0.3499999940395355,
+      "ksSpecularEXP": 40.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.0,
+      "fresnelEXP": 0.0,
+      "fresnelMaxLevel": 0.0,
+      "nmObjectSpace": 0.0,
+      "isAdditive": 0.0,
+      "useDetail": 0.0,
+      "detailUVMultiplier": 1.0,
+      "shadowBiasMult": 0.0,
+      "damageZones": 0.0,
+      "dirt": 0.0,
+      "sunSpecular": 0.5,
+      "sunSpecularEXP": 15.0
+    },
+    "bounds": [
+      -0.12089317291975021,
+      -0.15473775565624237,
+      -0.18606847524642944,
+      0.1252027153968811,
+      0.0656481683254242,
+      -0.0008355332538485527
+    ],
+    "records": [
+      643340,
+      676106,
+      876566
+    ]
+  },
+  "face": {
+    "mesh": "DRIVER_FACE",
+    "material": "mtHQFACE",
+    "textures": {
+      "txDiffuse": "face_txDiffuse.png",
+      "txNormal": "face_txNormal.dds",
+      "txMaps": "face_txMaps.dds"
+    },
+    "properties": {
+      "ksAmbient": 0.07999999821186066,
+      "ksDiffuse": 0.25,
+      "ksSpecular": 0.25,
+      "ksSpecularEXP": 120.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.02800000086426735,
+      "fresnelEXP": 5.0,
+      "fresnelMaxLevel": 0.03999999910593033,
+      "nmObjectSpace": 0.0,
+      "isAdditive": 0.0,
+      "useDetail": 0.0,
+      "detailUVMultiplier": 0.0,
+      "shadowBiasMult": 0.0,
+      "damageZones": 0.0,
+      "dirt": 0.0,
+      "sunSpecular": 0.0,
+      "sunSpecularEXP": 0.0
+    },
+    "bounds": [
+      -0.08921349048614502,
+      -0.123896524310112,
+      -0.11413001269102097,
+      0.08458185940980911,
+      -0.029008258134126663,
+      0.029619600623846054
+    ],
+    "records": [
+      1026911,
+      1028957,
+      1041309
+    ]
+  },
+  "balaklava": {
+    "mesh": "DRIVER_BALAKLAVA",
+    "material": "mtBalaklava",
+    "textures": {
+      "txDiffuse": "balaklava_txDiffuse.png",
+      "txNormal": "balaklava_txNormal.png",
+      "txMaps": "balaklava_txMaps.png"
+    },
+    "properties": {
+      "ksAmbient": 0.05087609961628914,
+      "ksDiffuse": 0.15000000596046448,
+      "ksSpecular": 0.5,
+      "ksSpecularEXP": 8.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.0,
+      "fresnelEXP": 0.0,
+      "fresnelMaxLevel": 0.0,
+      "nmObjectSpace": 0.0,
+      "isAdditive": 0.0,
+      "useDetail": 0.0,
+      "detailUVMultiplier": 0.0,
+      "shadowBiasMult": 0.0,
+      "damageZones": 0.0,
+      "dirt": 0.0,
+      "sunSpecular": 0.0,
+      "sunSpecularEXP": 0.0
+    },
+    "bounds": [
+      -0.11453333497047424,
+      -0.13314181566238403,
+      -0.1279824674129486,
+      0.10439393669366837,
+      0.1573130041360855,
+      0.09196645021438599
+    ],
+    "records": [
+      1050573,
+      1051099,
+      1055211
+    ]
+  },
+  "cam": {
+    "mesh": "CAM",
+    "material": "mtBODY_CAM",
+    "textures": {
+      "txDiffuse": "cam_txDiffuse.dds"
+    },
+    "properties": {
+      "ksAmbient": 0.05087609961628914,
+      "ksDiffuse": 0.4000000059604645,
+      "ksSpecular": 0.6000000238418579,
+      "ksSpecularEXP": 25.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0
+    },
+    "bounds": [
+      -0.099595807492733,
+      -0.05680080130696297,
+      -0.035625528544187546,
+      -0.09096357226371765,
+      -0.04922346770763397,
+      -0.027619648724794388
+    ],
+    "records": [
+      1058295,
+      1071645,
+      1142341
+    ]
+  },
+  "camCover": {
+    "mesh": "CAM_COVER",
+    "material": "mtBODY_CAM_LENS",
+    "textures": {
+      "txDiffuse": "camCover_txDiffuse.dds"
+    },
+    "properties": {
+      "ksAmbient": 0.05087609961628914,
+      "ksDiffuse": 0.05000000074505806,
+      "ksSpecular": 0.10000000149011612,
+      "ksSpecularEXP": 150.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "alpha": 0.15000000596046448
+    },
+    "bounds": [
+      -0.09716620296239853,
+      -0.05619429424405098,
+      -0.03418397158384323,
+      -0.09233178198337555,
+      -0.054529957473278046,
+      -0.02907150238752365
+    ],
+    "records": [
+      1195363,
+      1197409,
+      1209697
+    ]
+  },
+  "camFabric": {
+    "mesh": "CAM_FABRIC",
+    "material": "mtBODY_CAM_HOUSE",
+    "textures": {
+      "txDiffuse": "camFabric_txDiffuse.dds",
+      "txNormal": "camFabric_txNormal.dds",
+      "txMaps": "camFabric_txMaps.dds"
+    },
+    "properties": {
+      "ksAmbient": 0.05087609961628914,
+      "ksDiffuse": 0.30000001192092896,
+      "ksSpecular": 0.05000000074505806,
+      "ksSpecularEXP": 25.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.0,
+      "fresnelEXP": 0.0,
+      "fresnelMaxLevel": 0.0,
+      "nmObjectSpace": 0.0,
+      "isAdditive": 0.0,
+      "useDetail": 0.0,
+      "detailUVMultiplier": 0.0,
+      "shadowBiasMult": 0.0,
+      "damageZones": 0.0,
+      "dirt": 0.0,
+      "sunSpecular": 0.0,
+      "sunSpecularEXP": 0.0
+    },
+    "bounds": [
+      -0.107742078602314,
+      -0.05609634891152382,
+      -0.04276864603161812,
+      -0.08501271903514862,
+      -0.04043225198984146,
+      -0.020917430520057678
+    ],
+    "records": [
+      1218913,
+      1227019,
+      1263799
+    ]
+  },
+  "band": {
+    "mesh": "GLASS_EXT_FX",
+    "material": "mtGLASS_EXT",
+    "textures": {
+      "txDiffuse": "band_txDiffuse.dds",
+      "txNormal": "band_txNormal.dds",
+      "txMaps": "band_txMaps.dds"
+    },
+    "properties": {
+      "emMirrorDir": 0.0,
+      "emMirrorOffset": 0.0,
+      "emAlphaFromDiffuse": 1.0,
+      "ksAmbient": 0.3499999940395355,
+      "ksDiffuse": 0.20000000298023224,
+      "ksSpecular": 0.25,
+      "ksSpecularEXP": 500.0,
+      "ksEmissive": 0.0,
+      "ksAlphaRef": 0.0,
+      "fresnelC": 0.019999999552965164,
+      "fresnelEXP": 4.0,
+      "fresnelMaxLevel": 1.0,
+      "extColoredReflection": 0.0,
+      "extColoredReflectionNorm": 0.0,
+      "extColoredBaseReflection": 0.0,
+      "isAdditive": 0.0,
+      "useDetail": 0.0,
+      "detailUVMultiplier": 0.0,
+      "shadowBiasMult": 0.0,
+      "nmObjectSpace": 0.0,
+      "sunSpecular": 5.0,
+      "sunSpecularEXP": 800.0,
+      "ksEmissive1": 0.0,
+      "ksEmissive2": 0.0,
+      "ksEmissive3": 0.0,
+      "ksEmissive4": 0.0,
+      "ksEmissive5": 0.0,
+      "ksEmissive6": 0.0,
+      "emChannelsMode": 0.0,
+      "emMirrorChannel3As4": 0.0,
+      "emMirrorChannel2As5": 0.0,
+      "emMirrorChannel1As6": 0.0,
+      "emSkipDiffuseMap": 0.0,
+      "extBounceBack": 0.0
+    },
+    "bounds": [
+      -0.1336498111486435,
+      -0.16988137364387512,
+      -0.08426626771688461,
+      0.13899226486682892,
+      5.042180418968201e-05,
+      0.026006929576396942
+    ],
+    "records": [
+      1291384,
+      1307766,
+      1416714
+    ]
+  },
+  "sha256": "2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9"
+}

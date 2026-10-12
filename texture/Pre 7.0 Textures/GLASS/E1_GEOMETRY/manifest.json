@@ -1,0 +1,37 @@
+{
+  "model": "visors/visor_lando_2025Champion_maxquality_diet_face.kn5",
+  "sha256": "48f99994ec771682dacd3c16807255e1054d8cbd390197a6788e20837467899f",
+  "width": 1024,
+  "meshes": {
+    "frame": {
+      "name": "BODY_FRAME",
+      "vertices": 35586,
+      "triangles": 65289,
+      "nodes": 16383
+    },
+    "rubber": {
+      "name": "BODY_GLASSLINE",
+      "vertices": 23216,
+      "triangles": 43672,
+      "nodes": 16383
+    },
+    "fabric": {
+      "name": "BODY_FABRIC",
+      "vertices": 34869,
+      "triangles": 65415,
+      "nodes": 16383
+    },
+    "face": {
+      "name": "DRIVER_FACE",
+      "vertices": 1636,
+      "triangles": 3088,
+      "nodes": 1023
+    },
+    "balaklava": {
+      "name": "DRIVER_BALAKLAVA",
+      "vertices": 636,
+      "triangles": 1098,
+      "nodes": 403
+    }
+  }
+}

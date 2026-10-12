@@ -1,0 +1,28 @@
+{
+  "model": "visors\\visor_lando_2025Champion_maxquality_diet_face.kn5",
+  "sha256": "2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",
+  "mask_sha256": "08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",
+  "mesh": "GLASS_RAINFX",
+  "width": 2048,
+  "height": 512,
+  "valid_pixels": 479998,
+  "padded_pixels": 512593,
+  "coated_fraction": 0.6591548323631287,
+  "coat_distance_m": 0.0015,
+  "int_ext_max_distance_m": 0.005144644994288683,
+  "units": "metres per raw KN5 UV unit",
+  "uv_domain": [
+    0,
+    1,
+    -1,
+    0
+  ],
+  "wrap": false,
+  "du_alpha": "valid >= 1; conservative safe step in source mask texels",
+  "step_limit_max_mask_texels": 319,
+  "data_version": "rain-surface-v2",
+  "micro_cell_extent_per_local_metre": [
+    10.235960794267701,
+    9.661087603222654
+  ]
+}

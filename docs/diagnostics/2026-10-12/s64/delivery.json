@@ -1,0 +1,12 @@
+{
+  "files": {
+    "realvisor.lua": "2fb7fc4033eff49e3aa6968ac7d1639691e179df9e6547fc5fd8dedc0a22eddf",
+    "native_glass_occlusion.lua": "f71a8dcb7a2a808b640dfd90f47b866f28572c78c85b02b86ccb842e15585ee3",
+    "native_glass_state.lua": "80c6e87c9b43f6653602e4019d69fabba564589574af14bfe277774cf5de3b02",
+    "shaders/rainSurfaceMetric.hlsl": "4dde640cbb36c4d1c41d8a64d4849e9d6d018269d2a918511547cf723a7c3ed3",
+    "shaders/rainVisorLayer.hlsl": "9879add8a4671cdd7b55103e719a2e8743813a585f6cb2c1542d0a36e2dae52a",
+    "shaders/rainVisorOptics.hlsl": "480f1253037029d3dd17d3f629760df7241a71ecbaa3a418089d1be004fcff8f"
+  },
+  "settings_unchanged": true,
+  "game_fps_measured": false
+}

@@ -51,10 +51,14 @@ lua.execute('''
                 v2={value=vec2(2,3),readOk=true},v3={value=vec3(4,5,6),readOk=true},
                 unread={value=0,readOk=false}}}
     end
-    e=editor('BODY_FRAME');custom=editor('GLASS_INT_OVERLAY')
-    runtime={RAIN_VISOR_LAYER_TEST=true,RAIN_VISOR_LAYER_GAIN=1.23456789123456,UNRELATED=99}
+    e=editor('FRAME_MAIN');custom=editor('GLASS_INT_FX')
+    runtime={RAIN_VISOR_LAYER_TEST=true,RAIN_VISOR_LAYER_GAIN=1.23456789123456,
+        RAIN_VISOR_OPTICS_ENABLED=true,RAIN_VISOR_OPTICS_DUST_GAIN=.015,
+        RAIN_VISOR_OPTICS_NATIVE_SOURCE=true,RAIN_VISOR_OPTICS_SOURCE_WIDTH=1536,UNRELATED=99,
+        RAIN_SURFACE_COAT_ADHESION=.55,RAIN_SURFACE_COAT_RETENTION=.65,
+        RAIN_SURFACE_GLASS_EXTRA_DRAG=1.5,RAIN_MIRROR_WATER=true}
     deps={path='settings_mats.ini',editors={e,custom},runtime=runtime,
-        customItem=function(name) if name=='GLASS_INT_OVERLAY' then return {} end end,
+        customItem=function(name) if name=='GLASS_INT_FX' then return {} end end,
         read=function() error('Unexpected reread') end,
         apply=function(ed) applied[ed.meshName]=ed.values;return true end}
 ''')
@@ -64,15 +68,23 @@ lua.execute('''
     st=factory(deps)
     assert(st:load() and files[deps.path] and writes==1)
     assert(not files[deps.path]:find('unread=') and not files[deps.path]:find('UNRELATED'))
-    assert(not files[deps.path]:find('MESH:GLASS_INT_OVERLAY'))
-    assert(st:save(true) and separated==1 and not applied.GLASS_INT_OVERLAY)
+    assert(not files[deps.path]:find('MESH:GLASS_INT_FX'))
+    assert(st:save(true) and separated==1 and not applied.GLASS_INT_FX)
     e.values.f.value=0;e.values.b.value=true;e.values.v2.value=vec2(0,0);e.values.v3.value=vec3(0,0,0)
     runtime.RAIN_VISOR_LAYER_GAIN=0;runtime.RAIN_VISOR_LAYER_TEST=false
+    runtime.RAIN_VISOR_OPTICS_ENABLED=false;runtime.RAIN_VISOR_OPTICS_DUST_GAIN=0
+    runtime.RAIN_VISOR_OPTICS_NATIVE_SOURCE=false;runtime.RAIN_VISOR_OPTICS_SOURCE_WIDTH=0
+    runtime.RAIN_SURFACE_COAT_ADHESION=0;runtime.RAIN_SURFACE_COAT_RETENTION=0
+    runtime.RAIN_SURFACE_GLASS_EXTRA_DRAG=0;runtime.RAIN_MIRROR_WATER=false
     assert(st:load())
     assert(e.values.f.value==0.12345678912345678 and e.values.b.value==false)
     assert(e.values.v2.value.y==3 and e.values.v3.value.z==6)
     assert(runtime.RAIN_VISOR_LAYER_GAIN==1.23456789123456 and runtime.RAIN_VISOR_LAYER_TEST)
-    files[deps.path]=files[deps.path]..'\\n[MESH:ABSENT]\\nf=7\\n[MESH:BODY_FRAME]\\nf=nan\\nb=invalid\\n'
+    assert(runtime.RAIN_VISOR_OPTICS_ENABLED and runtime.RAIN_VISOR_OPTICS_DUST_GAIN==.015)
+    assert(runtime.RAIN_VISOR_OPTICS_NATIVE_SOURCE and runtime.RAIN_VISOR_OPTICS_SOURCE_WIDTH==1536)
+    assert(runtime.RAIN_SURFACE_COAT_ADHESION==.55 and runtime.RAIN_SURFACE_COAT_RETENTION==.65)
+    assert(runtime.RAIN_SURFACE_GLASS_EXTRA_DRAG==1.5 and runtime.RAIN_MIRROR_WATER)
+    files[deps.path]=files[deps.path]..'\\n[MESH:ABSENT]\\nf=7\\n[MESH:FRAME_MAIN]\\nf=nan\\nb=invalid\\n'
     local previous=e.values.f.value
     assert(st:load() and e.values.f.value==previous and e.values.b.value==false)
     assert(files[deps.path]:find('MESH:ABSENT') and files[deps.path]:find('f=7'))

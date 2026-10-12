@@ -1,0 +1,15 @@
+[
+  {
+    "pass": "stateReadback",
+    "textures": [
+      "txRainState",
+      "txRainStateMeta"
+    ],
+    "uniforms": [
+      "gRainReadbackHeight",
+      "gRainReadbackWidth",
+      "gRainStateCount",
+      "gRainStateVelocityEncodeRange"
+    ]
+  }
+]

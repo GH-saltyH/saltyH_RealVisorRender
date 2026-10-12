@@ -1,0 +1,10 @@
+{
+  "physical_gpu_code_byte_identical": true,
+  "settings_and_accepted_lighting_unchanged": true,
+  "fast_transport_preview_and_cache": true,
+  "supported_long_trail_connects": true,
+  "occlusion_resize_and_pending": true,
+  "live_rain_guard_and_readonly_state": true,
+  "actual_INT_EXT_after_rain_and_pending_capture_gate": true,
+  "GPU_sweep_prepared_before_wipe": true
+}

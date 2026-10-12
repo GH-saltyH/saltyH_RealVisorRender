@@ -1,0 +1,14 @@
+[
+  {
+    "case": "actual 64px dense to 32px sparse bounds bins: identical water RGB",
+    "max_delta": 0.0,
+    "mean_candidates_old": 29.875,
+    "mean_candidates_new": 9.625,
+    "slots": 384
+  },
+  {
+    "case": "swept GPU wipe survives zero CPU stamps/short recovery without changing water RGB",
+    "swept_fraction": 0.0229339599609375,
+    "mean_candidates": 9.875
+  }
+]

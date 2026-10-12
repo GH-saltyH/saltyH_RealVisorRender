@@ -1,0 +1,101 @@
+--- s66 baseline/visor_optics.lua
++++ visor_optics.lua
+@@ -149,7 +149,7 @@
+         for pass,name in ipairs({'hit','surface','material','glass'}) do
+             local draws={}
+             for id=1,(name=='surface' or name=='material') and #keys or 1 do
+-                local p={async=false,transform='original',mesh=d.editor('GLASS_INT_FX').targetMesh,
++                local p={async=true,transform='original',mesh=d.editor('GLASS_INT_FX').targetMesh,
+                     shader='#define OPT_BAKE_PASS '..(pass-1)..'\n'..code,textures={},values={gOptEye=self.bakeEye}}
+                 bindBake(p,pose,pass-1,(name=='surface' or name=='material') and id or nil)
+                 draws[#draws+1]=p
+@@ -207,7 +207,7 @@
+                 bindBake(p,pose,self.step,(name=='surface' or name=='material') and id or nil)
+                 p.values.gOptEye=eyeWorld
+             end
+-            requireUpdate(self[name]:update(eyeWorld,look,up,self.bakeFov))
++            requireUpdate((d.captureUpdate or function(shot,...) return shot:update(...) end)(self[name],eyeWorld,look,up,self.bakeFov))
+             if name=='hit' then
+                 self.bakePose=pose:clone();self.bakeEye=eyeWorld:clone()
+                 self.bakeLook=look:clone();self.bakeUp=up:clone()
+@@ -218,7 +218,7 @@
+                 self.shA=canvas(self.w,self.h,1);self.shB=canvas(self.w,self.h,1)
+                 self.aoA=canvas(self.w,self.h,1);self.aoB=canvas(self.w,self.h,1)
+                 self.shA:clear(rgbm(0,0,0,0));self.aoA:clear(rgbm(0,0,0,0))
+-                self.visibilityParams={async=false,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsTrace')..'\n'..shader('visorOpticsVisibility'),textures={},values={}}
++                self.visibilityParams={async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsTrace')..'\n'..shader('visorOpticsVisibility'),textures={},values={}}
+             end
+             return
+         end
+@@ -248,7 +248,7 @@
+         self.maskTexture=useTexture
+         self.mask=self.mask or canvas(useTexture and 2048 or 512,useTexture and 512 or 128,useTexture and 12 or 10,
+             useTexture and render.TextureFormat.R8G8B8A8.UNorm or nil)
+-        requireUpdate(self.mask:updateSceneWithShader({async=false,blendMode=render.BlendMode.Opaque,
++        requireUpdate(self.mask:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,
+             shader='#define OPT_MASK_TEXTURE '..(useTexture and '1' or '0')..'\n'..shader('visorOpticsMask'),
+             textures=useTexture and {txOptPattern=d.folder..'/texture/GLASS/visor_contamination_rgba.dds'} or {},values={
+             gOptSeed=r.RAIN_VISOR_OPTICS_SEED,gOptDensity=r.RAIN_VISOR_OPTICS_DUST_DENSITY,
+@@ -266,7 +266,7 @@
+                 render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+             self.probeShot:setOriginalLighting(true);self.probeShot:setShadersType(render.ShadersType.Main)
+             self.probeShot:setOpaqueAlphaFix(true)
+-            self.probeExpectedParams={mesh=probe.captureRefs,async=false,transform='original',
++            self.probeExpectedParams={mesh=probe.captureRefs,async=true,transform='original',
+                 shader=shader('visorOpticsProbe'),textures={},values={}}
+             self.probeExpected=ac.GeometryShot({opaque=function() requireUpdate(safeDraw(self.probeExpectedParams)) end},
+                 vec2(32,32),6,true,render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+@@ -307,7 +307,7 @@
+         end
+         self.sunA=self.sunA or canvas(1,1,1);self.sunB=self.sunB or canvas(1,1,1)
+         if not self.sunReady then self.sunA:clear(rgbm(self.externalShadow,self.externalShadow,self.externalShadow,1)) end
+-        requireUpdate(self.sunB:updateSceneWithShader({async=false,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsSun'),
++        requireUpdate(self.sunB:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsSun'),
+             textures={txOptDepth='dynamic::depth',txOptPrevious=self.sunA,txOptProbe=self.probeReady and self.probeShot or false,
+                 txOptProbeExpected=self.probeReady and self.probeExpected or false},values={gOptExternalShadow=self.externalShadow,
+                 gOptProbeReady=self.probeReady and 1 or 0,gOptSunLum=.2126*sim.lightColor.r+.7152*sim.lightColor.g+.0722*sim.lightColor.b,
+@@ -366,7 +366,7 @@
+         requireUpdate(d.probeUpdate(self.sourceShot,refs,origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV))
+         self.sourceView=self.sourceShot:viewMatrix():clone();self.sourceProjection=self.sourceShot:projectionMatrix():clone()
+         self.sourceOrigin=origin:clone();self.sourceOriginLocal=originLocal:clone()
+-        requireUpdate(self.sourceDepth:update(origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV))
++        requireUpdate((d.captureUpdate or function(shot,...) return shot:update(...) end)(self.sourceDepth,origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV))
+         self.sourceReady=true
+         self.sourceStatus=string.format('Native HDR source %dx%d: supplemental light, four-tap depth/ID confidence; BVH image retained',width,height)
+     end
+@@ -377,7 +377,7 @@
+         self.bright=self.bright or canvas(w,h,mips)
+         self.brightW=w;self.brightH=h
+         self.brightMaxMip=mips-1
+-        requireUpdate(self.bright:updateSceneWithShader({async=false,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsBright'),
++        requireUpdate(self.bright:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsBright'),
+             textures={txOptScene=scene,txOptAverage=scene},values={gOptSceneMaxMip=maxMip,
+                 gOptBrightInvSource=vec2(1/d.width(),1/d.height()),
+                 gOptBrightThreshold=r.RAIN_VISOR_OPTICS_GHOST_THRESHOLD,gOptBrightRelative=r.RAIN_VISOR_OPTICS_BRIGHT_RELATIVE}}))
+@@ -407,7 +407,7 @@
+         local sun=rgb(sim.lightColor.r,sim.lightColor.g,sim.lightColor.b)
+         local tint=rgb(r.RAIN_VISOR_OPTICS_TINT_R,r.RAIN_VISOR_OPTICS_TINT_G,r.RAIN_VISOR_OPTICS_TINT_B)
+         if self.ready and r.RAIN_VISOR_OPTICS_TIER>=1 then
+-            self.lighting=self.lighting or {async=false,blendMode=render.BlendMode.Opaque,shader='#define OPT_LIGHTING 1\n'..shader('rainVisorOptics'),textures={},values={}}
++            self.lighting=self.lighting or {async=true,blendMode=render.BlendMode.Opaque,shader='#define OPT_LIGHTING 1\n'..shader('rainVisorOptics'),textures={},values={}}
+             local p=self.lighting;p.textures={txOptHit=self.hit,txOptSurface=self.surface,txOptMaterial=self.material,
+                 txOptSH=self.shA,txOptAO=self.aoA,txOptSunVisibility=self.sunA,txOptScene=scene,txOptGlass=self.glass,
+                 txOptNative=self.sourceReady and self.sourceShot or false,txOptNativeDepth=self.sourceReady and self.sourceDepth or false}
+@@ -427,7 +427,7 @@
+             requireUpdate(self.radiance:updateSceneWithShader(p));requireUpdate(self.radiance:mipsUpdate())
+             if self.statsRequested and not self.statsPending then self:readStats(scene,maxMip,localLight) end
+         end
+-        self.composite=self.composite or {async=false,transform='original',shader='#define OPT_LIGHTING 0\n'..shader('rainVisorOptics'),textures={},values={}}
++        self.composite=self.composite or {async=true,transform='original',shader='#define OPT_LIGHTING 0\n'..shader('rainVisorOptics'),textures={},values={}}
+         local p=self.composite;p.mesh=e.targetMesh
+         p.textures={txOptScene=scene,txOptMask=self.mask,txOptSunVisibility=self.sunA,
+             txOptBright=self.bright,
+@@ -468,7 +468,7 @@
+     end
+     function st:readStats(scene,maxMip,localLight)
+         self.statsCanvas=self.statsCanvas or canvas(10,1,1,render.TextureFormat.R32.Float)
+-        requireUpdate(self.statsCanvas:updateSceneWithShader({async=false,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsStats'),textures={
++        requireUpdate(self.statsCanvas:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsStats'),textures={
+             txOptHit=self.hit,txOptAO=self.aoA,txOptSH=self.shA,txOptSunVisibility=self.sunA,
+             txOptScene=scene,txOptRadiance=self.radiance},values={gOptSceneMaxMip=maxMip,gOptLocalLight=localLight,
+                 gOptRadianceMaxMip=(self.mips or 1)-1}}))

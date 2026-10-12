@@ -1,0 +1,212 @@
+{
+  "shader": "ksPerPixelNM_UVMult",
+  "profile": {
+    "ksAmbient": 0.15,
+    "ksDiffuse": 0.1,
+    "ksSpecular": 0.85,
+    "ksSpecularEXP": 235,
+    "ksEmissive": [
+      0,
+      0,
+      0
+    ],
+    "ksAlphaRef": 0,
+    "diffuseMult": 0,
+    "normalMult": 0,
+    "fresnelC": 0.04,
+    "fresnelEXP": 5.208333333333334,
+    "fresnelMaxLevel": 0.8,
+    "extColoredReflection": 0,
+    "extColoredReflectionNorm": 0
+  },
+  "profile_gamma": {
+    "ksAmbient": 0.1,
+    "ksDiffuse": 0.1,
+    "ksSpecular": 0.85,
+    "ksSpecularEXP": 235,
+    "ksEmissive": [
+      0,
+      0,
+      0
+    ],
+    "ksAlphaRef": 0,
+    "diffuseMult": 0,
+    "normalMult": 0,
+    "fresnelC": 0.2,
+    "fresnelEXP": 2.367424242424242,
+    "fresnelMaxLevel": 0.8944271909999159,
+    "extColoredReflection": 0,
+    "extColoredReflectionNorm": 0
+  },
+  "alternate_shader": "ksPerPixelMultiMap_emissive",
+  "alternate_profile": {
+    "ksAmbient": 0.15,
+    "ksDiffuse": 0.1,
+    "ksSpecular": 0.85,
+    "ksSpecularEXP": 255,
+    "ksEmissive": [
+      0,
+      0,
+      0
+    ],
+    "ksAlphaRef": 0,
+    "fresnelC": 0.04,
+    "fresnelEXP": 5,
+    "fresnelMaxLevel": 0.8,
+    "isAdditive": 0,
+    "useDetail": 0,
+    "detailUVMultiplier": 1,
+    "nmObjectSpace": 0,
+    "emAlphaFromDiffuse": -1,
+    "emSkipDiffuseMap": 0,
+    "emChannelsMode": 0,
+    "extColoredReflection": 0,
+    "extColoredReflectionNorm": 0,
+    "shadowBiasMult": 0
+  },
+  "source_sha256": {
+    "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\ModelWorks\\_2_blender_f1-helmet-lando_2025championWinner\\texture\\MRR_BODY_WING_2K_txNormal.png": "df17500a01d35dc60c40dcbbf82d20ddeb7efa3d62ab43ff6e21d0a921223185",
+    "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\ModelWorks\\_2_blender_f1-helmet-lando_2025championWinner\\texture\\MRR_WING_DIFF.dds": "e690780d1a7fe23254849a4174876b88044af2bf15ed48bf528bbb5c7c8a3fc2",
+    "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\ModelWorks\\_2_blender_f1-helmet-lando_2025championWinner\\visor_lando_2025Champion_maxquality.blend": "446713538e5e3d0729175159ebf267d0215635bdc3363555c60f95a2d75ae42b",
+    "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\ModelWorks\\_2_blender_f1-helmet-lando_2025championWinner\\Final\\visor_lando_2025Champion_maxquality_Full.fbx.ini": "7cb27f685e7e0823c73323847a131b0970af3bb3b3162ab504e1645794377d77"
+  },
+  "originals_unchanged": true,
+  "uv_inventory": {
+    "WING_04": {
+      "uv_min": [
+        0.0,
+        0.0
+      ],
+      "uv_max": [
+        0.9999982118606567,
+        0.3252556025981903
+      ],
+      "materials": [
+        {
+          "name": "mtBODY_WING_MIRROR",
+          "images": [
+            {
+              "node": "Image Texture",
+              "image": "BODY_WING_REAR_4K_txNormal.png",
+              "path": "E:\\_db_OS_Core\\다운로드\\LANDO NORRIS 2025 HELMET F1 WORLD CHAMPION\\collection\\BODY_WING_REAR_4K_txNormal.png"
+            }
+          ]
+        }
+      ]
+    },
+    "WING_TOPMOST": {
+      "uv_min": [
+        0.0495024099946022,
+        0.011854263022542
+      ],
+      "uv_max": [
+        0.1027975007891655,
+        0.047057874500751495
+      ],
+      "materials": [
+        {
+          "name": "mtBODY_WING_MIRROR",
+          "images": [
+            {
+              "node": "Image Texture",
+              "image": "BODY_WING_REAR_4K_txNormal.png",
+              "path": "E:\\_db_OS_Core\\다운로드\\LANDO NORRIS 2025 HELMET F1 WORLD CHAMPION\\collection\\BODY_WING_REAR_4K_txNormal.png"
+            }
+          ]
+        }
+      ]
+    },
+    "WING_TOPSIDE": {
+      "uv_min": [
+        0.010930085554718971,
+        0.0306797344237566
+      ],
+      "uv_max": [
+        0.14083558320999146,
+        0.06801045686006546
+      ],
+      "materials": [
+        {
+          "name": "mtBODY_WING_MIRROR",
+          "images": [
+            {
+              "node": "Image Texture",
+              "image": "BODY_WING_REAR_4K_txNormal.png",
+              "path": "E:\\_db_OS_Core\\다운로드\\LANDO NORRIS 2025 HELMET F1 WORLD CHAMPION\\collection\\BODY_WING_REAR_4K_txNormal.png"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "gpu_probes": {
+    "0": [
+      0.05023498088121414,
+      0.05032750591635704,
+      0.05044059082865715,
+      0.06998850405216217
+    ],
+    "45": [
+      0.0346488356590271,
+      0.034745704382658005,
+      0.03486410155892372,
+      0.07216247916221619
+    ],
+    "75": [
+      0.023198014125227928,
+      0.023797238245606422,
+      0.024529624730348587,
+      0.2865152359008789
+    ],
+    "85": [
+      0.02227901853621006,
+      0.02375089004635811,
+      0.025549843907356262,
+      0.6591768860816956
+    ]
+  },
+  "dark": [
+    0.0,
+    0.0,
+    0.0,
+    0.06998850405216217
+  ],
+  "gamma_front": [
+    0.014503676444292068,
+    0.014596201479434967,
+    0.014709287323057652,
+    0.06998850405216217
+  ],
+  "multimap_front": [
+    0.050025131553411484,
+    0.05011765658855438,
+    0.05023074150085449,
+    0.06998850405216217
+  ],
+  "multimap_gamma_front": [
+    0.014503318816423416,
+    0.014595843851566315,
+    0.014708929695189,
+    0.06998850405216217
+  ],
+  "diffuse_alpha": {
+    "clear": 0.011764705882352941,
+    "balanced": 0.03137254901960784,
+    "defined": 0.06274509803921569
+  },
+  "normal_difference_max": 1.0488331317901611,
+  "default_normal": "Flat tangent normal: existing mesh geometry supplies curvature/bevels.",
+  "optional_normal": "Existing 2K normal normalized, same UV layout; legacy UV only.",
+  "fixture_scope": "Local native shaders on D3D11 WARP; synthetic UV cylinder/studio cube; no game/KN5/sorting test.",
+  "dds": "RGBA8 UNORM full mip chain: constants 4x4/3 levels, optional normal 2048x2048/12 levels.",
+  "output_sha256": {
+    "neutral_black.dds": "f56ca6e31abd47be92a91ed7c83a1babb2e1396851747978efe0c3437f4d170c",
+    "neutral_white.dds": "37f551237b9851b6e16cd20c0ec45339bdf2e8650ccd65338c0f6469a1b64577",
+    "WING_balanced_diffuse.dds": "15047ebc32739e104fc414988acc7990ef91bdfebc1af77da243c302efcbac1d",
+    "WING_clear_diffuse.dds": "99a85de3efbfe2e7065c2a109ad6c90e1594ab33cfda0a33961395ac27ace655",
+    "WING_defined_diffuse.dds": "b86d66628dcf70ece682e0ff56d5979a3d2cbd9bacb4a2e64b2a13562075e308",
+    "WING_flat_normal.dds": "179dfe61a1c8eacc2ba8a7028480c826cbd025f5988b4181f80ddefdabb2a243",
+    "WING_legacyUV_normal.dds": "a21419d154521df3937de8bd0c75899d26650e135adc0e1798b6e1c50f825a6e",
+    "WING_uniform_maps.dds": "a8b624634303c3b6fd82d08c75b67cf4e38e78211f5e505fed426a9b48c8d413"
+  }
+}

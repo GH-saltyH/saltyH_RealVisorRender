@@ -1,0 +1,537 @@
+--- s63-baseline/realvisor.lua
++++ realvisor.lua
+@@ -9091,19 +9091,18 @@
+             and state.generation[index] or 0
+         local old = state.trailMaskLast[index]
+         if (rainDynamicStateAlive[index] or 0) > 0.5 then
+-            local u = (rainDynamicStateU[index] or 0.0)
+-                + (rainDynamicStateVelocityU[index] or 0.0)
+-                    * predictedAge
+-            local v = (rainDynamicStateV[index] or -1.0)
+-                + (rainDynamicStateVelocityV[index] or 0.0)
+-                    * predictedAge
++            local u,v=state.surface:preview(rainDynamicStateU[index] or -1,
++                rainDynamicStateV[index] or -2,rainDynamicStateVelocityU[index] or 0,
++                rainDynamicStateVelocityV[index] or 0,predictedAge)
+             local radius = rainDynamicStateRadius[index] or 0.0
+-            if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
+-                if old and old.generation ~= generation then old = nil end
++            if state.surface:valid(u,v) then
++                if old and (old.generation ~= generation
++                    or not state.surface:segment(old.u,old.v,u,v)) then old = nil end
+                 local du = old and u - old.u or 0.0
+                 local dv = old and v - old.v or 0.0
+                 local minimum = math.max(radius * 0.4, 1.0 / size)
+-                local distance2 = du * du + dv * dv
++                local distance = state.surface:length(u,v,du,dv)
++                local distance2 = distance * distance
+                 if not old or distance2 >= minimum * minimum then
+                     -- New births stamp only at their current position.
+                     -- Subsequent movement leaves the ordinary trail.
+@@ -9463,7 +9462,7 @@
+ --        one by one; small satellites are thrown beyond the rim.
+ -- `quad(cx, cy, rx, ry, ux, uy, code, energy, amp)`; amp scales height.
+ rainDynamicSceneCopyState.waterFieldSplashV2 = function(quad, origin, scale,
+-    t, minKernel, ampScale)
++    t, minKernel, ampScale, surface, headSize)
+     local r = cfg.RUNTIME
+     local frac = rainDynamicSurfaceFrac
+     local function sstep(a, b, x)
+@@ -9473,6 +9472,11 @@
+     local Rf, E = origin.radius, origin.energy or origin.amount
+     local sa, sb = origin.seedA, origin.seedB
+     local x, y = origin.x, origin.y
++    if not surface:valid(x/headSize,y/headSize-1) then return 0 end
++    local function piece(dx,dy,rx,ry,ux,uy,code,energy,amp)
++        local cx,cy=surface:shift(x,y,dx,dy,headSize)
++        quad(cx*scale,cy*scale,rx*scale,ry*scale,ux,uy,code,energy,amp)
++    end
+     -- These values depend only on the drop life. Reuse them for every
+     -- animation frame and for the final persistent-trail stamp.
+     local pieces = origin.splashPieces
+@@ -9539,8 +9543,7 @@
+                 * (1.0 - 0.55 * brk) * (0.8 + 0.4 * E))
+             -- Intact ring: stretched along the rim; broken: round beads.
+             local along = rr * (1.0 + (0.8 + 0.6 * h2) * (1.0 - brk))
+-            quad((x + ca * d) * scale, (y + sn * d) * scale, along * scale,
+-                rr * scale, -sn, ca, rr / 32.0, 1.0, ringOn * amp0)
++            piece(ca*d,sn*d,along,rr,-sn,ca,rr/32.0,1.0,ringOn*amp0)
+             count = count + 1
+         end
+     end
+@@ -9553,9 +9556,7 @@
+             local h2 = satellites[j + 1]
+             local d = Rp * (1.05 + 0.9 * h2 * fly)
+             local rr = math.max(minKernel, Rf * (0.08 + 0.14 * h2))
+-            quad((x + satellites[j + 2] * d) * scale,
+-                (y + satellites[j + 3] * d) * scale,
+-                rr * scale, rr * scale, 1.0, 0.0, rr / 32.0, 1.0, amp0)
++            piece(satellites[j+2]*d,satellites[j+3]*d,rr,rr,1,0,rr/32.0,1.0,amp0)
+             count = count + 1
+         end
+     end
+@@ -9683,6 +9684,29 @@
+ end
+ 
+ -- Draws every head stamp as soft kernels. Called inside canvas:update().
++rainDynamicSceneCopyState.waterFieldDrawCpuSplash = function(state,target,size)
++    local list=state.gpuSplashList or {}
++    local drawn=0
++    if #list>0 then
++        local kernel=state.waterKernel(state)
++        local ks=math.max(1,cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
++        local minimum=math.max(.5,cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TEAR_MIN_KERNEL_TEXELS)
++        local q1,q2,q3,q4=vec2(),vec2(),vec2(),vec2()
++        local color=rgbm(0,1,0,1)
++        state.surface:updateAtlas(target,size,function()
++            local function quad(cx,cy,rx,ry,ux,uy,code,energy,amp)
++                if not state.surface:quad(q1,q2,q3,q4,cx,cy,rx*ks,ry*ks,ux,uy,size) then return end
++                color.r=math.min(code,1);color.g=1;color.b=energy;color.mult=amp or 1
++                if color.mult>.005 then ui.drawImageQuad(kernel,q1,q2,q3,q4,color) end
++            end
++            for _,item in ipairs(list) do
++                drawn=drawn+state.waterFieldSplashV2(quad,state.tearOrigin[item[1]],1,item[6],
++                    minimum,1,state.surface,size)
++            end
++        end)
++    end
++    state.waterFieldKernels=drawn
++end
+ rainDynamicSceneCopyState.waterFieldDrawStamps = function(state, stamps,
+     size, sim)
+     local kernel = state.waterKernel(state)
+@@ -9694,7 +9718,7 @@
+     local function kernelQuad(cx, cy, rx, ry, ux, uy, code, energy, amp)
+         local ax, ay = rx * ks, ry * ks
+         local vx, vy = -uy, ux
+-        state.surface:quad(q1,q2,q3,q4,cx,cy,ax,ay,ux,uy,size)
++        if not state.surface:quad(q1,q2,q3,q4,cx,cy,ax,ay,ux,uy,size) then return end
+         color.r = math.min(code, 1.0)
+         color.g = 1.0
+         color.b = energy
+@@ -9806,7 +9830,7 @@
+                                 origin.energy, st, generation }
+                     else
+                         drawn = drawn + state.waterFieldSplashV2(kernelQuad,
+-                            origin, 1.0, st, tearMinKernel, 1.0)
++                            origin, 1.0, st, tearMinKernel, 1.0, state.surface, size)
+                     end
+                     local back = math.max(0.0, math.min(1.0, (st - 0.7) / 0.3))
+                     bodyAmp = back * back * (3.0 - 2.0 * back)
+@@ -10199,7 +10223,7 @@
+     local function trailQuad(cx, cy, rx, ry, ux, uy, code, energy, amp)
+         local ax, ay = rx * ks, ry * ks
+         local vx, vy = -uy, ux
+-        state.surface:quad(q1,q2,q3,q4,cx,cy,ax,ay,ux,uy,size)
++        if not state.surface:quad(q1,q2,q3,q4,cx,cy,ax,ay,ux,uy,size) then return end
+         color.r = math.min(code, 1.0)
+         color.g = 1.0
+         color.b = energy
+@@ -10254,7 +10278,7 @@
+                     -- Final scattered beads only (no centre, broken rim).
+                     trails = trails + state.waterFieldSplashV2(splashQuad,
+                         item.origin, scale, 1.0,
+-                        tearMinKernel / math.max(scale, 0.05), 0.85)
++                        tearMinKernel / math.max(scale, 0.05), 0.85, state.surface, headSize)
+                 end
+             end
+             color.mult = 1.0
+@@ -10300,7 +10324,8 @@
+                     cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_FORM))
+                 local rr = R * width * (1.0 + widen * form)
+                 local fx, fy = x, y
+-                if lastGen[index] == generation and lastX[index] then
++                if lastGen[index] == generation and lastX[index]
++                    and state.surface:segment(lastX[index]/size,lastY[index]/size-1,x/size,y/size-1) then
+                     local dx, dy = x - lastX[index], y - lastY[index]
+                     -- Ignore teleports (respawn / readback jumps).
+                     if (state.surface:length(x/size,y/size-1,dx/size,dy/size)*size)^2 < math.max(
+@@ -10325,11 +10350,11 @@
+                     -- taper), plus a round cap only where the path starts.
+                     local hw = rr * scale * ks
+                     local vx, vy = -uy, ux
+-                    state.surface:ribbon(q1,q2,q3,q4,fx,fy,x,y,hw,ux,uy,size)
++                    local supported=state.surface:ribbon(q1,q2,q3,q4,fx,fy,x,y,hw,ux,uy,size)
+                     color.r = math.min(rr / 32.0, 1.0)
+                     color.g = 1.0
+                     color.b = form
+-                    if len > 1e-3 then
++                    if supported and len > 1e-3 then
+                         ui.drawImageQuad(ribbon, q1, q2, q3, q4, color)
+                     end
+                     if fx == x and fy == y then
+@@ -10507,6 +10532,8 @@
+ {
+     float2 pos; float R; float2 vel; float idx; float gen; float rUV;
+     if (!rgDrop(i, pos, R, vel, idx, gen, rUV)) return;
++    float reach = R * (gKs * 1.4 + max(gMaxRadii, max(gPuddleReach * 1.1, 0.6)) + 0.1) + 2.0;
++    if(any(abs(px-pos)>rgExtent(reach))) return;
+     float speed = length(vel);
+     float seedA = rgFrac(idx * 0.7548776662 + gen * 0.5698402911);
+     float seedB = rgFrac(idx * 0.6180339887 + gen * 0.4142135623);
+@@ -10619,6 +10646,7 @@
+ float4 main(PS_IN pin)
+ {
+     if (gDebug > 2.5) return float4(0.0, 0.0, 0.0, 0.0);
++    if(rainValid(float2(pin.Tex.x,pin.Tex.y-1))<.5) return 0;
+     float2 tex = pin.Tex;
+     if (gFlipY > 0.5) tex.y = 1.0 - tex.y;
+     float2 px = tex * gSize;
+@@ -10895,11 +10923,11 @@
+                 local col = (j - 1) % cols
+                 local row = math.floor((j - 1) / cols)
+                 local q1,q2,q3,q4=vec2(),vec2(),vec2(),vec2()
+-                st.surface:quad(q1,q2,q3,q4,o[2],o[3],o[8],o[8],1,0,size)
++                local supported=st.surface:quad(q1,q2,q3,q4,o[2],o[3],o[8],o[8],1,0,size)
+                 local u0,v0=col*tile/atlasW,row*tile/atlasH
+                 local u1,v1=(col+1)*tile/atlasW,(row+1)*tile/atlasH
+-                ui.drawImageQuad(drawAtlas,q1,q2,q3,q4,rgbm(1,1,1,1),
+-                    vec2(u0,v0),vec2(u1,v0),vec2(u1,v1),vec2(u0,v1))
++                if supported then ui.drawImageQuad(drawAtlas,q1,q2,q3,q4,rgbm(1,1,1,1),
++                    vec2(u0,v0),vec2(u1,v0),vec2(u1,v1),vec2(u0,v1)) end
+             end
+         end)
+     end
+@@ -11055,13 +11083,10 @@
+         if age and age >= 0.0 and age < growTime
+             and (rainDynamicStateAlive[index] or 0.0) > 0.5
+         then
+-            local u = (rainDynamicStateU[index] or -1.0)
+-                + (rainDynamicStateVelocityU[index] or 0.0)
+-                    * predictedAge
+-            local v = (rainDynamicStateV[index] or -2.0)
+-                + (rainDynamicStateVelocityV[index] or 0.0)
+-                    * predictedAge
+-            if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
++            local u,v=state.surface:preview(rainDynamicStateU[index] or -1,
++                rainDynamicStateV[index] or -2,rainDynamicStateVelocityU[index] or 0,
++                rainDynamicStateVelocityV[index] or 0,predictedAge)
++            if state.surface:valid(u,v) then
+                 local growth = math.min(age / growTime, 1.0)
+                 stamps[#stamps + 1] = {
+                     x = u * size, y = (v + 1.0) * size,
+@@ -11089,13 +11114,10 @@
+                 and state.birthSeenAt[index]
+             local age = birthAt and rainDynamicStateRenderClock - birthAt
+             if not age or age >= growTime then
+-                local u = (rainDynamicStateU[index] or -1.0)
+-                    + (rainDynamicStateVelocityU[index] or 0.0)
+-                        * predictedAge
+-                local v = (rainDynamicStateV[index] or -2.0)
+-                    + (rainDynamicStateVelocityV[index] or 0.0)
+-                        * predictedAge
+-                if u >= 0.0 and u <= 1.0 and v >= -1.0 and v <= 0.0 then
++                local u,v=state.surface:preview(rainDynamicStateU[index] or -1,
++                    rainDynamicStateV[index] or -2,rainDynamicStateVelocityU[index] or 0,
++                    rainDynamicStateVelocityV[index] or 0,predictedAge)
++                if state.surface:valid(u,v) then
+                     local radiusPx =
+                         (rainDynamicStateRadius[index] or 0.0) * size
+                     local stamp = {
+@@ -11216,12 +11238,14 @@
+         local overlayStart = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+         if #stamps > 0 and not (state.gpuHeadsActive
+                 and (cfg.RUNTIME.RAIN_GPU_HEADS_DEBUG or 0) >= 1.5) then
+-            if state.gpuHeadsActive and cfg.RUNTIME.RAIN_GPU_SPLASH then
+-                -- Metadata only: no head quads are submitted in R1.4.
++            if state.gpuHeadsActive then
++                -- GPU owns heads for both splash modes. Collect metadata once,
++                -- then draw only active CPU splashes, not every head's geometry.
+                 local splashStateStart = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+                 state.waterFieldCollectGpuSplash(state, stamps, size)
+                 state.profSplashStateMs =
+                     ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - splashStateStart) * 1000.0
++                if not cfg.RUNTIME.RAIN_GPU_SPLASH then state.waterFieldDrawCpuSplash(state,target,size) end
+             else
+                 state.profSplashStateMs = 0.0
+                 state.surface:updateAtlas(target,size,function()
+@@ -11863,6 +11887,13 @@
+     p.textures.txLayerBand = item.band or ov.src
+     p.textures.txLayerBandUV = item.bandUV or ov.src
+     p.textures.txLayerMaps = item.maps or ov.src
++    if rainDynamicSceneCopyState.nativeGlass then
++        rainDynamicSceneCopyState.nativeGlass:bind(p,'Layer',not ov.internalSource and ov.hdr==true)
++    else
++        p.textures.txLayerNativeDepth=false
++        p.values.gLayerNativeOn=0
++        p.values.gLayerNativePixelScale=vec2(1,1)
++    end
+     local v = p.values
+     local M = item.mat or 'FRAME'
+     local function mr(key, def)
+@@ -13439,9 +13470,21 @@
+     end
+     return eye,look:normalize(),up:normalize()
+ end
++rainDynamicSceneCopyState.nativeGlassLocalFrame = function()
++    if not visor or not offsetNode or not motionNode or not scaleNode or not axisRollNode then return nil end
++    local eye,look,up=vec3(),vec3(0,0,1),vec3(0,1,0)
++    -- Camera-attached hierarchy: include real G-force motion and the model
++    -- root, without subtracting large noisy world-space translations.
++    for _,node in ipairs({offsetNode,motionNode,scaleNode,axisPitchNode,axisYawNode,axisRollNode,visor}) do
++        local inverse=node:getTransformationRaw():inverse()
++        eye=inverse:transformPoint(eye);look=inverse:transformVector(look);up=inverse:transformVector(up)
++    end
++    return eye,look:normalize(),up:normalize()
++end
+ rainDynamicSceneCopyState.cachedOptics = dofile(appFolder..'/visor_optics.lua')({
+     folder=appFolder,runtime=cfg.RUNTIME,
+     editor=function(name) return rainDynamicSceneCopyState.e1SourceEditor(name) end,
++    nativeOcclusion=function(p) rainDynamicSceneCopyState.nativeGlass:bind(p,'Opt',true) end,
+     pose=function() return axisRollNode and axisRollNode:getWorldTransformationRaw() end,
+     localFrame=function() return rainDynamicSceneCopyState.opticsLocalFrame() end,
+     localTransform=function(ref) return ref:getTransformationRaw() end,
+@@ -13740,6 +13783,7 @@
+ end
+ ac.onRelease(function()
+     pcall(function() rainDynamicSceneCopyState.cachedOptics:dispose() end)
++    if rainDynamicSceneCopyState.nativeGlass then rainDynamicSceneCopyState.nativeGlass:dispose() end
+     if rainDynamicSceneCopyState.materialSettings.dirty then
+         rainDynamicSceneCopyState.materialSettings:save(false)
+     end
+@@ -13849,6 +13893,15 @@
+     end
+     if not r.RAIN_ENABLED or not r.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then return end
+     local sim = ac.getSim()
++    if phase=='pre' or phase=='post' then
++        st.nativeGlass=st.nativeGlass or dofile(appFolder..'/native_glass_occlusion.lua')({
++            owner=function() return visor end,
++            localFrame=function() return st.nativeGlassLocalFrame() end,
++            editor=function(name) return st.visorLayerEditor(name) end})
++        if not st.nativeGlass:update(sov.w,sov.h) then
++            vl.err=st.nativeGlass.error;return -- no unoccluded fallback over native glass
++        end
++    end
+     if not sim then return end
+     local mw = math.max(64, rainDynamicSceneCopyState.mainTargetWidth or 1280)
+     local mh = math.max(64, rainDynamicSceneCopyState.mainTargetHeight or 720)
+--- s63-baseline/rain_surface.lua
++++ rain_surface.lua
+@@ -72,19 +72,54 @@
+         end
+         local x=math.max(0,math.min(2047,math.floor(u*2048)))
+         local y=math.max(0,math.min(511,math.floor((v+1)*512)));local i=(y*2048+x)*4
+-        return tonumber(data.p[i]),tonumber(data.p[i+1]),tonumber(data.p[i+2])
++        return tonumber(data.p[i]),tonumber(data.p[i+1]),tonumber(data.p[i+2]),tonumber(data.p[i+3])
++    end
++    function st:valid(u,v)
++        if not (u>=0 and u<=1 and v>=-1 and v<=0) then return false end
++        local _,_,_,support=tap('du',u,v)
++        return support>=1
+     end
+     function st:metric(u,v)
++        if not self:valid(u,v) then return nil end
++        local pixel=math.min(511,math.floor((v+1)*512))*2048+math.min(2047,math.floor(u*2048))
++        if self.metricPixel==pixel then return self.metricA,self.metricB,self.metricC,self:unit() end
+         local x,y,z=tap('du',u,v);local X,Y,Z=tap('dv',u,v)
+-        local a=math.max(math.sqrt(x*x+y*y+z*z),1e-9)
+-        local b=(x*X+y*Y+z*Z)/a;local c=math.sqrt(math.max(X*X+Y*Y+Z*Z-b*b,1e-18))
++        local a=math.sqrt(x*x+y*y+z*z)
++        if a<1e-8 then return nil end
++        local b=(x*X+y*Y+z*Z)/a;local c=math.sqrt(math.max(X*X+Y*Y+Z*Z-b*b,0))
++        if c<1e-8 then return nil end
++        self.metricPixel,self.metricA,self.metricB,self.metricC=pixel,a,b,c
+         return a,b,c,self:unit()
+     end
+     function st:plane(u,v,dx,dy)
+-        local a,b,c,k=self:metric(u,v);return (a*dx+b*dy)/k,c*dy/k
++        local a,b,c,k=self:metric(u,v);if not a then return 0,0 end
++        return (a*dx+b*dy)/k,c*dy/k
+     end
+     function st:offset(u,v,x,y)
+-        local a,b,c,k=self:metric(u,v);local dy=y*k/c;return (x*k-b*dy)/a,dy
++        local a,b,c,k=self:metric(u,v);if not a then return 0,0 end
++        local dy=y*k/c;return (x*k-b*dy)/a,dy
++    end
++    -- CPU preview is a short local extrapolation, never a replacement for the
++    -- GPU transport. Reject unsupported points and discontinuous UV segments.
++    function st:segment(u,v,U,V)
++        if not self:valid(u,v) or not self:valid(U,V) then return false end
++        local length=self:length(u,v,U-u,V-v)
++        if length*self:unit()>.02 then return false end
++        local _,_,_,safe=tap('du',u,v)
++        -- du.A is the baked conservative distance in 4096x1024 mask pixels.
++        -- Most short movements are interior: no eight-point boundary walk.
++        if math.max(math.abs(U-u)*4096,math.abs(V-v)*1024)<=math.max(0,(safe-1)*.75) then return true end
++        for i=1,7 do local t=i/8
++            if not self:valid(u+(U-u)*t,v+(V-v)*t) then return false end
++        end
++        local x,y,z=self:point(u,v);local X,Y,Z=self:point(U,V)
++        local chord=math.sqrt((X-x)^2+(Y-y)^2+(Z-z)^2)
++        return chord<=math.max(length*2,.0005/self:unit())
++    end
++    function st:preview(u,v,du,dv,age)
++        local U,V=u+du*age,v+dv*age
++        if self:segment(u,v,U,V) then return U,V end
++        return u,v
+     end
+     function st:length(u,v,dx,dy) local x,y=self:plane(u,v,dx,dy);return math.sqrt(x*x+y*y) end
+     function st:velocity(u,v,du,dv)
+@@ -111,10 +146,12 @@
+         return cx+dx*size,cy+dy*size
+     end
+     function st:ribbon(q1,q2,q3,q4,x0,y0,x1,y1,halfWidth,ux,uy,size)
++        if not self:segment(x0/size,y0/size-1,x1/size,y1/size-1) then return false end
+         local dx,dy=self:offset(x0/size,y0/size-1,-uy*halfWidth/size,ux*halfWidth/size)
+         local X,Y=self:offset(x1/size,y1/size-1,-uy*halfWidth/size,ux*halfWidth/size)
+         q1:set(x0-dx*size,y0-dy*size);q2:set(x1-X*size,y1-Y*size)
+         q3:set(x1+X*size,y1+Y*size);q4:set(x0+dx*size,y0+dy*size)
++        return true
+     end
+     function st:stroke(x0,y0,x1,y1,width,color,size)
+         local px,py=self:plane(x1/size,y1/size-1,(x1-x0)/size,(y1-y0)/size)
+@@ -122,22 +159,27 @@
+         if len>1e-9 then ux,uy=px/len,py/len end
+         self.strokeQuad=self.strokeQuad or {vec2(),vec2(),vec2(),vec2()}
+         local q1,q2,q3,q4=unpack(self.strokeQuad)
+-        self:ribbon(q1,q2,q3,q4,x0,y0,x1,y1,width*.5,ux,uy,size)
+-        ui.drawQuadFilled(q1,q2,q3,q4,color)
+-        self:quad(q1,q2,q3,q4,x0,y0,width*.5,width*.5,1,0,size)
+-        ui.drawImageQuad(self.strokeCircle,q1,q2,q3,q4,color)
+-        self:quad(q1,q2,q3,q4,x1,y1,width*.5,width*.5,1,0,size)
+-        ui.drawImageQuad(self.strokeCircle,q1,q2,q3,q4,color)
++        if self:ribbon(q1,q2,q3,q4,x0,y0,x1,y1,width*.5,ux,uy,size) then
++            ui.drawQuadFilled(q1,q2,q3,q4,color)
++        end
++        if self:quad(q1,q2,q3,q4,x0,y0,width*.5,width*.5,1,0,size) then
++            ui.drawImageQuad(self.strokeCircle,q1,q2,q3,q4,color)
++        end
++        if self:quad(q1,q2,q3,q4,x1,y1,width*.5,width*.5,1,0,size) then
++            ui.drawImageQuad(self.strokeCircle,q1,q2,q3,q4,color)
++        end
+     end
+     -- A physical kernel quad in the virtual square UI coordinate system. The
+     -- atlas backing this UI can be rectangular via a final resample.
+     function st:quad(q1,q2,q3,q4,cx,cy,ax,ay,ux,uy,size)
+         local u,v=cx/size,cy/size-1
++        if not self:valid(u,v) or not (ax>=0 and ay>=0 and ax<size and ay<size) then return false end
+         local x,y=self:offset(u,v,ux*ax/size,uy*ax/size)
+         local X,Y=self:offset(u,v,-uy*ay/size,ux*ay/size)
+         x,y,X,Y=x*size,y*size,X*size,Y*size
+         q1:set(cx-x-X,cy-y-Y);q2:set(cx+x-X,cy+y-Y)
+         q3:set(cx+x+X,cy+y+Y);q4:set(cx-x+X,cy-y+Y)
++        return true
+     end
+     function st:updateAtlas(canvas,size,draw)
+         if not self.strokeCircle then
+--- s63-baseline/visor_optics.lua
++++ visor_optics.lua
+@@ -459,6 +459,7 @@
+             gOptBrightMaxMip=self.brightMaxMip,
+             gOptDebugOverlay=r.RAIN_VISOR_OPTICS_DEBUG_OVERLAY and 1 or 0}
+         local visible=e.targetMesh:isVisible(1)
++        if d.nativeOcclusion then d.nativeOcclusion(p) end
+         render.setBlendMode(render.BlendMode.BlendPremultiplied);render.setDepthMode(render.DepthMode.ReadOnly);render.setCullMode(render.CullMode.None)
+         local ok,result=pcall(function() e.targetMesh:setVisible(true,false);return render.mesh(p) end)
+         e.targetMesh:setVisible(visible,false)
+--- s63-baseline/native_glass_occlusion.lua
++++ native_glass_occlusion.lua
+@@ -0,0 +1,82 @@
++-- Native exterior glass owns its covered pixels. This independent metric
++-- capture does not write scene depth or sample/composite native glass colour.
++return function(d)
++    local st={ready=false,updates=0,names={'GLASS_EXT_MRR','GLASS_COAT_MRR','GLASS_INT_MRR','GLASS_STICKER_MRR'}}
++    function st:dispose()
++        if self.shot then self.shot:dispose();self.shot=nil end
++        self.ready=false;self.key=nil;self.owner=nil
++    end
++    function st:draw()
++        render.setCullMode(render.CullMode.None)
++        render.setBlendMode(render.BlendMode.Opaque)
++        render.setDepthMode(render.DepthMode.Normal)
++        for _,e in ipairs(self.items) do
++            self.params=self.params or {transform='original',async=false,shader=[[
++                float4 main(PS_IN pin) {
++                    // Native INT reverses the FX normal: retain exterior faces
++                    // only. An inside camera must still see the custom optics.
++                    clip(dot(pin.NormalW,-pin.PosC)-1e-7);
++                    return float4(length(pin.PosC),0,0,1);
++                }
++            ]]}
++            self.params.mesh=e.targetMesh
++            if render.mesh(self.params)==false then error('Native glass depth pending') end
++        end
++    end
++    function st:update(w,h)
++        local owner=d.owner()
++        if not owner then self:dispose();return true end
++        local sim=ac.getSim()
++        local eye,look,up
++        if d.localFrame then eye,look,up=d.localFrame() end
++        if not eye then
++            local inverse=owner:getWorldTransformationRaw():inverse()
++            eye=inverse:transformPoint(sim.cameraPosition)
++            look=inverse:transformVector(sim.cameraLook)
++            up=inverse:transformVector(sim.cameraUp)
++        end
++        local parts={w,h,sim.cameraFOV};self.items={}
++        for _,v in ipairs({eye,look,up}) do
++            parts[#parts+1]=string.format('%.8f,%.8f,%.8f',v.x,v.y,v.z)
++        end
++        for _,name in ipairs(self.names) do
++            local e=d.editor(name)
++            local visible=e and e.visible~=false and e.targetMesh and #e.targetMesh>0
++                and e.targetMesh:isVisible(1)
++            parts[#parts+1]=visible and name or '-'
++            if visible then self.items[#self.items+1]=e end
++        end
++        if #self.items==0 then self.ready=false;self.key=nil;return true end
++        local key=table.concat(parts,':')
++        if owner==self.owner and key==self.key and self.ready then return true end
++        self.ready=false
++        if not self.shot or self.w~=w or self.h~=h or self.owner~=owner then
++            self:dispose();self.owner=owner;self.w,self.h=w,h
++            self.shot=ac.GeometryShot({opaque=function() self:draw() end},vec2(w,h),1,true,
++                render.AntialiasingMode.None,render.TextureFormat.R32.Float)
++            self.shot:setName('Native exterior glass metric occlusion')
++            self.shot:setSky(false);self.shot:setParticles(false)
++            self.shot:setClearColor(rgbm(0,0,0,0));self.shot:setClippingPlanes(.001,10)
++        end
++        local ok,err=pcall(function()
++            if self.shot:update(sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)==false then
++                error('Native glass capture pending')
++            end
++        end)
++        render.setCullMode(render.CullMode.None)
++        render.setBlendMode(render.BlendMode.BlendPremultiplied)
++        render.setDepthMode(render.DepthMode.ReadOnly)
++        self.error=not ok and tostring(err) or nil
++        if not ok then return false end
++        self.ready=true;self.key=key;self.updates=self.updates+1
++        return true
++    end
++    function st:bind(p,prefix,enabled)
++        p.textures['tx'..prefix..'NativeDepth']=enabled and self.ready and self.shot or false
++        p.values['g'..prefix..'NativeOn']=enabled and self.ready and 1 or 0
++        local target=render.getRenderTargetSize()
++        p.values['g'..prefix..'NativePixelScale']=vec2((self.w or 1)/math.max(target.x,1),
++            (self.h or 1)/math.max(target.y,1))
++    end
++    return st
++end
+--- s63-baseline/shaders/rainVisorLayer.hlsl
++++ shaders/rainVisorLayer.hlsl
+@@ -187,6 +187,10 @@
+ 
+ float4 main(PS_IN pin)
+ {
++    if(gLayerNativeOn>.5 && gLayerKind>.5) {
++        float depth=txLayerNativeDepth.Load(int3((int2)(pin.PosH.xy*gLayerNativePixelScale),0)).r;
++        clip(depth>0 && depth<=length(pin.PosC)+.0001 ? -1 : 1);
++    }
+     float3 toEye = normalize(-pin.PosC);
+     float3 outwardNormal = normalize(pin.NormalW);
+     float3 ng = outwardNormal;
+--- s63-baseline/shaders/rainVisorOptics.hlsl
++++ shaders/rainVisorOptics.hlsl
+@@ -124,6 +124,10 @@
+ }
+ float4 main(PS_IN pin) {
+     float2 screenUV=pin.PosH.xy*gOptInvTarget;
++    if(gOptNativeOn>.5) {
++        float depth=txOptNativeDepth.Load(int3((int2)(pin.PosH.xy*gOptNativePixelScale),0)).r;
++        clip(depth>0 && depth<=length(pin.PosC)+.0001 ? -1 : 1);
++    }
+     float3 n=normalize(pin.NormalW),v=normalize(-pin.PosC);
+     float cosine=saturate(abs(dot(n,v))),f=.04+.96*pow(1-cosine,5);
+     float2 nXY=float2(dot(n,gOptCameraSide),-dot(n,gOptCameraUp));

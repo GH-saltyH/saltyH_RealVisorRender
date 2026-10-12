@@ -1,0 +1,41 @@
+--- s66 baseline/shaders/rainVisorDynamicDrop.hlsl
++++ shaders/rainVisorDynamicDrop.hlsl
+@@ -1226,7 +1226,8 @@
+         clip(depth.x<=0 || depth.x+.0002>=z ? 1 : -1);
+         clip(depth.y<=0 || depth.y+.0002>=length(pin.PosC) ? 1 : -1);
+     }
+-    if(gDynamicDropSurfaceDebug>6.5) {
++#ifdef RAIN_SURFACE_DEBUG
++    {
+         clip(pin.Tex.x<-2.5 ? 1 : -1);
+         float2 p=float2(pin.Tex.x+4,pin.Tex.y);clip(rainValid(p)-.5);
+         float3 u,v;rainMetric(p,u,v);
+@@ -1235,6 +1236,7 @@
+             : saturate(float3(length(u),length(v)*4,abs(dot(normalize(u),normalize(v)))));
+         return float4(color,1);
+     }
++#else
+     float4 c = float4(0.0, 0.0, 0.0, 0.0);
+     gFlowSceneOffset = float2(0.0, 0.0);
+     gFlowCoverage = 0.0;
+@@ -1287,8 +1289,8 @@
+         coverageAlpha+=saturate(gFlowCoverage)*(1-coverageAlpha);
+     float hazeD=gDynamicDropHazeDepthMin>0 ? coverageAlpha-gDynamicDropHazeDepthMin : -1;
+     clip(max(solid,hazeD));
+-    return float4(0,0,0,0);
+-#endif
++    c = float4(0,0,0,0);
++#else
+     if (gFlowCoverage > 0.0 && gDynamicDropWFDebug < 0.5 && gDynamicDropSmearDebug < 0.5)
+     {
+         float2 ratio = gDynamicDropInvRenderTargetSize / gDynamicDropInvScreenSize;
+@@ -1318,6 +1320,8 @@
+         clip(max(solid, hazeD));
+         c = float4(0.0, 0.0, 0.0, 0.0);
+     }
++#endif
+     }
+     return c;
+-}
++#endif
++}

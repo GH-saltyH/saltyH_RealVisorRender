@@ -1,4 +1,4 @@
-"""Actual geometry runtime: hash gate, all five transforms, source independence."""
+"""Actual geometry runtime: hash gate, all eight transforms, source independence."""
 from pathlib import Path
 import runpy
 root=Path(__file__).resolve().parents[2]
@@ -24,7 +24,7 @@ lua.execute('''
     axisRollNode={getWorldTransformationRaw=function() return {transformPoint=function() return {} end} end}
     rainDynamicSceneCopyState={e1Primary={},e1Geometry={},mainTargetWidth=1280,mainTargetHeight=720}
     geometryMeshes={}
-    for _,name in ipairs({'GLASS_INT_OVERLAY','BODY_FRAME','BODY_GLASSLINE','BODY_FABRIC','DRIVER_FACE','DRIVER_BALAKLAVA'}) do
+    for _,name in ipairs({'GLASS_INT_FX','FRAME_MAIN','BAND_INNER','BODY_FABRIC_TRACE','DRIVER_FACE','DRIVER_BALAKLAVA','CAM','CAM_COVER','CAM_FABRIC'}) do
         local mesh=refs({{visible=false}})
         function mesh:getWorldTransformationRaw() return {inverse=function() return name..'-inverse' end} end
         geometryMeshes[name]={targetMesh=mesh,visible=true}
@@ -57,10 +57,10 @@ lua.execute('''
     local s=rainDynamicSceneCopyState;local r=cfg.RUNTIME
     s.e1GeometryUpdate();assert(s.e1Geometry.ready and updates==1)
     local p=s.e1Geometry.params
-    for _,prefix in ipairs({'Frame','Rubber','Fabric','Face','Balaklava'}) do
+    for _,prefix in ipairs({'Frame','Rubber','Fabric','Face','Balaklava','Cam','CamCover','CamFabric'}) do
         assert(p.values['gE1'..prefix..'Visible']==1)
         assert(p.values['gE1'..prefix..'Inverse'])
-        assert(p.textures['txE1'..prefix..'Nodes'] and p.textures['txE1'..prefix..'Triangles'])
+        assert(p.values['gE1'..prefix..'Records'] and p.textures.txE1Geometry)
     end
     r.RAIN_VISOR_LAYER_E1_SOURCE_OFFSET=99;r.RAIN_VISOR_LAYER_E1_SOURCE_FOV=10
     r.RAIN_VISOR_LAYER_E1_SOURCE_SLOT=2;r.RAIN_VISOR_LAYER_E1_SOURCE_PITCH=30
@@ -93,7 +93,7 @@ lua.execute('''
     r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_FIXED_REFERENCE=true;r.RAIN_VISOR_LAYER_E1_HIGHLIGHT_ISOLATION=.75
     s.e1GeometryUpdate();assert(p.values.gE1FixedReference==1 and p.values.gE1Isolation==.75)
 ''')
-print('PASS: hash gate, five transforms, geometry independence, final/checker gate, current-frame native slots, stale/missing slot exclusion, single-source restore')
+print('PASS: hash gate, eight transforms, geometry independence, final/checker gate, current-frame native slots, stale/missing slot exclusion, single-source restore')
 
 # Execute the actual final composite without triggering another geometry trace.
 a=source.index('rainDynamicSceneCopyState.e1GeometryDraw = function()')
@@ -109,7 +109,7 @@ lua.execute('''
 lua.execute(source[a:b])
 lua.execute('''
     local s=rainDynamicSceneCopyState;local n=updates
-    local mesh=geometryMeshes.GLASS_INT_OVERLAY.targetMesh
+    local mesh=geometryMeshes.GLASS_INT_FX.targetMesh
     assert(not mesh:isVisible(1))
     s.e1GeometryDraw()
     assert(updates==n and not mesh:isVisible(1))

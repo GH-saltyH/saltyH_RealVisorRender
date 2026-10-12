@@ -1,0 +1,9 @@
+{
+  "live_stack_native_hook": true,
+  "pending_mask_blocks_optics": true,
+  "measurement_preserves_false_returns_and_errors": true,
+  "native_glass_sun_shadows_disabled_restorable": true,
+  "frame_visibility_and_shadows_retained": true,
+  "empty_merge_snapshot_remains_disabled": true,
+  "readback_error_stale_success_dispose": true
+}

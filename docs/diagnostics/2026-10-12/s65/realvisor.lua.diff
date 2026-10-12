@@ -1,0 +1,542 @@
+--- s64/realvisor.lua
++++ s65/realvisor.lua
+@@ -571,7 +571,7 @@
+         -- v2 / tear pieces and the trail. A/B with the CPU path.
+         RAIN_GPU_HEADS = true,
+         RAIN_GPU_SPLASH = false,      -- R1.4: bounded GPU splash atlas, opt-in
+-        RAIN_GPU_HEADS_SPARSE_WORDS = false, -- R1.3: skip empty tile-mask words
++        RAIN_GPU_HEADS_SPARSE_WORDS = true, -- exact sparse walker; dense path retained for comparison
+         RAIN_GPU_HEADS_TILE = 64,        -- px of the head canvas per tile
+         RAIN_GPU_HEADS_FLIP_Y = false,   -- debug: canvas row orientation
+         RAIN_GPU_HEADS_DEBUG = 0,        -- 0 off, 1 tile occupancy, 2 GPU-only, 3 no head shading
+@@ -6562,8 +6562,10 @@
+     for i=1,n do
+         px[i]=nil
+         if (rainDynamicStateAlive[i] or 0)>.5 then
+-            local u,v=state.surface:preview(rainDynamicStateU[i] or -1,rainDynamicStateV[i] or -2,
+-                rainDynamicStateVelocityU[i] or 0,rainDynamicStateVelocityV[i] or 0,age)
++            -- Broad phase uses one coherent readback snapshot. Visual
++            -- prediction belongs to trails; the GPU rechecks current physical
++            -- distance and generations before accepting every command.
++            local u,v=rainDynamicStateU[i] or -1,rainDynamicStateV[i] or -2
+             if state.surface:valid(u,v) then
+                 px[i],py[i]=u,v;maxR=math.max(maxR,rainDynamicStateRadius[i] or 0)
+             end
+@@ -7959,7 +7961,7 @@
+         local patternSize, patternGrid =
+             rainDynamicSceneCopyState.bakeMicroPattern()
+         ac.log(appNameDebug .. ' Micro pattern: '
+-            .. tostring(patternSize) .. 'x' .. tostring(patternSize)
++            .. tostring(patternSize) .. 'x' .. tostring(math.max(1,math.floor(patternSize/4)))
+             .. ' grid=' .. tostring(patternGrid)
+             .. ' boundsU=' .. tostring(rainDynamicSurfaceLookup.minU)
+             .. '..' .. tostring(rainDynamicSurfaceLookup.maxU)
+@@ -9002,13 +9004,6 @@
+         and not rainStateInitialized then return end
+     rainDynamicSceneCopyState.stateReadyFrame = sim.frame
+     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
+-        local maskOk, maskError = pcall(
+-            rainDynamicSceneCopyState.measure,'Wipe mask',rainDynamicSceneCopyState.updateTrailMaskTimed,sim)
+-        if not maskOk and not rainDynamicSceneCopyState.maskWarned then
+-            ac.warn(appNameDebug .. ' Dynamic UV mask update failed: '
+-                .. tostring(maskError))
+-            rainDynamicSceneCopyState.maskWarned = true
+-        end
+         rainDynamicSceneCopyState.microRebakeIfNeeded(
+             rainDynamicSceneCopyState)
+         if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED then
+@@ -9025,6 +9020,12 @@
+             end
+         else
+             rainDynamicSceneCopyState.birthMaskSuspended = true
++        end
++        local maskOk, maskError = pcall(
++            rainDynamicSceneCopyState.measure,'Wipe mask',rainDynamicSceneCopyState.updateTrailMaskTimed,sim)
++        if not maskOk and not rainDynamicSceneCopyState.maskWarned then
++            ac.warn(appNameDebug .. ' Dynamic UV mask update failed: '..tostring(maskError))
++            rainDynamicSceneCopyState.maskWarned = true
+         end
+         if not initializeRainDynamicSurfaceTest() then return end
+         rainDynamicSceneCopyState.preparedFrame = sim.frame
+@@ -9079,10 +9080,11 @@
+         / math.max(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_RIDGE_SECONDS, 0.05))
+     local copied = target:updateWithShader({
+         async = true,
+-        textures = { txWipePrevious = source },
++        textures = { txWipePrevious = source,txWipeSwept=state.birthMaskRead or false },
+         values = {
+             gWipeDecay = wipeDecay,
+             gRidgeDecay = ridgeDecay,
++            gWipeSwept=state.gpuHeadsActive and state.birthMaskFrame==sim.frame and 1 or 0,
+         },
+         shader = [[
+             float4 main(PS_IN pin)
+@@ -9091,6 +9093,12 @@
+                     samLinearClamp, pin.Tex, 0.0);
+                 float r = previous.r * gRidgeDecay;
+                 float g = previous.g * gWipeDecay;
++                // Current GPU transport segments cover every moving drop,
++                // independent of CPU readback age and the 384-stamp budget.
++                if(gWipeSwept>.5) {
++                    float swept=txWipeSwept.SampleLevel(samLinearClamp,pin.Tex,0).a;
++                    g=max(g,.95*smoothstep(0,.1,swept));
++                }
+                 return float4(r < 0.004 ? 0.0 : r, g < 0.004 ? 0.0 : g,
+                     0.0, 1.0);
+             }
+@@ -9115,7 +9123,7 @@
+         if (rainDynamicStateAlive[index] or 0) > 0.5 then
+             local u,v=state.surface:preview(rainDynamicStateU[index] or -1,
+                 rainDynamicStateV[index] or -2,rainDynamicStateVelocityU[index] or 0,
+-                rainDynamicStateVelocityV[index] or 0,predictedAge)
++                rainDynamicStateVelocityV[index] or 0,predictedAge,index)
+             local radius = rainDynamicStateRadius[index] or 0.0
+             if state.surface:valid(u,v) then
+                 if old and (old.generation ~= generation
+@@ -9186,9 +9194,10 @@
+     state.trailMaskStamps = (state.trailMaskStamps or 0) + #stamps
+     if sim.frame % 180 == 0 then
+         ac.log(appNameDebug .. ' Dynamic UV mask: '
+-            .. tostring(size) .. 'x' .. tostring(size)
++            .. tostring(size) .. 'x' .. tostring(math.max(1,math.floor(size/4)))
+             .. ' stamps=' .. tostring(state.trailMaskStamps)
+             .. ' budget=' .. tostring(limit)
++            .. ' gpuSweep=' .. tostring(state.gpuHeadsActive and state.birthMaskFrame==sim.frame)
+             .. ' recoverySeconds='
+             .. tostring(cfg.RUNTIME.RAIN_DYNAMIC_TRAIL_MASK_SECONDS))
+         state.trailMaskStamps = 0
+@@ -9327,6 +9336,40 @@
+ end
+ 
+ rainDynamicSceneCopyState.appFolder = appFolder
++-- Parameter-only mask filtering: one 4:1 bake, reused by colour and depth.
++-- Reveal, density and class tuning remain live uniforms and do not rebake.
++rainDynamicSceneCopyState.smearBake = function(state)
++    local r=cfg.RUNTIME
++    if not r.RAIN_DYNAMIC_SMEAR_ENABLED or not r.RAIN_DYNAMIC_SMEAR_USE_TEXTURE or not state.smearTexturePath then
++        state.smearBakeReady=false;return
++    end
++    local rt,gt=math.max(r.RAIN_DYNAMIC_SMEAR_R_TILING,.01),math.max(r.RAIN_DYNAMIC_SMEAR_G_TILING,.01)
++    local key=state.smearTexturePath..':'..rt..':'..gt
++    if state.smearBakeReady and state.smearBakeKey==key then return end
++    state.smearBakeReady=false
++    if not state.smearBakeCanvas then
++        state.smearBakeCanvas=ui.ExtraCanvas(vec2(2048,512),1,render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
++        state.smearBakeCanvas:setName('RainFX filtered smear mask (parameter cache)')
++    end
++    local ready=state.smearBakeCanvas:updateWithShader({async=false,blendMode=render.BlendMode.Opaque,
++        textures={txSmearSource=state.smearTexturePath},values={gSmearTiling=vec2(rt,gt)},shader=[[
++        float channel(float2 uv,float component) {
++            float4 t=txSmearSource.SampleLevel(samLinearClamp,frac(uv),0);
++            return component<.5 ? t.r : t.g;
++        }
++        float filtered(float2 uv,float tiling,float component) {
++            float2 d=float2(.003*tiling,0);
++            return .2*(channel(uv,component)+channel(uv+d,component)+channel(uv-d,component)
++                +channel(uv+d.yx,component)+channel(uv-d.yx,component));
++        }
++        float4 main(PS_IN pin) {
++            float2 r=pin.Tex*gSmearTiling.x,g=pin.Tex*gSmearTiling.y;
++            return float4(channel(r,0),filtered(g,gSmearTiling.y,1),filtered(r,gSmearTiling.x,0),
++                txSmearSource.SampleLevel(samLinearClamp,pin.Tex,0).a);
++        }]]})
++    state.smearBakeReady=ready~=false
++    if state.smearBakeReady then state.smearBakeKey=key end
++end
+ rainDynamicSceneCopyState.smearUpdate = function(state, sim)
+     local r = cfg.RUNTIME
+     if sim.frame ~= nil and state.smearFrame == sim.frame then
+@@ -9338,6 +9381,7 @@
+         local path = state.appFolder .. '/' .. r.RAIN_DYNAMIC_SMEAR_TEXTURE
+         state.smearTexturePath = io.fileExists(path) and path or nil
+     end
++    state.smearBake(state)
+     local dt = math.min(math.max(sim.dt or 0.0, 0.0), 0.1)
+     local rain = math.max(0.0, math.min(1.0,
+         r.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 and r.RAIN_GPU_STATE_RAIN_OVERRIDE
+@@ -10350,11 +10394,7 @@
+                     and state.surface:segment(lastX[index]/size,lastY[index]/size-1,x/size,y/size-1) then
+                     local dx, dy = x - lastX[index], y - lastY[index]
+                     -- Ignore teleports (respawn / readback jumps).
+-                    if (state.surface:length(x/size,y/size-1,dx/size,dy/size)*size)^2 < math.max(
+-                        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_LINK_RADII * R * scale,
+-                        cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_LINK_MIN_TEXELS, 0.0) ^ 2 then
+-                        fx, fy = lastX[index], lastY[index]
+-                    end
++                    fx, fy = lastX[index], lastY[index] -- generation + physical segment validated above
+                 end
+                 local sx, sy = x - fx, y - fy
+                 local px,py=state.surface:plane(x/size,y/size-1,sx/size,sy/size)
+@@ -10407,7 +10447,20 @@
+                 color.g = 1.0
+                 color.b = 0.0
+                 color.mult = 1.0
+-                trailQuad(x,y,r/ks,r/ks,1,0,R*width/32,0)
++                -- Slow trails also bridge readback intervals instead of
++                -- leaving isolated stamps whose spacing depends on FPS.
++                local fx,fy=x,y
++                if lastGen[index]==generation and lastX[index]
++                    and state.surface:segment(lastX[index]/size,lastY[index]/size-1,x/size,y/size-1) then
++                    fx,fy=lastX[index],lastY[index]
++                end
++                local px,py=state.surface:plane(x/size,y/size-1,(x-fx)/size,(y-fy)/size)
++                local len=math.sqrt(px*px+py*py);local ux,uy=1,0
++                if len>1e-9 then ux,uy=px/len,py/len end
++                if ribbon and len>1e-9 and state.surface:ribbon(q1,q2,q3,q4,fx,fy,x,y,r,ux,uy,size) then
++                    ui.drawImageQuad(ribbon,q1,q2,q3,q4,color)
++                end
++                trailQuad(x,y,r/ks,r/ks,ux,uy,R*width/32,0)
+                 lastX[index], lastY[index] = x, y
+                 lastGen[index] = generation
+                 trails = trails + 1
+@@ -10441,7 +10494,7 @@
+     return float4(float3(a,b,c)/gRainMetersPerUnit,rainValid(state.rg));
+ }
+ ]]
+-rainDynamicSceneCopyState.gpuHeadsCommon = rainDynamicSceneCopyState.surface.shader..[[
++rainDynamicSceneCopyState.gpuHeadsCommon = [[
+ static float3 rgFrame=float3(1,0,1);
+ float2 rgExtent(float radius) {
+     float x=max(rgFrame.x,1e-9),z=max(rgFrame.z,1e-9);
+@@ -10474,7 +10527,31 @@
+     return R > 0.0;
+ }
+ ]]
+-rainDynamicSceneCopyState.gpuHeadsPassA = rainDynamicSceneCopyState.gpuHeadsCommon .. [[
++rainDynamicSceneCopyState.gpuBoundsShader = rainDynamicSceneCopyState.gpuHeadsCommon .. [[
++float4 main(PS_IN pin) {
++    int i=(int)min(floor(pin.Tex.x*gCount),gCount-1);
++    float2 pos,vel;float R,idx,gen,rUV;
++    if(!rgDrop(i,pos,R,vel,idx,gen,rUV)) return float4(2e9,2e9,-2e9,-2e9);
++    float reach=R*(gKs*1.4+max(gMaxRadii,max(gPuddleReach*1.1,.6))+.1)+2;
++    float2 previous=pos;float valid=0;
++    if(gSweepEnabled>.5) {
++        float4 p=txRainPreviousState.Load(int3(i,0,0));
++        float4 m=txRainPreviousMeta.Load(int3(i,0,0));
++        float status=m.a-4*floor(m.a/4);
++        float2 q=float2(p.x,p.y+1)*gSize;
++        if(status==1 && floor(m.a/4)==gen && all(p.rg>=float2(0,-1)) && all(p.rg<=float2(1,0))
++            && length(rgPlane(pos-q))/gSize*gRainMetersPerUnit<.128) {previous=q;valid=1;}
++    }
++    float wipeRadius=max(gSweepMinRadius,R*gSweepWidthScale+gSweepWidthOffset);
++    reach=max(reach,wipeRadius);
++    float2 ext=rgExtent(reach);
++    uint row=(uint)floor(pin.Tex.y*3);
++    if(row==1u) return float4(previous,wipeRadius,valid);
++    if(row==2u) return float4(pos,ext);
++    return float4(min(pos,previous)-ext,max(pos,previous)+ext);
++}
++]]
++rainDynamicSceneCopyState.gpuHeadsPassA = [[
+ // s60: one helper per channel (no dynamic l-value indexing, which forced
+ // an unroll of a [loop] and failed to compile: X3550 / X3531).
+ float rgBitsFor(int base, float2 tmin, float2 tmax)
+@@ -10484,13 +10561,20 @@
+     {
+         int i = base + b;
+         if (i >= (int)gCount) break;
+-        float2 pos; float R; float2 vel; float idx; float gen; float rUV;
+-        if (rgDrop(i, pos, R, vel, idx, gen, rUV))
+-        {
+-            float reach = R * (gKs * 1.4 + max(gMaxRadii, max(gPuddleReach * 1.1, 0.6)) + 0.1) + 2.0;
+-            float2 ext=rgExtent(reach);
+-            if(all(pos+ext>=tmin)&&all(pos-ext<=tmax))
+-                bits |= (1u << (uint)b);
++        // Bounds are evaluated once per slot, rather than in every tile.
++        float4 bounds=txRainDropBounds.Load(int3(i,0,0));
++        if(all(bounds.zw>=tmin)&&all(bounds.xy<=tmax)) {
++            // Clip the swept segment against the expanded tile. A diagonal
++            // AABB alone would enqueue many empty tiles at driving speeds.
++            float4 previous=txRainDropBounds.Load(int3(i,1,0));
++            float4 current=txRainDropBounds.Load(int3(i,2,0));
++            float2 travel=current.xy-previous.xy;
++            float2 safe=float2(travel.x>=0 ? max(travel.x,1e-5) : min(travel.x,-1e-5),
++                travel.y>=0 ? max(travel.y,1e-5) : min(travel.y,-1e-5));
++            float2 a=(tmin-current.zw-previous.xy)/safe;
++            float2 z=(tmax+current.zw-previous.xy)/safe;
++            float2 enter=min(a,z),leave=max(a,z);
++            if(max(max(enter.x,enter.y),0)<=min(min(leave.x,leave.y),1)) bits|=1u<<(uint)b;
+         }
+     }
+     return (float)bits;
+@@ -10515,19 +10599,19 @@
+ rainDynamicSceneCopyState.gpuHeadsSummaryPass = [[
+ float4 main(PS_IN pin)
+ {
+-    int x = (int)floor(pin.Tex.x * gSummaryW);
+-    int ty = (int)floor(pin.Tex.y * gTilesY);
+-    int tx = x / (int)gSummaryWords;
+-    int block = x - tx * (int)gSummaryWords;
++    uint x = (uint)floor(pin.Tex.x * gSummaryW);
++    uint ty = (uint)floor(pin.Tex.y * gTilesY);
++    uint tx = x / (uint)gSummaryWords;
++    uint block = x - tx * (uint)gSummaryWords;
+     uint bx = 0u, by = 0u, bz = 0u, bw = 0u;
+-    [loop] for (int j = 0; j < 96; ++j)
++    [loop] for (uint j = 0u; j < 96u; ++j)
+     {
+-        int word = block * 96 + j;
+-        if (word >= (int)gWords) break;
+-        float4 m = txMask.Load(int3(tx * (int)gWords + word, ty, 0));
++        uint word = block * 96u + j;
++        if (word >= (uint)gWords) break;
++        float4 m = txMask.Load(int3(tx * (uint)gWords + word, ty, 0));
+         if (m.x > 0.0 || m.y > 0.0 || m.z > 0.0 || m.w > 0.0)
+         {
+-            uint bit = 1u << (uint)(j % 24);
++            uint bit = 1u << (j % 24u);
+             if (j < 24) bx |= bit;
+             else if (j < 48) by |= bit;
+             else if (j < 72) bz |= bit;
+@@ -10537,7 +10621,7 @@
+     return float4((float)bx, (float)by, (float)bz, (float)bw);
+ }
+ ]]
+-rainDynamicSceneCopyState.gpuHeadsPassB = rainDynamicSceneCopyState.gpuHeadsCommon .. [[
++rainDynamicSceneCopyState.gpuHeadsPassB = rainDynamicSceneCopyState.surface.shader .. rainDynamicSceneCopyState.gpuHeadsCommon .. [[
+ void rgKern(float2 px, float2 c, float ax, float ay, float2 u, float code,
+     float amp, inout float4 acc)
+ {
+@@ -10548,12 +10632,23 @@
+     float k = saturate(1.0 - dot(p, p)) * amp;
+     if (k <= 0.0 || amp <= 0.005) return;
+     acc.rgb = float3(min(code, 1.0), 1.0, 0.0) * k + acc.rgb * (1.0 - k);
+-    acc.a = k + acc.a * (1.0 - k);
++    // A is the independent swept wipe footprint. Water RGB stays unchanged.
+ }
+ void rgEval(int i, float2 px, inout float4 acc)
+ {
+     float2 pos; float R; float2 vel; float idx; float gen; float rUV;
+     if (!rgDrop(i, pos, R, vel, idx, gen, rUV)) return;
++    if(gSweepEnabled>.5) {
++        float4 path=txRainDropBounds.Load(int3(i,1,0));
++        float2 travel=rgPlane(pos-path.xy),delta=rgPlane(px-path.xy);
++        float length2=dot(travel,travel);
++        if(path.a>.5 && length2>1e-6) {
++            float t=saturate(dot(delta,travel)/length2);
++            float2 d=delta-travel*t;
++            float k=saturate(1-dot(d,d)/max(path.z*path.z,1e-6));
++            acc.a=max(acc.a,k);
++        }
++    }
+     float reach = R * (gKs * 1.4 + max(gMaxRadii, max(gPuddleReach * 1.1, 0.6)) + 0.1) + 2.0;
+     if(any(abs(px-pos)>rgExtent(reach))) return;
+     float speed = length(vel);
+@@ -10707,6 +10802,9 @@
+     local count = rainDynamicStateReadbackCount or 0
+     if not state or not meta or count <= 0 then return false end
+     local tile = math.max(16, math.floor(r.RAIN_GPU_HEADS_TILE))
++    -- At 4:1 this remains square in backing pixels; finer bins reduce
++    -- per-pixel candidate traffic without changing kernels or slot order.
++    tile=math.min(tile,32)
+     local tilesX = math.ceil(size / tile)
+     local tilesY = math.ceil(size/(tile*4))
+     local words = math.ceil(count / 96)
+@@ -10777,9 +10875,24 @@
+     values.gLobesOn = r.RAIN_DYNAMIC_WATER_FIELD_LOBES and 1.0 or 0.0
+     values.gFlipY = r.RAIN_GPU_HEADS_FLIP_Y and 1.0 or 0.0
+     values.gDebug = r.RAIN_GPU_HEADS_DEBUG or 0
++    values.gSweepEnabled=r.RAIN_DYNAMIC_TRAIL_MASK_ENABLED and 1 or 0
++    values.gSweepWidthScale=r.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE
++    values.gSweepWidthOffset=r.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM*r.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM*size*.5
++    values.gSweepMinRadius=math.max(.25,r.RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS)*size/math.max(r.RAIN_DYNAMIC_TRAIL_MASK_SIZE,1)*.5
++    if not st.gpuBounds or st.gpuBoundsCount~=count then
++        if st.gpuBounds then st.gpuBounds:dispose() end
++        st.gpuBounds=ui.ExtraCanvas(vec2(count,3),1,render.AntialiasingMode.None,render.TextureFormat.R32G32B32A32.Float)
++        st.gpuBounds:setName('RainFX per-drop conservative bounds');st.gpuBoundsCount=count
++    end
++    if st.measure('Head bounds',st.gpuBounds.updateWithShader,st.gpuBounds,{async=false,
++        blendMode=render.BlendMode.Opaque,values=values,
++        textures={txRainState=state,txRainStateMeta=meta,txRainDropMetric=st.gpuMetric,
++            txRainPreviousState=rainStateReadIsA and rainStateB or rainStateA,
++            txRainPreviousMeta=rainStateReadIsA and rainStateMetaB or rainStateMetaA},
++        shader=st.gpuBoundsShader})==false then return false end
+     local okA, errA = pcall(function()
+         local updated=st.measure('Head tiles',st.gpuMask.updateWithShader,st.gpuMask,{async=false,
+-            textures = {txRainState=state,txRainStateMeta=meta,txRainDu=st.surface.root..'du.dds',txRainDv=st.surface.root..'dv.dds',txRainBoundaryMask=textureRainBoundaryMask,txRainDropMetric=st.gpuMetric},
++            textures = {txRainDropBounds=st.gpuBounds},
+             values = values,
+             shader = rainDynamicSceneCopyState.gpuHeadsPassA,
+         })
+@@ -10801,7 +10914,7 @@
+         local updated=st.measure('Head kernels',target.updateWithShader,target,{async=false,
+             blendMode = render.BlendMode.Opaque,
+             textures = {txRainState=state,txRainStateMeta=meta,txRainDu=st.surface.root..'du.dds',txRainDv=st.surface.root..'dv.dds',txRainBoundaryMask=textureRainBoundaryMask,txRainDropMetric=st.gpuMetric,
+-                txMask = st.gpuMask, txOverride = st.gpuOverride,
++                txMask = st.gpuMask, txOverride = st.gpuOverride,txRainDropBounds=st.gpuBounds,
+                 txSummary = st.gpuSummary or st.gpuMask },
+             values = values,
+             shader = rainDynamicSceneCopyState.gpuHeadsPassB,
+@@ -11107,7 +11220,7 @@
+         then
+             local u,v=state.surface:preview(rainDynamicStateU[index] or -1,
+                 rainDynamicStateV[index] or -2,rainDynamicStateVelocityU[index] or 0,
+-                rainDynamicStateVelocityV[index] or 0,predictedAge)
++                rainDynamicStateVelocityV[index] or 0,predictedAge,index)
+             if state.surface:valid(u,v) then
+                 local growth = math.min(age / growTime, 1.0)
+                 stamps[#stamps + 1] = {
+@@ -11138,7 +11251,7 @@
+             if not age or age >= growTime then
+                 local u,v=state.surface:preview(rainDynamicStateU[index] or -1,
+                     rainDynamicStateV[index] or -2,rainDynamicStateVelocityU[index] or 0,
+-                    rainDynamicStateVelocityV[index] or 0,predictedAge)
++                    rainDynamicStateVelocityV[index] or 0,predictedAge,index)
+                 if state.surface:valid(u,v) then
+                     local radiusPx =
+                         (rainDynamicStateRadius[index] or 0.0) * size
+@@ -11325,7 +11438,7 @@
+         state.birthMaskMaxMotion or 0.0, maxMotionRadii)
+     if sim.frame % 180 == 0 then
+         ac.log(appNameDebug .. ' Dynamic birth mask: '
+-            .. tostring(size) .. 'x' .. tostring(size)
++            .. tostring(size) .. 'x' .. tostring(math.max(1,math.floor(size/4)))
+             .. ' stamps=' .. tostring(state.birthMaskStamps)
+             .. ' fresh=' .. tostring(state.birthMaskFresh)
+             .. ' stretched=' .. tostring(state.birthMaskStretched)
+@@ -13686,6 +13799,33 @@
+     if not ok then vl.err = 'post-rain optics capture: ' .. tostring(err); return nil end
+     return vl[slot..'Source']
+ end
++-- Combine already available frame depth with native glass distance in
++-- one binding. Never sample a DSV which the rain pass is currently writing.
++rainDynamicSceneCopyState.rainOcclusionUpdate = function()
++    local st=rainDynamicSceneCopyState;local sim=ac.getSim()
++    local size=render.getRenderTargetSize();local w,h=math.floor(size.x),math.floor(size.y)
++    if not st.rainOcclusion or st.rainOcclusionW~=w or st.rainOcclusionH~=h then
++        if st.rainOcclusion then st.rainOcclusion:dispose() end
++        st.rainOcclusion=ui.ExtraCanvas(vec2(w,h),1,render.AntialiasingMode.None,render.TextureFormat.R32G32.Float)
++        st.rainOcclusion:setName('RainFX stable scene/native occlusion');st.rainOcclusionW,st.rainOcclusionH=w,h
++    end
++    local native=st.nativeGlass
++    local near=math.max(sim.cameraClipNear or .05,.001)
++    local ready=st.rainOcclusion:updateSceneWithShader({async=false,blendMode=render.BlendMode.Opaque,
++        textures={txSceneDepth='dynamic::depth',txNativeDepth=native and native.ready and native.shot or false},
++        values={gNear=near,gFar=math.max(sim.cameraClipFar or 5000,near+1),
++            gReversed=cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED and 1 or 0,
++            gNative=native and native.ready and 1 or 0},shader=[[
++        float4 main(PS_IN pin) {
++            uint w=1u,h=1u;txSceneDepth.GetDimensions(w,h);
++            float d=txSceneDepth.Load(int3(clamp(int2(pin.Tex*float2(w,h)),int2(0,0),int2(w-1,h-1)),0)).r;
++            if(gReversed>.5)d=1-d;
++            float z=d>.99999 ? 10000 : gNear*gFar/max(gFar-d*(gFar-gNear),1e-7);
++            float native=gNative>.5 ? txNativeDepth.SampleLevel(samPointClamp,pin.Tex,0).r : 0;
++            return float4(z,native,0,1);
++        }]]})
++    st.rainOcclusionReady=ready~=false
++end
+ -- phase 'pre'  : housing (opaque, depth write) + glass items before rain
+ -- phase 'post' : glass items after rain (before the drop depth pass)
+ rainDynamicSceneCopyState.visorSceneStack = function(phase)
+@@ -13717,7 +13857,9 @@
+     end
+     local cachedSource
+     if phase == 'post' and r.RAIN_VISOR_LAYER_OPTICS then
++        vl.opticsReady=false
+         local opticsSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h)
++        vl.opticsReady=opticsSource~=nil
+         if opticsSource then
+             sov.src = opticsSource
+         end
+@@ -13815,6 +13957,10 @@
+ end
+ ac.onRelease(function()
+     pcall(function() rainDynamicSceneCopyState.cachedOptics:dispose() end)
++    for _,key in ipairs({'rainOcclusion','gpuBounds','smearBakeCanvas'}) do
++        local canvas=rainDynamicSceneCopyState[key]
++        if canvas then canvas:dispose();rainDynamicSceneCopyState[key]=nil end
++    end
+     if rainDynamicSceneCopyState.nativeGlass then rainDynamicSceneCopyState.nativeGlass:dispose() end
+     if rainDynamicSceneCopyState.nativeGlassState then rainDynamicSceneCopyState.nativeGlassState:restore() end
+     if rainDynamicSceneCopyState.materialSettings.dirty then
+@@ -14374,6 +14520,7 @@
+     end
+     rainDynamicSceneCopyState.measure('Refraction tone + copies',rainDynamicSceneCopyState.shotToneUpdate,sim)
+     pcall(rainDynamicSceneCopyState.visorProbeCopy, sim)
++    rainDynamicSceneCopyState.smearUpdate(rainDynamicSceneCopyState,sim)
+     local dropMeshParams = {
+         mesh = rainDynamicSurfaceMesh,
+         transform = 'original',
+@@ -14383,6 +14530,7 @@
+                 or rainDynamicSceneCopyState.geometryShot
+                 or rainDynamicSceneCopyState.canvas
+                 or 'dynamic::hdr',
++            txDynamicOcclusion = false,
+             txDynamicShotDepth =
+                 rainDynamicSceneCopyState.shotWithDepth
+                 and rainDynamicSceneCopyState.geometryShot
+@@ -14394,7 +14542,8 @@
+             txDynamicWeatherScreen =
+                 (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
+                     and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_USE_TEXTURE
+-                    and rainDynamicSceneCopyState.smearTexturePath)
++                    and (rainDynamicSceneCopyState.smearBakeReady and rainDynamicSceneCopyState.smearBakeCanvas
++                        or rainDynamicSceneCopyState.smearTexturePath))
+                 or rainDynamicSceneCopyState.weatherScreenCanvas
+                 or 'dynamic::screen',
+             txDynamicMicroPattern =
+@@ -14576,6 +14725,7 @@
+             gDynamicDropSmearTexture = (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_USE_TEXTURE
+                 and rainDynamicSceneCopyState.smearTexturePath)
+                 and 1.0 or 0.0,
++            gDynamicDropSmearBaked = rainDynamicSceneCopyState.smearBakeReady and 1.0 or 0.0,
+             gDynamicDropSmearDebug = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG,
+             gDynamicDropSmearNoseEnabled = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_NOSE_EXCLUDE
+                 and 1.0 or 0.0,
+@@ -14681,6 +14831,8 @@
+                 cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_SHEET_EDGE_SOFT,
+             gDynamicDropWFInvMaskSize = 1.0
+                 / math.max(rainDynamicSceneCopyState.birthMaskSize or 2048, 1),
++            gDynamicDropOcclusionOn = 0.0,
++            gDynamicDropCameraForward = sim.cameraLook,
+             gDynamicDropDepthOnly = 0.0,
+             gDynamicDropSurfaceDebug=cfg.RUNTIME.RAIN_DEBUG,
+             gDynamicDropDepthExact =
+@@ -14695,9 +14847,23 @@
+     dropMeshParams.shader=rainDynamicSceneCopyState.surface.shader..dropMeshParams.shader
+     rainDynamicSceneCopyState.lastDropMeshParams = dropMeshParams
+     local dynamicDrawn = false
+-    local sceneStackOk = pcall(rainDynamicSceneCopyState.measure,'Glass pre',rainDynamicSceneCopyState.visorSceneStack,'pre')
++    local sceneStackOk,sceneStackError = pcall(rainDynamicSceneCopyState.measure,'Glass pre',rainDynamicSceneCopyState.visorSceneStack,'pre')
++    if not sceneStackOk then rainDynamicSceneCopyState.visorLayer.err='Glass pre: '..tostring(sceneStackError) end
++    if not cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OFF and not cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG then
++        rainDynamicSceneCopyState.measure('Rain occlusion',rainDynamicSceneCopyState.rainOcclusionUpdate)
++        dropMeshParams.textures.txDynamicOcclusion=rainDynamicSceneCopyState.rainOcclusion
++        dropMeshParams.values.gDynamicDropOcclusionOn=rainDynamicSceneCopyState.rainOcclusionReady and 1 or 0
++    end
++    -- Captures/stack draws change state; set it at the actual rain submission.
++    render.setCullMode(render.CullMode.None)
++    render.setDepthMode((cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OFF or cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG)
++        and render.DepthMode.Off or render.DepthMode.ReadOnly)
++    render.setBlendMode(render.BlendMode.BlendAccurate)
+     local rainEditor=rainDynamicSceneCopyState.e1SourceEditor('GLASS_RAINFX')
+-    if (not rainEditor or rainEditor.visible~=false) and not ((cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE
++    if (not rainEditor or rainEditor.visible~=false)
++        and (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OFF or cfg.RUNTIME.RAIN_DYNAMIC_DROP_UV_DEBUG
++            or rainDynamicSceneCopyState.rainOcclusionReady)
++        and not ((cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE
+             and cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE)
+             or cfg.RUNTIME.RAIN_VISOR_OVERLAY) then
+         dynamicDrawn = rainDynamicSceneCopyState.measure('Rain colour',render.mesh,dropMeshParams)
+@@ -14717,7 +14883,12 @@
+         dropMeshParams.values.gDynamicDropDepthOnly = 1.0
+         render.setBlendMode(render.BlendMode.AlphaBlend)
+         render.setDepthMode(render.DepthMode.Normal)
++        local colourShader=dropMeshParams.shader
++        if cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE>=2 then
++            dropMeshParams.shader='#define RAIN_DEPTH_ONLY 1\n'..colourShader
++        end
+         rainDynamicSceneCopyState.measure('Rain depth',render.mesh,dropMeshParams)
++        dropMeshParams.shader=colourShader
+         dropMeshParams.values.gDynamicDropDepthOnly = 0.0
+         render.setDepthMode(render.DepthMode.ReadOnly)
+         render.setBlendMode(render.BlendMode.BlendAccurate)
+@@ -17822,7 +17993,7 @@
+                     p.gpuHeadsActive and 'active' or 'off',
+                     p.profGpuSubmitMs or 0, p.gpuOverrideCount or 0,
+                     p.gpuHeadsErr and ('  err ' .. p.gpuHeadsErr) or ''))
+-                local tv, tc = ui.slider('GPU heads tile (px)', cfg.RUNTIME.RAIN_GPU_HEADS_TILE, 16, 256, '%.0f')
++                local tv, tc = ui.slider('GPU heads tile (px, effective cap 32)', cfg.RUNTIME.RAIN_GPU_HEADS_TILE, 16, 256, '%.0f')
+                 if tc then cfg.RUNTIME.RAIN_GPU_HEADS_TILE = math.floor(tv + 0.5) end
+                 if ui.checkbox('GPU heads: skip empty tile words (R1.3)',
+                     cfg.RUNTIME.RAIN_GPU_HEADS_SPARSE_WORDS) then

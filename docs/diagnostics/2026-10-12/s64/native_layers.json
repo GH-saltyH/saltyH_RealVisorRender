@@ -1,0 +1,80 @@
+{
+  "states": {
+    "GLASS_EXT_MRR": {
+      "flags": [
+        1,
+        1,
+        1
+      ],
+      "shader": "ksPerPixelMultiMap_emissive",
+      "blend": 1,
+      "depth": 0,
+      "isAdditive": 0.0,
+      "emAlphaFromDiffuse": 1.0
+    },
+    "GLASS_INT_MRR": {
+      "flags": [
+        1,
+        1,
+        1
+      ],
+      "shader": "ksPerPixelMultiMap_emissive",
+      "blend": 1,
+      "depth": 0,
+      "isAdditive": 0.0,
+      "emAlphaFromDiffuse": 1.0
+    },
+    "GLASS_COAT_MRR": {
+      "flags": [
+        1,
+        1,
+        1
+      ],
+      "shader": "ksPerPixelMultiMap_emissive",
+      "blend": 1,
+      "depth": 0,
+      "isAdditive": 0.0,
+      "emAlphaFromDiffuse": 1.0
+    },
+    "GLASS_STICKER_MRR": {
+      "flags": [
+        1,
+        1,
+        1
+      ],
+      "shader": "ksPerPixelMultiMap_emissive",
+      "blend": 1,
+      "depth": 0,
+      "isAdditive": 1.0,
+      "emAlphaFromDiffuse": 1.0
+    }
+  },
+  "ray_order": [
+    {
+      "eye_model_local": [
+        0.0,
+        -0.5,
+        0.0
+      ],
+      "common_rays": 110,
+      "EXT_in_front": 110,
+      "INT_in_front": 0,
+      "coplanar": 0,
+      "min_INT_minus_EXT_m": 0.0025054355485942814,
+      "max_INT_minus_EXT_m": 0.04696213479348482
+    },
+    {
+      "eye_model_local": [
+        0.15,
+        -0.5,
+        0.15
+      ],
+      "common_rays": 96,
+      "EXT_in_front": 96,
+      "INT_in_front": 0,
+      "coplanar": 0,
+      "min_INT_minus_EXT_m": 0.0009689246178494759,
+      "max_INT_minus_EXT_m": 0.02975423894681206
+    }
+  ]
+}

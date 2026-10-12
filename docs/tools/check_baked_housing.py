@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
     lua.execute('''
         rainDynamicSceneCopyState={nativeHousing={}}
         cfg={RUNTIME={MODEL_PATH='test.kn5'}}
-        render={on=function() end}
+        render={on=function() end,CullMode={None=2}}
         local methods={}
         function refs(items)
             return setmetatable(items or {},{__index=methods})
@@ -37,12 +37,15 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
             for i,m in ipairs(self) do m.material=other[i].material end
         end
         for _,name in ipairs({'applyShaderReplacements','setMaterialTexture','setMaterialProperty',
-            'ensureUniqueMaterials','setCullMode','setTransparent','setBlendMode','setDepthMode'}) do
+            'ensureUniqueMaterials','setTransparent','setBlendMode','setDepthMode'}) do
             methods[name]=function() error('Unexpected baked material/render-state mutation: '..name) end
         end
-        local names={'BODY_FRAME','BODY_GLASSLINE','BODY_FABRIC',
-            'BODY_FRAME_OVERLAY','BODY_GLASSLINE_OVERLAY','BODY_FABRIC_OVERLAY',
-            'DRIVER_FACE','DRIVER_BALAKLAVA','GLASS_COATING_OVERLAY','BODY_FRAME_MIRROR','UNRELATED'}
+        function methods:setCullMode(mode)
+            for _,m in ipairs(self) do assert(m.name=='FRAME_MAIN' and mode==render.CullMode.None);m.cull=mode end
+        end
+        local names={'FRAME_MAIN','BAND_INNER','BODY_FABRIC_TRACE',
+            'FRAME_MAIN_OVERLAY','BAND_INNER_OVERLAY','BODY_FABRIC_TRACE_OVERLAY',
+            'CAM','CAM_COVER','CAM_FABRIC','DRIVER_FACE','DRIVER_BALAKLAVA','GLASS_COAT_FX','FRAME_MAIN_MIRROR','UNRELATED'}
         function model()
             local m={meshes={},pose={value=0}}
             m.pose.set=function(self,other) self.value=other.value end
@@ -62,13 +65,16 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
         axisRollNode={loadKN5=function() capture=model();return capture end}
         editors={}
         for _,name in ipairs(names) do
-            if name:find('BODY_') then editors[name]={meshName=name,targetMesh=visor:findMeshes(name),visible=true} end
+            if not name:find('DRIVER_') then editors[name]={meshName=name,targetMesh=visor:findMeshes(name),visible=true} end
         end
         rainDynamicSceneCopyState.visorLayerEditor=function(name) return editors[name] end
         rainDynamicSceneCopyState.visorLayerDefs=function() return {housing={
-            {mesh='BODY_FRAME',mat='FRAME'},{mesh='BODY_GLASSLINE',mat='RUBBER'},
-            {mesh='BODY_FABRIC',mat='FABRIC'}}} end
+            {mesh='FRAME_MAIN',mat='FRAME'},{mesh='BAND_INNER',mat='RUBBER'},
+            {mesh='BODY_FABRIC_TRACE',mat='FABRIC'},{mesh='CAM',mat='CAM'},{mesh='CAM_COVER',mat='CAM'},{mesh='CAM_FABRIC',mat='CAM'}}} end
     ''')
+    start=source.index('    rainDynamicSceneCopyState.captureUpdate=function(')
+    end=source.index('    -- Stage 3:',start)
+    lua.execute(source[start:end])
     start=source.index('rainDynamicSceneCopyState.nativeHousingEnsure = function()')
     end=source.index('render.onSceneReady',start)
     lua.execute(source[start:end])
@@ -78,20 +84,20 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
     lua.execute('''
         local st=rainDynamicSceneCopyState
         local native=st.nativeHousingEnsure()
-        assert(#native==3)
-        for _,name in ipairs({'BODY_FRAME_OVERLAY','BODY_GLASSLINE_OVERLAY','BODY_FABRIC_OVERLAY'}) do
-            assert(not editors[name].visible)
-            assert(not editors[name].targetMesh[1].visible and not editors[name].targetMesh[1].shadows)
+        assert(#native==6)
+        for _,name in ipairs({'FRAME_MAIN_OVERLAY','BAND_INNER_OVERLAY','BODY_FABRIC_TRACE_OVERLAY'}) do
+            assert(editors[name].visible)
+            assert(editors[name].targetMesh[1].visible and editors[name].targetMesh[1].shadows)
         end
         local selected=st.nativeCaptureRefs(true)
-        assert(#selected==5 and selected~=capture)
-        local allowed={BODY_FRAME=true,BODY_GLASSLINE=true,BODY_FABRIC=true,DRIVER_FACE=true,DRIVER_BALAKLAVA=true}
+        assert(#selected==8 and selected~=capture)
+        local allowed={FRAME_MAIN=true,BAND_INNER=true,BODY_FABRIC_TRACE=true,DRIVER_FACE=true,DRIVER_BALAKLAVA=true,CAM=true,CAM_COVER=true,CAM_FABRIC=true}
         for _,m in ipairs(selected) do assert(allowed[m.name] and m.material==m.name..'-original') end
         for name,ref in pairs(capture.meshes) do
             assert(not ref[1].shadows)
             assert(not ref[1].visible) -- allowlist selection must not leak a scene draw
         end
-        assert(not visor.meshes.DRIVER_FACE[1].visible and not visor.meshes.DRIVER_BALAKLAVA[1].visible)
+        assert(visor.meshes.DRIVER_FACE[1].visible and visor.meshes.DRIVER_BALAKLAVA[1].visible)
         for _,actor in ipairs(st.e1ReflectionActors()) do assert(actor.two==true) end
         st.nativeCaptureHide();assert(not capture.visible)
         local shot={update=function()
@@ -144,10 +150,26 @@ with tempfile.TemporaryDirectory(prefix='housing_check_', dir=root/'docs/tools',
         shot.update=function() return false end
         assert(st.nativeCaptureUpdate(shot,selected)==false and not capture.visible)
         for _,m in ipairs(selected) do assert(not m.visible) end
-        editors.BODY_FABRIC.targetMesh=refs()
-        assert(#st.nativeHousingEnsure()==2 and st.nativeHousingStatus:find('BODY_FABRIC'))
+        cfg.RUNTIME.RAIN_VISOR_OPTICS_ENABLED=true
+        cfg.RUNTIME.RAIN_VISOR_OPTICS_NATIVE_SOURCE=true;cfg.RUNTIME.RAIN_VISOR_OPTICS_TIER=2
+        local opticsRefs=st.nativeCaptureRefs(true,'opticsSource')
+        assert(#opticsRefs==8 and not st.nativeCaptureModel.opticsSource.prepared)
+        st.nativeCapturePrepare()
+        assert(st.nativeCaptureModel.opticsSource.prepared and not st.nativeCaptureModel.source.prepared)
+        assert(st.nativeCaptureModel.opticsSource.root.visible)
+        local colourShot={update=function()
+            for _,m in ipairs(opticsRefs) do assert(m.visible and allowed[m.name]) end
+            return true
+        end}
+        assert(st.nativeCaptureUpdate(colourShot,opticsRefs))
+        assert(not st.nativeCaptureModel.opticsSource.root.visible)
+        assert(visor.meshes.DRIVER_FACE[1].visible and visor.meshes.DRIVER_BALAKLAVA[1].visible)
+        cfg.RUNTIME.RAIN_VISOR_OPTICS_NATIVE_SOURCE=false;st.nativeCapturePrepare()
+        assert(not st.nativeCaptureModel.opticsSource.prepared)
+        editors.BODY_FABRIC_TRACE.targetMesh=refs()
+        assert(#st.nativeHousingEnsure()==5 and st.nativeHousingStatus:find('BODY_FABRIC_TRACE'))
         visor=model();visor.meshes.DRIVER_FACE=nil;visor.meshes.DRIVER_BALAKLAVA=nil
         assert(#st.e1ReflectionActors()==0)
-        assert(#st.nativeCaptureRefs(true)==2)
+        assert(#st.nativeCaptureRefs(true)==5)
     ''')
     print('PASS: authored materials; capture allowlist; moving native transform preparation; capture cleanup/nested callbacks; checker mode; optional/missing meshes')

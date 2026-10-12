@@ -1,0 +1,162 @@
+바이저 내부 광학효과 설계안
+0. 핵심 설계 원칙
+바이저와 내부 구조물은 카메라 기준으로 정지해 있다.
+얼굴, 라이너, 셸, 바이저는 같은 계층에 묶여 있고 눈(카메라)과의 상대 위치가 고정됩니다.
+따라서 "눈 → 바이저 → 반사 → 어디에 맞는가"라는 기하는 프레임마다 풀 필요가 없습니다. 한 번만 구워두면 됩니다.
+프레임마다 바뀌는 것은 조명(태양 방향, 색, 그림자, 주변 밝기)뿐입니다.
+현재 e1HousingGeometry.hlsl은 BVH 트레이스를 프레임마다 돌립니다. 이것을 bake + 런타임 라이팅으로 분리하는 것이 가장 큰 효율 이득입니다.
+먼지와 광택은 "마스크 × 장면 HDR의 PSF 컨볼루션"으로 푼다.
+입자가 빛을 산란하는 양은 먼지(p) × ∫ 장면밝기(q) × 위상함수(각도(p,q)) dq입니다.
+이것은 헤비테일 커널의 블룸에 먼지 마스크를 곱한 것과 같습니다. 밉 피라미드로 싸게 계산할 수 있습니다.
+화면 밖의 태양처럼 스크린 스페이스로 잡히지 않는 광원은 해석적 항으로 보완합니다.
+출력은 반드시 HDR 씬 선형 공간에 가산(additive)으로 넣는다.
+반사율은 약 4%이고 고스트는 0.16%입니다.
+이 수치는 YEBIS가 노출과 톤매핑을 적용해야 의미가 생깁니다. 외부가 밝으면 안 보이고, 어두우면 드러나는 현상이 자동으로 재현됩니다.
+기존 스택에서 이미 쓰고 있는 alpha = 0 프리멀티 가산 방식 그대로입니다.
+바이저 안쪽 면의 이물질과 반사상은 초점이 맞지 않는다.
+눈은 무한대에 초점이 맞고 먼지는 눈에서 2~5 cm 거리에 있습니다. 동공 크기 대비 착란원이 수 도(°) 단위로 커집니다.
+그래서 실제로는 날카로운 점이 아니라 부드러운 얼룩 안개로 보입니다.
+반사된 얼굴도 가상상 거리가 멀어서 블러된 유령 같은 패치로 보입니다.
+선명하게 그리면 오히려 CG처럼 보입니다. 마스크를 의도적으로 낮은 주파수의 밉으로 샘플링하는 것이 핵심입니다.
+1. 물리 → 구현 매핑
+현상	물리	구현
+① 내부 반사 (얼굴, 라이너)	안쪽 면 프레넬 반사 F0≈0.04, 입사각이 클수록 증가	반사 히트 G-버퍼 bake + 런타임 라이팅 → 거리 기반 DOF 블러
+① 이중상	안쪽 면과 바깥 면의 2회 반사, 두께만큼 변위	같은 bake 맵을 법선 방향으로 오프셋해 2번째 탭 (약 0.8배 감쇠)
+① 태양이 바이저 개구부를 통해 얼굴에 맺히는 패치	셸에 의한 방향성 차폐 + 바이저 밴드 투과	bake된 방향성 가시성(SH L1) × 태양 방향
+② 외부 강광 고스트	안쪽/바깥 면 2회 바운스 복제상	밝은 영역의 HDR 밉을 법선 방향 오프셋으로 1~3탭, 색분산(RGB 오프셋 차)
+② 외부 강광 글레어/베일	입자와 필름의 전방 산란	먼지 마스크 × (HDR ⊗ PSF) + 해석적 태양항
+③ 먼지	점산란 + 디포커스	저주파 마스크 × 위 글레어
+③ 스크래치	홈에 수직인 평면으로 팬 형태 산란	스크래치 접선 필드에서 수직 방향 1D 이방성 블러 (스크래치 픽셀만)
+③ 지문과 스머지	얇은 막, 넓은 저강도 산란	마스크 A채널, 큰 반경 밉
+2. 아키텍처
+[Bake, 변경 시에만 (프로필, FOV, 렌더크기, 메쉬 가시성의 해시)]
+  Pass B1: 반사 히트  (위치.xyz + matID)         RGBA32F  ← e1HousingGeometry.hlsl 재활용
+  Pass B2: 노말 + 거리 + AO                      RGBA16F  (AO는 BVH 반구 8~16레이)
+  Pass B3: 알베도 + 러프니스                      RGBA8    (KN5 텍스처를 hit UV로 샘플)
+  Pass B4: 방향성 가시성 SH L1 (32~64레이)        RGBA16F  (밴드 알파 투과율 포함)
+  Pass B5: 먼지 / 스크래치 마스크 생성             (절차적, micro pattern bake처럼 디바운스)
+
+[매 프레임]
+  P1: InteriorRadiance 캔버스 (512×256, fp16, mips)
+      = shade(bake, 태양, 하늘, 프레임평균, 외부그림자 스칼라, 바이저 투과색)
+  P2: 소스 준비  opticsSource(post-rain HDR + mips)  ← 이미 있음
+  P3: INT 패스에서 합성
+      out.rgb = Reflection + Ghost + DustGlare + ScratchStreak   (alpha = 0, 가산)
+합성 위치는 이미 있는 GLASS_INT_OVERLAY(kind 3)의 post 단계입니다. 현재 레이어 순서 COATING → rain → INT → EXT에서 INT가 비 위에 오기 때문에, 안쪽 면 먼지와 반사가 물방울 위에 놓이는 것이 물리적으로 맞습니다.
+카메라 모션(G-force) 대응:
+motionNode가 바이저를 최대 2 cm 움직이므로 bake 가정이 깨집니다.
+매번 rebake하지 않고, bake된 히트 거리 d로 시차 보정을 합니다: uv' = uv + proj(eyeDelta) / d.
+이 보정으로 1~2 cm 범위는 충분히 커버됩니다.
+3. 효과별 설계
+A. 내부 반사 (얼굴, 라이너)
+
+P1: 라이팅. bake 텍셀마다 계산합니다.
+
+ambient = hemi(N) × frameLum × AO
+sunVis  = saturate(dot(SH_vis, shBasis(L_local)))        // 개구부 + 밴드 + 틴트 투과
+          × extShadowScalar                              // 헬멧 위치 외부 그림자(스칼라)
+direct  = sunColor × sunVis × saturate(dot(N, L)) × visorTint
+radiance = albedo × (ambient + direct) + bounce         // bounce는 기존 SUN_BOUNCE 로직
+extShadowScalar는 기존 shadow probe에서 헬멧 위치의 값 하나만 읽어 시간 평활한 것입니다. 픽셀 단위 프로브는 필요 없고, 헬멧은 작아서 스칼라면 충분합니다.
+방향성 차폐를 bake하면 "태양이 앞에서 올 때만 턱과 라이너에 빛 패치가 생기는" 현상이 cos 스무스스텝 근사보다 정확해집니다. 현재 RAIN_VISOR_LAYER_SHADOW_COS_* 근사를 대체합니다.
+
+P3: 샘플링.
+
+F       = F0 + (1-F0)(1-N·V)^5            // 페이지 노말맵 반영, F0≈0.04
+cocMip  = f(hitDist + eyeToVisor, pupil)   // 거리 기반 블러
+refl    = InteriorRadiance.SampleLevel(uv_parallax, cocMip) × F
+ghost   = InteriorRadiance.SampleLevel(uv + n_xy × thicknessShift, cocMip+0.5) × F × (1-F)² × 0.8
+이중상 오프셋은 바이저 두께 3 mm 기준으로 법선 투영 방향으로 줍니다. 입사각이 클수록 커집니다.
+이 방식은 라이팅 비용이 거의 없습니다. 현재처럼 매 프레임 BVH를 도는 구조보다 훨씬 쌉니다.
+B. 외부 강광 (고스트, 글레어)
+hlsl
+// 밝은 영역의 2회 바운스 고스트 (HDR 소스 사용, 클램프 큰 값)
+float3 ghost = 0;
+[unroll] for (int i = 0; i < 3; ++i) {
+    float2 off = nXY * ghostShift * (1.0 + 0.25*i);
+    ghost.r += hdr(uv + off*1.00, mip).r;
+    ghost.g += hdr(uv + off*1.04, mip).g;     // 색분산
+    ghost.b += hdr(uv + off*1.08, mip).b;
+}
+ghost *= (F*F) * ghostGain;                   // F² ≈ 0.0016
+해석적 태양항은 화면 밖 태양도 처리합니다. 태양 방향을 카메라 공간으로 변환해 cosθ = dot(V_p, -L)을 쓰고, 위상함수는 Henyey-Greenstein(g≈0.85~0.95)입니다.
+태양 가시성은 dynamic::depth에서 태양 스크린 위치 주변 5×5가 하늘인 비율로 구합니다. 화면 밖이면 외부 그림자 스칼라로 대체합니다. 둘 다 시간 평활합니다.
+밝은 소스는 HDR 소스가 자동으로 처리합니다. 헤드라이트, 터널 출구, 반사광이 따로 구현하지 않아도 들어옵니다.
+C. 먼지와 스크래치
+
+마스크 (바이저 UV, 절차적으로 한 번 bake):
+
+채널	내용
+R	입자 밀도 (셀 노이즈 + fbm 클러스터, 기존 haze의 hash 함수 재활용)
+G	스크래치 강도
+B	스크래치 접선 각도. 닦은 호 흔적이 지배적이라 와이프 중심점 기준 원호 접선 필드로 생성
+A	지문과 스머지 두께 (저주파)
+
+글레어 (PSF 컨볼루션):
+
+hlsl
+// 헤비테일 PSF ≈ 밉 가중합
+float3 L = 0;
+L += hdrMip(uv, 2) * w2;  L += hdrMip(uv, 3) * w3;
+L += hdrMip(uv, 4) * w4;  L += hdrMip(uv, 5) * w5;
+L += hdrMip(uv, 6) * w6;  L += hdrMip(uv, 8) * w8;
+float dust = dustMask(uvTex, defocusMip);          // 저주파 샘플
+float3 glare = L * dust * dustGain
+             + sunColor * sunVis * HG(cosTheta, g) * dust * sunDustGain;
+가중치 w2…w8은 HG(g≈0.9)의 꼬리에 피팅합니다. 장면 대비 비율을 표로 두고 튜닝합니다.
+defocusMip은 눈-바이저 거리와 동공 크기로 정합니다. 먼지의 선명도를 조절하는 핵심 파라미터입니다.
+
+스크래치 (스크래치 픽셀만 분기):
+
+hlsl
+if (scratch > 0.02) {
+    float2 t = float2(cos(ang), sin(ang));
+    float2 n = float2(-t.y, t.x);               // 홈에 수직 방향으로 번짐
+    for (int i=-6;i<=6;++i)
+        streak += hdrMip(uv + n*i*stepPx, 2.5) * kernel1D(i);
+    streak *= scratch * scratchGain;
+}
+4. 성능 예산과 티어
+티어	내용	런타임 비용(추정)
+T0	먼지 PSF 글레어 + 해석 태양	약 6~8탭
+T1	+ 내부 반사 (bake + 라이팅 캔버스)	+캔버스 1회 + 2탭
+T2	+ 고스트, 스크래치 스트릭	+약 9~15탭 (스크래치 픽셀만)
+모두 해상도 독립 캔버스 위에 올라가므로 DLSS와 TAA에도 안정적입니다.
+마스크가 헤드락이라 시간 안정성이 좋습니다.
+스크래치는 고주파라서 깜빡일 수 있습니다. 프리필터된 밉에서 샘플링해 방지합니다.
+5. 기존 코드와의 통합 지점
+재활용:
+e1HousingGeometry.hlsl의 e1Mesh()와 BVH 데이터를 bake 패스로 사용합니다. mode를 B1~B4로 확장합니다.
+opticsSource 캡처(post-rain HDR, 6밉)를 글레어 소스로 씁니다.
+microRebakeIfNeeded의 디바운스 패턴을 bake 재실행 로직에 그대로 씁니다.
+visorProbeCopy는 외부 그림자 스칼라 추출용으로 축소합니다.
+제거 대상:
+e1GeometryUpdate의 프레임별 트레이스
+e1PrimaryResolve 파이프라인(bake 도입 후 불필요)
+RAIN_VISOR_LAYER_E1_* 플래그 다수
+신규:
+rainVisorOptics.hlsl: P1 라이팅, P3 합성
+bake 캐시 키 (프로필 transform, FOV, 렌더 크기, 메쉬 가시성)
+설정 키 RAIN_VISOR_OPTICS_*: 밴드 투과율, 틴트, dustGain, defocusMip, ghostShift, sunDustGain, scratchGain
+6. 구현 순서와 검증
+먼지 글레어(T0): 가장 효과 대비 구현이 쉽습니다. 먼저 넣으면 전체 톤 판단 기준이 생깁니다.
+bake 분리: 기존 트레이스를 캐시로 바꾸고 결과가 기존 모드 8, 9와 일치하는지 확인합니다.
+라이팅 캔버스 + 반사(T1): 방향성 SH 가시성 포함.
+고스트와 스크래치(T2).
+마스크 정교화: 와이프 호 필드, 지문, 에이징.
+
+디버그 뷰로 단계별 확인이 필요합니다:
+
+히트 matID
+AO
+SH 가시성(태양을 돌려보며 확인)
+먼지 4채널
+PSF 가중치 합
+CoC 밉
+
+검증 기준은 실제 바이저캠 영상입니다. 태양 정면 / 측면 / 역광, 터널 출구, 야간 헤드라이트의 정성 비교로 dustGain, defocusMip, ghostShift를 맞춥니다.
+
+7. 가장 큰 위험 요소와 대안
+bake 해상도와 시차: 모션 폭이 크면 반사가 어긋나 보입니다. 시차 보정이 부족하면 눈 오프셋 3점(중앙/좌/우) bake를 도입합니다. 기존 E1_MULTIVIEW 구조를 이 용도로 축소해 재활용할 수 있습니다.
+dynamic::hdr의 태양 원반 클램프: 태양이 포화되지 않거나 너무 작게 들어오면 해석 태양항이 이를 보완합니다. 이 때문에 해석항은 필수입니다.
+초점 흐림 표현: 마스크와 반사상을 블러하는 방식이 "게임에선 낯설게" 느껴질 수 있습니다. defocusMip과 reflectionBlur를 슬라이더로 노출하고, 선명한 쪽까지 범위를 열어두는 것이 안전합니다.

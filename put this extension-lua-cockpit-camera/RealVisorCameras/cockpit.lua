@@ -341,6 +341,7 @@ local lastHidden = -1
 
 function script.update(dt, mode, turnMix)
 
+
   -- ------------------------------------------------------------
   -- Delta time stabilization
   -- ------------------------------------------------------------

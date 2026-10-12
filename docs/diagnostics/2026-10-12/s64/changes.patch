@@ -1,0 +1,693 @@
+--- s64-baseline/realvisor.lua
++++ realvisor.lua
+@@ -983,6 +983,7 @@
+         RAIN_VISOR_LAYER_NATIVE_SCENE_PASS = false, -- archived HDR capture/custom output experiment
+         RAIN_VISOR_LAYER_NATIVE_DIRECT_ONLY = false, -- diagnose direct light vs sky ambient/reflections
+         RAIN_VISOR_LAYER_NATIVE_DEDICATED_SHADOWS = false, -- comparison; default shares scene shadow set
++        RAIN_VISOR_LAYER_NATIVE_GLASS_SHADOWS = false, -- glass transmission must not become an opaque sun shadow
+         RAIN_VISOR_LAYER_NATIVE_SHELL_SHADOW = false, -- physical FRAME_MAIN caster, no colour output
+         RAIN_VISOR_LAYER_NATIVE_AMBIENT = 1.0,
+         RAIN_VISOR_LAYER_NATIVE_DIFFUSE = 0.6,
+@@ -1811,15 +1812,27 @@
+         float2 rainStateSurfaceForce(float2 position,float radius,out float forceMagnitude) {
+             float3 normalWorld=rainStateNormalWorld(position),airWorld;
+             float3 forceWorld=rainStateExternalForceWorld(normalWorld,radius,airWorld);
+-            // Optional downward airflow is a physical gravity-tangent component.
+-            // UV V can face any direction; never force a signed V movement.
++            forceWorld-=normalWorld*dot(forceWorld,normalWorld);
++            // Preserve lateral airflow, replace its signed downhill component.
++            // Use WORLD gravity projected onto the actual surface; UV V is arbitrary.
+             if(gRainStateLifecycle>.5 && gRainAirflowDownwardMode>.5) {
+-                float3 down=float3(0,-1,0);down-=normalWorld*dot(down,normalWorld);
++                // The smooth baked normal determines incidence. The Jacobian
++                // determines the actual movement plane; use it for redirection
++                // so a normal/triangle mismatch cannot leak into lateral flow.
++                float3 u,v;rainMetric(position,u,v);
++                float3 movementNormal=mul(cross(u,v),(float3x3)gRainObjectToWorld);
++                float normalLength=dot(movementNormal,movementNormal);
++                movementNormal=normalLength>1e-20 ? movementNormal*rsqrt(max(normalLength,1e-20)) : normalWorld;
++                float3 down=float3(0,-1,0);down-=movementNormal*dot(down,movementNormal);
+                 float l=length(down);
+-                if(l>1e-6) forceWorld+=down/l*min(length(airWorld)*.30*gRainAirflowDownwardGain,
+-                    max(gRainStateGravity*gRainPhysicsAccelScale,.1)*(1+min(length(gRainAirVelocityWorld)/20,4)*gRainAirflowDownwardGain));
++                if(l>1e-6) {
++                    down/=l;
++                    float3 tangentAir=airWorld-normalWorld*dot(airWorld,normalWorld);
++                    float along=dot(tangentAir,down);
++                    float desired=length(airWorld)*.30*max(gRainAirflowDownwardGain,0);
++                    forceWorld+=down*(desired-along);
++                }
+             }
+-            forceWorld-=normalWorld*dot(forceWorld,normalWorld);
+             forceMagnitude=length(forceWorld);
+             return rainStateProjectForce(forceWorld,position);
+         }
+@@ -2263,7 +2276,8 @@
+             }
+ 
+ #ifdef RAIN_MERGE_CODE
+-            if (gRainMergeEnabled > 0.5 && gRainStateLifecycle > 0.5)
++            if (gRainMergeEnabled > 0.5 && gRainStateLifecycle > 0.5
++                && txRainMergeCmd.Load(int3((int)index,0,0)).b >= (64.0/255.0))
+             {
+                 float4 pState, pMeta;
+                 float4 merge = rainMergeDecode(index, count,
+@@ -2308,7 +2322,7 @@
+             // slides into it. Only the component across the motion is
+             // applied (no braking, and a drop's own trail behind it is
+             // symmetric). Straight-line code: no branches, no loops.
+-            {
++            if(gRainWetPathGain>0 && dt>0 && rainMetricLength(p,v)>max(gRainWetPathMinSpeed,1e-6)) {
+                 float wsp0 = rainMetricLength(p,v);
+                 float2 wdir0 = v / max(wsp0, 1e-7);
+                 // Read AHEAD of the drop: its own fresh trail lies behind.
+@@ -2342,6 +2356,7 @@
+ #endif
+ 
+             if (gRainStatePhysics > 0.5) {
++                if(dt<=0 && all(v==0))return float4(p,v);
+                 return rainStateUpdatePhysics(
+                     p,
+                     v,
+@@ -2654,7 +2669,9 @@
+                 float2 p = state.rg;
+                 float2 v = state.ba;
+ #ifdef RAIN_MERGE_CODE
+-                if (gRainMergeEnabled > 0.5)
++                if (gRainMergeEnabled > 0.5
++                    && txRainMergeCmd.Load(int3((int)index,0,0)).b >= (64.0/255.0)
++                    && txRainMergeCmd.Load(int3((int)index,0,0)).b < (128.0/255.0))
+                 {
+                     float4 pState, pMeta;
+                     float4 merge = rainMergeDecode(index, count, generation,
+@@ -6528,10 +6545,12 @@
+             state.mergeActive = false
+         end
+         state.mergePairs, state.mergeAttracts = 0, 0
++        state.profMergeMs=0
+         return false
+     end
+-    if state.mergeSnapshot == rainDynamicStateSnapshotTime then return true end
++    if state.mergeSnapshot == rainDynamicStateSnapshotTime then state.profMergeMs=0;return state.mergeActive==true end
+     state.mergeSnapshot = rainDynamicStateSnapshotTime
++    local profileStart=r.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0
+ 
+     local n = math.min(count, rainDynamicStateReadbackCount)
+     local age = math.min(math.max(
+@@ -6540,92 +6559,78 @@
+     local px, py = state.mergePX or {}, state.mergePY or {}
+     state.mergePX, state.mergePY = px, py
+     local maxR = 0.0
+-    for i = 1, n do
+-        if (rainDynamicStateAlive[i] or 0.0) > 0.5 then
+-            px[i] = (rainDynamicStateU[i] or 0.0)
+-                + (rainDynamicStateVelocityU[i] or 0.0) * age
+-            py[i] = (rainDynamicStateV[i] or -1.0)
+-                + (rainDynamicStateVelocityV[i] or 0.0) * age
+-            maxR = math.max(maxR, rainDynamicStateRadius[i] or 0.0)
+-        else
+-            px[i] = nil
+-        end
+-    end
+-    local mergeReach = r.RAIN_GPU_STATE_MERGE_REACH
+-    local attractReach = r.RAIN_GPU_STATE_ATTRACT_REACH
+-    local cell = math.max(2.0 * maxR * math.max(mergeReach, attractReach),
+-        1e-4)
+-    local grid = {}
+-    local points={}
+-    local function cellKey(x,y,z) return x..':'..y..':'..z end
+     for i=1,n do
+-        if px[i] then
+-            local x,y,z=state.surface:point(px[i],py[i]);points[i]={x,y,z}
+-            local key=cellKey(math.floor(x/cell),math.floor(y/cell),math.floor(z/cell))
+-            local bucket=grid[key] or {};grid[key]=bucket;bucket[#bucket+1]=i
+-        end
+-    end
+-    local partner = {}
+-    local kind = {}
+-    local pairCount = 0
+-    local attracts = 0
+-    local maxPairs = math.max(0, math.floor(r.RAIN_GPU_STATE_MERGE_MAX_PAIRS))
+-    local minSpeed = r.RAIN_GPU_STATE_ATTRACT_MIN_SPEED
+-    local cone = r.RAIN_GPU_STATE_ATTRACT_CONE
+-    for i = 1, n do
+-        local xi = px[i]
+-        if xi and not partner[i] then
+-            local yi = py[i]
+-            local ri = rainDynamicStateRadius[i] or 0.0
+-            local point=points[i]
+-            local cx=math.floor(point[1]/cell);local cy=math.floor(point[2]/cell);local cz=math.floor(point[3]/cell)
+-            local bestJ, bestD = nil, math.huge
+-            local vu = rainDynamicStateVelocityU[i] or 0.0
+-            local vv = rainDynamicStateVelocityV[i] or 0.0
+-            local pu,pv=state.surface:plane(xi,yi,vu,vv)
+-            local speed=math.sqrt(pu*pu+pv*pv)
+-            local steerJ, steerD = nil, math.huge
+-            for gx = cx - 1, cx + 1 do
+-                for gy = cy - 1, cy + 1 do
+-                  for gz=cz-1,cz+1 do
+-                    local bucket = grid[cellKey(gx,gy,gz)]
+-                    if bucket then
+-                        for _, j in ipairs(bucket) do
+-                            if j ~= i then
+-                                local dx, dy = px[j] - xi, py[j] - yi
+-                                local other=points[j]
+-                                local d=math.sqrt((other[1]-point[1])^2+(other[2]-point[2])^2+(other[3]-point[3])^2)
+-                                local du,dv=state.surface:plane(xi,yi,dx,dy)
+-                                local rs = ri + (rainDynamicStateRadius[j]
+-                                    or 0.0)
+-                                if wantMerge and not partner[j]
+-                                    and d < rs * mergeReach and d < bestD
+-                                then
+-                                    bestJ, bestD = j, d
+-                                end
+-                                if wantAttract and speed >= minSpeed
+-                                    and d < rs * attractReach and d < steerD
+-                                    and (du * pu + dv * pv)
+-                                        > cone * d * speed
+-                                then
+-                                    steerJ, steerD = j, d
+-                                end
+-                            end
+-                        end
++        px[i]=nil
++        if (rainDynamicStateAlive[i] or 0)>.5 then
++            local u,v=state.surface:preview(rainDynamicStateU[i] or -1,rainDynamicStateV[i] or -2,
++                rainDynamicStateVelocityU[i] or 0,rainDynamicStateVelocityV[i] or 0,age)
++            if state.surface:valid(u,v) then
++                px[i],py[i]=u,v;maxR=math.max(maxR,rainDynamicStateRadius[i] or 0)
++            end
++        end
++    end
++    local mergeReach,attractReach=r.RAIN_GPU_STATE_MERGE_REACH,r.RAIN_GPU_STATE_ATTRACT_REACH
++    local cell=math.max(2*maxR*math.max(mergeReach,attractReach),1e-4)
++    local X,Y,Z=state.mergeX or {},state.mergeY or {},state.mergeZ or {}
++    local CX,CY,CZ=state.mergeCX or {},state.mergeCY or {},state.mergeCZ or {}
++    state.mergeX,state.mergeY,state.mergeZ=X,Y,Z
++    state.mergeCX,state.mergeCY,state.mergeCZ=CX,CY,CZ
++    local minX,minY,minZ,maxX,maxY,maxZ=math.huge,math.huge,math.huge,-math.huge,-math.huge,-math.huge
++    for i=1,n do if px[i] then
++        X[i],Y[i],Z[i]=state.surface:point(px[i],py[i])
++        local x,y,z=math.floor(X[i]/cell),math.floor(Y[i]/cell),math.floor(Z[i]/cell)
++        CX[i],CY[i],CZ[i]=x,y,z
++        minX,minY,minZ=math.min(minX,x),math.min(minY,y),math.min(minZ,z)
++        maxX,maxY,maxZ=math.max(maxX,x),math.max(maxY,y),math.max(maxZ,z)
++    end end
++    -- Collision-free integer keys, including one neighbouring cell of padding.
++    -- Avoid 27 string concatenations per live drop and per-frame point tables.
++    local sy,sz=math.max(1,maxY-minY+3),math.max(1,maxZ-minZ+3)
++    local sx=math.max(1,maxX-minX+3)
++    assert(sx*sy*sz<4503599627370496,'Rain merge grid exceeds exact integer range')
++    local function cellKey(x,y,z) return ((x-minX+1)*sy+y-minY+1)*sz+z-minZ+1 end
++    local grid={};local maximumBucket=0
++    for i=1,n do if px[i] then
++        local key=cellKey(CX[i],CY[i],CZ[i]);local bucket=grid[key]
++        if not bucket then bucket={};grid[key]=bucket end
++        bucket[#bucket+1]=i;maximumBucket=math.max(maximumBucket,#bucket)
++    end end
++    local partner,kind={},{}
++    local pairCount,attracts,checks=0,0,0
++    local maxPairs=math.max(0,math.floor(r.RAIN_GPU_STATE_MERGE_MAX_PAIRS))
++    local minSpeed,cone=r.RAIN_GPU_STATE_ATTRACT_MIN_SPEED,r.RAIN_GPU_STATE_ATTRACT_CONE
++    local unit=state.surface:unit()
++    for i=1,n do if px[i] and not partner[i] then
++        local ri=rainDynamicStateRadius[i] or 0
++        local vx,vy,vz=state.surface:velocity(px[i],py[i],rainDynamicStateVelocityU[i] or 0,rainDynamicStateVelocityV[i] or 0)
++        vx,vy,vz=vx/unit,vy/unit,vz/unit
++        local speed=math.sqrt(vx*vx+vy*vy+vz*vz)
++        local bestJ,bestD,steerJ,steerD=nil,math.huge,nil,math.huge
++        local merging=wantMerge and pairCount<maxPairs
++        local steering=wantAttract and speed>=minSpeed
++        if merging or steering then
++            for gx=CX[i]-1,CX[i]+1 do for gy=CY[i]-1,CY[i]+1 do for gz=CZ[i]-1,CZ[i]+1 do
++                local bucket=grid[cellKey(gx,gy,gz)]
++                if bucket then for _,j in ipairs(bucket) do if j~=i then
++                    checks=checks+1
++                    local dx,dy,dz=X[j]-X[i],Y[j]-Y[i],Z[j]-Z[i]
++                    local d2=dx*dx+dy*dy+dz*dz
++                    local rs=ri+(rainDynamicStateRadius[j] or 0)
++                    if merging and not partner[j] and d2<(rs*mergeReach)^2 and d2<bestD then
++                        bestJ,bestD=j,d2
+                     end
+-                end
+-            end
+-            end -- physical Z cell
+-            if bestJ and pairCount < maxPairs then
+-                partner[i], kind[i] = bestJ, 1
+-                partner[bestJ], kind[bestJ] = i, 1
+-                pairCount = pairCount + 1
+-            elseif steerJ then
+-                partner[i], kind[i] = steerJ, 2
+-                attracts = attracts + 1
+-            end
+-        end
+-    end
++                    if steering and d2<(rs*attractReach)^2 and d2<steerD
++                        and dx*vx+dy*vy+dz*vz>cone*math.sqrt(d2)*speed then
++                        steerJ,steerD=j,d2
++                    end
++                end end end
++            end end end
++        end
++        if bestJ then
++            partner[i],kind[i],partner[bestJ],kind[bestJ]=bestJ,1,i,1;pairCount=pairCount+1
++        elseif steerJ then partner[i],kind[i]=steerJ,2;attracts=attracts+1 end
++    end end
++    state.mergeCandidateChecks,state.mergeMaximumBucket=checks,maximumBucket
+     local generation = state.generation or {}
+     state.mergeCmd:clear(rgbm.colors.transparent)
+     if pairCount + attracts > 0 then
+@@ -6648,13 +6653,24 @@
+             end
+         end)
+     end
+-    state.mergeActive = true
++    state.mergeActive = pairCount+attracts>0
+     state.mergePairs = pairCount
+     state.mergeAttracts = attracts
+     state.mergePairsTotal = (state.mergePairsTotal or 0) + pairCount
+-    return true
++    state.profMergeMs=r.RAIN_PERFORMANCE_PROFILING and (os.preciseClock()-profileStart)*1000 or 0
++    return state.mergeActive
+ end
+ 
++-- SDK render.measure records CPU AND GPU in Render Stats; submission clocks
++-- alone cannot identify an expensive GPU pass. Diagnostic overhead is opt-in.
++rainDynamicSceneCopyState.measure = function(key,fn,...)
++    if cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and render.measure then
++        local a,b,c
++        render.measure('RealVisor/'..key,function(...) a,b,c=fn(...) end,...)
++        return a,b,c
++    end
++    return fn(...)
++end
+ local function updateRainGPUState(sim)
+     if rainStateSingleDropDirty
+         or (
+@@ -6929,7 +6945,7 @@
+     local lifecycleOn =
+         rainStateMetaUpdateParams.values.gRainStateLifecycle > 0.5
+     local mergeOk, mergeReady = pcall(
+-        rainDynamicSceneCopyState.updateMergeCommands, count, lifecycleOn)
++        rainDynamicSceneCopyState.measure,'Merge CPU',rainDynamicSceneCopyState.updateMergeCommands,count,lifecycleOn)
+     if not mergeOk and not rainDynamicSceneCopyState.mergeWarned then
+         ac.warn(appNameDebug .. ' Merge commands failed: '
+             .. tostring(mergeReady))
+@@ -6971,8 +6987,8 @@
+     rainStateUpdateParams.values.gRainBirthRamp =
+         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_RAMP_SECONDS
+ 
+-    writeState:updateWithShader(rainStateUpdateParams)
+-    writeMeta:updateWithShader(rainStateMetaUpdateParams)
++    rainDynamicSceneCopyState.measure('State transport',writeState.updateWithShader,writeState,rainStateUpdateParams)
++    rainDynamicSceneCopyState.measure('State lifecycle',writeMeta.updateWithShader,writeMeta,rainStateMetaUpdateParams)
+ 
+     rainStateReadIsA = not rainStateReadIsA
+ end
+@@ -8230,6 +8246,7 @@
+ 
+     slot.canvas:accessData(function(err, data)
+         slot.pending = false
++        local profileStart=cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0
+ 
+         if err or not data then
+             if not rainDynamicStateReadbackErrorLogged then
+@@ -8240,6 +8257,7 @@
+                 )
+                 rainDynamicStateReadbackErrorLogged = true
+             end
++            if data then data:dispose() end
+             return
+         end
+ 
+@@ -8322,6 +8340,7 @@
+         -- Multiple readbacks are now in flight. Do not let an unusually late
+         -- older callback overwrite state from a newer completed request.
+         if sourceRequestFrame < rainDynamicStateLatestAcceptedRequestFrame then
++            data:dispose()
+             return
+         end
+ 
+@@ -8436,6 +8455,9 @@
+         rainDynamicStateSnapshotTime = slot.requestTime
+         rainDynamicStateHasSnapshot = true
+         rainDynamicStateReadbackReady = true
++        data:dispose()
++        rainDynamicSceneCopyState.profReadbackMs=cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING
++            and (os.preciseClock()-profileStart)*1000 or 0
+     end)
+ end
+ 
+@@ -8975,13 +8997,13 @@
+         or not cfg.RUNTIME.RAIN_ENABLED then return end
+     local sim = ac.getSim()
+     if not sim then return end
+-    updateRainGPUState(sim)
++    rainDynamicSceneCopyState.measure('Physics total',updateRainGPUState,sim)
+     if cfg.RUNTIME.RAIN_GPU_STATE_MODE > 0
+         and not rainStateInitialized then return end
+     rainDynamicSceneCopyState.stateReadyFrame = sim.frame
+     if cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then
+         local maskOk, maskError = pcall(
+-            rainDynamicSceneCopyState.updateTrailMaskTimed, sim)
++            rainDynamicSceneCopyState.measure,'Wipe mask',rainDynamicSceneCopyState.updateTrailMaskTimed,sim)
+         if not maskOk and not rainDynamicSceneCopyState.maskWarned then
+             ac.warn(appNameDebug .. ' Dynamic UV mask update failed: '
+                 .. tostring(maskError))
+@@ -8992,7 +9014,7 @@
+         if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED then
+             local tB0 = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+             local birthOk, birthError = pcall(
+-                rainDynamicSceneCopyState.updateBirthMask, sim)
++                rainDynamicSceneCopyState.measure,'Water canvases total',rainDynamicSceneCopyState.updateBirthMask,sim)
+             -- R1.0 profiling (docs/RAINFX_GPU_PRELAID.md): CPU cost of the
+             -- per-drop stamping (birth mask + water-field heads + trails).
+             rainDynamicSceneCopyState.profBirthMs = ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - tB0) * 1000.0
+@@ -10726,7 +10748,7 @@
+     local metricParams={async=false,blendMode=render.BlendMode.Opaque,textures={txRainState=state},
+         values={gCount=count},shader=st.gpuMetricShader}
+     st.surface:bind(metricParams)
+-    local okMetric,metricUpdated=pcall(function() return st.gpuMetric:updateWithShader(metricParams) end)
++    local okMetric,metricUpdated=pcall(function() return st.measure('Head metric',st.gpuMetric.updateWithShader,st.gpuMetric,metricParams) end)
+     if not okMetric or metricUpdated==false then st.gpuHeadsErr='metric pending: '..tostring(metricUpdated);return false end
+     values.gSize = size
+     values.gRainMetersPerUnit = st.surface:unit()
+@@ -10756,7 +10778,7 @@
+     values.gFlipY = r.RAIN_GPU_HEADS_FLIP_Y and 1.0 or 0.0
+     values.gDebug = r.RAIN_GPU_HEADS_DEBUG or 0
+     local okA, errA = pcall(function()
+-        local updated=st.gpuMask:updateWithShader({async=false,
++        local updated=st.measure('Head tiles',st.gpuMask.updateWithShader,st.gpuMask,{async=false,
+             textures = {txRainState=state,txRainStateMeta=meta,txRainDu=st.surface.root..'du.dds',txRainDv=st.surface.root..'dv.dds',txRainBoundaryMask=textureRainBoundaryMask,txRainDropMetric=st.gpuMetric},
+             values = values,
+             shader = rainDynamicSceneCopyState.gpuHeadsPassA,
+@@ -10776,7 +10798,7 @@
+         if not okS then st.gpuHeadsErr = 'summary: ' .. tostring(errS); return false end
+     end
+     local okB, errB = pcall(function()
+-        local updated=target:updateWithShader({async=false,
++        local updated=st.measure('Head kernels',target.updateWithShader,target,{async=false,
+             blendMode = render.BlendMode.Opaque,
+             textures = {txRainState=state,txRainStateMeta=meta,txRainDu=st.surface.root..'du.dds',txRainDv=st.surface.root..'dv.dds',txRainBoundaryMask=textureRainBoundaryMask,txRainDropMetric=st.gpuMetric,
+                 txMask = st.gpuMask, txOverride = st.gpuOverride,
+@@ -11050,7 +11072,7 @@
+     state.gpuHeadsActive = false
+     if waterField and cfg.RUNTIME.RAIN_GPU_HEADS then
+         local tg = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+-        local okG, resG = pcall(state.gpuHeadsRun, target, size, sim)
++        local okG, resG = pcall(state.measure,'Heads total',state.gpuHeadsRun,target,size,sim)
+         state.gpuHeadsActive = okG and resG == true
+         if not okG then state.gpuHeadsErr = tostring(resG) end
+         state.profGpuSubmitMs = ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - tg) * 1000.0
+@@ -11288,7 +11310,7 @@
+         end
+         state.profHeadOverlayMs = ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - overlayStart) * 1000.0
+         local trailStart = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+-        state.waterFieldUpdateTrail(state, stamps, size, sim)
++        state.measure('WF trail + film',state.waterFieldUpdateTrail,state,stamps,size,sim)
+         state.profWaterTrailMs = ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - trailStart) * 1000.0
+     end
+     state.birthMaskRead = target
+@@ -11400,7 +11422,8 @@
+         sim.cameraClipFar
+     )
+     local shotOk, shotResult = pcall(function()
+-        local updated = rainDynamicSceneCopyState.geometryShot:update(
++        local updated = rainDynamicSceneCopyState.measure('World refraction capture',
++            rainDynamicSceneCopyState.geometryShot.update,rainDynamicSceneCopyState.geometryShot,
+             sim.cameraPosition,
+             sim.cameraLook,
+             sim.cameraUp,
+@@ -13683,6 +13706,15 @@
+     sov.src, sov.hdr = src, true
+     sov.w = math.max(1, st.mainTargetWidth or 1280)
+     sov.h = math.max(1, st.mainTargetHeight or 720)
++    if phase=='pre' or phase=='post' then
++        st.nativeGlass=st.nativeGlass or dofile(appFolder..'/native_glass_occlusion.lua')({
++            owner=function() return visor end,
++            localFrame=function() return st.nativeGlassLocalFrame() end,
++            editor=function(name) return st.visorLayerEditor(name) end})
++        if not st.measure('Native glass mask',st.nativeGlass.update,st.nativeGlass,sov.w,sov.h) then
++            vl.err=st.nativeGlass.error;return -- no unoccluded fallback over native glass
++        end
++    end
+     local cachedSource
+     if phase == 'post' and r.RAIN_VISOR_LAYER_OPTICS then
+         local opticsSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h)
+@@ -13784,6 +13816,7 @@
+ ac.onRelease(function()
+     pcall(function() rainDynamicSceneCopyState.cachedOptics:dispose() end)
+     if rainDynamicSceneCopyState.nativeGlass then rainDynamicSceneCopyState.nativeGlass:dispose() end
++    if rainDynamicSceneCopyState.nativeGlassState then rainDynamicSceneCopyState.nativeGlassState:restore() end
+     if rainDynamicSceneCopyState.materialSettings.dirty then
+         rainDynamicSceneCopyState.materialSettings:save(false)
+     end
+@@ -13893,15 +13926,6 @@
+     end
+     if not r.RAIN_ENABLED or not r.RAIN_DYNAMIC_SURFACE_STATE_ENABLED then return end
+     local sim = ac.getSim()
+-    if phase=='pre' or phase=='post' then
+-        st.nativeGlass=st.nativeGlass or dofile(appFolder..'/native_glass_occlusion.lua')({
+-            owner=function() return visor end,
+-            localFrame=function() return st.nativeGlassLocalFrame() end,
+-            editor=function(name) return st.visorLayerEditor(name) end})
+-        if not st.nativeGlass:update(sov.w,sov.h) then
+-            vl.err=st.nativeGlass.error;return -- no unoccluded fallback over native glass
+-        end
+-    end
+     if not sim then return end
+     local mw = math.max(64, rainDynamicSceneCopyState.mainTargetWidth or 1280)
+     local mh = math.max(64, rainDynamicSceneCopyState.mainTargetHeight or 720)
+@@ -14348,7 +14372,7 @@
+         rainDynamicSceneCopyState.fogTone = rgb(l + (f.r - l) * k,
+             l + (f.g - l) * k, l + (f.b - l) * k)
+     end
+-    rainDynamicSceneCopyState.shotToneUpdate(sim)
++    rainDynamicSceneCopyState.measure('Refraction tone + copies',rainDynamicSceneCopyState.shotToneUpdate,sim)
+     pcall(rainDynamicSceneCopyState.visorProbeCopy, sim)
+     local dropMeshParams = {
+         mesh = rainDynamicSurfaceMesh,
+@@ -14671,17 +14695,17 @@
+     dropMeshParams.shader=rainDynamicSceneCopyState.surface.shader..dropMeshParams.shader
+     rainDynamicSceneCopyState.lastDropMeshParams = dropMeshParams
+     local dynamicDrawn = false
+-    local sceneStackOk = pcall(rainDynamicSceneCopyState.visorSceneStack, 'pre')
++    local sceneStackOk = pcall(rainDynamicSceneCopyState.measure,'Glass pre',rainDynamicSceneCopyState.visorSceneStack,'pre')
+     local rainEditor=rainDynamicSceneCopyState.e1SourceEditor('GLASS_RAINFX')
+     if (not rainEditor or rainEditor.visible~=false) and not ((cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE
+             and cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE)
+             or cfg.RUNTIME.RAIN_VISOR_OVERLAY) then
+-        dynamicDrawn = render.mesh(dropMeshParams)
++        dynamicDrawn = rainDynamicSceneCopyState.measure('Rain colour',render.mesh,dropMeshParams)
+     end
+     -- s53: glass in front of the rain (GLASS_EXT band, GLASS_INT), before
+     -- the drop depth pass so the same-surface GLASS_EXT is not rejected.
+     if sceneStackOk then
+-        local okPost, errPost = pcall(rainDynamicSceneCopyState.visorSceneStack, 'post')
++        local okPost, errPost = pcall(rainDynamicSceneCopyState.measure,'Glass post',rainDynamicSceneCopyState.visorSceneStack,'post')
+         if not okPost then rainDynamicSceneCopyState.visorLayer.err = tostring(errPost) end
+     end
+     -- Depth occlusion pass (docs/RAINFX_IMPACT_SPLASH.md §7): same mesh and
+@@ -14693,7 +14717,7 @@
+         dropMeshParams.values.gDynamicDropDepthOnly = 1.0
+         render.setBlendMode(render.BlendMode.AlphaBlend)
+         render.setDepthMode(render.DepthMode.Normal)
+-        render.mesh(dropMeshParams)
++        rainDynamicSceneCopyState.measure('Rain depth',render.mesh,dropMeshParams)
+         dropMeshParams.values.gDynamicDropDepthOnly = 0.0
+         render.setDepthMode(render.DepthMode.ReadOnly)
+         render.setBlendMode(render.BlendMode.BlendAccurate)
+@@ -16069,6 +16093,11 @@
+         or (cfg.RUNTIME.RAIN_VISOR_SCENE_STACK and cfg.RUNTIME.RAIN_ENABLED
+             and cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED))
+     rainDynamicSceneCopyState.visorLayerSceneHide(customStack or false)
++    local state=rainDynamicSceneCopyState
++    state.nativeGlassState=state.nativeGlassState or dofile(appFolder..'/native_glass_state.lua')({
++        editor=function(name) return state.visorLayerEditor(name) end,runtime=cfg.RUNTIME,
++        dirty=function() state.materialSettings:markDirty() end})
++    state.nativeGlassState:update() -- before engine sun-shadow list preparation
+ 
+     -- After camera tracking, offset, motion and calibration. Engine world-matrix
+     -- updates follow this callback; enabling only at onSceneReady is too late.
+@@ -16519,6 +16548,8 @@
+         + (p.profSplashStateMs or 0) * 0.05
+     p.profOverrideWriteAvg = (p.profOverrideWriteAvg or 0) * 0.95
+         + (p.profOverrideWriteMs or 0) * 0.05
++    p.profMergeAvg=(p.profMergeAvg or 0)*.95+(p.profMergeMs or 0)*.05
++    p.profReadbackAvg=(p.profReadbackAvg or 0)*.95+(p.profReadbackMs or 0)*.05
+     cfg.RUNTIME.AVG_TIME_X_MIN = cfg.RUNTIME.AVG_TIME_X_MIN == 0.0 and p.profBirthAvg or math.min(cfg.RUNTIME.AVG_TIME_X_MIN, (p.profBirthAvg or 0.0))
+     cfg.RUNTIME.AVG_TIME_X_MAX = cfg.RUNTIME.AVG_TIME_X_MAX == 0.0 and p.profBirthAvg or math.max(cfg.RUNTIME.AVG_TIME_X_MAX, (p.profBirthAvg or 0.0))
+     cfg.RUNTIME.AVG_TIME_Y_MIN = cfg.RUNTIME.AVG_TIME_Y_MIN == 0.0 and p.profTrailAvg or math.min(cfg.RUNTIME.AVG_TIME_Y_MIN, (p.profTrailAvg or 0.0))
+@@ -17761,6 +17792,9 @@
+ 
+             ui.text(string.format('Rain birth + WF CPU (avg): total %.2f ms | wipe mask %.2f ms | slots %d',
+                 (p.profBirthAvg or 0.0), (p.profTrailAvg or 0.0), rainDynamicStateReadbackCount or 0))
++            ui.text(string.format('Merge CPU %.2f ms | readback CPU %.2f ms | checks %d | largest bucket %d',
++                p.profMergeAvg or 0,p.profReadbackAvg or 0,p.mergeCandidateChecks or 0,p.mergeMaximumBucket or 0))
++            ui.textWrapped('Render Stats -> RealVisor/* shows separate CPU/GPU timings. Nested totals overlap; compare leaf passes.')
+             ui.text(string.format('R1.1 CPU parts (avg): build %.2f | head overlay %.2f | water trail %.2f ms',
+                 (p.profBuildAvg or 0.0), (p.profOverlayAvg or 0.0), (p.profWaterTrailAvg or 0.0)))
+             if ui.checkbox('GPU heads (R1.1, tile binning)', cfg.RUNTIME.RAIN_GPU_HEADS) then
+@@ -18503,6 +18537,7 @@
+     ui.separator()
+ 
+     ui.text('Model Config & Debug')
++    if rainDynamicSceneCopyState.nativeGlassState then rainDynamicSceneCopyState.nativeGlassState:ui() end
+     if ui.button('Apply & save all materials##KN5') then
+         rainDynamicSceneCopyState.materialSettings:save(true)
+     end
+--- s64-baseline/native_glass_occlusion.lua
++++ native_glass_occlusion.lua
+@@ -26,6 +26,14 @@
+     function st:update(w,h)
+         local owner=d.owner()
+         if not owner then self:dispose();return true end
++        self.items={};local visibility={}
++        for _,name in ipairs(self.names) do
++            local e=d.editor(name)
++            local visible=e and e.visible~=false and e.targetMesh and #e.targetMesh>0 and e.targetMesh:isVisible(1)
++            visibility[#visibility+1]=visible and name or '-'
++            if visible then self.items[#self.items+1]=e end
++        end
++        if #self.items==0 then self.ready=false;self.key=nil;return true end
+         local sim=ac.getSim()
+         local eye,look,up
+         if d.localFrame then eye,look,up=d.localFrame() end
+@@ -35,18 +43,10 @@
+             look=inverse:transformVector(sim.cameraLook)
+             up=inverse:transformVector(sim.cameraUp)
+         end
+-        local parts={w,h,sim.cameraFOV};self.items={}
++        local parts={w,h,sim.cameraFOV,table.concat(visibility,':')}
+         for _,v in ipairs({eye,look,up}) do
+             parts[#parts+1]=string.format('%.8f,%.8f,%.8f',v.x,v.y,v.z)
+         end
+-        for _,name in ipairs(self.names) do
+-            local e=d.editor(name)
+-            local visible=e and e.visible~=false and e.targetMesh and #e.targetMesh>0
+-                and e.targetMesh:isVisible(1)
+-            parts[#parts+1]=visible and name or '-'
+-            if visible then self.items[#self.items+1]=e end
+-        end
+-        if #self.items==0 then self.ready=false;self.key=nil;return true end
+         local key=table.concat(parts,':')
+         if owner==self.owner and key==self.key and self.ready then return true end
+         self.ready=false
+--- s64-baseline/native_glass_state.lua
++++ native_glass_state.lua
+@@ -0,0 +1,48 @@
++-- Transparent native glass does not cast an opaque four-layer sun shadow.
++-- Material colours, alpha, shader, cull/depth modes and Visible are preserved.
++return function(d)
++    local st={items={},names={'GLASS_EXT_MRR','GLASS_COAT_MRR','GLASS_INT_MRR','GLASS_STICKER_MRR'}}
++    function st:restore()
++        for _,entry in pairs(self.items) do
++            for _,part in ipairs(entry.parts) do pcall(function() part.ref:setShadows(part.shadows) end) end
++        end
++        self.items={}
++    end
++    function st:update()
++        for _,name in ipairs(self.names) do
++            local e=d.editor(name);local ref=e and e.targetMesh
++            if ref and #ref>0 then
++                local entry=self.items[name]
++                if not entry or entry.ref~=ref then
++                    entry={ref=ref,parts={}};self.items[name]=entry
++                    for i=1,#ref do
++                        entry.parts[#entry.parts+1]={ref=ref:at(i),shadows=ref:isCastingShadows(i)}
++                    end
++                end
++                for _,part in ipairs(entry.parts) do
++                    part.ref:setShadows(d.runtime.RAIN_VISOR_LAYER_NATIVE_GLASS_SHADOWS and part.shadows or false)
++                end
++            end
++        end
++    end
++    function st:ui()
++        if ui.checkbox('Native glass casts hard sun shadows (comparison)',d.runtime.RAIN_VISOR_LAYER_NATIVE_GLASS_SHADOWS) then
++            d.runtime.RAIN_VISOR_LAYER_NATIVE_GLASS_SHADOWS=not d.runtime.RAIN_VISOR_LAYER_NATIVE_GLASS_SHADOWS
++            d.dirty()
++        end
++        ui.textWrapped('Clear native glass keeps reflections and opacity; hard shadows are off so the opening receives sunlight. Frame/rubber shadows remain.')
++        if ui.treeNode('Native glass render states') then
++            for _,name in ipairs(self.names) do
++                local entry=self.items[name]
++                if entry then
++                    local ref=entry.ref
++                    ui.text(string.format('%s: transparent %s | blend %s | depth %s | cull %s | shadow %s',name,
++                        tostring(ref:isTransparent(1)),tostring(ref:blendMode(1)),tostring(ref:depthMode(1)),
++                        tostring(ref:cullMode(1)),tostring(ref:isCastingShadows(1))))
++                end
++            end
++            ui.treePop()
++        end
++    end
++    return st
++end
+--- s64-baseline/shaders/rainSurfaceMetric.hlsl
++++ shaders/rainSurfaceMetric.hlsl
+@@ -52,23 +52,33 @@
+     float remaining=max(dt,0);
+     uint w=1u,h=1u;txRainBoundaryMask.GetDimensions(w,h);
+     float2 maskSize=float2(w,h);
++    float4 currentU=rainMetricTap(txRainDu,float2(position.x,position.y+1));
++    float3 u=currentU.xyz,v=rainMetricTap(txRainDv,float2(position.x,position.y+1)).xyz;
++    float speed=length(u*velocity.x+v*velocity.y)/max(gRainMetersPerUnit,1e-8);
+     [loop] for(int step=0;step<128;++step) {
+         if(remaining<=1e-7)break;
+-        float speed=rainMetricLength(position,velocity);
+         if(speed<1e-9)break;
+         float texelSpeed=max(abs(velocity.x)*maskSize.x,abs(velocity.y)*maskSize.y);
+-        float safe=rainMetricTap(txRainDu,float2(position.x,position.y+1)).a;
++        float safe=currentU.a;
+         float safePixels=max(.5,(safe-1)*.75);
+         float h=min(remaining,min(safePixels/max(texelSpeed,1e-9),gRainReferencePerMM/max(speed,1e-9)));
+         float2 next=position+velocity*h;
+-        if(rainValid(next)<.5)return float4(2,2,0,0);
+-        float3 u,v;rainMetric(position,u,v);
++        if(any(next<float2(0,-1)) || any(next>float2(1,0)))return float4(2,2,0,0);
++        float2 uv=float2(next.x,next.y+1);
++        float4 nextU=rainMetricTap(txRainDu,uv);
++        if(nextU.a<.5 || rainMetricTap(txRainBoundaryMask,uv).a<.5)return float4(2,2,0,0);
++        float3 nextV=rainMetricTap(txRainDv,uv).xyz;
+         float3 momentum=(u*velocity.x+v*velocity.y)/gRainMetersPerUnit;
+-        float2 transported=rainMetricProject(next,momentum);
+-        float movedSpeed=rainMetricLength(next,transported);
++        float a=dot(nextU.xyz,nextU.xyz),b=dot(nextU.xyz,nextV),c=dot(nextV,nextV);
++        float det=max(a*c-b*b,1e-20);
++        float mu=dot(nextU.xyz,momentum),mv=dot(nextV,momentum);
++        float2 transported=float2(c*mu-b*mv,a*mv-b*mu)/det*gRainMetersPerUnit;
++        float movedSpeed=length(nextU.xyz*transported.x+nextV*transported.y)/max(gRainMetersPerUnit,1e-8);
+         velocity=movedSpeed>1e-9 ? transported*(speed/movedSpeed) : float2(0,0);
+         position=next;remaining-=h;
++        currentU=nextU;u=nextU.xyz;v=nextV;
++        speed=length(u*velocity.x+v*velocity.y)/max(gRainMetersPerUnit,1e-8);
+     }
+-    if(remaining>1e-7 && rainMetricLength(position,velocity)>1e-9)return float4(2,2,0,0);
++    if(remaining>1e-7 && speed>1e-9)return float4(2,2,0,0);
+     return float4(position,velocity);
+ }
+--- s64-baseline/shaders/rainVisorLayer.hlsl
++++ shaders/rainVisorLayer.hlsl
+@@ -189,7 +189,9 @@
+ {
+     if(gLayerNativeOn>.5 && gLayerKind>.5) {
+         float depth=txLayerNativeDepth.Load(int3((int2)(pin.PosH.xy*gLayerNativePixelScale),0)).r;
+-        clip(depth>0 && depth<=length(pin.PosC)+.0001 ? -1 : 1);
++        // Exterior ownership is coverage, not translucent depth blending.
++        // FX and native meshes are independently modelled and can interleave.
++        clip(depth>0 ? -1 : 1);
+     }
+     float3 toEye = normalize(-pin.PosC);
+     float3 outwardNormal = normalize(pin.NormalW);
+--- s64-baseline/shaders/rainVisorOptics.hlsl
++++ shaders/rainVisorOptics.hlsl
+@@ -126,7 +126,7 @@
+     float2 screenUV=pin.PosH.xy*gOptInvTarget;
+     if(gOptNativeOn>.5) {
+         float depth=txOptNativeDepth.Load(int3((int2)(pin.PosH.xy*gOptNativePixelScale),0)).r;
+-        clip(depth>0 && depth<=length(pin.PosC)+.0001 ? -1 : 1);
++        clip(depth>0 ? -1 : 1);
+     }
+     float3 n=normalize(pin.NormalW),v=normalize(-pin.PosC);
+     float cosine=saturate(abs(dot(n,v))),f=.04+.96*pow(1-cosine,5);

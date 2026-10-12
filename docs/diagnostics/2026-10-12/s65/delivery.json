@@ -1,0 +1,66 @@
+{
+  "files": {
+    "realvisor.lua": {
+      "sha256": "7605cef301ecd47ef5423dd042cacbe29a9a03ce37401fc50529f3363838a914",
+      "mtime_ns": 1791788224148290700
+    },
+    "rain_surface.lua": {
+      "sha256": "c2a30e1fc1173d505f8afbff60578d0688c42db4d2a0d8c1fa30356580de63c1",
+      "mtime_ns": 1791786539322734200
+    },
+    "shaders/rainVisorDynamicDrop.hlsl": {
+      "sha256": "6865051a40e8c37e6931db14a09174fea6482decf2be683a212f7de2b00ec1f7",
+      "mtime_ns": 1791786627840336400
+    },
+    "native_glass_state.lua": {
+      "sha256": "80c6e87c9b43f6653602e4019d69fabba564589574af14bfe277774cf5de3b02",
+      "mtime_ns": 1791779207137211100
+    },
+    "native_glass_occlusion.lua": {
+      "sha256": "f71a8dcb7a2a808b640dfd90f47b866f28572c78c85b02b86ccb842e15585ee3",
+      "mtime_ns": 1791779515735559900
+    },
+    "visor_optics.lua": {
+      "sha256": "8143a27fcd0f5da0977239bf14c679d150af9a9e2996ab023c239f378ada7ef6",
+      "mtime_ns": 1791771903945872000
+    },
+    "material_settings.lua": {
+      "sha256": "9bdbf33158d9e29a48b042d298dfbc13aa6fcc5aa26d8c965f954ed5bca5f48d",
+      "mtime_ns": 1791743335672473000
+    },
+    "settings.ini": {
+      "sha256": "c057b43528f4ae470fa0b35d54f8c55c016dd0fd1628a4679bc85249c53de7c3",
+      "mtime_ns": 1791636956188236900
+    },
+    "settings_mats.ini": {
+      "sha256": "33b530595725cf1d371f499448bcc3d5ca7e0c164e16f15b3f8d47a6324145c7",
+      "mtime_ns": 1791633872126581100
+    }
+  },
+  "numeric_tuning_unchanged": true,
+  "runtime_default_change": {
+    "RAIN_GPU_HEADS_SPARSE_WORDS": [
+      "false",
+      "true"
+    ]
+  },
+  "required_lua_modules": [
+    "rain_surface.lua",
+    "shaders/rainVisorDynamicDrop.hlsl",
+    "native_glass_state.lua",
+    "native_glass_occlusion.lua",
+    "visor_optics.lua",
+    "material_settings.lua"
+  ],
+  "compiled_programs": {
+    "rainVisorDynamicDrop": {
+      "bytes": 248664,
+      "snapshot_texture_retained": true
+    },
+    "rainDepthCoverage": {
+      "bytes": 164312,
+      "snapshot_texture_retained": false
+    }
+  },
+  "game_fps_measured": false
+}

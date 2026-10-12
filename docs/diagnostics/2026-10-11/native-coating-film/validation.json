@@ -1,0 +1,143 @@
+{
+  "sources": {
+    "CUTPATTERN": "11653251154133129aa4215c267bb06d704a1e009d33734619adcdfad43eabde",
+    "NOISE1": "71b08fabd747fd5a22f1b3d8c12301dbd0f122040404f0401208debec9cb6031",
+    "NOISE2": "ebf0b8f5463673824ec228753f9e855e3eb9a2e3db71c386e86eb8e84e50ec79",
+    "NOISE3": "641c8ad7161b9be93459070f8c056ed9c58905178587a8fe5ef32ba1c6507f45",
+    "SIGN": "9ee7f9c689ade87fd090462d449a295a873b8843423adfb077abd45bb7ff5166",
+    "txNormal": "b44c944c4f1595074c6ac325edb756c06bb16ee471f6d22b7da396899c37991b"
+  },
+  "files": {
+    "COAT_balanced_diffuse.dds": "2a447572bc09f63d8b8168a6a2946e1405d3e74742fa283de81bd1d851f8d88b",
+    "COAT_balanced_maps.dds": "27e651b25b2b415e0d0b95ff8fc57cc396fdbec019ce6c5674ae1e999c5e3f0f",
+    "COAT_clear_diffuse.dds": "ed951798a32f113275dbc3c4b6c813132935b000f0ba9d0e6aa9b3229c12c19b",
+    "COAT_clear_maps.dds": "27e651b25b2b415e0d0b95ff8fc57cc396fdbec019ce6c5674ae1e999c5e3f0f",
+    "COAT_cloudy_diffuse.dds": "50e8ee9358486d99850bd99bf4ba231e34baed0c8ab0e0827f48607c1052ffee",
+    "COAT_cloudy_maps.dds": "27e651b25b2b415e0d0b95ff8fc57cc396fdbec019ce6c5674ae1e999c5e3f0f",
+    "COAT_normal.dds": "f6635e177295892376f099b0ca62b8548c9f3bbed8264fe31564e0e26939d1c9",
+    "COAT_normal_shallow_engraving.dds": "bcecf5d6e82e7354843db8d89ebf21accf7cbbe32a9b89f59f62f47c40521b42",
+    "neutral_black.dds": "f56ca6e31abd47be92a91ed7c83a1babb2e1396851747978efe0c3437f4d170c",
+    "neutral_white.dds": "37f551237b9851b6e16cd20c0ec45339bdf2e8650ccd65338c0f6469a1b64577"
+  },
+  "variants": {
+    "clear": {
+      "center_input_alpha_p5_p95": [
+        0.031047431752085686,
+        0.04642165079712868
+      ],
+      "ends_input_alpha_p5_p95": [
+        0.17928926646709442,
+        0.21700000762939453
+      ],
+      "dds_mips": 13
+    },
+    "balanced": {
+      "center_input_alpha_p5_p95": [
+        0.050071146339178085,
+        0.07567193359136581
+      ],
+      "ends_input_alpha_p5_p95": [
+        0.2973140776157379,
+        0.36500000953674316
+      ],
+      "dds_mips": 13
+    },
+    "cloudy": {
+      "center_input_alpha_p5_p95": [
+        0.07830434292554855,
+        0.11821738630533218
+      ],
+      "ends_input_alpha_p5_p95": [
+        0.4425041675567627,
+        0.5450000166893005
+      ],
+      "dds_mips": 13
+    }
+  },
+  "profile": {
+    "ksAmbient": 0.5,
+    "ksDiffuse": 0.5,
+    "ksSpecular": 0.45,
+    "ksSpecularEXP": 255,
+    "ksEmissive": 0,
+    "ksAlphaRef": 0,
+    "fresnelC": 0.025,
+    "fresnelEXP": 5,
+    "fresnelMaxLevel": 0.3,
+    "isAdditive": 0,
+    "useDetail": 0,
+    "detailUVMultiplier": 1,
+    "nmObjectSpace": 0,
+    "emAlphaFromDiffuse": -1,
+    "emSkipDiffuseMap": 0,
+    "emChannelsMode": 0,
+    "extColoredReflection": 0,
+    "extColoredReflectionNorm": 0,
+    "shadowBiasMult": 0
+  },
+  "profile_gamma": {
+    "ksAmbient": 0.25,
+    "ksDiffuse": 0.25,
+    "ksSpecular": 0.45,
+    "ksSpecularEXP": 255,
+    "ksEmissive": 0,
+    "ksAlphaRef": 0,
+    "fresnelC": 0.15811388300841897,
+    "fresnelEXP": 2.2727272727272725,
+    "fresnelMaxLevel": 0.5477225575051661,
+    "isAdditive": 0,
+    "useDetail": 0,
+    "detailUVMultiplier": 1,
+    "nmObjectSpace": 0,
+    "emAlphaFromDiffuse": -1,
+    "emSkipDiffuseMap": 0,
+    "emChannelsMode": 0,
+    "extColoredReflection": 0,
+    "extColoredReflectionNorm": 0,
+    "shadowBiasMult": 0
+  },
+  "scope": "Native local CSP shader, D3D11 WARP synthetic UV/cylinder and studio environment; no game test",
+  "gpu_probes": {
+    "center": [
+      0.35444268584251404,
+      0.36306944489479065,
+      0.3690818250179291,
+      0.09145902097225189
+    ],
+    "left_end": [
+      0.35090702772140503,
+      0.35841843485832214,
+      0.36386486887931824,
+      0.3722982704639435
+    ],
+    "right_end": [
+      0.5452281832695007,
+      0.5531318783760071,
+      0.55986088514328,
+      0.3661133646965027
+    ],
+    "letter": [
+      0.34195128083229065,
+      0.3477402329444885,
+      0.354259729385376,
+      0.40992680191993713
+    ],
+    "dark": [
+      0.0,
+      0.0,
+      0.0,
+      0.09145902097225189
+    ]
+  },
+  "gamma_center": [
+    0.15742972493171692,
+    0.16508729755878448,
+    0.17068156599998474,
+    0.09145902097225189
+  ],
+  "originals_unchanged": true,
+  "normal_max_length_error_before_encoding": 1.1920928955078125e-07,
+  "normal_letter_depth": "Optional artistic shallow recess, not measured geometry",
+  "source_alpha_equal": true,
+  "dds": "RGBA8 UNORM; 4096x1024 complete13mips; normalized normal mips"
+}

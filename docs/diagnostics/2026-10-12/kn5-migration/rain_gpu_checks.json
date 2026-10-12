@@ -1,0 +1,64 @@
+[
+  {
+    "case": "force orthogonality and 1 mm reference radius",
+    "profile_scale": 1,
+    "valid_samples": 1911,
+    "errors": [
+      2.598389983177185e-07,
+      2.4028122425079346e-07,
+      4.656612873077393e-10
+    ]
+  },
+  {
+    "case": "force orthogonality and 1 mm reference radius",
+    "profile_scale": 2,
+    "valid_samples": 1911,
+    "errors": [
+      2.598389983177185e-07,
+      2.4028122425079346e-07,
+      4.656612873077393e-10
+    ]
+  },
+  {
+    "case": "force orthogonality and 1 mm reference radius",
+    "profile_scale": 0.75,
+    "valid_samples": 1911,
+    "errors": [
+      2.5205372367054224e-07,
+      2.3189932107925415e-07,
+      4.656612873077393e-10
+    ]
+  },
+  {
+    "case": "inertial speed across new UV bases",
+    "dt": 0.016,
+    "live_samples": 1841,
+    "maximum_speed_error": 4.76837158203125e-07,
+    "boundary_exits": 70
+  },
+  {
+    "case": "inertial speed across new UV bases",
+    "dt": 0.05,
+    "live_samples": 1715,
+    "maximum_speed_error": 5.364418029785156e-07,
+    "boundary_exits": 196
+  },
+  {
+    "case": "crossed one-texel hole exits, with no wrapping",
+    "result": [
+      2.0,
+      2.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "case": "outer boundary exits",
+    "result": [
+      2.0,
+      2.0,
+      0.0,
+      0.0
+    ]
+  }
+]

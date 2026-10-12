@@ -1,0 +1,21 @@
+{
+  "size": [
+    2048,
+    2048
+  ],
+  "seed": 17,
+  "format": "RGBA8 UNORM linear, alpha is smudge data",
+  "channels": [
+    "dust",
+    "scratch coverage",
+    "scratch tangent / 2pi",
+    "smudge"
+  ],
+  "sha256": "f977c1e0e788833a80a28c4c53cd519759f5eca4c55fe09e5e0fa17cc652c444",
+  "mean_rgba": [
+    0.02647374097038718,
+    0.0025279989429548675,
+    0.4847202123380175,
+    0.0032439456266515395
+  ]
+}

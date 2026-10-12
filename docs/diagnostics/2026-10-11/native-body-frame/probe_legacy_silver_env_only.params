@@ -1,0 +1,46 @@
+ksAmbient 0.4
+ksDiffuse 0.6
+ksSpecular 0.65
+ksSpecularEXP 255
+ksEmissive 0 0 0
+ksAlphaRef 0
+fresnelC 0.08
+fresnelEXP 5
+fresnelMaxLevel 0.85
+isAdditive 0
+useDetail 0
+detailUVMultiplier 1
+nmObjectSpace 0
+extColoredReflection 2
+extColoredReflectionNorm 0
+shadowBiasMult 0
+fixtureSize 1 1
+fixtureAngle 0
+fixtureProbe 1
+ksLightDirection 0.35 -0.3 -0.88741197 0
+ksLightColor 0 0 0 0
+extSpecularColor 0 0 0
+ksAmbientColor_sky0 0 0 0 0
+ksHorizonColor 0 0 0 0
+ksZenithColor 0 0 0 0
+perObjAmbientMultiplier 1
+extLambertGamma_inner 1
+extVAOExp 1
+extFresnelGamma 1
+extSunSpecularMult 1
+extReflectionBrightness 1
+extReflectionBrightnessMult 1
+ksExposure 1
+extEmissiveMults 1 1 1 3
+extIBLAmbientBaseThreshold 1
+extScreenSize 1024 512 0.0009765625 0.001953125
+extMSAA 1
+extClearCoat 0
+extShaderFlags 0
+ksNearPlane 0.01
+extFlags 0
+extVaoMode 0
+shadowR1 0
+shadowR2 1
+sceneShadowOpacity 0
+fixtureUV 0.510986328125 0.65283203125

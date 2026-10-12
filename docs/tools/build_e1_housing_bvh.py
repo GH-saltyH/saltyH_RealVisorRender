@@ -15,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MODEL = ROOT / 'visors/visor_lando_2025Champion_maxquality_diet_face.kn5'
 OUT = ROOT / 'texture/GLASS/E1_GEOMETRY'
 WIDTH = 1024
-MESHES = [('BODY_FRAME', 'frame'), ('BODY_GLASSLINE', 'rubber'),
-          ('BODY_FABRIC', 'fabric'), ('DRIVER_FACE', 'face'), ('DRIVER_BALAKLAVA', 'balaklava')]
+MESHES = [('FRAME_MAIN', 'frame'), ('BAND_INNER', 'rubber'),
+          ('BODY_FABRIC_TRACE', 'fabric'), ('DRIVER_FACE', 'face'), ('DRIVER_BALAKLAVA', 'balaklava'),
+          ('CAM', 'cam'), ('CAM_COVER', 'camCover'), ('CAM_FABRIC', 'camFabric')]
 
 
 def dds(path, records):
@@ -49,7 +50,7 @@ def mesh(blob, name):
     return matches[0]
 
 
-def build(vertices, indices):
+def build(vertices, indices, with_order=False):
     tri = vertices[indices, :3]
     uv = vertices[indices, 6:8]
     minimum, maximum = tri.min(1), tri.max(1)
@@ -86,7 +87,8 @@ def build(vertices, indices):
     records[:, :3, :3] = tri[order]
     records[:, :3, 3] = uv[order, :, 0]
     records[:, 3, :3] = uv[order, :, 1]
-    return packed, records.reshape(-1, 4), len(nodes)
+    result=(packed, records.reshape(-1, 4), len(nodes))
+    return (*result, order) if with_order else result
 
 
 def main():

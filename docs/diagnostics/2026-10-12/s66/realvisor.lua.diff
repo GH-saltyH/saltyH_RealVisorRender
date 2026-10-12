@@ -1,0 +1,690 @@
+--- s66 baseline/realvisor.lua
++++ realvisor.lua
+@@ -62,6 +62,29 @@
+     local rainDynamicSurfaceMeshCount = 0
+     -- Script-global table avoids the LuaJIT limit on chunk-level locals.
+     rainDynamicSceneCopyState = {}
++    -- Main-camera hooks must not run inside our offscreen GeometryShots.
++    -- Restore the scope on pending and error exits as well as successful draws.
++    rainDynamicSceneCopyState.captureUpdate=function(shot,...)
++        local st=rainDynamicSceneCopyState
++        st.offscreenCaptureActive=(st.offscreenCaptureActive or 0)+1
++        local ok,result=pcall(shot.update,shot,...)
++        st.offscreenCaptureActive=st.offscreenCaptureActive-1
++        if not ok then error(result) end
++        return result
++    end
++    rainDynamicSceneCopyState.loadRuntimeModule=function(name)
++        local st=rainDynamicSceneCopyState
++        st.moduleFactories=st.moduleFactories or {};st.moduleErrors=st.moduleErrors or {}
++        if st.moduleFactories[name] then return st.moduleFactories[name] end
++        if st.moduleErrors[name] then return nil,st.moduleErrors[name] end
++        local ok,factory=pcall(dofile,appFolder..'/'..name)
++        if not ok or type(factory)~='function' then
++            local message='Required runtime module '..name..': '..tostring(factory)
++            st.moduleErrors[name]=message;ac.warn(appNameDebug..' '..message)
++            return nil,message
++        end
++        st.moduleFactories[name]=factory;return factory
++    end
+     -- Stage 3: persistent GPU state -> async CPU readback -> dynamic vertices.
+     local rainDynamicStateReadbackSlots = {}
+     local rainDynamicStateReadbackCount = 0
+@@ -313,7 +336,7 @@
+         -- false: original signed tangent airflow, true: downward visor
+         -- runoff with the original left/right tangent component.
+         RAIN_AIRFLOW_DOWNWARD_MODE = true,
+-        RAIN_AIRFLOW_DOWNWARD_GAIN = 2.58,
++        RAIN_AIRFLOW_DOWNWARD_GAIN = 0.33,
+ 
+         -- All external accelerations enter the GPU in SI m/s^2 and
+         -- share this compact surface-force conversion.
+@@ -597,14 +620,14 @@
+         RAIN_DYNAMIC_WATER_FIELD_DEBUG = 0, -- 1 height/silhouette, 2 slope, 3 large-drop weight
+         RAIN_DYNAMIC_WATER_FIELD_THRESHOLD = 0.35,
+         RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE = 1.24,
+-        RAIN_DYNAMIC_WATER_FIELD_REFRACTION = 0.35, -- shot heights at slope 1
++        RAIN_DYNAMIC_WATER_FIELD_REFRACTION = 0.69, -- shot heights at slope 1
+         RAIN_DYNAMIC_WATER_FIELD_SCENE_MIP = 3.0,
+         RAIN_DYNAMIC_WATER_FIELD_SLOPE_MIP = 1.5,
+         RAIN_DYNAMIC_WATER_FIELD_EDGE_LOSS = 0.75,
+         RAIN_DYNAMIC_WATER_FIELD_LOSS_START = 0.70,
+         RAIN_DYNAMIC_WATER_FIELD_LOSS_END = 1.30,
+         RAIN_DYNAMIC_WATER_FIELD_GLINT = 0.45,
+-        RAIN_DYNAMIC_WATER_FIELD_OPACITY = 0.97,
++        RAIN_DYNAMIC_WATER_FIELD_OPACITY = 1.00,
+         RAIN_DYNAMIC_WATER_FIELD_NORMAL_STEP_TEXELS = 1.0,
+         RAIN_DYNAMIC_WATER_FIELD_LOBES = true,
+         RAIN_DYNAMIC_WATER_FIELD_MOTION_STRETCH = 0.35,
+@@ -630,7 +653,7 @@
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED = true,
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE = 1024,
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 0.46,      -- WF trail lifetime, FINE TUNED
+-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.78,        -- WF trail width, FINE TUNED
++        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.31,        -- WF trail width, FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.75,        -- WF trail bead noise, FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 203.0, -- WF trail noise cells FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED = 0.004, -- visor UV / s
+@@ -682,8 +705,8 @@
+         -- trails are cylindrical lenses: sharp image shifted across the flow
+         -- by the thickness gradient instead of a blurred copy ("paint").
+         RAIN_DYNAMIC_TRAIL_REFRACT_V2 = true,
+-        RAIN_DYNAMIC_TRAIL_REFRACT_PX = 14.0,      -- image shift at slope 1 (render px)
+-        RAIN_DYNAMIC_TRAIL_GRAD_WIDE_TEXELS = 3.5, -- ~ half a trail width (trail canvas)
++        RAIN_DYNAMIC_TRAIL_REFRACT_PX = 22.0,      -- image shift at slope 1 (render px)
++        RAIN_DYNAMIC_TRAIL_GRAD_WIDE_TEXELS = 2.8, -- ~ half a trail width (trail canvas)
+         RAIN_DYNAMIC_TRAIL_GRAD_MIX = 0.65,        -- 0 narrow (edges) .. 1 wide (interior)
+         RAIN_DYNAMIC_TRAIL_PROFILE_RANGE = 0.35,   -- G above threshold = full thickness
+         RAIN_DYNAMIC_TRAIL_SLOPE_MAX = 1.5,
+@@ -7602,7 +7625,17 @@
+ 
+     rainDynamicSurfaceVertices = vertices
+     rainDynamicSurfaceIndices = indices
+-    rainDynamicSurfaceLookup = rainDynamicSurfaceBuildLookup(vertices, indices)
++    if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED and cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ONLY then
++        local minU,minV,maxU,maxV=math.huge,math.huge,-math.huge,-math.huge
++        for i=1,#vertices do local uv=vertices:get(i).uv
++            minU,minV=math.min(minU,uv.x),math.min(minV,uv.y)
++            maxU,maxV=math.max(maxU,uv.x),math.max(maxV,uv.y)
++        end
++        rainDynamicSurfaceLookup={minU=minU,minV=minV,maxU=maxU,maxV=maxV,
++            rangeU=math.max(maxU-minU,1e-7),rangeV=math.max(maxV-minV,1e-7),
++            bboxUVArea=(maxU-minU)*(maxV-minV),totalUVArea=0,
++            validTriangleCount=math.floor(#indices/3),boundsOnly=true}
++    else rainDynamicSurfaceLookup = rainDynamicSurfaceBuildLookup(vertices, indices) end
+ 
+     ac.log(
+         appNameDebug
+@@ -7636,7 +7669,12 @@
+         .. '%'
+     )
+ 
+-    local lookupValidation = rainDynamicSurfaceValidateLookup(rainDynamicSurfaceLookup)
++    local lookupValidation=rainDynamicSurfaceLookup.boundsOnly
++        and {total=0,hitCount=0,missCount=0,bucketMembershipMiss=0,containmentMiss=0}
++        or rainDynamicSurfaceValidateLookup(rainDynamicSurfaceLookup)
++    if rainDynamicSurfaceLookup.boundsOnly then
++        ac.log(appNameDebug..' Shared GPU rain mesh: obsolete per-triangle lookup/probes skipped')
++    end
+     local lookupAccuracy =
+         lookupValidation.total > 0
+         and (lookupValidation.hitCount / lookupValidation.total) * 100.0
+@@ -7829,7 +7867,7 @@
+             if rainDynamicSceneCopyState.microPatternCanvas then
+                 local maskOk, maskResult = pcall(function()
+                     return rainDynamicSceneCopyState.microPatternCanvas:updateWithShader({
+-                        async=false,
++                        async=true,
+                         -- Opaque: the rim class (A = 0.5) must not be
+                         -- premultiplied into the stored lens coordinates.
+                         blendMode = render.BlendMode.Opaque,
+@@ -7992,6 +8030,7 @@
+     -- of render.mesh(), because that API also respects SceneReference
+     -- visibility on the target CSP build.
+     rainDynamicSurfaceMesh:setVisible(false, false)
++    rainDynamicSurfaceMesh:setShadows(false) -- manual colour only; never an opaque visor sun caster
+ 
+     rainDynamicSurfaceInitialized = true
+ 
+@@ -9018,6 +9057,7 @@
+                     .. tostring(birthError))
+                 rainDynamicSceneCopyState.birthMaskWarned = true
+             end
++            if not birthOk or birthError==false then return end
+         else
+             rainDynamicSceneCopyState.birthMaskSuspended = true
+         end
+@@ -9351,7 +9391,7 @@
+         state.smearBakeCanvas=ui.ExtraCanvas(vec2(2048,512),1,render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+         state.smearBakeCanvas:setName('RainFX filtered smear mask (parameter cache)')
+     end
+-    local ready=state.smearBakeCanvas:updateWithShader({async=false,blendMode=render.BlendMode.Opaque,
++    local ready=state.smearBakeCanvas:updateWithShader({async=true,blendMode=render.BlendMode.Opaque,
+         textures={txSmearSource=state.smearTexturePath},values={gSmearTiling=vec2(rt,gt)},shader=[[
+         float channel(float2 uv,float component) {
+             float4 t=txSmearSource.SampleLevel(samLinearClamp,frac(uv),0);
+@@ -10743,10 +10783,10 @@
+     inout float4 acc, inout int occupied)
+ {
+     float4 m = txMask.Load(int3(tx * (int)gWords + w, ty, 0));
+-    rgWalk(m.x, w * 96, px, acc, occupied);
+-    rgWalk(m.y, w * 96 + 24, px, acc, occupied);
+-    rgWalk(m.z, w * 96 + 48, px, acc, occupied);
+-    rgWalk(m.w, w * 96 + 72, px, acc, occupied);
++    // One loop body, rather than four inlined copies of the complete kernel.
++    // m is read-only; dynamic l-value indexing is deliberately avoided.
++    [loop] for(uint channel=0u;channel<4u;++channel)
++        rgWalk(m[channel],w*96+(int)channel*24,px,acc,occupied);
+ }
+ void rgWalkSummary(float fbits, int base, int tx, int ty, float2 px,
+     inout float4 acc, inout int occupied)
+@@ -10777,10 +10817,8 @@
+         {
+             float4 s = txSummary.Load(int3(tx * (int)gSummaryWords + block, ty, 0));
+             int base = block * 96;
+-            rgWalkSummary(s.x, base, tx, ty, px, acc, occupied);
+-            rgWalkSummary(s.y, base + 24, tx, ty, px, acc, occupied);
+-            rgWalkSummary(s.z, base + 48, tx, ty, px, acc, occupied);
+-            rgWalkSummary(s.w, base + 72, tx, ty, px, acc, occupied);
++            [loop] for(uint channel=0u;channel<4u;++channel)
++                rgWalkSummary(s[channel],base+(int)channel*24,tx,ty,px,acc,occupied);
+         }
+     }
+     else
+@@ -10843,7 +10881,7 @@
+         st.gpuMetric=ui.ExtraCanvas(vec2(count,1),1,render.AntialiasingMode.None,render.TextureFormat.R32G32B32A32.Float)
+         st.gpuMetric:setName('RainFX per-drop physical frame');st.gpuMetricCount=count
+     end
+-    local metricParams={async=false,blendMode=render.BlendMode.Opaque,textures={txRainState=state},
++    local metricParams={async=true,blendMode=render.BlendMode.Opaque,textures={txRainState=state},
+         values={gCount=count},shader=st.gpuMetricShader}
+     st.surface:bind(metricParams)
+     local okMetric,metricUpdated=pcall(function() return st.measure('Head metric',st.gpuMetric.updateWithShader,st.gpuMetric,metricParams) end)
+@@ -10884,14 +10922,14 @@
+         st.gpuBounds=ui.ExtraCanvas(vec2(count,3),1,render.AntialiasingMode.None,render.TextureFormat.R32G32B32A32.Float)
+         st.gpuBounds:setName('RainFX per-drop conservative bounds');st.gpuBoundsCount=count
+     end
+-    if st.measure('Head bounds',st.gpuBounds.updateWithShader,st.gpuBounds,{async=false,
++    if st.measure('Head bounds',st.gpuBounds.updateWithShader,st.gpuBounds,{async=true,
+         blendMode=render.BlendMode.Opaque,values=values,
+         textures={txRainState=state,txRainStateMeta=meta,txRainDropMetric=st.gpuMetric,
+             txRainPreviousState=rainStateReadIsA and rainStateB or rainStateA,
+             txRainPreviousMeta=rainStateReadIsA and rainStateMetaB or rainStateMetaA},
+         shader=st.gpuBoundsShader})==false then return false end
+     local okA, errA = pcall(function()
+-        local updated=st.measure('Head tiles',st.gpuMask.updateWithShader,st.gpuMask,{async=false,
++        local updated=st.measure('Head tiles',st.gpuMask.updateWithShader,st.gpuMask,{async=true,
+             textures = {txRainDropBounds=st.gpuBounds},
+             values = values,
+             shader = rainDynamicSceneCopyState.gpuHeadsPassA,
+@@ -10902,6 +10940,7 @@
+     if r.RAIN_GPU_HEADS_SPARSE_WORDS then
+         local okS, errS = pcall(function()
+             local updated = st.gpuSummary:updateWithShader({
++                async=true,
+                 textures = { txMask = st.gpuMask },
+                 values = values,
+                 shader = st.gpuHeadsSummaryPass,
+@@ -10911,7 +10950,7 @@
+         if not okS then st.gpuHeadsErr = 'summary: ' .. tostring(errS); return false end
+     end
+     local okB, errB = pcall(function()
+-        local updated=st.measure('Head kernels',target.updateWithShader,target,{async=false,
++        local updated=st.measure('Head kernels',target.updateWithShader,target,{async=true,
+             blendMode = render.BlendMode.Opaque,
+             textures = {txRainState=state,txRainStateMeta=meta,txRainDu=st.surface.root..'du.dds',txRainDv=st.surface.root..'dv.dds',txRainBoundaryMask=textureRainBoundaryMask,txRainDropMetric=st.gpuMetric,
+                 txMask = st.gpuMask, txOverride = st.gpuOverride,txRainDropBounds=st.gpuBounds,
+@@ -11187,6 +11226,12 @@
+         local tg = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+         local okG, resG = pcall(state.measure,'Heads total',state.gpuHeadsRun,target,size,sim)
+         state.gpuHeadsActive = okG and resG == true
++        state.gpuHeadsPending=not state.gpuHeadsActive
++        if state.gpuHeadsPending then
++            state.birthMaskReady=false
++            state.gpuHeadsErr=not okG and tostring(resG) or state.gpuHeadsErr or 'GPU head shaders pending'
++            return false -- no expensive CPU particle fallback while compiling
++        end
+         if not okG then state.gpuHeadsErr = tostring(resG) end
+         state.profGpuSubmitMs = ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - tg) * 1000.0
+     end
+@@ -11536,7 +11581,7 @@
+     )
+     local shotOk, shotResult = pcall(function()
+         local updated = rainDynamicSceneCopyState.measure('World refraction capture',
+-            rainDynamicSceneCopyState.geometryShot.update,rainDynamicSceneCopyState.geometryShot,
++            rainDynamicSceneCopyState.captureUpdate,rainDynamicSceneCopyState.geometryShot,
+             sim.cameraPosition,
+             sim.cameraLook,
+             sim.cameraUp,
+@@ -11661,7 +11706,7 @@
+     pcall(function() ov.shot:setClippingPlanes(
+         math.max(sim.cameraClipNear or 0.05, 0.001), sim.cameraClipFar) end)
+     local ok, res = pcall(function()
+-        return ov.shot:update(sim.cameraPosition, sim.cameraLook,
++        return rainDynamicSceneCopyState.captureUpdate(ov.shot,sim.cameraPosition, sim.cameraLook,
+             sim.cameraUp, sim.cameraFOV)
+     end)
+     if not ok then ov.err = tostring(res) end
+@@ -11703,7 +11748,7 @@
+         return
+     end
+     test.params = test.params or {
+-        transform = 'original', async = false, values = {},
++        transform = 'original', async = true, values = {},
+         -- Inline and independent of the common shader loader and all textures.
+         shader = [[float4 main(PS_IN pin) {
+             float a = saturate(gE1TestAlpha);
+@@ -11719,6 +11764,7 @@
+     render.setCullMode(render.CullMode.None)
+     render.setDepthMode(stage == 2 and render.DepthMode.Off or render.DepthMode.ReadOnly)
+     test.attempts = test.attempts + 1
++    test.frame=ac.getSim().frame
+     test.lastDrawTime = os.clock()
+     local ok, result = pcall(function()
+         editor.targetMesh:setVisible(true, false)
+@@ -12363,7 +12409,7 @@
+             end
+         end
+         for _,entry in ipairs(restore) do entry.ref:setVisible(true,false) end
+-        return shot:update(origin,look,up,fov)
++        return rainDynamicSceneCopyState.captureUpdate(shot,origin,look,up,fov)
+     end)
+     rainDynamicSceneCopyState.nativeCaptureActive=rainDynamicSceneCopyState.nativeCaptureActive-1
+     for _,entry in ipairs(restore) do entry.ref:setVisible(entry.visible,false) end
+@@ -12393,7 +12439,7 @@
+         for index, item in ipairs(st.items) do
+             local e = rainDynamicSceneCopyState.e1SourceEditor(item.mesh)
+             if item.mesh~='CAM_COVER' and e and e.visible ~= false and e.targetMesh and #e.targetMesh>0 then
+-                local p = st.depthParams[index] or {transform='original', async=false, values={}, shader=[[
++                local p = st.depthParams[index] or {transform='original', async=true, values={}, shader=[[
+                     float4 main(PS_IN pin) {
+                         float3 viewRelative = mul(float4(pin.PosC,0),gE1CaptureView).xyz;
+                         return float4(abs(viewRelative.z),gE1SurfaceId,0,1);
+@@ -12542,7 +12588,7 @@
+         updated=rainDynamicSceneCopyState.nativeCaptureUpdate(st.shot,st.nativeRef,
+             origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
+     else
+-        updated=st.shot:update(origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
++        updated=rainDynamicSceneCopyState.captureUpdate(st.shot,origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)
+     end
+     if updated == false then
+         error('Source shot update pending')
+@@ -12553,7 +12599,7 @@
+     st.projection = st.shot:projectionMatrix():clone()
+     st.origin = origin:clone()
+     local depthCallsBefore = st.depthCalls or 0
+-    if st.positionShot:update(origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)==false then
++    if rainDynamicSceneCopyState.captureUpdate(st.positionShot,origin,look,up,r.RAIN_VISOR_LAYER_E1_SOURCE_FOV)==false then
+         error('Metric depth capture pending')
+     end
+     if (st.depthCalls or 0)==depthCallsBefore then error('Metric depth callback did not run') end
+@@ -12563,7 +12609,7 @@
+     local hi = math.max(r.RAIN_VISOR_LAYER_SHADOW_COS_HI, lo + 0.001)
+     local t = math.max(0, math.min(1, (L:dot(sim.cameraLook) - lo) / (hi - lo)))
+     st.opening = r.RAIN_VISOR_LAYER_HELMET_SHADOW and t * t * (3 - 2 * t) or 1
+-    if st.preview:updateSceneWithShader({async = false, textures = {txE1Source = st.shot,txE1MetricDepth = st.positionShot},
++    if st.preview:updateSceneWithShader({async = true, textures = {txE1Source = st.shot,txE1MetricDepth = st.positionShot},
+         values = {gE1Opening = st.opening, gE1Mode = r.RAIN_VISOR_LAYER_E1_SOURCE_MODE},
+         shader = [[float4 main(PS_IN pin) {
+             float4 c = txE1Source.SampleLevel(samLinearClamp, pin.Tex, 0);
+@@ -12809,7 +12855,7 @@
+     end
+     local e = rainDynamicSceneCopyState.visorLayerEditor('GLASS_INT_FX')
+     if not e or not e.targetMesh or #e.targetMesh == 0 or e.visible == false then return end
+-    st.params = st.params or {transform = 'original', async = false,
++    st.params = st.params or {transform = 'original', async = true,
+         textures = {}, values = {}, shader = [[
+         float2 e1Project(float3 p, out float w) {
+             float4 h = mul(float4(p,1),gE1Projection);
+@@ -13040,7 +13086,7 @@
+     st.shot:setClippingPlanes(math.max(sim.cameraClipNear or 0.001,0.001),sim.cameraClipFar or 1000)
+     rainDynamicSceneCopyState.e1Primary.resolving=true
+     local ok,res=pcall(function()
+-        return st.shot:update(sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)
++        return rainDynamicSceneCopyState.captureUpdate(st.shot,sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)
+     end)
+     rainDynamicSceneCopyState.e1Primary.resolving=false
+     if not ok then error(res) end
+@@ -13054,7 +13100,7 @@
+     if not st.ready then return end
+     local ed=rainDynamicSceneCopyState.visorLayerEditor('GLASS_INT_FX')
+     if not ed or ed.visible==false or not ed.targetMesh or #ed.targetMesh==0 then return end
+-    st.params=st.params or {transform='original',async=false,textures={},values={},shader=[[
++    st.params=st.params or {transform='original',async=true,textures={},values={},shader=[[
+         float4 main(PS_IN pin) {
+             float3 p=mul(float4(pin.PosC+gResolveEyeDelta,0),gResolveView).xyz;
+             float4 clipPos=mul(float4(p,1),gResolveProjection);
+@@ -13194,7 +13240,7 @@
+         st.shot:setClearColor(rgbm(0,0,0,0))
+         st.w,st.h=w,h
+     end
+-    st.params=st.params or {transform='original',async=false,textures={},values={}}
++    st.params=st.params or {transform='original',async=true,textures={},values={}}
+     local p=st.params
+     p.mesh=e.targetMesh;p.shader=st.shader
+     local v=p.values
+@@ -13248,7 +13294,7 @@
+     p.textures.txE1FabricDiffuse=appFolder..'/texture/GLASS/E1_GEOMETRY/fabric_txDiffuse.dds'
+     local ok,err=pcall(function()
+         st.shot:setClippingPlanes(math.max(sim.cameraClipNear or 0.008,0.001),sim.cameraClipFar or 1000)
+-        if st.shot:update(sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)==false then
++        if rainDynamicSceneCopyState.captureUpdate(st.shot,sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)==false then
+             error('Geometry capture pending')
+         end
+     end)
+@@ -13349,7 +13395,7 @@
+     st.origin=sim.cameraPosition:clone()
+     st.preview=st.preview or ui.ExtraCanvas(vec2(320,180),1,render.AntialiasingMode.None,
+         render.TextureFormat.R16G16B16A16.Float)
+-    if st.preview:updateSceneWithShader({async=false,textures={txHousingPreview=st.shot},
++    if st.preview:updateSceneWithShader({async=true,textures={txHousingPreview=st.shot},
+         shader=[[float4 main(PS_IN pin) {
+             float3 c=max(txHousingPreview.SampleLevel(samLinearClamp,pin.Tex,0).rgb,0);
+             return float4(c/(1+c),1);
+@@ -13378,7 +13424,7 @@
+     local st=rainDynamicSceneCopyState.nativeHousingScene
+     local ed=rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+     if not st.ready or not ed or not ed.targetMesh or ed.visible==false then return end
+-    st.params=st.params or {transform='original',async=false,textures={},values={},shader=[[
++    st.params=st.params or {transform='original',async=true,textures={},values={},shader=[[
+         float4 main(PS_IN pin) {
+             float3 p=mul(float4(pin.PosC+gHousingEyeToCapture,0),gHousingView).xyz;
+             float4 h=mul(float4(p,1),gHousingProjection);
+@@ -13411,7 +13457,7 @@
+     local e=rainDynamicSceneCopyState.visorLayerEditor('GLASS_INT_FX')
+     if not e or not e.targetMesh or #e.targetMesh~=1 or e.visible==false then return end
+     local ok,err=pcall(function()
+-        st.composite=st.composite or {transform='original',async=false,textures={},values={},shader=[[
++        st.composite=st.composite or {transform='original',async=true,textures={},values={},shader=[[
+             float4 main(PS_IN pin) {
+                 float2 uv=pin.PosH.xy*gE1InvTarget;
+                 float4 c=txE1Geometry.SampleLevel(samLinearClamp,uv,0);
+@@ -13534,7 +13580,7 @@
+             ui.text('Geometry output preview (opaque; HDR compressed)')
+             geometry.preview=geometry.preview or ui.ExtraCanvas(vec2(384,216),1,
+                 render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+-            local shown=geometry.preview:updateSceneWithShader({async=false,textures={txGeometryPreview=geometry.shot},
++            local shown=geometry.preview:updateSceneWithShader({async=true,textures={txGeometryPreview=geometry.shot},
+                 values={gPreviewHDR=(r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==0
+                     or (r.RAIN_VISOR_LAYER_E1_PRIMARY_MODE==3 and r.RAIN_VISOR_LAYER_E1_SOURCE_MODE==0)) and 1 or 0},
+                 shader=[[
+@@ -13618,7 +13664,7 @@
+     return eye,look:normalize(),up:normalize()
+ end
+ rainDynamicSceneCopyState.cachedOptics = dofile(appFolder..'/visor_optics.lua')({
+-    folder=appFolder,runtime=cfg.RUNTIME,
++    folder=appFolder,runtime=cfg.RUNTIME,captureUpdate=rainDynamicSceneCopyState.captureUpdate,
+     editor=function(name) return rainDynamicSceneCopyState.e1SourceEditor(name) end,
+     nativeOcclusion=function(p) rainDynamicSceneCopyState.nativeGlass:bind(p,'Opt',true) end,
+     pose=function() return axisRollNode and axisRollNode:getWorldTransformationRaw() end,
+@@ -13811,7 +13857,7 @@
+     end
+     local native=st.nativeGlass
+     local near=math.max(sim.cameraClipNear or .05,.001)
+-    local ready=st.rainOcclusion:updateSceneWithShader({async=false,blendMode=render.BlendMode.Opaque,
++    local ready=st.rainOcclusion:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,
+         textures={txSceneDepth='dynamic::depth',txNativeDepth=native and native.ready and native.shot or false},
+         values={gNear=near,gFar=math.max(sim.cameraClipFar or 5000,near+1),
+             gReversed=cfg.RUNTIME.RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED and 1 or 0,
+@@ -13840,17 +13886,23 @@
+     end
+     vl.defs = vl.defs or rainDynamicSceneCopyState.visorLayerDefs()
+     local st = rainDynamicSceneCopyState
+-    local src = (st.toneReady and st.toneCanvas) or st.geometryShot or 'dynamic::hdr'
++    local src = vl.fallbackSourceFrame==ac.getSim().frame and vl.fallbackSource
++        or (st.toneReady and st.toneCanvas) or st.geometryShot or 'dynamic::hdr'
+     local sov = vl.sceneOv or {}
+     vl.sceneOv = sov
+     sov.src, sov.hdr = src, true
+     sov.w = math.max(1, st.mainTargetWidth or 1280)
+     sov.h = math.max(1, st.mainTargetHeight or 720)
+     if phase=='pre' or phase=='post' then
+-        st.nativeGlass=st.nativeGlass or dofile(appFolder..'/native_glass_occlusion.lua')({
++        if not st.nativeGlass then
++            local factory,err=st.loadRuntimeModule('native_glass_occlusion.lua')
++            if not factory then vl.err=err;vl.status='Required native glass module missing';return false end
++            st.nativeGlass=factory({
+             owner=function() return visor end,
+             localFrame=function() return st.nativeGlassLocalFrame() end,
+-            editor=function(name) return st.visorLayerEditor(name) end})
++            editor=function(name) return st.visorLayerEditor(name) end,
++            captureUpdate=st.captureUpdate})
++        end
+         if not st.measure('Native glass mask',st.nativeGlass.update,st.nativeGlass,sov.w,sov.h) then
+             vl.err=st.nativeGlass.error;return -- no unoccluded fallback over native glass
+         end
+@@ -13902,7 +13954,57 @@
+     render.setDepthMode(render.DepthMode.ReadOnly)
+     render.setCullMode(render.CullMode.None)
+     vl.status = 'scene stack drawn'
++    vl[phase=='pre' and 'preFrame' or 'postFrame']=ac.getSim().frame
++    if phase=='post' and vl.fallbackSource and vl.fallbackSourceFrame~=ac.getSim().frame
++        and st.preparedFrame==ac.getSim().frame then
++        vl.fallbackSource:dispose();vl.fallbackSource=nil;vl.fallbackSourceFrame=nil
++    end
++    return true
+ end
++
++-- Glass and the routing test also draw while rain initialization/compilation
++-- is pending or rain is off. Their geometry does not depend on rain atlases.
++rainDynamicSceneCopyState.glassFallback = function()
++    local st=rainDynamicSceneCopyState;local r=cfg.RUNTIME;local sim=ac.getSim()
++    if (st.offscreenCaptureActive or 0)>0 then return end
++    if not initialized or not visor or activeEnableMode~=1 or not sim
++        or not r.RAIN_VISOR_LAYER or not r.RAIN_VISOR_SCENE_STACK or r.RAIN_VISOR_OVERLAY then return end
++    local size=render.getRenderTargetSize()
++    st.mainTargetWidth,st.mainTargetHeight=math.floor(size.x),math.floor(size.y)
++    if st.visorLayer.postFrame~=sim.frame then
++        local ok,err=pcall(function()
++            -- Rain-off/pending glass gets a stable current frame, rather than
++            -- an old world capture or a read from its own live colour target.
++            local vl=st.visorLayer
++            if vl.fallbackSourceFrame~=sim.frame then
++                local w,h=st.mainTargetWidth,st.mainTargetHeight
++                if not vl.fallbackSource or vl.fallbackW~=w or vl.fallbackH~=h then
++                    if vl.fallbackSource then vl.fallbackSource:dispose() end
++                    vl.fallbackSource=ui.ExtraCanvas(vec2(w,h),math.floor(math.log(math.max(w,h))/math.log(2))+1,
++                        render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
++                    vl.fallbackSource:setName('Glass rain-off/pending source')
++                    vl.fallbackW,vl.fallbackH=w,h
++                end
++                if vl.fallbackSource:copyFrom('dynamic::hdr')==false
++                    or vl.fallbackSource:mipsUpdate()==false then error('Glass source pending') end
++                vl.fallbackSourceFrame=sim.frame
++            end
++            if st.visorLayer.preFrame~=sim.frame then st.visorSceneStack('pre') end
++            st.visorSceneStack('post')
++        end)
++        if not ok then st.visorLayer.err='Glass fallback: '..tostring(err) end
++    end
++    if r.RAIN_VISOR_LAYER_E1_SURFACE_TEST and st.e1SurfaceTest.frame~=sim.frame then
++        st.e1SurfaceDraw('slot');st.e1SurfaceDraw('final')
++    end
++end
++render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG and 'main.smoke'
++    or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'main.track.transparent' or 'main.root.transparent'),
++    function() -- registered before rain; on a prepared rain frame the normal stack owns ordering
++        if rainDynamicSceneCopyState.preparedFrame~=ac.getSim().frame then
++            rainDynamicSceneCopyState.glassFallback()
++        end
++    end)
+ 
+ -- Called inside the overlay GeometryShot transparent callback.
+ rainDynamicSceneCopyState.visorLayerDraw = function(ov)
+@@ -14050,8 +14152,7 @@
+     local overlayLayer = r.RAIN_VISOR_OVERLAY and r.RAIN_VISOR_LAYER
+     -- the scene stack is drawn from the drop callback, which needs the rain
+     -- pipeline; without it the KN5 meshes fall back to their Visible boxes.
+-    local wantHide = overlayLayer or (r.RAIN_VISOR_SCENE_STACK
+-        and r.RAIN_ENABLED and r.RAIN_DYNAMIC_SURFACE_STATE_ENABLED)
++    local wantHide = overlayLayer or (r.RAIN_VISOR_LAYER and r.RAIN_VISOR_SCENE_STACK)
+     pcall(rainDynamicSceneCopyState.visorProbeSet,
+         overlayLayer and not r.RAIN_VISOR_LAYER_NATIVE_HOUSING
+             and r.RAIN_VISOR_LAYER_SHADOW_PROBE and true or false)
+@@ -14178,7 +14279,7 @@
+     pcall(function() op.shot:setClippingPlanes(
+         math.max(sim.cameraClipNear or 0.05, 0.001), sim.cameraClipFar) end)
+     local ok, res = pcall(function()
+-        return op.shot:update(sim.cameraPosition, sim.cameraLook,
++        return rainDynamicSceneCopyState.captureUpdate(op.shot,sim.cameraPosition, sim.cameraLook,
+             sim.cameraUp, sim.cameraFOV)
+     end)
+     op.status = ok and string.format('ok  callback calls %d  mesh drawn %d',
+@@ -14297,6 +14398,7 @@
+     or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK
+         and 'main.track.transparent'
+         or 'main.root.transparent'), function()
++    if (rainDynamicSceneCopyState.offscreenCaptureActive or 0)>0 then return end
+     if not cfg.RUNTIME.RAIN_ENABLED
+         or not cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED
+     then
+@@ -14522,6 +14624,7 @@
+     pcall(rainDynamicSceneCopyState.visorProbeCopy, sim)
+     rainDynamicSceneCopyState.smearUpdate(rainDynamicSceneCopyState,sim)
+     local dropMeshParams = {
++        async = true,
+         mesh = rainDynamicSurfaceMesh,
+         transform = 'original',
+         textures = {
+@@ -14844,7 +14947,8 @@
+         shader = rainDynamicDropShader.HLSL
+     }
+     rainDynamicSceneCopyState.surface:bind(dropMeshParams)
+-    dropMeshParams.shader=rainDynamicSceneCopyState.surface.shader..dropMeshParams.shader
++    dropMeshParams.shader=(cfg.RUNTIME.RAIN_DEBUG>6.5 and '#define RAIN_SURFACE_DEBUG 1\n' or '')
++        ..rainDynamicSceneCopyState.surface.shader..dropMeshParams.shader
+     rainDynamicSceneCopyState.lastDropMeshParams = dropMeshParams
+     local dynamicDrawn = false
+     local sceneStackOk,sceneStackError = pcall(rainDynamicSceneCopyState.measure,'Glass pre',rainDynamicSceneCopyState.visorSceneStack,'pre')
+@@ -14866,7 +14970,9 @@
+         and not ((cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE
+             and cfg.RUNTIME.RAIN_VISOR_OVERLAY_PROBE_HIDE_SCENE)
+             or cfg.RUNTIME.RAIN_VISOR_OVERLAY) then
+-        dynamicDrawn = rainDynamicSceneCopyState.measure('Rain colour',render.mesh,dropMeshParams)
++        local okColour,colourResult=pcall(rainDynamicSceneCopyState.measure,'Rain colour',render.mesh,dropMeshParams)
++        dynamicDrawn=okColour and colourResult or false
++        if not okColour then rainDynamicSceneCopyState.rainDrawError='Rain colour: '..tostring(colourResult) end
+     end
+     -- s53: glass in front of the rain (GLASS_EXT band, GLASS_INT), before
+     -- the drop depth pass so the same-surface GLASS_EXT is not rejected.
+@@ -14887,7 +14993,8 @@
+         if cfg.RUNTIME.RAIN_DYNAMIC_DROP_DEPTH_OCCLUDE_MODE>=2 then
+             dropMeshParams.shader='#define RAIN_DEPTH_ONLY 1\n'..colourShader
+         end
+-        rainDynamicSceneCopyState.measure('Rain depth',render.mesh,dropMeshParams)
++        local okDepth,depthResult=pcall(rainDynamicSceneCopyState.measure,'Rain depth',render.mesh,dropMeshParams)
++        if not okDepth then rainDynamicSceneCopyState.rainDrawError='Rain depth: '..tostring(depthResult) end
+         dropMeshParams.shader=colourShader
+         dropMeshParams.values.gDynamicDropDepthOnly = 0.0
+         render.setDepthMode(render.DepthMode.ReadOnly)
+@@ -14920,6 +15027,9 @@
+         rainDynamicManualDrawLogged = true
+     end
+ end)
++render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG and 'main.smoke'
++    or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'main.track.transparent' or 'main.root.transparent'),
++    rainDynamicSceneCopyState.glassFallback)
+ 
+ 
+ render.on('main.track.transparent', function()
+@@ -15223,7 +15333,10 @@
+ ------------------------------------------------------------
+ 
+ local function initializeScene()
+-
++    local startup=rainDynamicSceneCopyState
++    if startup.sceneLoadPending then return false end
++    if startup.sceneLoadError then return false end
++    if not startup.sceneTreeReady then
+ 
+     --------------------------------------------------------
+     -- carsRoot
+@@ -15365,13 +15478,27 @@
+     -- Load KN5
+     --------------------------------------------------------
+ 
+-    visor =
+-        axisRollNode:loadKN5({
+-
+-            filename = cfg.RUNTIME.MODEL_PATH,
+-
+-            forceRenderableOn = true
+-        })
++    startup.sceneTreeReady=true
++    end
++    if not visor then
++        startup.sceneLoadPending=true;startup.sceneLoadStarted=os.preciseClock()
++        startup.sceneLoadStatus='Loading visor KN5 asynchronously'
++        local owner=axisRollNode
++        owner:loadKN5Async({filename=cfg.RUNTIME.MODEL_PATH,forceRenderableOn=true},function(err,loaded)
++            if axisRollNode~=owner then if loaded then loaded:dispose() end;return end
++            startup.sceneLoadPending=false
++            startup.sceneLoadMS=(os.preciseClock()-startup.sceneLoadStarted)*1000
++            if err or not loaded then
++                startup.sceneLoadError=tostring(err or 'No model returned')
++                startup.sceneLoadStatus='KN5 load failed: '..startup.sceneLoadError
++                ac.warn(appNameDebug..' '..startup.sceneLoadStatus);return
++            end
++            visor=loaded;visor:setVisible(false,false)
++            startup.sceneLoadStatus='KN5 ready; applying saved profile/materials'
++            ac.log(appNameDebug..' Async KN5 ready in '..string.format('%.1f ms',startup.sceneLoadMS))
++        end)
++        return false
++    end
+ 
+ 
+     if visor and cfg.RUNTIME.RAIN_VISOR_MOTION_STENCIL >= 0.0 then
+@@ -15487,6 +15614,7 @@
+ 
+ 
+     initialized = true
++    startup.sceneLoadStatus='Visor ready'
+ 
+ 
+     ac.log(
+@@ -16001,7 +16129,7 @@
+                 end
+             end
+             if source and #source > 0 then
+-                shader.HLSL = source
++                shader.HLSL = '#line 1 "RealVisor/'..shader.ID..'.hlsl"\n'..source
+                 shader.LOADED = true
+                 shader.RETRY_LOGGED = false
+                 ac.log(appNameDebug .. ' SHADER LOADED: ' .. shader.ID
+@@ -16096,6 +16224,7 @@
+ end
+ 
+ render.on('main.track.opaque', function()
++    if (rainDynamicSceneCopyState.offscreenCaptureActive or 0)>0 then return end
+     if not visor or activeEnableMode ~= 1 or not cameraAnchor then
+         return
+     end
+@@ -16158,6 +16287,7 @@
+ function script.update(dt)
+     -- Close any previous/aborted frame before early returns or model reloads.
+     rainDynamicSceneCopyState.nativeCaptureHide()
++    if rainDynamicSurfaceMesh then rainDynamicSurfaceMesh:setVisible(false,false);rainDynamicSurfaceMesh:setShadows(false) end
+     rainDynamicSceneCopyState.materialSettings:flush()
+ 
+     --------------------------------------------------------
+@@ -16261,8 +16391,7 @@
+     -- independently of whether cached optics is enabled. Explicit draws scope
+     -- visibility to their callback and restore this hidden state afterward.
+     local customStack=cfg.RUNTIME.RAIN_VISOR_LAYER and (cfg.RUNTIME.RAIN_VISOR_OVERLAY
+-        or (cfg.RUNTIME.RAIN_VISOR_SCENE_STACK and cfg.RUNTIME.RAIN_ENABLED
+-            and cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_STATE_ENABLED))
++        or cfg.RUNTIME.RAIN_VISOR_SCENE_STACK)
+     rainDynamicSceneCopyState.visorLayerSceneHide(customStack or false)
+     local state=rainDynamicSceneCopyState
+     state.nativeGlassState=state.nativeGlassState or dofile(appFolder..'/native_glass_state.lua')({
+@@ -18229,6 +18358,13 @@
+     ui.text(
+         strDisplayName .. ' v' .. strVersion
+     )
++
++    if not initialized then
++        ui.textWrapped(rainDynamicSceneCopyState.sceneLoadStatus or 'Preparing visor scene')
++    end
++    if rainDynamicSceneCopyState.gpuHeadsPending then
++        ui.textWrapped('Rain shaders preparing: '..tostring(rainDynamicSceneCopyState.gpuHeadsErr or 'pending'))
++    end
+ 
+     ui.separator()
+ 
+@@ -18960,6 +19096,7 @@
+ -- s61 2026-10-12: water-only mirror pass; all other FX omitted.
+ render.on('mirror.track.transparent',function()
+     local st=rainDynamicSceneCopyState
++    if (st.offscreenCaptureActive or 0)>0 then return end
+     if cfg.RUNTIME.RAIN_MIRROR_WATER==false or not cfg.RUNTIME.RAIN_ENABLED
+         or not st.surface.ready or not rainDynamicSurfaceMesh then return end
+     local editor=st.visorLayerEditor('GLASS_RAINFX')
+@@ -18974,7 +19111,7 @@
+     render.setDepthMode(render.DepthMode.ReadOnly)
+     render.setBlendMode(render.BlendMode.BlendPremultiplied)
+     rainDynamicSurfaceMesh:setVisible(true,false)
+-    local ok,err=pcall(render.mesh,{mesh=rainDynamicSurfaceMesh,transform='original',shader=st.mirrorWaterShader,
++    local ok,err=pcall(render.mesh,{mesh=rainDynamicSurfaceMesh,transform='original',async=true,shader=st.mirrorWaterShader,
+         textures={txMirrorHeads=st.birthMaskRead,txMirrorTrails=st.waterTrailRead or st.birthMaskRead,
+             txMirrorBoundary=textureRainBoundaryMask},
+         values={gMirrorLightDirection=-sim.lightDirection,gMirrorLightColor=sim.lightColor}})

@@ -1,0 +1,20 @@
+{
+  "model_sha256": "2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",
+  "mask_pixels": 489325,
+  "metric_supported_pixels": 489325,
+  "mask_without_metric_pixels": 0,
+  "normal_mean_cosine": 0.9864034056663513,
+  "normal_p05_cosine": 0.9825683236122131,
+  "physical_coated_fraction": 0.6639163846107,
+  "median_m_per_u": 0.6013994728217311,
+  "median_m_per_v": 0.14639661983934524,
+  "radius_max_error_m": 8.673617379884035e-19,
+  "triangle_count": 40201,
+  "physical_birth_sites": 8192,
+  "int_normal_format": "RGBA16 UNORM 2048 x 512",
+  "micro_cell_extent_per_local_metre": [
+    10.235960794267701,
+    9.661087603222654
+  ],
+  "literal_runtime_texture_paths_checked": 24
+}
