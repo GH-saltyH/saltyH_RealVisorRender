@@ -1,0 +1,44 @@
+{
+  "step": "s73",
+  "date": "2026-10-14",
+  "scope": "design only",
+  "runtime_settings_shaders_unchanged": {
+    "realvisor.lua": true,
+    "rain_surface.lua": true,
+    "rain_trails.lua": true,
+    "lib.lua": true,
+    "settings.ini": true,
+    "settings_mats.ini": true,
+    "shaders/e1HousingGeometry.hlsl": true,
+    "shaders/rainMirrorWater.hlsl": true,
+    "shaders/rainSurfaceMetric.hlsl": true,
+    "shaders/rainTrailBin.hlsl": true,
+    "shaders/rainTrailDescriptor.hlsl": true,
+    "shaders/rainTrailResolve.hlsl": true,
+    "shaders/rainVisorDynamicDrop.hlsl": true,
+    "shaders/rainVisorLayer.hlsl": true,
+    "shaders/rainVisorOptics.hlsl": true,
+    "shaders/rainVisorScreen.hlsl": true,
+    "shaders/visorOpticsBake.hlsl": true,
+    "shaders/visorOpticsBright.hlsl": true,
+    "shaders/visorOpticsMask.hlsl": true,
+    "shaders/visorOpticsProbe.hlsl": true,
+    "shaders/visorOpticsStats.hlsl": true,
+    "shaders/visorOpticsSun.hlsl": true,
+    "shaders/visorOpticsTrace.hlsl": true,
+    "shaders/visorOpticsVisibility.hlsl": true
+  },
+  "numeric_checks": {
+    "mm_to_atlas_pixels": true,
+    "mass_cubic_scaling": true,
+    "spherical_cap_geometry": true,
+    "mixture_normalization": true
+  },
+  "mass_ratio_2p25_to_0p65_mm": 41.4770141101502,
+  "changed_docs_sha256": {
+    "docs/README.md": "caf70c559088ef98e04ef91ecd4a1bb4e8d12e68d58dcba8e809b19ebc1fba02",
+    "docs/RAINFX_ROADMAP.md": "428524685825878cf742e60ee5319feb125f01b96d129d1d8cfcaec00cf13aee",
+    "docs/RAINFX_S73_PHYSICS_WEATHER_REFACTOR_DESIGN.md": "6938241d9b21e5229c544ac14b0196d6cc84300294fd02acd0c433d8ff81b578"
+  },
+  "actual_CSP_GPU_and_game_validation": false
+}

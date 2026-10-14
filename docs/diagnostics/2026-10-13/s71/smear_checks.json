@@ -1,0 +1,75 @@
+[
+  {
+    "version": "before",
+    "case": "red_head_fresh_wipe",
+    "region_mean": 0.0,
+    "effective_class_wipe_mean": 0.7600001096725464,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "before",
+    "case": "red_trail",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.0,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "before",
+    "case": "green_head_fresh_wipe",
+    "region_mean": 0.6050634980201721,
+    "effective_class_wipe_mean": 0.7600001096725464,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "before",
+    "case": "green_trail",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.0,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "after",
+    "case": "red_head_fresh_wipe",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.11399997025728226,
+    "alpha_max": 0.0
+  },
+  {
+    "version": "after",
+    "case": "red_trail",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.0,
+    "alpha_max": 0.0
+  },
+  {
+    "version": "after",
+    "case": "green_head_fresh_wipe",
+    "region_mean": 0.6050634980201721,
+    "effective_class_wipe_mean": 0.7600001096725464,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "after",
+    "case": "green_trail",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.0,
+    "alpha_max": 1.0
+  },
+  {
+    "case": "green_head_fresh_wipe preserves output",
+    "max_delta": 0.0
+  },
+  {
+    "case": "green_trail preserves output",
+    "max_delta": 0.0
+  },
+  {
+    "case": "disabled preserves output",
+    "max_delta": 0.0
+  },
+  {
+    "case": "shared symmetric class pair",
+    "sample_count": 4096,
+    "max_presence_step": 0.00523154069900339
+  }
+]

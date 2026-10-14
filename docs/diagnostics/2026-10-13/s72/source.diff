@@ -1,0 +1,472 @@
+--- s72-before/realvisor.lua
++++ s72-after/realvisor.lua
+@@ -588,6 +588,12 @@
+         RAIN_NEW_TRAIL_MIN_DROP_MM = 0.20,
+         RAIN_NEW_TRAIL_MIN_FOOTPRINT_MM = 0.04,
+         RAIN_NEW_TRAIL_HEIGHT = 0.75,
++        -- Response diameter is a calibrated water-model input, separate from
++        -- the accepted motion/reference footprint and visible head/micro size.
++        RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE = 3.0,
++        RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE = 0.3333333333333333,
++        RAIN_NEW_TRAIL_PIXEL_INTEGRATION = true,
++        RAIN_NEW_TRAIL_BANDLIMIT = true,
+         RAIN_NEW_TRAIL_GRADIENT_D = 0.35,
+         RAIN_NEW_TRAIL_HEAD_GRADIENT_D = 0.32,
+         RAIN_NEW_TRAIL_SPLASH_REF_MM = 0.0, -- migrate the current authored texel value once
+@@ -17663,7 +17669,21 @@
+     sl('Minimum film-producing drop diameter (mm)','RAIN_NEW_TRAIL_MIN_DROP_MM',.05,1,'%.2f mm')
+     sl('Film starts moving at (mm/s)','RAIN_NEW_TRAIL_MIN_SPEED_MM_S',.1,20,'%.2f mm/s')
+     sl('Full speed response (mm/s)','RAIN_NEW_TRAIL_FULL_SPEED_MM_S',5,150,'%.1f mm/s')
+-    sl('Reference film height','RAIN_NEW_TRAIL_HEIGHT',.1,1,'%.2f')
++    sl('Film height at 1 model mm','RAIN_NEW_TRAIL_HEIGHT',.1,1,'%.2f')
++    sl('Water-model diameter multiplier','RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE',1,6,'%.2f x')
++    sl('Thin-trace output diameter compensation','RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE',.1,1,'%.3f x')
++    if ui.button('Keep current thin-trace size (output = 1 / model)') then
++        r.RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE=1/math.max(r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE,1)
++        rainDynamicSceneCopyState.materialSettings:markDirty()
++    end
++    ui.text(string.format('100%% rain: output %.2f-%.2f mm; water model %.2f-%.2f mm; micro output %.2f mm',
++        r.RAIN_GPU_SIZE_MIN_HEAVY,r.RAIN_GPU_SIZE_MAX_HEAVY,
++        r.RAIN_GPU_SIZE_MIN_HEAVY*r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE,
++        r.RAIN_GPU_SIZE_MAX_HEAVY*r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE,
++        r.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM))
++    ui.textWrapped('Heads/micro keep their current profile. Developed sheets use the water-model diameter; compensation keeps thin traces and clearing footprints small.')
++    ck('Integrate pixel footprint (thin path support)','RAIN_NEW_TRAIL_PIXEL_INTEGRATION')
++    ck('Filter unresolved bead/ripple frequencies','RAIN_NEW_TRAIL_BANDLIMIT')
+     sl('Liquid base lifetime (s)','RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS',.1,3,'%.2f s')
+     sl('Wipe recovery (s)','RAIN_DYNAMIC_TRAIL_MASK_SECONDS',.1,5,'%.2f s')
+     sl('Thin film beading','RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE',0,1,'%.2f')
+--- s72-before/rain_trails.lua
++++ s72-after/rain_trails.lua
+@@ -11,10 +11,11 @@
+     assert(substitutions==1,'New Trail sparse traversal output missing')
+     st.resolveProgram=d.surface.shader..st.resolveCode..traversal
+     function st:dispose()
+-        for _,name in ipairs({'descriptors','mask','summary','a','b'}) do
++        for _,name in ipairs({'descriptorsA','descriptorsB','mask','summary','a','b'}) do
+             if self[name] then self[name]:dispose();self[name]=nil end
+         end
+-        self.ready=false;self.read=nil;self.frame=nil;self.key=nil
++        self.ready=false;self.read=nil;self.write=nil;self.descriptors=nil;self.descriptorRead=nil
++        self.frame=nil;self.preparedFrame=nil;self.key=nil
+     end
+     local function canvas(w,h,format,name)
+         local c=ui.ExtraCanvas(vec2(w,h),1,render.AntialiasingMode.None,format)
+@@ -37,6 +38,7 @@
+         self.density=density;self.phase=state.ripplePhase or 0
+     end
+     function st:prepare(inputs,headValues,sim,state)
++        self.preparedFrame=nil
+         self:environment(sim,state)
+         local count=math.floor(headValues.gCount);local size=math.max(128,math.floor(r.RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE))
+         size=math.min(size,4096);local tile=32
+@@ -47,14 +49,21 @@
+             self:dispose();self.key=key;self.size=size
+             state.waterTrailRead=nil;state.waterTrailReady=false
+             state.trailMaskRead=nil;state.trailMaskFrame=nil
+-            self.descriptors=canvas(count,4,render.TextureFormat.R32G32B32A32.Float,'New Trail slot descriptors')
++            self.descriptorsA=canvas(count,5,render.TextureFormat.R32G32B32A32.Float,'New Trail slot descriptors A')
++            self.descriptorsB=canvas(count,5,render.TextureFormat.R32G32B32A32.Float,'New Trail slot descriptors B')
++            self.descriptorRead=self.descriptorsA
+             self.mask=canvas(nx*words,ny,render.TextureFormat.R32G32B32A32.Float,'New Trail sparse tiles')
+             self.summary=canvas(nx*summaryWords,ny,render.TextureFormat.R32G32B32A32.Float,'New Trail sparse summary')
+             self.a=canvas(size,math.floor(size/4),render.TextureFormat.R16G16B16A16.Float,'New Trail history A')
+             self.b=canvas(size,math.floor(size/4),render.TextureFormat.R16G16B16A16.Float,'New Trail history B')
+             self.read=self.a
+         end
++        self.descriptors=self.descriptorRead==self.descriptorsA and self.descriptorsB or self.descriptorsA
+         local v=self.values or {};for k,value in pairs(headValues) do v[k]=value end
++        v.gNewTrailModelDiameterScale=math.max(r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE or 1,1)
++        v.gNewTrailOutputDiameterScale=math.max(r.RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE or 1,.01)
++        v.gNewTrailPixelIntegration=r.RAIN_NEW_TRAIL_PIXEL_INTEGRATION and 1 or 0
++        v.gNewTrailBandlimit=r.RAIN_NEW_TRAIL_BANDLIMIT and 1 or 0
+         local ref=r.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM
+         v.gNewTrailBirthHold=r.RAIN_GPU_STATE_BIRTH_HOLD_SECONDS;v.gNewTrailLifecycle=inputs.lifecycle and 1 or 0
+         v.gNewTrailWet=self.wet;v.gNewTrailShear=self.shear;v.gNewTrailSupply=self.supply;v.gNewTrailDensity=self.density
+@@ -76,7 +85,7 @@
+         local tx={txRainState=inputs.state,txRainStateMeta=inputs.meta,txRainPreviousState=inputs.previousState,
+             txRainPreviousMeta=inputs.previousMeta,txRainDropMetric=inputs.metric,txOverride=inputs.override,
+             txRainDu=d.surface.root..'du.dds',txRainDv=d.surface.root..'dv.dds',txRainBoundaryMask=d.boundary,
+-            txTrailPrevious=self.read}
++            txTrailPrevious=self.read,txTrailPreviousDescriptors=self.descriptorRead}
+         if d.measure('New Trail descriptors',self.descriptors.updateWithShader,self.descriptors,{async=true,blendMode=render.BlendMode.Opaque,
+             textures=tx,values=v,shader=self.descriptorCode})==false then self.pending=true;return false end
+         v.gSize=size;v.gTile=vec2(tile,tile*4);v.gTilesX=nx;v.gTilesY=ny;v.gWords=words
+@@ -94,7 +103,7 @@
+     end
+     function st:publish(sim,state)
+         if self.preparedFrame~=sim.frame then return false end
+-        self.read=self.write;self.ready=true;self.frame=sim.frame;self.updates=self.updates+1
++        self.read=self.write;self.descriptorRead=self.descriptors;self.ready=true;self.frame=sim.frame;self.updates=self.updates+1
+         state.waterTrailRead=self.read;state.waterTrailReady=true;state.waterTrailSize=self.size
+         state.trailMaskRead=self.read;state.trailMaskFrame=sim.frame;state.trailMaskSize=self.size
+         state.newTrailActive=true
+--- s72-before/shaders/rainTrailDescriptor.hlsl
++++ s72-after/shaders/rainTrailDescriptor.hlsl
+@@ -10,19 +10,23 @@
+ }
+ float4 main(PS_IN pin) {
+     uint i=(uint)min(floor(pin.Tex.x*gCount),gCount-1);
+-    uint row=(uint)floor(pin.Tex.y*4);
++    uint row=(uint)floor(pin.Tex.y*5);
+     float4 s=txRainState.Load(int3(i,0,0)),m=txRainStateMeta.Load(int3(i,0,0));
+     float4 old=txRainPreviousState.Load(int3(i,0,0)),om=txRainPreviousMeta.Load(int3(i,0,0));
+     float4 metric=txRainDropMetric.Load(int3(i,0,0));float3 f=metric.rgb;
+     float2 endUV=float2(s.x,s.y+1),startUV=float2(old.x,old.y+1);
+-    float radius=max(m.r,0),diameter=2*radius/max(gRainReferencePerMM,1e-8);
++    float modelScale=max(gNewTrailModelDiameterScale,1);
++    float outputScale=gNewTrailOutputDiameterScale>0 ? gNewTrailOutputDiameterScale : 1;
++    float radius=max(m.r,0)*modelScale;
++    float diameter=2*radius/max(gRainReferencePerMM,1e-8);
++    float outputRadius=radius*outputScale;
+     float status=m.a-4*floor(m.a/4),previousStatus=om.a-4*floor(om.a/4);
+     float hold=gNewTrailBirthHold*(.6+.8*frac(sin(float(i)*12.9898+78.233)*43758.5453));
+     float4 splash=txOverride.Load(int3(i,0,0));
+     bool valid=status==1 && previousStatus==1 && floor(m.a/4)==floor(om.a/4)
+-        && metric.a>.5 && radius>0 && (gNewTrailLifecycle<.5 || m.b>=hold)
+-        && !(splash.a>.5 && splash.r<.95) && all(startUV>=0) && all(startUV<=1)
+-        && all(endUV>=0) && all(endUV<=1);
++    && metric.a>.5 && radius>0 && (gNewTrailLifecycle<.5 || m.b>=hold)
++    && !(splash.a>.5 && splash.r<.95) && all(startUV>=0) && all(startUV<=1)
++    && all(endUV>=0) && all(endUV<=1);
+     float moved=length(ntPlane(endUV-startUV,f));
+     valid=valid && moved>1e-8 && moved*gRainMetersPerUnit<.128;
+     // Reject holes / unsupported atlas joins. These are descriptor work, not
+@@ -33,35 +37,68 @@
+             if(ntValid(uv)<.5) valid=false;
+         }
+     }
+-    if(!valid) return row==3u ? float4(2e9,2e9,-2e9,-2e9) : float4(0,0,0,0);
+-    if(row==0u) return float4(startUV,endUV);
+-    float coat=saturate(txRainDv.SampleLevel(samLinearClamp,endUV,0).a);
+-    float speed=length(ntPlane(s.ba,f));
+-    float vn=smoothstep(gNewTrailMinSpeed,gNewTrailFullSpeed,speed);
+-    float size=smoothstep(.4,2.5,diameter);
+-    float wet=max(gNewTrailWet,saturate(txTrailPrevious.SampleLevel(samLinearClamp,endUV,0).g));
+-    float sheet=gNewTrailSheetEnabled*max(vn,smoothstep(gNewTrailDensityMin,gNewTrailDensityFull,gNewTrailDensity))
+-        *smoothstep(.15,.65,gNewTrailShear);
+-    float width=radius*gNewTrailWidthD*(1+gNewTrailWiden*smoothstep(.3,.8,gNewTrailShear)*sheet);
+-    width=max(width,gNewTrailMinDiameterMM*gRainReferencePerMM*.5);
+-    float height=gNewTrailHeight*pow(max(vn,0),.67)*(.35+.65*size)
+-        *lerp(1,1.6,wet)*lerp(1,.35,coat)*(1-.6*smoothstep(.5,1,gNewTrailShear));
+-    // Slow large wet drops also feed a narrow gravity rivulet.
+-    float rivulet=gNewTrailSupply*wet*size*(1-smoothstep(.15,.5,gNewTrailShear))*vn;
+-    height=max(height,gNewTrailHeight*rivulet*lerp(1,.35,coat));
+-    height*=lerp(1,.2,coat*(1-smoothstep(.05,.35,vn)));
+-    height*=smoothstep(gNewTrailMinDropMM,gNewTrailMinDropMM*2,diameter);
+-    if(gNewTrailWaterEnabled<.5 || (gNewTrailSupply<.001 && gNewTrailWet<.08)) height=0;
+-    height=min(height*(1+.15*saturate(txTrailPrevious.SampleLevel(samLinearClamp,endUV,0).g)),1);
+-    float life=gNewTrailSeconds*lerp(1,2.5,gNewTrailWet)*lerp(1,.4,coat)*(1+.5*size);
+-    float wipeRadius=max(radius*gNewTrailWipeD,gNewTrailMinDiameterMM*gRainReferencePerMM*.5);
+-    if(gNewTrailWipeEnabled<.5)wipeRadius=0;
+-    if(row==1u)return float4(width,height,sheet,life);
+-    if(row==2u)return float4(f,wipeRadius);
+-    float reach=max(width,wipeRadius);
+-    float a=max(f.x,1e-9),c=max(f.z,1e-9);
+-    float2 ext=reach*float2(sqrt(1+f.y*f.y/(c*c))/a,1/c);
+-    // A sampling pixel margin ensures conservative tiles at either resolution.
+-    ext+=gNewTrailPixelUV;
+-    return float4(min(startUV,endUV)-ext,max(startUV,endUV)+ext);
++    float4 result=float4(0,0,0,0);
++    if(!valid) {
++        result=row==3u ? float4(2e9,2e9,-2e9,-2e9) : float4(0,0,0,0);
++        // A pinned/temporarily suppressed live drop keeps phase without
++        // drawing a path. Respawn and unsupported exits still reset it.
++        if(row==4u && status==1 && previousStatus==1 && floor(m.a/4)==floor(om.a/4)
++        && metric.a>.5 && all(endUV>=0) && all(endUV<=1)) {
++            float4 phase=float4(0,0,0,0);
++            phase=txTrailPreviousDescriptors.Load(int3(i,4,0));
++            float keep=phase.a>.5 && phase.b==floor(m.a/4) ? 1 : 0;
++            result=float4(phase.g,phase.g,phase.b,1)*keep;
++        }
++    }
++    else {
++        if(row==0u) result=float4(startUV,endUV);
++        else {
++            float coat=saturate(txRainDv.SampleLevel(samLinearClamp,endUV,0).a);
++            float speed=length(ntPlane(s.ba,f));
++            float vn=smoothstep(gNewTrailMinSpeed,gNewTrailFullSpeed,speed);
++            float size=smoothstep(.4,2.5,diameter);
++            float wet=max(gNewTrailWet,saturate(txTrailPrevious.SampleLevel(samLinearClamp,endUV,0).g));
++            float sheet=gNewTrailSheetEnabled*max(vn,smoothstep(gNewTrailDensityMin,gNewTrailDensityFull,gNewTrailDensity))
++            *smoothstep(.15,.65,gNewTrailShear);
++            // Thin traces retain the accepted output size; a developed sheet uses
++            // the model diameter, so head-size compensation does not shrink it away.
++            float filmRadius=radius*lerp(outputScale,1,sheet);
++            float width=filmRadius*gNewTrailWidthD*(1+gNewTrailWiden*smoothstep(.3,.8,gNewTrailShear)*sheet);
++            width=max(width,gNewTrailMinDiameterMM*gRainReferencePerMM*.5);
++            float height=gNewTrailHeight*pow(max(vn,0),.67)*(.35+.65*size)
++            *lerp(1,1.6,wet)*lerp(1,.35,coat)*(1-.6*smoothstep(.5,1,gNewTrailShear));
++            // Slow large wet drops also feed a narrow gravity rivulet.
++            float rivulet=gNewTrailSupply*wet*size*(1-smoothstep(.15,.5,gNewTrailShear))*vn;
++            height=max(height,gNewTrailHeight*rivulet*lerp(1,.35,coat));
++            // h0 is calibrated at 1 model-mm. Film deposition scales with the
++            // model radius while output footprint compensation retains head size.
++            height*=diameter;
++            height*=lerp(1,.2,coat*(1-smoothstep(.05,.35,vn)));
++            height*=smoothstep(gNewTrailMinDropMM,gNewTrailMinDropMM*2,diameter);
++            if(gNewTrailWaterEnabled<.5 || (gNewTrailSupply<.001 && gNewTrailWet<.08)) height=0;
++            height=min(height*(1+.15*saturate(txTrailPrevious.SampleLevel(samLinearClamp,endUV,0).g)),1);
++            float life=gNewTrailSeconds*lerp(1,2.5,gNewTrailWet)*lerp(1,.4,coat)*(1+.5*size);
++            float wipeRadius=max(outputRadius*gNewTrailWipeD,gNewTrailMinDiameterMM*gRainReferencePerMM*.5);
++            if(gNewTrailWipeEnabled<.5)wipeRadius=0;
++            if(row==1u)result=float4(width,height,sheet,life);
++            else if(row==2u)result=float4(f,wipeRadius);
++            else if(row==4u) {
++                float4 previous=txTrailPreviousDescriptors.Load(int3(i,4,0));
++                float generation=floor(m.a/4);
++                float begin=previous.a>.5 && previous.b==generation ? previous.g : 0;
++                // Integrated distance in local footprint diameters, not an origin
++                // reset on each segment. Changing width preserves phase continuity.
++                result=float4(begin,begin+moved/max(2*width,1e-8),generation,1);
++            }
++            else {
++                float reach=max(width,wipeRadius);
++                float a=max(f.x,1e-9),c=max(f.z,1e-9);
++                float2 ext=reach*float2(sqrt(1+f.y*f.y/(c*c))/a,1/c);
++                // A sampling pixel margin ensures conservative tiles at either resolution.
++                ext+=gNewTrailPixelUV;
++                result=float4(min(startUV,endUV)-ext,max(startUV,endUV)+ext);
++            }
++        }
++    }
++    return result;
+ }
+--- s72-before/shaders/rainTrailResolve.hlsl
++++ s72-after/shaders/rainTrailResolve.hlsl
+@@ -14,14 +14,43 @@
+     // between atlas rows. This is sampling support, never an artist texel width.
+     float aa=.5*length(float2(frame.x/gSize,(abs(frame.y)+frame.z)*4/gSize));
+     if(frame.a>0)acc.a=max(acc.a,.95*saturate((frame.a+aa-sqrt(d2))/max(aa,1e-9)));
+-    float sampledRadius=shape.x+aa*.5;
+-    if(shape.y<=0 || d2>=sampledRadius*sampledRadius)return;
++    if(shape.y<=0)return; // Wipe-only work skips liquid integration/phase math.
++    float2 tangent=normalize(travel+float2(1e-15,0));
++    float2 normal=float2(-tangent.y,tangent.x);
++    float2 pixelU=float2(frame.x/gSize,0);
++    float2 pixelV=float2(frame.y*4/gSize,frame.z*4/gSize);
++    float aaAcross=max(.5*(abs(dot(normal,pixelU))+abs(dot(normal,pixelV))),1e-9);
++    float aaAlong=max(.5*(abs(dot(tangent,pixelU))+abs(dot(tangent,pixelV))),1e-9);
++    float cornerRadius=.5*sqrt(dot(pixelU,pixelU)+dot(pixelV,pixelV)+2*abs(dot(pixelU,pixelV)));
++    float sampledRadius=shape.x+(gNewTrailPixelIntegration>.5 ? cornerRadius : aa*.5);
++    if(d2>=sampledRadius*sampledRadius)return;
+     float k=saturate(1-d2/max(sampledRadius*sampledRadius,1e-18))*shape.x/max(sampledRadius,1e-9);
+-    float along=dot(delta,normalize(travel+float2(1e-15,0)))/max(shape.x*2,1e-8);
+-    // Thin films bead; thick ones stay continuous. No floor or plateau in sheets.
+-    float bead=.5+.5*sin(along*gNewTrailBeadCycles*6.2831853+float(i)*2.399963);
+-    float modulation=lerp(1,lerp(.15,1,bead*bead),gNewTrailNoise*(1-saturate(shape.y))*(1-shape.z));
+-    float ripple=1+gNewTrailSheetRipple*shape.z*sin(along*6.2831853+gNewTrailPhase);
++    if(gNewTrailPixelIntegration>.5) {
++        // Closed-form box integral of the transverse parabolic film profile.
++        // Average thickness is conserved as the path crosses atlas rows.
++        float width=max(shape.x,1e-9),q=dot(side,normal);
++        float lo=clamp(q-aaAcross,-width,width),hi=clamp(q+aaAcross,-width,width);
++        k=max(0,(hi-lo-(hi*hi*hi-lo*lo*lo)/(3*width*width))/(2*aaAcross));
++        float cap=abs(dot(side,tangent));
++        k*=1-smoothstep(max(width-aaAlong,0),width+aaAlong,cap);
++    }
++    float beadResolved=gNewTrailBandlimit>.5 ? 1-smoothstep(.25,.5,
++        gNewTrailBeadCycles*aaAlong/max(shape.x,1e-9)) : 1;
++    float rippleResolved=gNewTrailBandlimit>.5 ? 1-smoothstep(.25,.5,
++        aaAlong/max(shape.x,1e-9)) : 1;
++    float modulationAmount=gNewTrailNoise*(1-saturate(shape.y))*(1-shape.z);
++    float modulation=lerp(1,.46875,modulationAmount),ripple=1;
++    if(beadResolved*modulationAmount>1e-5 || rippleResolved*gNewTrailSheetRipple*shape.z>1e-5) {
++        float4 phase=txTrailDescriptors.Load(int3(i,4,0));
++        float along=phase.x+dot(delta,tangent)/max(shape.x*2,1e-8);
++        if(beadResolved*modulationAmount>1e-5) {
++            float bead=.5+.5*sin(along*gNewTrailBeadCycles*6.2831853+float(i)*2.399963);
++            float profile=lerp(.46875,lerp(.15,1,bead*bead),beadResolved);
++            modulation=lerp(1,profile,modulationAmount);
++        }
++        if(rippleResolved*gNewTrailSheetRipple*shape.z>1e-5)
++            ripple=1+gNewTrailSheetRipple*shape.z*rippleResolved*sin(along*6.2831853+gNewTrailPhase);
++    }
+     float height=min(shape.y*k*modulation*ripple,1);
+     if(height>acc.g)acc.rgb=float3(shape.x*gNewTrailHeadSize/32,height,shape.z)*float3(height,1,height);
+ }
+@@ -37,7 +66,9 @@
+     float coat=saturate(txRainDv.SampleLevel(samLinearClamp,uv,0).a);
+     float width=p.r/max(p.g,1e-7)*32/max(gNewTrailHeadSize,1);
+     float sheet=saturate(p.b/max(p.g,1e-7));
+-    float diameter=2*width/max(gNewTrailWidthD*(1+gNewTrailWiden*sheet)*gRainReferencePerMM,1e-8);
++    float outputScale=gNewTrailOutputDiameterScale>0 ? gNewTrailOutputDiameterScale : 1;
++    float diameter=2*width/max(gNewTrailWidthD*(1+gNewTrailWiden*smoothstep(.3,.8,gNewTrailShear)*sheet)
++        *gRainReferencePerMM*lerp(outputScale,1,sheet),1e-8);
+     float life=gNewTrailSeconds*lerp(1,2.5,gNewTrailWet)*lerp(1,.4,coat)*(1+.5*smoothstep(.4,2.5,diameter));
+     float dry=gNewTrailSupply<.001 && gNewTrailWet<.08 ? 2 : 1;
+     p.rgb*=exp(-gNewTrailDt*1.05*dry/max(life,.05));
+--- s72-before/shaders/rainVisorDynamicDrop.hlsl
++++ s72-after/shaders/rainVisorDynamicDrop.hlsl
+@@ -833,6 +833,12 @@
+                         // Metric offsets sample a physical footprint diameter,
+                         // independent of the atlas UV rotation/skew/resolution.
+                         float r=max(radiusUV*2*gDynamicDropNewTrailGradientD,1e-6);
++                        // Sub-texel derivatives of a bilinear film alternate
++                        // between cell slopes. Keep a half-history-texel floor
++                        // in physical units; reuse the same four height taps.
++                        float historySpan=wfStep*max(localFrame.x,
++                            4*length(float2(localFrame.y,localFrame.z)));
++                        r=max(r,historySpan*.5);
+                         float2 du=float2(r/localFrame.x,0);
+                         float dvStep=r/localFrame.z;
+                         float2 dv=float2(-localFrame.y*dvStep/localFrame.x,dvStep);
+--- s72-before/docs/README.md
++++ s72-after/docs/README.md
+@@ -54,8 +54,9 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
++| `RAINFX_S72_TRAIL_SAMPLING_AND_DIAMETER.md` | ACTIVE | carried phase, pixel integration/bandlimit, trail derivative floor; model diameter ×3 with compensated thin output, wide sheets, preserved head/micro profile; cost and GPU checks, game verification pending |
+ | `RAINFX_S71_SMEAR_RED_REGION.md` | ACTIVE | low-G red region restored: class wipe follows G, neutral trails follow visibility, shared class boundaries and persisted Smear tuning; game confirmation pending |
+-| `RAINFX_S70_TRAIL_VISIBILITY.md` | ACTIVE | evaluated current saved trail thickness/optics; ordinary films are suppressed by subpixel deposition, opacity and weak displacement; corrections pending |
++| `RAINFX_S70_TRAIL_VISIBILITY.md` | REFERENCE | diagnosis of weak ordinary-film optics; sampling/model calibration implemented and evaluated in s72 |
+ | `RAINFX_S69_MOTION_AND_MEMORY.md` | REFERENCE | user confirms G-force conflict and memory leak fixed; scene-ready native mask, accumulating splash/queue fixes and merge allocation reduction |
+ | `RAINFX_S68_VIEW_AND_CONVEX_TINT.md` | ACTIVE | main-view FX completion/retries, native glass UI callback fix, independent E2/E3 convex tint; automatic-driving game confirmation pending |
+ | `RAINFX_S67_NEW_TRAIL.md` | ACTIVE | current GPU liquid/wipe history, pending-callback fix, diameter/mm controls, 4096-slot work reduction and offline checks; game verification pending |
+--- s72-before/docs/RAINFX_ROADMAP.md
++++ s72-after/docs/RAINFX_ROADMAP.md
+@@ -1,6 +1,20 @@
+ # RainFX roadmap (accepted items, not scheduled) — updated 2026-10-13
+ 
+ See `docs/README.md` for the document index and working rules.
++
++## Latest s72 Trail sampling/model calibration (2026-10-13)
++
++User confirms current head/micro size profile is appropriate, but observes rough
++traces and no thick-film response at those diameters. Reproduced segment phase
++resets and unresolved noise/ripple frequencies; added carried generation phase,
++projected pixel integration/bandlimit and a half-history-texel derivative floor.
++Water-model diameter ×3 / thin-output compensation 1/3 retains accepted head,
++micro and thin/wipe sizes; developed sheets use model width and radius-scaled
++thickness. Deposited ordinary-film history reaches the production lens (alpha
++0.953, bare-visor contribution zero in the controlled test). Additional metadata
++384 KiB, no new full-atlas pass; actual 4096-slot model-width candidates +0.148%.
++Actual game FPS and remaining true trajectory/chord corners need confirmation.
++See `RAINFX_S72_TRAIL_SAMPLING_AND_DIAMETER.md`; this follows the s70 diagnosis.
+ 
+ ## Latest s71 Smear red-region correction (2026-10-13)
+ 
+--- s72-before/docs/RAINFX_S70_TRAIL_VISIBILITY.md
++++ s72-after/docs/RAINFX_S70_TRAIL_VISIBILITY.md
+@@ -1,6 +1,15 @@
+ # RainFX s70: when New Trail actually becomes a visible lens
+ 
+-Date: 2026-10-12. Status: ACTIVE — evaluation complete; optical calibration and subpixel deposition corrections remain to implement.
++Date: 2026-10-12. Status: REFERENCE — evaluation followed by s72 sampling and water-model calibration; game confirmation tracked there.
++
++## Follow-up (2026-10-13)
++
++s72 implements carried phase, subpixel integration/bandlimit, derivative support
++and a separate water-model diameter/output calibration. Actual deposited normal
++film now reaches production refraction in controlled GPU checks. See
++`RAINFX_S72_TRAIL_SAMPLING_AND_DIAMETER.md` for changes, cost and verification limits.
++The numbers and unchanged-runtime statement below describe the original s70
++evaluation; they are retained as the historical diagnosis.
+ 
+ ## User result and scope
+ 
+--- s72-before/docs/tools/check_s67_runtime.py
++++ s72-after/docs/tools/check_s67_runtime.py
+@@ -1,7 +1,7 @@
+ """Run production New Trail pending/publication/environment and pending optics."""
+ from pathlib import Path
+-import runpy,re,json,hashlib,time
+-ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-12/s67'
++import runpy,re,json,hashlib,time,sys
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/(sys.argv[1] if len(sys.argv)>1 else 'docs/diagnostics/2026-10-12/s67')
+ env=runpy.run_path(str(ROOT/'docs/tools/check_baked_housing.py'));lua=env['lua']
+ source=(ROOT/'realvisor.lua').read_text(encoding='utf-8');module=(ROOT/'rain_trails.lua').read_text()
+ lua.execute('assert(loadstring(...))',module);lua.execute('assert(loadstring(...))',(ROOT/'visor_optics.lua').read_text())
+@@ -38,31 +38,36 @@
+     'measure':lua.globals().measure})
+ lua.globals().trail=factory(dependency)
+ lua.execute('''
+-    pendingStage='New Trail slot descriptors'
+-    assert(trail:prepare(input,headValues,sim,state)==false and allocations==5 and not trail.ready)
++    pendingStage='New Trail descriptors'
++    assert(trail:prepare(input,headValues,sim,state)==false and allocations==6 and not trail.ready)
+     assert(not trail:publish(sim,state) and not state.waterTrailReady)
+     local a=trail.a
+     for i=1,50 do trail:prepare(input,headValues,sim,state) end
+-    assert(allocations==5 and trail.a==a)
++    assert(allocations==6 and trail.a==a)
+     pendingStage='New Trail resolve';assert(trail:prepare(input,headValues,sim,state)==false)
+     assert(trail.read==a and not trail:publish(sim,state))
+     pendingStage=nil;assert(trail:prepare(input,headValues,sim,state))
+     assert(not trail.ready and trail.read==a)
+     assert(trail:publish(sim,state) and state.waterTrailRead==state.trailMaskRead)
+     assert(trail.frame==sim.frame and trail.ready and state.waterTrailReady)
+-    assert(trail.write.params.values.gCount==4096 and trail.write.size.x==1024 and trail.write.size.y==256)
++    local phaseRead=trail.descriptorRead
++    pendingStage='New Trail resolve'
++    assert(not trail:prepare(input,headValues,sim,state) and not trail:publish(sim,state))
++    assert(trail.descriptorRead==phaseRead,'Pending retries must not publish the phase bank')
++    pendingStage=nil
++    assert(trail.read.params.values.gCount==4096 and trail.read.size.x==1024 and trail.read.size.y==256)
+     local w=trail.wet;trail:environment(sim,state);assert(trail.wet==w)
+     for i=1,180 do sim.frame=sim.frame+1;trail:environment(sim,state) end
+     assert(trail.wet>.3 and trail.wet<.6)
+     sim.rainIntensity=0;state.smearDensity=0;state.smearAirKmh=0;state.smearFacing=0
+     for i=1,3600 do sim.frame=sim.frame+1;trail:environment(sim,state) end
+     assert(trail.supply==0 and trail.wet<.04,'Track wetness/puddles must not force a wet visor')
+-    headValues.gCount=2048;pendingStage='New Trail slot descriptors'
++    headValues.gCount=2048;pendingStage='New Trail descriptors'
+     assert(trail:prepare(input,headValues,sim,state)==false and a.disposed)
+     assert(not state.waterTrailRead and not state.waterTrailReady,'Disposed history cannot feed physics next frame')
+-    assert(allocations==10 and disposed==5)
++    assert(allocations==12 and disposed==6)
+ ''')
+-report=['Actual 4096-slot pipeline: five bounded allocations, async retry reuse, atomic liquid/wipe publication, same-frame heads/paths, resize cleanup',
++report=['Actual 4096-slot pipeline: six bounded allocations including descriptor phase banks, async retry reuse, atomic liquid/wipe publication, same-frame heads/paths, resize cleanup',
+     'One wetness update per frame; 3-second rise/20-second dry response; wet tracks alone do not create water']
+ # Execute the actual narrowed CPU splash-centre branch for 4096 live drops.
+ a=source.index('    if state.newTrailActive and state.gpuHeadsActive then',source.index('rainDynamicSceneCopyState.updateBirthMask ='))
+--- s72-before/docs/tools/check_s67_gpu.py
++++ s72-after/docs/tools/check_s67_gpu.py
+@@ -1,8 +1,8 @@
+ """D3D11 readbacks of the actual unified descriptor/bin/history/lens programs."""
+ from pathlib import Path
+-import re,json,time
++import re,json,time,sys
+ import numpy as np
+-ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-12/s67';OUT.mkdir(parents=True,exist_ok=True)
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/(sys.argv[1] if len(sys.argv)>1 else 'docs/diagnostics/2026-10-12/s67');OUT.mkdir(parents=True,exist_ok=True)
+ base=(ROOT/'docs/tools/check_s63_gpu.py').read_text();env={'__file__':str(ROOT/'docs/tools/check_s63_gpu.py')}
+ exec(base[:base.index('report=[]')],env);env['OUT']=OUT
+ render=env['render'];inline=env['inline'];types=env['types'];types['gNewTrailPixelUV']='float2'
+@@ -35,7 +35,7 @@
+     'txRainBoundaryMask':mask,'txTrailPrevious':zero}
+ def pipeline(name,values=None):
+     values={**v,**(values or {})}
+-    desc=render(name+'_descriptor',descriptor,tx,values,(count,4))
++    desc=render(name+'_descriptor',descriptor,tx,values,(count,5))
+     tiles=render(name+'_tiles',bins,{'txTrailDescriptors':desc},values,(values['gMaskW'],8))
+     summary=render(name+'_summary',inline(lua,'rainDynamicSceneCopyState.gpuHeadsSummaryPass ='),{'txMask':tiles},values,(values['gSummaryW'],8))
+     output=render(name+'_resolve',resolve,{**tx,'txTrailDescriptors':desc,'txMask':tiles,'txSummary':summary},values,(size,size//4))
+@@ -74,9 +74,11 @@
+ assert np.max(abs(coated[:,:,3]-a[:,:,3]))<2e-6
+ report.append({'case':'coating lowers film height while preserving the same micro wipe footprint'})
+ dv[:,:,3]=0
+-low,_=pipeline('low_shear',{'gNewTrailShear':.3});high,_=pipeline('high_shear',{'gNewTrailShear':1})
+-assert high[:,:,1].max()<low[:,:,1].max()
+-report.append({'case':'high shear thins water after the intermediate-speed maximum'})
++meta[0,0,0]=.5*ref # Compare thinning before the large-film height cap saturates.
++low,low_desc=pipeline('low_shear',{'gNewTrailShear':.3});high,high_desc=pipeline('high_shear',{'gNewTrailShear':1})
++assert high_desc[1,0,1]<low_desc[1,0,1], 'Compare physical thickness before width-dependent pixel averaging'
++meta[0,0,0]=1.2*ref
++report.append({'case':'high shear thins descriptor water after the intermediate-speed maximum; deposited peak also depends on width'})
+ # A skewed local UV metric must still connect the same current/previous path.
+ frames[:,:,1]=.11/unit
+ du[:,:,1]=0;dv[:,:,0]=.11
+--- s72-before/docs/tools/bench_s67_candidates.py
++++ s72-after/docs/tools/bench_s67_candidates.py
+@@ -52,7 +52,7 @@
+  'gNewTrailDt':1/60,'gNewTrailHeadSize':2048,'gNewTrailDiffuse':0,'gNewTrailPixelUV':(1/1024,4/1024)}
+ ntx={**tx,'txTrailPrevious':np.zeros((256,1024,4),np.float32)}
+ ntx['txTrailDescriptors']=render('actual4096_trail_descriptors',
+- (ROOT/'shaders/rainTrailDescriptor.hlsl').read_text(),ntx,nv,(count,4))
++ (ROOT/'shaders/rainTrailDescriptor.hlsl').read_text(),ntx,nv,(count,5))
+ nv.update(gSize=1024,gTilesX=32,gTilesY=8,gMaskW=32*43,gSummaryW=32)
+ ntx['txMask']=render('actual4096_trail_tiles',(ROOT/'shaders/rainTrailBin.hlsl').read_text(),ntx,nv,(32*43,8))
+ ntx['txSummary']=render('actual4096_trail_summary',inline(lua,'rainDynamicSceneCopyState.gpuHeadsSummaryPass ='),ntx,nv,(32,8))

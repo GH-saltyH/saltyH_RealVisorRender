@@ -1,0 +1,56 @@
+{
+  "step": "s68",
+  "files": {
+    "realvisor.lua": {
+      "source_sha256": "abead0499fe319891315d3b7e4db80413675e5c051358426146683296b3a2604",
+      "mtime_ns": 1791809305075148600,
+      "installed_sha256": "abead0499fe319891315d3b7e4db80413675e5c051358426146683296b3a2604",
+      "installed_matches": true
+    },
+    "native_glass_state.lua": {
+      "source_sha256": "5ab6c2b10e07bb935a9e1cbc4287654f7524cc0eb3e31b3eec2bf7cd1ba6dce3",
+      "mtime_ns": 1791808576914727100,
+      "installed_sha256": "5ab6c2b10e07bb935a9e1cbc4287654f7524cc0eb3e31b3eec2bf7cd1ba6dce3",
+      "installed_matches": true
+    },
+    "shaders/rainVisorLayer.hlsl": {
+      "source_sha256": "7311dd7f2dd3161a6fb11a748afc0fa3a30efcb43d55d69100e415ae4c8878fb",
+      "mtime_ns": 1791808576936250200,
+      "installed_sha256": "7311dd7f2dd3161a6fb11a748afc0fa3a30efcb43d55d69100e415ae4c8878fb",
+      "installed_matches": true
+    },
+    "docs/README.md": {
+      "source_sha256": "5edb7e4ff61dfdd81a41a11fd545dd9f2b7dc9fd59ffd35c0d309732f9306200",
+      "mtime_ns": 1791809437625550900
+    },
+    "docs/RAINFX_ROADMAP.md": {
+      "source_sha256": "18fb63acf8c50d72188658f3329a34bae680600be573bca6cad46cc06a4ff688",
+      "mtime_ns": 1791809437909209000
+    },
+    "docs/RAINFX_S68_VIEW_AND_CONVEX_TINT.md": {
+      "source_sha256": "4402bbf87aaf5c9d743ded12d612ffaf7b55b39238da72e21feca614904b91b7",
+      "mtime_ns": 1791809437329412700
+    }
+  },
+  "existing_scalar_tuning_preserved": true,
+  "unchanged_files": [
+    "settings.ini",
+    "settings_mats.ini",
+    "rain_trails.lua",
+    "native_glass_occlusion.lua",
+    "visor_optics.lua",
+    "shaders/rainSurfaceMetric.hlsl",
+    "shaders/rainTrailDescriptor.hlsl",
+    "shaders/rainTrailResolve.hlsl",
+    "shaders/rainVisorDynamicDrop.hlsl"
+  ],
+  "installed_settings_current": {
+    "settings.ini": "bf876add65b59bc3dc966da9653ef1cffe1f97be9aec6886a1369109f6ba02d9",
+    "settings_mats.ini": "acaf0f0be8c8b5e365717ec590b73f58d57d8a9e7194478a9557868baabf31ba"
+  },
+  "runtime_checks": "runtime_checks.json",
+  "tint_checks": "tint_gpu_checks.json",
+  "actual_automatic_driving_trigger_confirmed": false,
+  "actual_game_recovery_verified": false,
+  "reload_required": true
+}

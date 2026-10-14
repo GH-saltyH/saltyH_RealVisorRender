@@ -1,6 +1,91 @@
-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-12
+# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-14
 
 See `docs/README.md` for the document index and working rules.
+
+## Latest s73 Physics/weather refactor design (2026-10-14)
+
+Design only; runtime and user tuning unchanged. Verified the user's updated
+6 px/mm at 4096x1024 reference. Audited mixed SI/normalized masses, reference
+force/speed calibration and trail-only diameter x3. Proposed volume-based
+surface state, contact-angle pinning, independent display-size gain,
+filtered CSP weather/phase adapter, estimated DSD/flux and birth-only
+virtual impact. Track water and RH have separate physical roles; effect
+gates share actual local water state. Reuse existing GPU slots/sparse
+sweeps; film transport/absorption/children follow explicit cost gates.
+s72 remains the live implementation until the staged model is implemented.
+See `RAINFX_S73_PHYSICS_WEATHER_REFACTOR_DESIGN.md`.
+
+## Latest s72 Trail sampling/model calibration (2026-10-13)
+
+User confirms current head/micro size profile is appropriate, but observes rough
+traces and no thick-film response at those diameters. Reproduced segment phase
+resets and unresolved noise/ripple frequencies; added carried generation phase,
+projected pixel integration/bandlimit and a half-history-texel derivative floor.
+Water-model diameter ×3 / thin-output compensation 1/3 retains accepted head,
+micro and thin/wipe sizes; developed sheets use model width and radius-scaled
+thickness. Deposited ordinary-film history reaches the production lens (alpha
+0.953, bare-visor contribution zero in the controlled test). Additional metadata
+384 KiB, no new full-atlas pass; actual 4096-slot model-width candidates +0.148%.
+Actual game FPS and remaining true trajectory/chord corners need confirmation.
+See `RAINFX_S72_TRAIL_SAMPLING_AND_DIAMETER.md`; this follows the s70 diagnosis.
+
+## Latest s71 Smear red-region correction (2026-10-13)
+
+User reports green/high-G smear looks correct but red/low-G areas do not,
+at 100% rain, 220–287 km/h and density 1.00–1.50. Reproduced two bypasses:
+raw clearance erased low-G classes and restored opaque heads; neutral trail
+coverage ignored G visibility. Class wipe now uses pre-erasure path/G weakening,
+and neutral trails use the existing trail visibility control. Colour/presence
+share symmetric class interpolation. Numeric/bool Smear UI settings now persist.
+No default tuning, physics or render pass changes. High-G endpoint and smear-off
+outputs are identical in controlled GPU replays; actual game validation pending.
+See `RAINFX_S71_SMEAR_RED_REGION.md`. s70 trail calibration remains open.
+
+## Latest s70 Trail visibility evaluation (2026-10-12)
+
+User confirms s69 G-force conflict and memory leak resolved, then reports no
+visible New Trail refraction. Current saved width is 0.26 D. Production-shader
+readbacks show ordinary coated 0.65 mm paths can disappear between atlas rows;
+aligned paths reach G=0.0512 but only 4.32% alpha and 0.0124 px shift on the
+controlled projection. Actual baked coated samples show the same strong
+suppression. Thickness starts above 1.3653 mm/s and 0.20 mm, but max history
+does not add water mass and legacy sheet height floors are inactive. Subpixel
+deposition and optical calibration need correction within the existing passes.
+Runtime/tuning unchanged by this evaluation. See `RAINFX_S70_TRAIL_VISIBILITY.md`.
+
+## Latest s69 G-force/memory follow-up (2026-10-12)
+
+User isolates FX loss to moving G-force transforms; profiler shows 2297.72 MB,
+GC 58.1% and merge/splash hotspots, with repeated 5-FPS stalls. Moving native
+mask GeometryShots now prepare before main rendering. Reproduced and removed
+CPU splash-history growth and a retired New Trail queue without a consumer.
+4096-slot merge scratch reuses an ascending linked grid: identical commands,
+99.67% less allocation in the offline workload; CPU median remains similar.
+Current motion/tuning and GPU physics retained. The user subsequently confirms
+G-force conflict and memory leak resolved. See `RAINFX_S69_MOTION_AND_MEMORY.md`.
+
+## Latest s68 FX/UI follow-up (2026-10-12)
+
+User reports FX disappearing near automatic driving and returning with ESC,
+plus an invalid native-state tree UI call. Fixed the confirmed tree callback
+contract and reproduced a frame-only guard suppressing another render view.
+FX completion now belongs to a main view/target, pending stages retry and
+successful items do not composite twice. Added independent authored-convex
+E2/E3 dark tint, default neutral, with UI/persistence and HDR shader checks.
+The exact automatic-driving trigger and real-game recovery remain to verify.
+New Trail review follows that confirmation. See `RAINFX_S68_VIEW_AND_CONVEX_TINT.md`.
+
+## Latest s67 New Trail follow-up (2026-10-12)
+
+User confirms s66 lighting repaired and daytime 60% rain at 79→59 FPS,
+100% rain at 75→45 FPS. Normal async pending no longer throws from owned
+optics/capture callbacks. New Trail combines current-GPU liquid and wipe
+segments in one 4:1 history, removing delayed CPU path stamps and their budget.
+Head bins exclude swept-path work (38.32% fewer candidates at 4096 slots,
+identical water RGB). Diameter/mm controls retain physical size across texture
+resolution changes. Production shader, lifecycle, lens, skewed/actual-baked
+mesh and hole checks pass. Real game FPS/appearance remains pending.
+See `RAINFX_S67_NEW_TRAIL.md`.
 
 ## Latest s66 startup and missing glass follow-up (2026-10-12)
 

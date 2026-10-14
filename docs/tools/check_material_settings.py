@@ -54,9 +54,16 @@ lua.execute('''
     e=editor('FRAME_MAIN');custom=editor('GLASS_INT_FX')
     runtime={RAIN_VISOR_LAYER_TEST=true,RAIN_VISOR_LAYER_GAIN=1.23456789123456,
         RAIN_VISOR_OPTICS_ENABLED=true,RAIN_VISOR_OPTICS_DUST_GAIN=.015,
+        RAIN_VISOR_LAYER_OPTICS_CONVEX_TINT=.35,
         RAIN_VISOR_OPTICS_NATIVE_SOURCE=true,RAIN_VISOR_OPTICS_SOURCE_WIDTH=1536,UNRELATED=99,
         RAIN_SURFACE_COAT_ADHESION=.55,RAIN_SURFACE_COAT_RETENTION=.65,
-        RAIN_SURFACE_GLASS_EXTRA_DRAG=1.5,RAIN_MIRROR_WATER=true}
+        RAIN_SURFACE_GLASS_EXTRA_DRAG=1.5,RAIN_MIRROR_WATER=true,
+        RAIN_NEW_TRAIL_ENABLED=true,RAIN_NEW_TRAIL_SPLASH_REF_MM=2.6,
+        RAIN_NEW_TRAIL_MICRO_RIM_D=.12,RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH=.7,
+        RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED=true,RAIN_DYNAMIC_TRAIL_MASK_SECONDS=.69,
+        RAIN_DYNAMIC_SMEAR_ENABLED=true,RAIN_DYNAMIC_SMEAR_TRAIL_HIDE=.81,
+        RAIN_DYNAMIC_SMEAR_PATH_WEAKEN=.85,RAIN_DYNAMIC_SMEAR_CLASSES=5,
+        RAIN_DYNAMIC_SMEAR_WIND_MODE=2}
     deps={path='settings_mats.ini',editors={e,custom},runtime=runtime,
         customItem=function(name) if name=='GLASS_INT_FX' then return {} end end,
         read=function() error('Unexpected reread') end,
@@ -73,17 +80,31 @@ lua.execute('''
     e.values.f.value=0;e.values.b.value=true;e.values.v2.value=vec2(0,0);e.values.v3.value=vec3(0,0,0)
     runtime.RAIN_VISOR_LAYER_GAIN=0;runtime.RAIN_VISOR_LAYER_TEST=false
     runtime.RAIN_VISOR_OPTICS_ENABLED=false;runtime.RAIN_VISOR_OPTICS_DUST_GAIN=0
+    runtime.RAIN_VISOR_LAYER_OPTICS_CONVEX_TINT=0
     runtime.RAIN_VISOR_OPTICS_NATIVE_SOURCE=false;runtime.RAIN_VISOR_OPTICS_SOURCE_WIDTH=0
     runtime.RAIN_SURFACE_COAT_ADHESION=0;runtime.RAIN_SURFACE_COAT_RETENTION=0
     runtime.RAIN_SURFACE_GLASS_EXTRA_DRAG=0;runtime.RAIN_MIRROR_WATER=false
+    runtime.RAIN_NEW_TRAIL_ENABLED=false;runtime.RAIN_NEW_TRAIL_SPLASH_REF_MM=0
+    runtime.RAIN_NEW_TRAIL_MICRO_RIM_D=0;runtime.RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH=0
+    runtime.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED=false;runtime.RAIN_DYNAMIC_TRAIL_MASK_SECONDS=0
+    runtime.RAIN_DYNAMIC_SMEAR_ENABLED=false;runtime.RAIN_DYNAMIC_SMEAR_TRAIL_HIDE=0
+    runtime.RAIN_DYNAMIC_SMEAR_PATH_WEAKEN=0;runtime.RAIN_DYNAMIC_SMEAR_CLASSES=1
+    runtime.RAIN_DYNAMIC_SMEAR_WIND_MODE=0
     assert(st:load())
+    assert(runtime.RAIN_DYNAMIC_SMEAR_ENABLED and runtime.RAIN_DYNAMIC_SMEAR_TRAIL_HIDE==.81)
+    assert(runtime.RAIN_DYNAMIC_SMEAR_PATH_WEAKEN==.85 and runtime.RAIN_DYNAMIC_SMEAR_CLASSES==5)
+    assert(runtime.RAIN_DYNAMIC_SMEAR_WIND_MODE==2)
     assert(e.values.f.value==0.12345678912345678 and e.values.b.value==false)
     assert(e.values.v2.value.y==3 and e.values.v3.value.z==6)
     assert(runtime.RAIN_VISOR_LAYER_GAIN==1.23456789123456 and runtime.RAIN_VISOR_LAYER_TEST)
     assert(runtime.RAIN_VISOR_OPTICS_ENABLED and runtime.RAIN_VISOR_OPTICS_DUST_GAIN==.015)
+    assert(runtime.RAIN_VISOR_LAYER_OPTICS_CONVEX_TINT==.35)
     assert(runtime.RAIN_VISOR_OPTICS_NATIVE_SOURCE and runtime.RAIN_VISOR_OPTICS_SOURCE_WIDTH==1536)
     assert(runtime.RAIN_SURFACE_COAT_ADHESION==.55 and runtime.RAIN_SURFACE_COAT_RETENTION==.65)
     assert(runtime.RAIN_SURFACE_GLASS_EXTRA_DRAG==1.5 and runtime.RAIN_MIRROR_WATER)
+    assert(runtime.RAIN_NEW_TRAIL_ENABLED and runtime.RAIN_NEW_TRAIL_SPLASH_REF_MM==2.6)
+    assert(runtime.RAIN_NEW_TRAIL_MICRO_RIM_D==.12 and runtime.RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH==.7)
+    assert(runtime.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED and runtime.RAIN_DYNAMIC_TRAIL_MASK_SECONDS==.69)
     files[deps.path]=files[deps.path]..'\\n[MESH:ABSENT]\\nf=7\\n[MESH:FRAME_MAIN]\\nf=nan\\nb=invalid\\n'
     local previous=e.values.f.value
     assert(st:load() and e.values.f.value==previous and e.values.b.value==false)

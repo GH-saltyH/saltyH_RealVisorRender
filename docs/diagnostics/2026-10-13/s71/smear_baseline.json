@@ -1,0 +1,30 @@
+[
+  {
+    "version": "before",
+    "case": "red_head_fresh_wipe",
+    "region_mean": 0.0,
+    "effective_class_wipe_mean": 0.7600001096725464,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "before",
+    "case": "red_trail",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.0,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "before",
+    "case": "green_head_fresh_wipe",
+    "region_mean": 0.6050634980201721,
+    "effective_class_wipe_mean": 0.7600001096725464,
+    "alpha_max": 1.0
+  },
+  {
+    "version": "before",
+    "case": "green_trail",
+    "region_mean": 1.0,
+    "effective_class_wipe_mean": 0.0,
+    "alpha_max": 1.0
+  }
+]

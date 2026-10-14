@@ -77,6 +77,14 @@ float3 rainDynamicWeatherSkyTone(float3 scene, float2 uv)
 // head moving over its own trail keeps its own radius code.
 // Composite RGB contains the film underlay; A preserves the pure trail.
 // Remove the underlay before WF winner selection and lens derivatives.
+// New Trail packs liquid in RGB and independent micro clearance in A.
+float4 rainWipeTap(float2 uv) {
+    float4 t=txDynamicTrailMask.SampleLevel(samLinearClamp,saturate(uv),0);
+    return gDynamicDropNewTrail>.5 ? float4(0,t.a,0,0) : t;
+}
+float rainNewTrailHeight(float2 uv) {
+    return txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv),0).g;
+}
 float4 rainPureTrail(float4 t)
 {
     if (gDynamicDropImpactFilm > 0.5)
@@ -240,8 +248,7 @@ float4 rainHazeEvalBase(float2 posH, float2 patternUV)
             * gDynamicDropHazeStrength;
         if (gDynamicDropTrailMaskWipeEnabled > 0.5)
         {
-            float wipe = txDynamicTrailMask.SampleLevel(samLinearClamp,
-                patternUV, 0.0).g;
+            float wipe = rainWipeTap(patternUV).g;
             amount *= 1.0 - smoothstep(0.05, 0.60,
                 saturate(rainSmearWipe(wipe)
                     * gDynamicDropTrailMaskWipeStrength));
@@ -414,6 +421,17 @@ float3 rainWaterLensColor(float2 sceneUV, float2 slope, float energy,
 //   e = max(1 - reveal / ERASE_SPAN, wipe * CLASS_WIPE),
 //   order_k = frac((k + 0.5) * 0.618034 + seed)
 // ---------------------------------------------------------------------------
+// One symmetric class pair drives both facet colour and class survival.
+float4 rainSmearClassPair(float g)
+{
+    float n=clamp(floor(gDynamicDropSmearClasses+.5),1,8);
+    float c=g*n;
+    float edge=clamp(floor(c+.5),1,max(n-1,1));
+    float k0=clamp(edge-1,0,n-1),k1=min(k0+1,n-1);
+    float width=max(gDynamicDropSmearClassSoft,.001);
+    return float4(k0,k1,smoothstep(edge-width*.5,edge+width*.5,c),n);
+}
+
 float4 rainSmearClassHash(float k)
 {
     return frac(sin(float4(k * 12.9898 + 1.7, k * 78.233 + 4.1,
@@ -526,15 +544,9 @@ float rainImpactRipple(float2 uv)
 
 float3 rainSmearColorAt(float2 smearSceneUV)
 {
-    float smearN = clamp(floor(gDynamicDropSmearClasses + 0.5), 1.0, 8.0);
-    float smearCls = gSmearG * smearN;
-    float smearK0 = min(floor(smearCls), smearN - 1.0);
-    float smearK1 = min(smearK0 + 1.0, smearN - 1.0);
-    float classWidth=max(gDynamicDropSmearClassSoft,.001);
-    float edge=clamp(floor(smearCls+.5),1.0,max(smearN-1.0,1.0));
-    smearK0=clamp(edge-1,0,smearN-1);
-    smearK1=min(smearK0+1,smearN-1);
-    float smearBlend=smoothstep(edge-classWidth*.5,edge+classWidth*.5,smearCls);
+    float4 pair=rainSmearClassPair(gSmearG);
+    float smearN=pair.w,smearCls=gSmearG*smearN;
+    float smearK0=pair.x,smearK1=pair.y,smearBlend=pair.z;
             float3 smearScene = float3(0.0, 0.0, 0.0);
             if (gSmearMask > 0.002)
                 smearScene = lerp(rainSmearClassColor(smearK0, smearSceneUV),
@@ -621,9 +633,7 @@ float4 rainDropMain(PS_IN pin)
             gSmearR = smearRG.x;
             // G contrast (docs/RAINFX_SMEAR_MASK.md v6): steeper G cuts the
             // pattern away more raggedly.
-            gSmearG = pow(saturate((visibilityRG.y - gDynamicDropSmearGPivot)
-                * gDynamicDropSmearGContrast + gDynamicDropSmearGPivot),
-                max(gDynamicDropSmearGGamma, 0.05));
+            gSmearG = gSmearVisibilityG;
             // Region where R <= reveal. The band keeps reveal 0 empty and
             // reveal 1 complete: front = reveal * (1 + 2 soft) - soft.
             float smearSoft = max(gDynamicDropSmearEdgeSoft, 0.001);
@@ -655,30 +665,21 @@ float4 rainDropMain(PS_IN pin)
                 * gDynamicDropInvScreenSize
                 * smearRatio);
             // v7 class facets (see rainSmearClassColor).
-            float smearN = clamp(floor(gDynamicDropSmearClasses + 0.5),
-                1.0, 8.0);
-            float smearCls = gSmearG * smearN;
-            float smearK0 = min(floor(smearCls), smearN - 1.0);
-            float smearK1 = min(smearK0 + 1.0, smearN - 1.0);
-            float smearBlend = smoothstep(
-                1.0 - max(gDynamicDropSmearClassSoft, 0.001), 1.0,
-                smearCls - smearK0);
+            float4 pair=rainSmearClassPair(gSmearG);
+            float smearK0=pair.x,smearK1=pair.y,smearBlend=pair.z;
+            // Class erasure is a wipe operation too. Apply the pre-erasure
+            // region/G rule, or a fresh path cancels the low-G smear and
+            // restores opaque drops exactly where they should stay weak.
             float smearWipe = gDynamicDropTrailMaskWipeEnabled > 0.5
-                ? txDynamicTrailMask.SampleLevel(samLinearClamp,
-                    patternUV, 0.0).g * gDynamicDropSmearClassWipe : 0.0;
+                ? rainSmearWipe(rainWipeTap(patternUV).g) * gDynamicDropSmearClassWipe : 0.0;
             float smearErase = max(1.0 - gDynamicDropSmearIntensity
                 / max(gDynamicDropSmearEraseSpan, 0.01), smearWipe);
-            float smearP0 = smoothstep(smearErase - 0.08, smearErase + 0.08,
+            float smearP0 = smoothstep(smearErase - 0.15, smearErase + 0.15,
                 rainSmearClassOrder(smearK0));
-            float smearP1 = smoothstep(smearErase - 0.08, smearErase + 0.08,
+            float smearP1 = smoothstep(smearErase - 0.15, smearErase + 0.15,
                 rainSmearClassOrder(smearK1));
             float smearPresence = lerp(smearP0, smearP1, smearBlend);
-            float visCls = gSmearVisibilityG * smearN;
-            float visK0 = min(floor(visCls), smearN - 1.0);
-            float visK1 = min(visK0 + 1.0, smearN - 1.0);
-            float visBlend = smoothstep(1.0 - max(gDynamicDropSmearClassSoft, 0.15), 1.0, visCls - visK0);
-            gSmearMask *= lerp(smoothstep(smearErase - 0.15, smearErase + 0.15, rainSmearClassOrder(visK0)),
-                smoothstep(smearErase - 0.15, smearErase + 0.15, rainSmearClassOrder(visK1)), visBlend);
+            gSmearMask *= smearPresence;
             gSmearK = gSmearMask * gSmearG;
             gSmearColor = rainSmearColorAt(smearSceneUV);
             if (gDynamicDropSmearDebug > 3.5)
@@ -693,8 +694,7 @@ float4 rainDropMain(PS_IN pin)
         }
         // Film/ridge derivatives also precede every colour/debug return.
         // FXC otherwise sees undefined neighbour values on early-exit paths.
-        float2 coverageForGradient = txDynamicTrailMask.SampleLevel(
-            samLinearClamp, patternUV, 0.0).rg;
+        float2 coverageForGradient = rainWipeTap(patternUV).rg;
         float filmG = 0.95 * pow(saturate(coverageForGradient.g / 0.95),
             max(gDynamicDropTrailFilmAgeExp, 0.05));
         float filmCoverage = gDynamicDropTrailFilmEnabled > 0.5
@@ -758,10 +758,6 @@ float4 rainDropMain(PS_IN pin)
                 : gDynamicDropWFHeadStep;
             float2 stepU = float2(wfStep, 0.0);
             float2 stepV = float2(0.0, wfStep*4.0);
-            float hU1 = rainWaterFieldTap(patternUV + stepU).g;
-            float hU0 = rainWaterFieldTap(patternUV - stepU).g;
-            float hV1 = rainWaterFieldTap(patternUV + stepV).g;
-            float hV0 = rainWaterFieldTap(patternUV - stepV).g;
             float h0 = w0.g;
             // Derivatives before any per-pixel branch (hoisted).
             float2 wfDx = hoistPatternDx;
@@ -771,10 +767,26 @@ float4 rainDropMain(PS_IN pin)
             float radiusUV = w0.r / max(w0.g, 0.02) * 32.0
                 * gDynamicDropWFInvMaskSize;
             float wfDet = wfDx.x * wfDy.y - wfDx.y * wfDy.x;
-            float2 physicalDx=rainMetricPlane(float2(patternUV.x,patternUV.y-1),wfDx);
-            float2 physicalDy=rainMetricPlane(float2(patternUV.x,patternUV.y-1),wfDy);
+            // Share one local frame across derivatives and diameter-based
+            // offsets: physical UI units do not add baked-metric texture reads.
+            float3 metricU,metricV;rainMetric(float2(patternUV.x,patternUV.y-1),metricU,metricV);
+            float metricA=max(length(metricU),1e-9),metricB=dot(metricU/metricA,metricV);
+            float metricC=sqrt(max(dot(metricV,metricV)-metricB*metricB,1e-18));
+            float3 localFrame=float3(metricA,metricB,metricC)/gRainMetersPerUnit;
+            float2 physicalDx=float2(localFrame.x*wfDx.x+localFrame.y*wfDx.y,localFrame.z*wfDx.y);
+            float2 physicalDy=float2(localFrame.x*wfDy.x+localFrame.y*wfDy.y,localFrame.z*wfDy.y);
             float physicalDet=physicalDx.x*physicalDy.y-physicalDx.y*physicalDy.x;
             float radiusPx = radiusUV / sqrt(max(abs(physicalDet), 1e-14));
+            float headPhysicalStep=max(radiusUV*2*gDynamicDropNewHeadGradientD,1e-6);
+            if(gDynamicDropNewTrail>.5 && !trailWins) {
+                stepU=float2(headPhysicalStep/localFrame.x,0);
+                float dv=headPhysicalStep/localFrame.z;
+                stepV=float2(-localFrame.y*dv/localFrame.x,dv);
+            }
+            float hU1 = rainWaterFieldTap(patternUV + stepU).g;
+            float hU0 = rainWaterFieldTap(patternUV - stepU).g;
+            float hV1 = rainWaterFieldTap(patternUV + stepV).g;
+            float hV0 = rainWaterFieldTap(patternUV - stepV).g;
             float largeW = smoothstep(gDynamicDropLargeStartPx,
                 max(gDynamicDropLargeFullPx, gDynamicDropLargeStartPx + 0.5),
                 radiusPx);
@@ -786,8 +798,9 @@ float4 rainDropMain(PS_IN pin)
             float hWidth = max(hoistWFFwidth * 0.75, 0.004)
                 + gDynamicDropWFSheetEdgeSoft * sheetEarly
                 + gDynamicDropLargeEdgeSoft * largeW;
-            float inside = smoothstep(gDynamicDropWFThreshold - hWidth,
-                gDynamicDropWFThreshold + hWidth, h0);
+            float threshold=trailWins && gDynamicDropNewTrail>.5 ? .015 : gDynamicDropWFThreshold;
+            if(trailWins && gDynamicDropNewTrail>.5)hWidth=min(hWidth,.007);
+            float inside = smoothstep(threshold - hWidth, threshold + hWidth, h0);
             if (gDynamicDropWFDebug > 0.5 && gDynamicDropWFDebug < 1.5
                 && h0 > 0.01)
                 return float4(h0, inside, 0.0, 0.85);
@@ -799,6 +812,10 @@ float4 rainDropMain(PS_IN pin)
                 // (height increases inward). Shape independent.
                 float2 slope = float2(dot(gradUV, wfDx), dot(gradUV, wfDy))
                     * radiusPx;
+                if(gDynamicDropNewTrail>.5 && !trailWins) {
+                    float2 grad=float2(hU1-hU0,hV1-hV0)/(2*headPhysicalStep);
+                    slope=float2(dot(grad,physicalDx),dot(grad,physicalDy))*radiusPx;
+                }
                 // Trail refraction v2 (docs/RAINFX_TRAIL_REFRACTION.md T1):
                 // a trail is a cylindrical lens, not a head dome. Its canvas
                 // is flat-topped, so the 1-texel gradient is ~0 inside and
@@ -808,10 +825,31 @@ float4 rainDropMain(PS_IN pin)
                 // step (~ half a trail width) gives the whole interior a
                 // cross-flow slope. Normalised by the wide step in pixels,
                 // the slope is ~1 at the edge of a trail of that half-width.
-                bool trailV2 = trailWins && gDynamicDropTrailRefractV2 > 0.5;
+                bool trailV2 = trailWins && (gDynamicDropNewTrail>.5 || gDynamicDropTrailRefractV2 > 0.5);
                 float2 trailOffsetPx = float2(0.0, 0.0);
                 if (trailV2)
                 {
+                    if(gDynamicDropNewTrail>.5) {
+                        // Metric offsets sample a physical footprint diameter,
+                        // independent of the atlas UV rotation/skew/resolution.
+                        float r=max(radiusUV*2*gDynamicDropNewTrailGradientD,1e-6);
+                        // Sub-texel derivatives of a bilinear film alternate
+                        // between cell slopes. Keep a half-history-texel floor
+                        // in physical units; reuse the same four height taps.
+                        float historySpan=wfStep*max(localFrame.x,
+                            4*length(float2(localFrame.y,localFrame.z)));
+                        r=max(r,historySpan*.5);
+                        float2 du=float2(r/localFrame.x,0);
+                        float dvStep=r/localFrame.z;
+                        float2 dv=float2(-localFrame.y*dvStep/localFrame.x,dvStep);
+                        float2 grad=float2(rainNewTrailHeight(patternUV+du)-rainNewTrailHeight(patternUV-du),
+                            rainNewTrailHeight(patternUV+dv)-rainNewTrailHeight(patternUV-dv))/(2*r);
+                        slope=float2(dot(grad,physicalDx),dot(grad,physicalDy))*radiusPx;
+                        float magnitude=length(slope);
+                        slope*=min(1,gDynamicDropTrailSlopeMax/max(magnitude,1e-6));
+                        trailOffsetPx=slope*min(gDynamicDropTrailRefractPx,
+                            2*radiusPx*gDynamicDropNewTrailRefractD);
+                    } else {
                     float thr = gDynamicDropWFThreshold;
                     float invRange = 1.0 / max(gDynamicDropTrailProfileRange,
                         0.02);
@@ -861,6 +899,7 @@ float4 rainDropMain(PS_IN pin)
                         length(slope));
                     trailOffsetPx = slope * gDynamicDropTrailRefractPx
                         * (1.0 + gDynamicDropTrailEdgeBoost * edgeRim);
+                    }
                 }
                 float slopeLen = length(slope);
                 if (gDynamicDropWFDebug > 2.5)
@@ -954,9 +993,10 @@ float4 rainDropMain(PS_IN pin)
                 // v9 (user): inside the smear the WF trails are weak and
                 // transparent; only the moving drops stay turbid, which reads
                 // as foam carried by the drops.
-                if (trailWins)
-                    wfAlpha *= 1.0 - saturate(gDynamicDropSmearTrailClear)
-                        * gSmearMask;
+                if (trailWins) {
+                    if(gDynamicDropNewTrail>.5)wfAlpha*=smoothstep(.015,.20,h0);
+                    wfAlpha *= 1.0 - saturate(gDynamicDropSmearTrailClear)*gSmearMask;
+                }
                 // Inside the region the water keeps full presence (shape,
                 // rim, glint: the flow stays visible) and its colour mixes
                 // with the micro / haze beneath (no early return).
@@ -969,7 +1009,10 @@ float4 rainDropMain(PS_IN pin)
                     if (gDynamicDropImpactFilm > 0.5)
                         pureInside = smoothstep(gDynamicDropWFThreshold - hWidth,
                             gDynamicDropWFThreshold + hWidth, wTrail.a);
-                    float trailCover = pureInside * gSmearMask;
+                    // The neutral refraction path must follow the same G
+                    // visibility as the legacy water overlay (smear v8).
+                    float trailCover = pureInside * gSmearMask
+                        * rainSmearVis(gDynamicDropSmearTrailHide);
                     gFlowCoverage = 1.0 - (1.0 - gImpactCover) * (1.0 - trailCover);
                     float2 trailOffset = (sampleUV - sceneUV) * trailCover
                         * saturate(gDynamicDropSmearTrailMix);
@@ -1018,8 +1061,7 @@ float4 rainDropMain(PS_IN pin)
                 {
                     float2 filmLocal = filmPattern.xy * 2.0 - 1.0;
                     float2 diskCenterUV = rainMicroCenter(patternUV,filmLocal,rainMicroRadiusCells(filmPoint.b));
-                    float diskClearance = txDynamicTrailMask.SampleLevel(
-                        samLinearClamp, saturate(diskCenterUV), 0.0).g;
+                    float diskClearance = rainWipeTap(saturate(diskCenterUV)).g;
                     float visibleDisk = 1.0 - smoothstep(0.08, 0.70,
                         saturate(rainSmearWipe(diskClearance)
                             * gDynamicDropTrailMaskWipeStrength));
@@ -1142,8 +1184,7 @@ float4 rainDropMain(PS_IN pin)
             // All pixels of a winning disk share one clearance sample.
             // Keep its existing baked, pixelated silhouette intact.
             float2 diskCenterUV = rainMicroCenter(patternUV,lensLocal,microRadiusCells);
-            float clearance = txDynamicTrailMask.SampleLevel(
-                samLinearClamp, saturate(diskCenterUV), 0.0).g;
+            float clearance = rainWipeTap(saturate(diskCenterUV)).g;
             microVisibility *= 1.0 - smoothstep(0.08, 0.70,
                 saturate(rainSmearWipe(clearance)
                     * gDynamicDropTrailMaskWipeStrength));
@@ -1263,7 +1304,7 @@ float4 main(PS_IN pin)
             ? rainWaterFieldTap(patternUV).g : 0.0;
         float4 depthMicro = rainMicroPoint(patternUV);
         float depthWipe = gDynamicDropTrailMaskWipeEnabled > 0.5
-            ? txDynamicTrailMask.SampleLevel(samLinearClamp, patternUV, 0.0).g
+            ? rainWipeTap(patternUV).g
                 * gDynamicDropTrailMaskWipeStrength : 0.0;
         bool depthMicroOn = depthMicro.a > 0.75 && gDynamicDropMicroRain > 0.001
             && gDynamicDropMicroRain >= rainMicroGate(depthMicro.b) && depthWipe < 0.08;

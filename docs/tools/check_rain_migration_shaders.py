@@ -2,7 +2,7 @@
 from pathlib import Path
 import re,subprocess,json,sys,time
 ROOT=Path(__file__).resolve().parents[2];lua=(ROOT/'realvisor.lua').read_text(encoding='utf-8')
-OUT=ROOT/'docs/diagnostics/2026-10-12/s66/shaders';OUT.mkdir(parents=True,exist_ok=True)
+OUT=ROOT/(sys.argv[2] if len(sys.argv)>2 else 'docs/diagnostics/2026-10-12/s67/shaders');OUT.mkdir(parents=True,exist_ok=True)
 metric=(ROOT/'shaders/rainSurfaceMetric.hlsl').read_text()
 fxc='C:/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64/fxc.exe'
 types={}
@@ -14,6 +14,7 @@ types.update(gRainObjectToWorld='float4x4',gRainAcceleration='float3',gRainAirVe
  gImpactObjectStep='float3',gMicroSearch='float2')
 types.update({k:'float3' for k in ('gLayerColor','gLayerSun','gLayerBounce','gLayerAmbSky','gLayerAmbHorizon',
  'gLayerLightDir','gLayerCameraSide','gLayerCameraUp','gLayerCameraLook')})
+types['gNewTrailPixelUV']='float2';types['gTile']='float2'
 def inline(anchor):
     start=lua.index(anchor);a=lua.index('[[',start)+2;b=lua.index(']]',a);return lua[a:b]
 passes={}
@@ -47,6 +48,11 @@ passes['rainDebug']=metric+(ROOT/'shaders/rainVisorScreen.hlsl').read_text(encod
 passes['gpuSplashAtlas']=inline('rainDynamicSceneCopyState.gpuSplashAtlasShader =')
 passes['microPattern']=metric+inline('                            gMicroGridUV=vec2')
 passes['glassLayer']=(ROOT/'shaders/rainVisorLayer.hlsl').read_text(encoding='utf-8')
+passes['newTrailDescriptor']=(ROOT/'shaders/rainTrailDescriptor.hlsl').read_text()
+passes['newTrailBin']=(ROOT/'shaders/rainTrailBin.hlsl').read_text()
+tail=inline('rainDynamicSceneCopyState.gpuHeadsPassB =')
+tail=tail[tail.index('void rgWalk('):].replace('    return acc;','    return ntResolve(pin.Tex,acc);')
+passes['newTrailResolve']=metric+(ROOT/'shaders/rainTrailResolve.hlsl').read_text()+tail
 report=[]
 for name,code in passes.items():
     if len(sys.argv)>1 and name not in sys.argv[1].split(','):continue

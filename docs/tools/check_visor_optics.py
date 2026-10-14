@@ -128,7 +128,7 @@ lua.execute('''
         CullMode={None=0},DepthMode={Normal=1,ReadOnly=0,Off=2},BlendMode={Opaque=1,BlendPremultiplied=0},ShadersType={Main=1},
         setCullMode=function() end,setDepthMode=function(v) currentDepth=v end,setBlendMode=function() end,
         getRenderTargetSize=function() return vec2(1280,720) end,
-        mesh=function(p) checkBindings(p);drawParams=p;if meshFail then error('mesh failed') end;return true end}
+        mesh=function(p) checkBindings(p);drawParams=p;if meshFail then error('mesh failed') end;return not meshPending end}
     captured=0;canvasUpdates=0;disposed=0
     function resource()
         return {dispose=function() disposed=disposed+1 end,clear=function() end,mipsUpdate=function() return true end,
@@ -212,7 +212,11 @@ lua.execute('''
     sim.cameraFOV=100;optics:updateBake();assert(not optics.ready and not optics.hit)
     clock=clock+.3;optics:updateBake();assert(optics.bakes==2 and optics.step==1)
     pending=true;local ok=pcall(function() optics:updateBake() end)
-    assert(not ok and optics.step==1);pending=false
+    assert(ok and optics.step==1);pending=false
+    meshPending=true;local previousStep=optics.step
+    ok=pcall(function() optics:updateBake() end)
+    assert(ok and optics.step==previousStep and optics.capturePending.surface and optics.pending)
+    meshPending=false
     meshFail=true;ok=pcall(function() optics:updateBake() end)
     assert(not ok and optics.step==1 and not meshes.GLASS_INT_FX.targetMesh:isVisible(1));meshFail=false
     optRuntime.RAIN_VISOR_OPTICS_TIER=0;optics:updateBake();assert(not optics.hit and not optics.ready)
@@ -225,7 +229,7 @@ lua.execute('''
     probe.prepared=true;optics:updateExternalProbe();assert(optics.probeReady and optics.probeShot and optics.probeExpected)
     local before=captured;optics:updateExternalProbe();assert(captured==before)
     clock=clock+.2;pending=true;ok=pcall(function() optics:updateExternalProbe() end)
-    assert(not ok and not optics.probeReady);pending=false
+    assert(ok and not optics.probeReady);pending=false
     optics:updateExternalProbe();assert(optics.probeReady)
     optics:draw(resource(),8);assert(optics.sunA.params.values.gOptProbeReady==1)
     assert(optics.sunA.params.textures.txOptProbe==optics.probeShot)
@@ -412,7 +416,7 @@ lua.execute('''
     local oldShot=sourceOptics.sourceShot;optRuntime.RAIN_VISOR_OPTICS_SOURCE_WIDTH=2048
     sourceOptics:updateNativeSource();assert(sourceOptics.sourceShot~=oldShot and sourceOptics.sourceWidth==2048)
     pending=true;local ok=pcall(function() sourceOptics:updateNativeSource() end)
-    assert(not ok and not sourceOptics.sourceReady);pending=false
+    assert(ok and not sourceOptics.sourceReady);pending=false
     sourceOptics:updateNativeSource();assert(sourceOptics.sourceReady)
     optRuntime.RAIN_VISOR_OPTICS_NATIVE_SOURCE=false;sourceOptics:updateNativeSource();assert(not sourceOptics.sourceReady)
     sourceOptics:dispose();assert(not sourceOptics.sourceShot and not sourceOptics.sourceDepth and not sourceOptics.hit)
@@ -436,6 +440,7 @@ lua.execute('''
     colors.__mul=function(c,k) return rgb(c.r*k,c.g*k,c.b*k) end
     function rgb(r,g,b) return setmetatable({r=r,g=g,b=b},colors) end
     sim.cameraSide=vec3(1,0,0)
+    sim.frame=1
     render.BlendMode.BlendAccurate=2
     function ui.ExtraCanvas(size,mips)
         local c=resource();c.sizeValue=size;c.levels=mips
@@ -451,6 +456,12 @@ lua.execute('''
     s.mainTargetWidth=1280;s.mainTargetHeight=720;s.toneReady=false;s.geometryShot='unchanged scene'
     s.visorLayerEditor=dependency.editor
     s.e1PrimaryDraw=function() end;s.e1SurfaceDraw=function() end
+    initialized=true;activeEnableMode=1
+    s.nativeGlass={ready=true,updates=0,update=function() return true end,
+        bind=function(_,p,prefix)
+            p.textures['tx'..prefix..'NativeDepth']=false;p.values['g'..prefix..'NativeOn']=0
+            p.values['g'..prefix..'NativePixelScale']=vec2(1,1)
+        end}
     optRuntime.RAIN_VISOR_SCENE_STACK=true;optRuntime.RAIN_VISOR_OVERLAY=false
     optRuntime.RAIN_VISOR_LAYER_OPTICS=true;optRuntime.RAIN_VISOR_LAYER_E1_SURFACE_TEST=false
     optRuntime.RAIN_VISOR_LAYER_OPTICS_INTERIOR=true
@@ -462,17 +473,22 @@ lua.globals().rainDynamicSceneCopyState.cachedOptics=factory(lua.globals().depen
 a=source.index('rainDynamicSceneCopyState.visorLayerDrawItem = function(')
 b=source.index('-- Stage 2:',a)
 lua.execute(source[a:b])
+a=source.index('rainDynamicSceneCopyState.nativeGlassPrepare=function()')
+b=source.index('render.onSceneReady(rainDynamicSceneCopyState.nativeGlassPrepare)',a)
+lua.execute(source[a:b])
+
 a=source.index('rainDynamicSceneCopyState.visorOpticsCapture = function(')
 b=source.index('-- Glass and the routing test',a)
 lua.execute(source[a:b])
 lua.execute('''
     local s=rainDynamicSceneCopyState;local r=optRuntime;local vl=s.visorLayer
-    r.RAIN_VISOR_OPTICS_ENABLED=false;s.visorSceneStack('post')
+    local function post() assert(s.nativeGlassPrepare());s.beginMainView();return s.visorSceneStack('post') end
+    r.RAIN_VISOR_OPTICS_ENABLED=false;post()
     local base=vl.opticsSource;local item=vl.defs.glass[2];local p=item.params
     assert(p.values.gLayerOptics==1 and p.textures.txLayerSource==base and vl.opticsMips==6)
     local normal,refraction,blur=p.values.gLayerOpticsNormal,p.values.gLayerOpticsRefractionPx,p.values.gLayerOpticsInteriorSoftPx
     for tier=0,2 do
-        r.RAIN_VISOR_OPTICS_ENABLED=true;r.RAIN_VISOR_OPTICS_TIER=tier;s.visorSceneStack('post')
+        r.RAIN_VISOR_OPTICS_ENABLED=true;r.RAIN_VISOR_OPTICS_TIER=tier;post()
         assert(vl.opticsSource==base and p.textures.txLayerSource==base and vl.opticsMips==6)
         assert(p.values.gLayerOptics==1 and p.values.gLayerOpticsNormal==normal
             and p.values.gLayerOpticsRefractionPx==refraction and p.values.gLayerOpticsInteriorSoftPx==blur)
@@ -480,20 +496,20 @@ lua.execute('''
         assert(s.cachedOptics.composite.textures.txOptScene==vl.cachedSceneSource)
         assert(not base.disposed)
     end
-    failCached=true;s.visorSceneStack('post');assert(vl.opticsReady and not vl.cachedSceneReady)
+    failCached=true;post();assert(vl.opticsReady and not vl.cachedSceneReady)
     assert(p.textures.txLayerSource==base and p.values.gLayerOptics==1);failCached=false
     local extra=vl.cachedSceneSource
     r.RAIN_VISOR_OPTICS_REFLECTION_GAIN=0;r.RAIN_VISOR_OPTICS_DOUBLE_GAIN=0;r.RAIN_VISOR_OPTICS_EFFECT_GAIN=0
     local draws=s.cachedOptics.draws;local updates=canvasUpdates
     for tier=0,2 do
         r.RAIN_VISOR_OPTICS_TIER=tier;assert(not s.cachedOptics:needsComposite())
-        s.visorSceneStack('post');s.cachedOptics:draw(resource(),10)
+        post();s.cachedOptics:draw(resource(),10)
         assert(s.cachedOptics.draws==draws and canvasUpdates==updates)
         assert(p.textures.txLayerSource==base and p.values.gLayerOptics==1)
     end
     assert(extra.disposed and not vl.cachedSceneSource)
     r.RAIN_VISOR_LAYER_OPTICS=false;r.RAIN_VISOR_OPTICS_EFFECT_GAIN=1
-    s.visorSceneStack('post');assert(p.values.gLayerOptics==0 and p.textures.txLayerSource=='unchanged scene')
-    r.RAIN_VISOR_OPTICS_ENABLED=false;s.visorSceneStack('post');assert(not vl.cachedSceneSource)
+    post();assert(p.values.gLayerOptics==0 and p.textures.txLayerSource=='unchanged scene')
+    r.RAIN_VISOR_OPTICS_ENABLED=false;post();assert(not vl.cachedSceneSource)
 ''')
 print('PASS: actual scene stack preserves E2/E3 sources/parameters across cached toggles and tiers; failed cached capture cannot suppress E2/E3; zero gains skip captures/draws; E2/E3 remains independently switchable')

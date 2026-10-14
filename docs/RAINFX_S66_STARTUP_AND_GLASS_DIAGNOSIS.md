@@ -1,6 +1,6 @@
 # RainFX s66: startup stalls, invisible glass and compiler warning
 
-Date: 2026-10-12. Status: ACTIVE — source/offline verification complete; game load/FPS/sunlight verification pending.
+Date: 2026-10-12. Status: REFERENCE — user reports improved FPS and repaired lighting; startup pending and trail follow-up are recorded in `RAINFX_S67_NEW_TRAIL.md`.
 
 ## User result and scope
 

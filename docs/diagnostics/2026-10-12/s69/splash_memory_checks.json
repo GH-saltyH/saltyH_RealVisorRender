@@ -1,0 +1,22 @@
+[
+  {
+    "source": "s68_leaking",
+    "frames": 300,
+    "active_slots": 64,
+    "painted_events": 2889600,
+    "retained_transient_list": 19200,
+    "retired_trail_queue": 19200,
+    "retained_lua_kb_after_collection": 2730.50390625,
+    "cpu_item_pool": 0
+  },
+  {
+    "source": "s69_bounded",
+    "frames": 300,
+    "active_slots": 64,
+    "painted_events": 19200,
+    "retained_transient_list": 0,
+    "retired_trail_queue": 0,
+    "retained_lua_kb_after_collection": 88.4765625,
+    "cpu_item_pool": 64
+  }
+]

@@ -425,6 +425,9 @@ float4 main(PS_IN pin)
         // Band overlap REPLACES the covered destination: an alpha-zero delta
         // assumes an identical base, and cannot guarantee outside occlusion.
         float3 opticalImage=base+((rim-base)*ridge+interiorDelta*(1-ridge))*max(gLayerOpticsBrightness,0);
+        // Tint transmission across the authored convex area, including the
+        // flat crown. It stays independent of relief/refraction effect gain.
+        opticalImage*=1-saturate(gLayerOpticsConvexTint)*saturate(lensField.a);
         float bandReplace = bandFloor * saturate(gLayerBandOpacity);
         float3 output = lerp(opticalImage - base, opticalImage, bandReplace) * coverage;
         return float4(output, bandReplace * coverage);

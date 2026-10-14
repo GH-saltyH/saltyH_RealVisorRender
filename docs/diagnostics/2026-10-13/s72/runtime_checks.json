@@ -1,0 +1,10 @@
+[
+  "Actual 4096-slot pipeline: six bounded allocations including descriptor phase banks, async retry reuse, atomic liquid/wipe publication, same-frame heads/paths, resize cleanup",
+  "One wetness update per frame; 3-second rise/20-second dry response; wet tracks alone do not create water",
+  "4096 old/live CPU drops only preview the 20 eligible active splash centres; no CPU trail stamping",
+  "Async state and lifecycle writes publish as a pair; false results retain the old bank",
+  "One-time splash/mm and micro/D migration preserves current tuning and is stable across resolution changes",
+  "True GeometryShot update with pending source/depth callback cannot publish incomplete capture",
+  "Wipe-only mode clears stale splash body suppression without CPU splash work",
+  "Workspace settings and physical transport retained; normal pending never throws from optics/native capture callbacks"
+]

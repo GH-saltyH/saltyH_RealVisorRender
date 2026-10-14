@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-13",
+  "step": "s71",
+  "runtime_defaults_unchanged": true,
+  "installed_matching_sha256": {
+    "realvisor.lua": "96b64462a65595bc5786945f00e7f51318eef06a26bb17eabfc288694ed07302",
+    "material_settings.lua": "57ea02462e3e9a664ec64019732af89b25798216464986ef1429956ea8adee94",
+    "shaders/rainVisorDynamicDrop.hlsl": "1033ec3012cd4c757885b90678d37d426368abe79b9188b6439c2bec06c88a7e"
+  },
+  "tests": [
+    "check_s71_smear",
+    "check_material_settings",
+    "four colour/depth shader variants"
+  ],
+  "game_confirmation_pending": true
+}

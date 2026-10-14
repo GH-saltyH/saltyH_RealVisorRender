@@ -30,7 +30,10 @@ return function(d)
         if not ok then error(result) end
         return result
     end
-    local function requireUpdate(value) if value==false then error('Optics shader/capture pending') end end
+    local function ready(value)
+        if value==false then st.pending=true;st.status='Optics shader/capture preparing';return false end
+        return true
+    end
     function st:disposeBake()
         self.statsGeneration=(self.statsGeneration or 0)+1;self.statsPending=false
         for _,name in ipairs({'hit','surface','material','glass','shA','shB','aoA','aoB','radiance'}) do
@@ -158,7 +161,12 @@ return function(d)
             local format=name=='hit' and render.TextureFormat.R32G32B32A32.Float
                 or name=='material' and render.TextureFormat.R8G8B8A8.UNorm or render.TextureFormat.R16G16B16A16.Float
             self[name]=ac.GeometryShot({opaque=function()
-                for _,p in ipairs(draws) do requireUpdate(safeDraw(p)) end
+                for _,p in ipairs(draws) do
+                    if safeDraw(p)==false then
+                        self.capturePending=self.capturePending or {};self.capturePending[name]=true
+                        return -- normal async compile; never throw across a CSP callback
+                    end
+                end
             end},vec2(self.w,self.h),1,true,
                 render.AntialiasingMode.None,format)
             self[name]:setSky(false);self[name]:setParticles(false);self[name]:setClearColor(rgbm(0,0,0,0))
@@ -207,7 +215,9 @@ return function(d)
                 bindBake(p,pose,self.step,(name=='surface' or name=='material') and id or nil)
                 p.values.gOptEye=eyeWorld
             end
-            requireUpdate((d.captureUpdate or function(shot,...) return shot:update(...) end)(self[name],eyeWorld,look,up,self.bakeFov))
+            self.capturePending=self.capturePending or {};self.capturePending[name]=false
+            local updated=(d.captureUpdate or function(shot,...) return shot:update(...) end)(self[name],eyeWorld,look,up,self.bakeFov)
+            if not ready(updated) or not ready(not self.capturePending[name]) then return false end
             if name=='hit' then
                 self.bakePose=pose:clone();self.bakeEye=eyeWorld:clone()
                 self.bakeLook=look:clone();self.bakeUp=up:clone()
@@ -229,7 +239,7 @@ return function(d)
             p.textures.txOptBandDiffuse=d.folder..'/texture/GLASS/FX/ext_txBand.png'
             p.textures.txOptPrevious=a;p.textures.txOptHit=self.hit;p.textures.txOptSurface=self.surface
             p.values.gOptSample=index;p.values.gOptVisibilityPass=ao and 1 or 0
-            requireUpdate(b:updateSceneWithShader(p))
+            if not ready(b:updateSceneWithShader(p)) then return false end
             if ao then self.aoA,self.aoB=b,a else self.shA,self.shB=b,a end
             self.step=self.step+1;self.status=string.format('Optics bake %d/44 (SH 32 rays, AO 8 rays)',self.step)
             return
@@ -248,12 +258,12 @@ return function(d)
         self.maskTexture=useTexture
         self.mask=self.mask or canvas(useTexture and 2048 or 512,useTexture and 512 or 128,useTexture and 12 or 10,
             useTexture and render.TextureFormat.R8G8B8A8.UNorm or nil)
-        requireUpdate(self.mask:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,
+        if not ready(self.mask:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,
             shader='#define OPT_MASK_TEXTURE '..(useTexture and '1' or '0')..'\n'..shader('visorOpticsMask'),
             textures=useTexture and {txOptPattern=d.folder..'/texture/GLASS/visor_contamination_rgba.dds'} or {},values={
             gOptSeed=r.RAIN_VISOR_OPTICS_SEED,gOptDensity=r.RAIN_VISOR_OPTICS_DUST_DENSITY,
-            gOptScratchDensity=r.RAIN_VISOR_OPTICS_SCRATCH_DENSITY}}))
-        requireUpdate(self.mask:mipsUpdate());self.maskKey=key
+            gOptScratchDensity=r.RAIN_VISOR_OPTICS_SCRATCH_DENSITY}})) then return false end
+        if not ready(self.mask:mipsUpdate()) then return false end;self.maskKey=key
     end
     function st:updateExternalProbe()
         if not d.probeEnsure then return end
@@ -268,7 +278,7 @@ return function(d)
             self.probeShot:setOpaqueAlphaFix(true)
             self.probeExpectedParams={mesh=probe.captureRefs,async=true,transform='original',
                 shader=shader('visorOpticsProbe'),textures={},values={}}
-            self.probeExpected=ac.GeometryShot({opaque=function() requireUpdate(safeDraw(self.probeExpectedParams)) end},
+            self.probeExpected=ac.GeometryShot({opaque=function() self.probeExpectedPending=safeDraw(self.probeExpectedParams)==false end},
                 vec2(32,32),6,true,render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
             for _,shot in ipairs({self.probeShot,self.probeExpected}) do
                 shot:setSky(false);shot:setParticles(false);shot:setClearColor(rgbm(0,0,0,0));shot:setClippingPlanes(.001,2)
@@ -282,9 +292,11 @@ return function(d)
         local origin=center+light*.5;local up=math.abs(light.y)<.9 and vec3(0,1,0) or vec3(1,0,0)
         up=(up-light*up:dot(light)):normalize()
         self.probeExpectedParams.values.gOptLightWorld=light
-        requireUpdate(d.probeUpdate(self.probeShot,probe.captureRefs,origin,-light,up,75))
-        requireUpdate(d.probeUpdate(self.probeExpected,probe.captureRefs,origin,-light,up,75))
-        requireUpdate(self.probeShot:mipsUpdate());requireUpdate(self.probeExpected:mipsUpdate())
+        if not ready(d.probeUpdate(self.probeShot,probe.captureRefs,origin,-light,up,75)) then return false end
+        self.probeExpectedPending=false
+        local updated=d.probeUpdate(self.probeExpected,probe.captureRefs,origin,-light,up,75)
+        if not ready(updated) or not ready(not self.probeExpectedPending) then return false end
+        if not ready(self.probeShot:mipsUpdate()) then return false end;if not ready(self.probeExpected:mipsUpdate()) then return false end
         self.probeReady=true;self.probeTime=os.clock()
     end
     function st:updateSun(sim)
@@ -307,14 +319,14 @@ return function(d)
         end
         self.sunA=self.sunA or canvas(1,1,1);self.sunB=self.sunB or canvas(1,1,1)
         if not self.sunReady then self.sunA:clear(rgbm(self.externalShadow,self.externalShadow,self.externalShadow,1)) end
-        requireUpdate(self.sunB:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsSun'),
+        if not ready(self.sunB:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsSun'),
             textures={txOptDepth='dynamic::depth',txOptPrevious=self.sunA,txOptProbe=self.probeReady and self.probeShot or false,
                 txOptProbeExpected=self.probeReady and self.probeExpected or false},values={gOptExternalShadow=self.externalShadow,
                 gOptProbeReady=self.probeReady and 1 or 0,gOptSunLum=.2126*sim.lightColor.r+.7152*sim.lightColor.g+.0722*sim.lightColor.b,
                 gOptProbeGain=r.RAIN_VISOR_OPTICS_SHADOW_PROBE_GAIN,
                 gOptSunOnScreen=onScreen and 1 or 0,gOptSunUV=sunUV,gOptInvTarget=vec2(1/d.width(),1/d.height()),
                 gOptReversedDepth=r.RAIN_DYNAMIC_SHOT_TONE_FRAME_DEPTH_REVERSED and 1 or 0,
-                gOptSunBlend=1}})) -- current-frame visibility; no delayed light trigger
+                gOptSunBlend=1}})) then return false end -- current-frame visibility; no delayed light trigger
         self.sunA,self.sunB=self.sunB,self.sunA;self.sunReady=true
         if self.probeReady then self.shadowStatus='Native engine-shadow scalar probe (32x32, 10 Hz)' end
         return light,side
@@ -336,7 +348,7 @@ return function(d)
                 render.TextureFormat.R16G16B16A16.Float)
             self.sourceShot:setOriginalLighting(true);self.sourceShot:setShadersType(render.ShadersType.Main)
             self.sourceShot:setOpaqueAlphaFix(true);self.sourceShot:setTransparentPass(true)
-            self.sourceDepth=ac.GeometryShot({opaque=function() d.sourceDepthDraw(self) end},vec2(width,height),1,true,
+            self.sourceDepth=ac.GeometryShot({opaque=function() self.sourceDepthPending=d.sourceDepthDraw(self)==false end},vec2(width,height),1,true,
                 render.AntialiasingMode.None,render.TextureFormat.R32G32B32A32.Float)
             for _,shot in ipairs({self.sourceShot,self.sourceDepth}) do
                 shot:setSky(false);shot:setParticles(false);shot:setClearColor(rgbm(0,0,0,0));shot:setClippingPlanes(.001,2)
@@ -363,10 +375,12 @@ return function(d)
         local origin=pose:transformPoint(originLocal)
         local look=pose:transformVector(vec3(0,-math.sin(pitch),-math.cos(pitch))):normalize()
         local up=pose:transformVector(vec3(0,math.cos(pitch),-math.sin(pitch))):normalize()
-        requireUpdate(d.probeUpdate(self.sourceShot,refs,origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV))
+        if not ready(d.probeUpdate(self.sourceShot,refs,origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV)) then return false end
         self.sourceView=self.sourceShot:viewMatrix():clone();self.sourceProjection=self.sourceShot:projectionMatrix():clone()
         self.sourceOrigin=origin:clone();self.sourceOriginLocal=originLocal:clone()
-        requireUpdate((d.captureUpdate or function(shot,...) return shot:update(...) end)(self.sourceDepth,origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV))
+        self.sourceDepthPending=false
+        if not ready((d.captureUpdate or function(shot,...) return shot:update(...) end)(self.sourceDepth,origin,look,up,r.RAIN_VISOR_OPTICS_SOURCE_FOV))
+            or not ready(not self.sourceDepthPending) then return false end
         self.sourceReady=true
         self.sourceStatus=string.format('Native HDR source %dx%d: supplemental light, four-tap depth/ID confidence; BVH image retained',width,height)
     end
@@ -377,11 +391,11 @@ return function(d)
         self.bright=self.bright or canvas(w,h,mips)
         self.brightW=w;self.brightH=h
         self.brightMaxMip=mips-1
-        requireUpdate(self.bright:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsBright'),
+        if not ready(self.bright:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsBright'),
             textures={txOptScene=scene,txOptAverage=scene},values={gOptSceneMaxMip=maxMip,
                 gOptBrightInvSource=vec2(1/d.width(),1/d.height()),
-                gOptBrightThreshold=r.RAIN_VISOR_OPTICS_GHOST_THRESHOLD,gOptBrightRelative=r.RAIN_VISOR_OPTICS_BRIGHT_RELATIVE}}))
-        requireUpdate(self.bright:mipsUpdate())
+                gOptBrightThreshold=r.RAIN_VISOR_OPTICS_GHOST_THRESHOLD,gOptBrightRelative=r.RAIN_VISOR_OPTICS_BRIGHT_RELATIVE}})) then return false end
+        if not ready(self.bright:mipsUpdate()) then return false end
     end
     function st:needsComposite()
         if not r.RAIN_VISOR_OPTICS_ENABLED then return false end
@@ -396,10 +410,10 @@ return function(d)
     end
     function st:draw(scene,maxMip)
         if not self:needsComposite() then return end
-        self:updateMask();local sim=ac.getSim();local pose=d.pose();if not pose then return end
+        if self:updateMask()==false then return false end;local sim=ac.getSim();local pose=d.pose();if not pose then return end
         local e=d.editor('GLASS_INT_FX');if not e or not e.targetMesh or #e.targetMesh~=1 or e.visible==false then return end
-        self:updateBright(scene,maxMip)
-        local light,side=self:updateSun(sim);local inverse=pose:inverse()
+        if self:updateBright(scene,maxMip)==false then return false end
+        local light,side=self:updateSun(sim);if light==false then return false end;local inverse=pose:inverse()
         local localLight=inverse:transformVector(light):normalize()
         local opening=self.bakeLook and self.bakePose:inverse():transformVector(self.bakeLook):normalize()
             or inverse:transformVector(sim.cameraLook):normalize()
@@ -424,7 +438,7 @@ return function(d)
                 gOptNativeReady=self.sourceReady and 1 or 0,gOptSourceView=self.sourceView or pose,
                 gOptSourceProjection=self.sourceProjection or pose,gOptSourceOriginLocal=self.sourceOriginLocal or vec3(),
                 gOptDebug=r.RAIN_VISOR_OPTICS_DEBUG}
-            requireUpdate(self.radiance:updateSceneWithShader(p));requireUpdate(self.radiance:mipsUpdate())
+            if not ready(self.radiance:updateSceneWithShader(p)) then return false end;if not ready(self.radiance:mipsUpdate()) then return false end
             if self.statsRequested and not self.statsPending then self:readStats(scene,maxMip,localLight) end
         end
         self.composite=self.composite or {async=true,transform='original',shader='#define OPT_LIGHTING 0\n'..shader('rainVisorOptics'),textures={},values={}}
@@ -463,15 +477,15 @@ return function(d)
         render.setBlendMode(render.BlendMode.BlendPremultiplied);render.setDepthMode(render.DepthMode.ReadOnly);render.setCullMode(render.CullMode.None)
         local ok,result=pcall(function() e.targetMesh:setVisible(true,false);return render.mesh(p) end)
         e.targetMesh:setVisible(visible,false)
-        if not ok then error(result) end;requireUpdate(result)
+        if not ok then error(result) end;if not ready(result) then return false end
         self.draws=self.draws+1;self.drawTier=r.RAIN_VISOR_OPTICS_TIER
     end
     function st:readStats(scene,maxMip,localLight)
         self.statsCanvas=self.statsCanvas or canvas(10,1,1,render.TextureFormat.R32.Float)
-        requireUpdate(self.statsCanvas:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsStats'),textures={
+        if not ready(self.statsCanvas:updateSceneWithShader({async=true,blendMode=render.BlendMode.Opaque,shader=shader('visorOpticsStats'),textures={
             txOptHit=self.hit,txOptAO=self.aoA,txOptSH=self.shA,txOptSunVisibility=self.sunA,
             txOptScene=scene,txOptRadiance=self.radiance},values={gOptSceneMaxMip=maxMip,gOptLocalLight=localLight,
-                gOptRadianceMaxMip=(self.mips or 1)-1}}))
+                gOptRadianceMaxMip=(self.mips or 1)-1}})) then return false end
         self.statsRequested=false;self.statsPending=true;self.statsError=nil
         local generation=self.statsGeneration or 0;local key=self.key
         self.statsCanvas:accessData(function(err,data)

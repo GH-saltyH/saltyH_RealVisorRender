@@ -1,4 +1,4 @@
-# RealVisor RainFX — docs index and working rules (2026-10-12)
+# RealVisor RainFX — docs index and working rules (2026-10-14)
 
 Start here. This file lists every document in `docs/` with its state, the
 current architecture in one screen, and the rules for working on the
@@ -19,6 +19,9 @@ project.
   - Water field: drops, trails, film.
   - Micro pattern, haze, smear.
   - Exact depth pass.
+  - New Trail (`rain_trails.lua`): same-frame GPU swept liquid/clearance history;
+    4:1 metrics, diameter/mm UI, independent channels. Legacy CPU paths remain
+    behind the New Trail toggle.
 - **Refraction source.** The geometry shot plus the HDR frame copy, through
   tone mode 3 (frame-first composite; rules in `RAINFX_NEAR_OBJECTS.md`
   §10).
@@ -51,7 +54,14 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
-| `RAINFX_S66_STARTUP_AND_GLASS_DIAGNOSIS.md` | ACTIVE | missing installed module, measured cold compile stall, async startup, independent glass/test routing and shadow/capture isolation; game confirmation pending |
+| `RAINFX_S73_PHYSICS_WEATHER_REFACTOR_DESIGN.md` | ACTIVE | design only: audited 6 px/mm calibration, volume/SI physics, independent display gain, CSP weather adapter, virtual impact and shared effect state; staged implementation and cost gates |
+| `RAINFX_S72_TRAIL_SAMPLING_AND_DIAMETER.md` | ACTIVE | carried phase, pixel integration/bandlimit, trail derivative floor; model diameter ×3 with compensated thin output, wide sheets, preserved head/micro profile; cost and GPU checks, game verification pending |
+| `RAINFX_S71_SMEAR_RED_REGION.md` | ACTIVE | low-G red region restored: class wipe follows G, neutral trails follow visibility, shared class boundaries and persisted Smear tuning; game confirmation pending |
+| `RAINFX_S70_TRAIL_VISIBILITY.md` | REFERENCE | diagnosis of weak ordinary-film optics; sampling/model calibration implemented and evaluated in s72 |
+| `RAINFX_S69_MOTION_AND_MEMORY.md` | REFERENCE | user confirms G-force conflict and memory leak fixed; scene-ready native mask, accumulating splash/queue fixes and merge allocation reduction |
+| `RAINFX_S68_VIEW_AND_CONVEX_TINT.md` | ACTIVE | main-view FX completion/retries, native glass UI callback fix, independent E2/E3 convex tint; automatic-driving game confirmation pending |
+| `RAINFX_S67_NEW_TRAIL.md` | ACTIVE | current GPU liquid/wipe history, pending-callback fix, diameter/mm controls, 4096-slot work reduction and offline checks; game verification pending |
+| `RAINFX_S66_STARTUP_AND_GLASS_DIAGNOSIS.md` | REFERENCE | missing installed module, measured cold compile stall, async startup, independent glass/test routing and shadow/capture isolation; user FPS/light results in s67 |
 | `RAINFX_S62_OUTPUT_AND_COST_FIXES.md` | REFERENCE | user game-output follow-up: warning-free shaders, EXT/E2/E3/micro fixes, cost reductions and verification limits |
 | `RAINFX_S63_GLITCH_AND_NATIVE_OCCLUSION.md` | REFERENCE | bounded wipe/trail/splash geometry, physical splash positions, native exterior ownership and additional cost fixes |
 | `RAINFX_S64_BOTTLENECK_AIRFLOW_LIGHTING.md` | REFERENCE | reproduced merge CPU bottleneck, cheaper physical transport, corrected downward airflow/live native hook, sunlight shadow policy and engine CPU/GPU timings |

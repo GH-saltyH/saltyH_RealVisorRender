@@ -1,0 +1,9 @@
+{
+  "zero_tint_baseline_delta": 0.0,
+  "half_tint_hdr_delta": -1.0,
+  "clear_outside_max": 0.0,
+  "central_hole_max": 0.0,
+  "alpha_max": 0.0,
+  "old_effect_gain": 0,
+  "texture_bindings": 10
+}

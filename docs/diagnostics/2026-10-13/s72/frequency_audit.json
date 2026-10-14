@@ -1,0 +1,16 @@
+{
+  "sites": 4096,
+  "directions_per_site": 8,
+  "assumed_display_diameter_mm": 0.65,
+  "shear": 0.6,
+  "bead_cycles_per_output_footprint": 5.0,
+  "output_trail_width_mm": 0.2224753370539904,
+  "unresolved_bead_fraction": 1.0,
+  "unresolved_ripple_fraction": 1.0,
+  "ripple_sampling_ratio_percentiles": [
+    2.5912017436468684,
+    3.402978081776908,
+    3.798803193768272
+  ],
+  "limits": "Actual surface metrics, sampled directions, controlled diameter/shear; not a recorded game velocity distribution."
+}

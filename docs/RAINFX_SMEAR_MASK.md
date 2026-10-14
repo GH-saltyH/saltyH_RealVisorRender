@@ -2,6 +2,25 @@
 
 Status: implemented behind `RAIN_DYNAMIC_SMEAR_ENABLED` (default `true`).
 
+## Current correction: red/low-G region (2026-10-13, s71)
+
+The latest accepted intent is **v8**: low processed G weakens every water
+feature, including neutral trail refraction. At full reveal, debug 1 red is
+strong region coverage with low G; green is region coverage with high G.
+It is not a comparison of raw texture R against raw G.
+
+s71 corrects raw class wiping that cancelled the red mask and restored
+opaque heads, and neutral trail coverage that bypassed G visibility. Class
+erasure now uses `rainSmearWipe` evaluated before class survival. Facet
+colour, survival and debug share the same symmetric class pair. Numeric/bool
+Smear controls now persist to `settings_mats.ini`.
+
+The old v4 fixed-region rule and v3 low-G sparkling-head rule below are
+historical; they must not be used to justify strong water in the red region.
+The October 7 neutral composition remains, with v8 visibility restored.
+No procedural region water sheet was reintroduced. See
+`RAINFX_S71_SMEAR_RED_REGION.md` for the reproduced cases and verification limits.
+
 ## Whole-visor eligibility and nose exclusion (2026-10-07)
 
 The existing `texture/smear_mask_v7_template_2048.png` is the R/G pattern

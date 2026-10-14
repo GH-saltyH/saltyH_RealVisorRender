@@ -1,0 +1,252 @@
+--- s71-before/realvisor.lua
++++ s71-after/realvisor.lua
+@@ -9393,7 +9393,7 @@
+     RAIN_DYNAMIC_SMEAR_MIP = 'Blur of the turbid colour (mip of the refraction source).',
+     RAIN_DYNAMIC_SMEAR_VEIL = 'Turbid colour drifts toward the fog colour by this.',
+     RAIN_DYNAMIC_SMEAR_HEAD_HIDE = 'Moving drops inside the region: visibility goes to G (1 = low G hides them fully).',
+-    RAIN_DYNAMIC_SMEAR_TRAIL_HIDE = 'G-dependent legacy WF overlay visibility at smear transition edges; it does not hide neutral refraction in full smear interiors.',
++    RAIN_DYNAMIC_SMEAR_TRAIL_HIDE = 'G-dependent visibility of WF trails, including neutral refraction inside the smear region.',
+     RAIN_DYNAMIC_SMEAR_R_TILING = 'How many times the mask R (region blobs) repeats over the visor. The texture must tile.',
+     RAIN_DYNAMIC_SMEAR_G_TILING = 'How many times the mask G (class patches) repeats over the visor. Higher = denser pattern.',
+     RAIN_DYNAMIC_SMEAR_CLASSES = 'Number of facet classes G is cut into. Each class bends and tones the scene its own way.',
+@@ -9403,7 +9403,7 @@
+     RAIN_DYNAMIC_SMEAR_TONE_RANGE = 'Brightness spread between classes (+-).',
+     RAIN_DYNAMIC_SMEAR_CLASS_MIP_RANGE = 'Blur spread between classes (+- mip around the turbid blur).',
+     RAIN_DYNAMIC_SMEAR_ERASE_SPAN = 'Below this reveal level the classes are erased one by one (random fixed order).',
+-    RAIN_DYNAMIC_SMEAR_CLASS_WIPE = 'How strongly wiping/flowing water erases classes on its path.',
++    RAIN_DYNAMIC_SMEAR_CLASS_WIPE = 'How strongly flowing water erases classes; follows the region/G path weakening before class erasure.',
+     RAIN_DYNAMIC_SMEAR_LINE_STRENGTH = 'Faint darkening on the boundaries between classes.',
+     RAIN_DYNAMIC_SMEAR_LINE_WIDTH = 'Width of the boundary lines, in class units.',
+     RAIN_DYNAMIC_SMEAR_FACET_ALPHA = 'Opacity of the class facet film on bare glass (no depth write, like haze).',
+@@ -18194,6 +18194,8 @@
+                 cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_WIND_MODE, 0, 3, '%.0f')
+             if changed then
+                 cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_WIND_MODE = math.floor(value + 0.5)
++                local settings=rainDynamicSceneCopyState.materialSettings
++                if settings then settings:markDirty() end
+             end
+         end
+         tfSlider('Airspeed for amp 1 (km/h)', 'RAIN_DYNAMIC_SMEAR_REF_KMH', 10.0, 400.0, '%.0f')
+@@ -18213,7 +18215,7 @@
+         tfSlider('Region: head mix with beneath', 'RAIN_DYNAMIC_SMEAR_HEAD_MIX', 0.0, 1.0, '%.2f')
+         tfSlider('Region: paths/film/ridge follow G', 'RAIN_DYNAMIC_SMEAR_PATH_WEAKEN', 0.0, 1.0, '%.2f')
+         tfSlider('Region: moving drops follow G', 'RAIN_DYNAMIC_SMEAR_HEAD_HIDE', 0.0, 1.0, '%.2f')
+-        tfSlider('WF trail visibility by G (region transition only)', 'RAIN_DYNAMIC_SMEAR_TRAIL_HIDE', 0.0, 1.0, '%.2f')
++        tfSlider('Region: WF trail visibility by G', 'RAIN_DYNAMIC_SMEAR_TRAIL_HIDE', 0.0, 1.0, '%.2f')
+         tfSlider('Mask R tiling (region blobs)', 'RAIN_DYNAMIC_SMEAR_R_TILING', 0.25, 8.0, '%.2f')
+         tfSlider('Mask G tiling (pattern density)', 'RAIN_DYNAMIC_SMEAR_G_TILING', 0.25, 12.0, '%.2f')
+         tfSlider('Turbid blur (mip)', 'RAIN_DYNAMIC_SMEAR_MIP', 0.0, 9.0, '%.1f')
+@@ -18230,6 +18232,8 @@
+             end
+             if changed then
+                 cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_CLASSES = math.floor(value + 0.5)
++                local settings=rainDynamicSceneCopyState.materialSettings
++                if settings then settings:markDirty() end
+             end
+         end
+         tfSlider('Class boundary blur', 'RAIN_DYNAMIC_SMEAR_CLASS_SOFT', 0.0, 1.0, '%.2f')
+--- s71-before/material_settings.lua
++++ s71-after/material_settings.lua
+@@ -7,6 +7,7 @@
+     local function runtimeKey(key)
+         return key:match('^RAIN_VISOR_LAYER_') or key:match('^RAIN_VISOR_OPTICS_')
+             or key:match('^RAIN_SURFACE_') or key=='RAIN_MIRROR_WATER'
++            or key:match('^RAIN_DYNAMIC_SMEAR_')
+             or key:match('^RAIN_NEW_TRAIL_') or key:match('^RAIN_DYNAMIC_WATER_FIELD_TRAIL_')
+             or key:match('^RAIN_DYNAMIC_WATER_FIELD_SHEET_') or key:match('^RAIN_DYNAMIC_TRAIL_')
+     end
+--- s71-before/shaders/rainVisorDynamicDrop.hlsl
++++ s71-after/shaders/rainVisorDynamicDrop.hlsl
+@@ -421,6 +421,17 @@
+ //   e = max(1 - reveal / ERASE_SPAN, wipe * CLASS_WIPE),
+ //   order_k = frac((k + 0.5) * 0.618034 + seed)
+ // ---------------------------------------------------------------------------
++// One symmetric class pair drives both facet colour and class survival.
++float4 rainSmearClassPair(float g)
++{
++    float n=clamp(floor(gDynamicDropSmearClasses+.5),1,8);
++    float c=g*n;
++    float edge=clamp(floor(c+.5),1,max(n-1,1));
++    float k0=clamp(edge-1,0,n-1),k1=min(k0+1,n-1);
++    float width=max(gDynamicDropSmearClassSoft,.001);
++    return float4(k0,k1,smoothstep(edge-width*.5,edge+width*.5,c),n);
++}
++
+ float4 rainSmearClassHash(float k)
+ {
+     return frac(sin(float4(k * 12.9898 + 1.7, k * 78.233 + 4.1,
+@@ -533,15 +544,9 @@
+ 
+ float3 rainSmearColorAt(float2 smearSceneUV)
+ {
+-    float smearN = clamp(floor(gDynamicDropSmearClasses + 0.5), 1.0, 8.0);
+-    float smearCls = gSmearG * smearN;
+-    float smearK0 = min(floor(smearCls), smearN - 1.0);
+-    float smearK1 = min(smearK0 + 1.0, smearN - 1.0);
+-    float classWidth=max(gDynamicDropSmearClassSoft,.001);
+-    float edge=clamp(floor(smearCls+.5),1.0,max(smearN-1.0,1.0));
+-    smearK0=clamp(edge-1,0,smearN-1);
+-    smearK1=min(smearK0+1,smearN-1);
+-    float smearBlend=smoothstep(edge-classWidth*.5,edge+classWidth*.5,smearCls);
++    float4 pair=rainSmearClassPair(gSmearG);
++    float smearN=pair.w,smearCls=gSmearG*smearN;
++    float smearK0=pair.x,smearK1=pair.y,smearBlend=pair.z;
+             float3 smearScene = float3(0.0, 0.0, 0.0);
+             if (gSmearMask > 0.002)
+                 smearScene = lerp(rainSmearClassColor(smearK0, smearSceneUV),
+@@ -628,9 +633,7 @@
+             gSmearR = smearRG.x;
+             // G contrast (docs/RAINFX_SMEAR_MASK.md v6): steeper G cuts the
+             // pattern away more raggedly.
+-            gSmearG = pow(saturate((visibilityRG.y - gDynamicDropSmearGPivot)
+-                * gDynamicDropSmearGContrast + gDynamicDropSmearGPivot),
+-                max(gDynamicDropSmearGGamma, 0.05));
++            gSmearG = gSmearVisibilityG;
+             // Region where R <= reveal. The band keeps reveal 0 empty and
+             // reveal 1 complete: front = reveal * (1 + 2 soft) - soft.
+             float smearSoft = max(gDynamicDropSmearEdgeSoft, 0.001);
+@@ -662,29 +665,21 @@
+                 * gDynamicDropInvScreenSize
+                 * smearRatio);
+             // v7 class facets (see rainSmearClassColor).
+-            float smearN = clamp(floor(gDynamicDropSmearClasses + 0.5),
+-                1.0, 8.0);
+-            float smearCls = gSmearG * smearN;
+-            float smearK0 = min(floor(smearCls), smearN - 1.0);
+-            float smearK1 = min(smearK0 + 1.0, smearN - 1.0);
+-            float smearBlend = smoothstep(
+-                1.0 - max(gDynamicDropSmearClassSoft, 0.001), 1.0,
+-                smearCls - smearK0);
++            float4 pair=rainSmearClassPair(gSmearG);
++            float smearK0=pair.x,smearK1=pair.y,smearBlend=pair.z;
++            // Class erasure is a wipe operation too. Apply the pre-erasure
++            // region/G rule, or a fresh path cancels the low-G smear and
++            // restores opaque drops exactly where they should stay weak.
+             float smearWipe = gDynamicDropTrailMaskWipeEnabled > 0.5
+-                ? rainWipeTap(patternUV).g * gDynamicDropSmearClassWipe : 0.0;
++                ? rainSmearWipe(rainWipeTap(patternUV).g) * gDynamicDropSmearClassWipe : 0.0;
+             float smearErase = max(1.0 - gDynamicDropSmearIntensity
+                 / max(gDynamicDropSmearEraseSpan, 0.01), smearWipe);
+-            float smearP0 = smoothstep(smearErase - 0.08, smearErase + 0.08,
++            float smearP0 = smoothstep(smearErase - 0.15, smearErase + 0.15,
+                 rainSmearClassOrder(smearK0));
+-            float smearP1 = smoothstep(smearErase - 0.08, smearErase + 0.08,
++            float smearP1 = smoothstep(smearErase - 0.15, smearErase + 0.15,
+                 rainSmearClassOrder(smearK1));
+             float smearPresence = lerp(smearP0, smearP1, smearBlend);
+-            float visCls = gSmearVisibilityG * smearN;
+-            float visK0 = min(floor(visCls), smearN - 1.0);
+-            float visK1 = min(visK0 + 1.0, smearN - 1.0);
+-            float visBlend = smoothstep(1.0 - max(gDynamicDropSmearClassSoft, 0.15), 1.0, visCls - visK0);
+-            gSmearMask *= lerp(smoothstep(smearErase - 0.15, smearErase + 0.15, rainSmearClassOrder(visK0)),
+-                smoothstep(smearErase - 0.15, smearErase + 0.15, rainSmearClassOrder(visK1)), visBlend);
++            gSmearMask *= smearPresence;
+             gSmearK = gSmearMask * gSmearG;
+             gSmearColor = rainSmearColorAt(smearSceneUV);
+             if (gDynamicDropSmearDebug > 3.5)
+@@ -1008,7 +1003,10 @@
+                     if (gDynamicDropImpactFilm > 0.5)
+                         pureInside = smoothstep(gDynamicDropWFThreshold - hWidth,
+                             gDynamicDropWFThreshold + hWidth, wTrail.a);
+-                    float trailCover = pureInside * gSmearMask;
++                    // The neutral refraction path must follow the same G
++                    // visibility as the legacy water overlay (smear v8).
++                    float trailCover = pureInside * gSmearMask
++                        * rainSmearVis(gDynamicDropSmearTrailHide);
+                     gFlowCoverage = 1.0 - (1.0 - gImpactCover) * (1.0 - trailCover);
+                     float2 trailOffset = (sampleUV - sceneUV) * trailCover
+                         * saturate(gDynamicDropSmearTrailMix);
+--- s71-before/docs/README.md
++++ s71-after/docs/README.md
+@@ -1,4 +1,4 @@
+-# RealVisor RainFX — docs index and working rules (2026-10-12)
++# RealVisor RainFX — docs index and working rules (2026-10-13)
+ 
+ Start here. This file lists every document in `docs/` with its state, the
+ current architecture in one screen, and the rules for working on the
+@@ -54,6 +54,7 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
++| `RAINFX_S71_SMEAR_RED_REGION.md` | ACTIVE | low-G red region restored: class wipe follows G, neutral trails follow visibility, shared class boundaries and persisted Smear tuning; game confirmation pending |
+ | `RAINFX_S70_TRAIL_VISIBILITY.md` | ACTIVE | evaluated current saved trail thickness/optics; ordinary films are suppressed by subpixel deposition, opacity and weak displacement; corrections pending |
+ | `RAINFX_S69_MOTION_AND_MEMORY.md` | REFERENCE | user confirms G-force conflict and memory leak fixed; scene-ready native mask, accumulating splash/queue fixes and merge allocation reduction |
+ | `RAINFX_S68_VIEW_AND_CONVEX_TINT.md` | ACTIVE | main-view FX completion/retries, native glass UI callback fix, independent E2/E3 convex tint; automatic-driving game confirmation pending |
+--- s71-before/docs/RAINFX_ROADMAP.md
++++ s71-after/docs/RAINFX_ROADMAP.md
+@@ -1,6 +1,18 @@
+-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-12
++# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-13
+ 
+ See `docs/README.md` for the document index and working rules.
++
++## Latest s71 Smear red-region correction (2026-10-13)
++
++User reports green/high-G smear looks correct but red/low-G areas do not,
++at 100% rain, 220–287 km/h and density 1.00–1.50. Reproduced two bypasses:
++raw clearance erased low-G classes and restored opaque heads; neutral trail
++coverage ignored G visibility. Class wipe now uses pre-erasure path/G weakening,
++and neutral trails use the existing trail visibility control. Colour/presence
++share symmetric class interpolation. Numeric/bool Smear UI settings now persist.
++No default tuning, physics or render pass changes. High-G endpoint and smear-off
++outputs are identical in controlled GPU replays; actual game validation pending.
++See `RAINFX_S71_SMEAR_RED_REGION.md`. s70 trail calibration remains open.
+ 
+ ## Latest s70 Trail visibility evaluation (2026-10-12)
+ 
+--- s71-before/docs/RAINFX_SMEAR_MASK.md
++++ s71-after/docs/RAINFX_SMEAR_MASK.md
+@@ -1,6 +1,25 @@
+ # Smear mask: fingerprint-like turbid patches (2026-10-01)
+ 
+ Status: implemented behind `RAIN_DYNAMIC_SMEAR_ENABLED` (default `true`).
++
++## Current correction: red/low-G region (2026-10-13, s71)
++
++The latest accepted intent is **v8**: low processed G weakens every water
++feature, including neutral trail refraction. At full reveal, debug 1 red is
++strong region coverage with low G; green is region coverage with high G.
++It is not a comparison of raw texture R against raw G.
++
++s71 corrects raw class wiping that cancelled the red mask and restored
++opaque heads, and neutral trail coverage that bypassed G visibility. Class
++erasure now uses `rainSmearWipe` evaluated before class survival. Facet
++colour, survival and debug share the same symmetric class pair. Numeric/bool
++Smear controls now persist to `settings_mats.ini`.
++
++The old v4 fixed-region rule and v3 low-G sparkling-head rule below are
++historical; they must not be used to justify strong water in the red region.
++The October 7 neutral composition remains, with v8 visibility restored.
++No procedural region water sheet was reintroduced. See
++`RAINFX_S71_SMEAR_RED_REGION.md` for the reproduced cases and verification limits.
+ 
+ ## Whole-visor eligibility and nose exclusion (2026-10-07)
+ 
+--- s71-before/docs/tools/check_material_settings.py
++++ s71-after/docs/tools/check_material_settings.py
+@@ -60,7 +60,10 @@
+         RAIN_SURFACE_GLASS_EXTRA_DRAG=1.5,RAIN_MIRROR_WATER=true,
+         RAIN_NEW_TRAIL_ENABLED=true,RAIN_NEW_TRAIL_SPLASH_REF_MM=2.6,
+         RAIN_NEW_TRAIL_MICRO_RIM_D=.12,RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH=.7,
+-        RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED=true,RAIN_DYNAMIC_TRAIL_MASK_SECONDS=.69}
++        RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED=true,RAIN_DYNAMIC_TRAIL_MASK_SECONDS=.69,
++        RAIN_DYNAMIC_SMEAR_ENABLED=true,RAIN_DYNAMIC_SMEAR_TRAIL_HIDE=.81,
++        RAIN_DYNAMIC_SMEAR_PATH_WEAKEN=.85,RAIN_DYNAMIC_SMEAR_CLASSES=5,
++        RAIN_DYNAMIC_SMEAR_WIND_MODE=2}
+     deps={path='settings_mats.ini',editors={e,custom},runtime=runtime,
+         customItem=function(name) if name=='GLASS_INT_FX' then return {} end end,
+         read=function() error('Unexpected reread') end,
+@@ -84,7 +87,13 @@
+     runtime.RAIN_NEW_TRAIL_ENABLED=false;runtime.RAIN_NEW_TRAIL_SPLASH_REF_MM=0
+     runtime.RAIN_NEW_TRAIL_MICRO_RIM_D=0;runtime.RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH=0
+     runtime.RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED=false;runtime.RAIN_DYNAMIC_TRAIL_MASK_SECONDS=0
++    runtime.RAIN_DYNAMIC_SMEAR_ENABLED=false;runtime.RAIN_DYNAMIC_SMEAR_TRAIL_HIDE=0
++    runtime.RAIN_DYNAMIC_SMEAR_PATH_WEAKEN=0;runtime.RAIN_DYNAMIC_SMEAR_CLASSES=1
++    runtime.RAIN_DYNAMIC_SMEAR_WIND_MODE=0
+     assert(st:load())
++    assert(runtime.RAIN_DYNAMIC_SMEAR_ENABLED and runtime.RAIN_DYNAMIC_SMEAR_TRAIL_HIDE==.81)
++    assert(runtime.RAIN_DYNAMIC_SMEAR_PATH_WEAKEN==.85 and runtime.RAIN_DYNAMIC_SMEAR_CLASSES==5)
++    assert(runtime.RAIN_DYNAMIC_SMEAR_WIND_MODE==2)
+     assert(e.values.f.value==0.12345678912345678 and e.values.b.value==false)
+     assert(e.values.v2.value.y==3 and e.values.v3.value.z==6)
+     assert(runtime.RAIN_VISOR_LAYER_GAIN==1.23456789123456 and runtime.RAIN_VISOR_LAYER_TEST)

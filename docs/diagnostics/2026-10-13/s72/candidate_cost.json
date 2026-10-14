@@ -1,0 +1,14 @@
+{
+  "1": {
+    "total_tile_candidates": 6747,
+    "mean_candidates_per_atlas_pixel": 26.35546875,
+    "valid_descriptors": 3826
+  },
+  "3": {
+    "total_tile_candidates": 6757,
+    "mean_candidates_per_atlas_pixel": 26.39453125,
+    "valid_descriptors": 3826
+  },
+  "candidate_relative_increase": 0.0014821402104638892,
+  "limits": "Actual metrics and current 100% birth diameter range, controlled velocities/ages; candidate work is not a GPU millisecond measurement."
+}

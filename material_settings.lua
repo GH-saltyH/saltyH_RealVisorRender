@@ -4,6 +4,14 @@ return function(d)
     local st={path=d.path, dirty=false}
     local function finite(v) return type(v)=='number' and v==v and math.abs(v)<math.huge end
     local function custom(e) return d.customItem(e.meshName)~=nil end
+    local function runtimeKey(key)
+        return key:match('^RAIN_VISOR_LAYER_') or key:match('^RAIN_VISOR_OPTICS_')
+            or key:match('^RAIN_SURFACE_') or key=='RAIN_MIRROR_WATER'
+            or key:match('^RAIN_DYNAMIC_SMEAR_')
+            or key:match('^RAIN_NEW_TRAIL_') or key:match('^RAIN_DYNAMIC_WATER_FIELD_TRAIL_')
+            or key:match('^RAIN_DYNAMIC_WATER_FIELD_SHEET_') or key:match('^RAIN_DYNAMIC_TRAIL_')
+    end
+    st.isRuntimeKey=runtimeKey
     local function decode(ini,section,key,kind)
         local raw=ini:get(section,key)
         if not raw then return nil end
@@ -67,7 +75,7 @@ return function(d)
                 end
             end
             for key,value in pairs(d.runtime) do
-                if (key:match('^RAIN_VISOR_LAYER_') or key:match('^RAIN_VISOR_OPTICS_') or key:match('^RAIN_SURFACE_') or key=='RAIN_MIRROR_WATER') and (type(value)=='boolean' or type(value)=='number') then
+                if runtimeKey(key) and (type(value)=='boolean' or type(value)=='number') then
                     self.ini:set('CUSTOM_SHADER',key,encode(value,type(value)=='boolean' and 'bool' or 'float'))
                 end
             end
@@ -82,7 +90,7 @@ return function(d)
             local data=io.load(self.path)
             self.ini=ac.INIConfig.parse(data or '')
             for key,current in pairs(d.runtime) do
-                if (key:match('^RAIN_VISOR_LAYER_') or key:match('^RAIN_VISOR_OPTICS_') or key:match('^RAIN_SURFACE_') or key=='RAIN_MIRROR_WATER') and (type(current)=='boolean' or type(current)=='number') then
+                if runtimeKey(key) and (type(current)=='boolean' or type(current)=='number') then
                     local value=decode(self.ini,'CUSTOM_SHADER',key,type(current)=='boolean' and 'bool' or 'float')
                     if value~=nil then d.runtime[key]=value end
                 end

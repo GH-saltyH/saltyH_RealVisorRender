@@ -20,7 +20,7 @@ return function(d)
                 }
             ]]}
             self.params.mesh=e.targetMesh
-            if render.mesh(self.params)==false then error('Native glass depth pending') end
+            if render.mesh(self.params)==false then self.pending=true;return false end
         end
     end
     function st:update(w,h)
@@ -58,9 +58,10 @@ return function(d)
             self.shot:setSky(false);self.shot:setParticles(false)
             self.shot:setClearColor(rgbm(0,0,0,0));self.shot:setClippingPlanes(.001,10)
         end
+        self.pending=false
         local ok,err=pcall(function()
             if (d.captureUpdate or function(shot,...) return shot:update(...) end)(self.shot,sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)==false then
-                error('Native glass capture pending')
+                self.pending=true
             end
         end)
         render.setCullMode(render.CullMode.None)
@@ -68,6 +69,7 @@ return function(d)
         render.setDepthMode(render.DepthMode.ReadOnly)
         self.error=not ok and tostring(err) or nil
         if not ok then return false end
+        if self.pending then self.error='Native glass capture preparing';return false end
         self.ready=true;self.key=key;self.updates=self.updates+1
         return true
     end

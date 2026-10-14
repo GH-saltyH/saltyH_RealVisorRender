@@ -31,7 +31,7 @@ return function(d)
             d.dirty()
         end
         ui.textWrapped('Clear native glass keeps reflections and opacity; hard shadows are off so the opening receives sunlight. Frame/rubber shadows remain.')
-        if ui.treeNode('Native glass render states') then
+        ui.treeNode('Native glass render states',function()
             for _,name in ipairs(self.names) do
                 local entry=self.items[name]
                 if entry then
@@ -41,8 +41,7 @@ return function(d)
                         tostring(ref:cullMode(1)),tostring(ref:isCastingShadows(1))))
                 end
             end
-            ui.treePop()
-        end
+        end)
     end
     return st
 end

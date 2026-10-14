@@ -1,0 +1,627 @@
+--- s72 pre-change baseline
++++ s73 design baseline
+@@ -37,7 +37,6 @@
+     
+     local textureRainSurfaceNormal = appFolder .. '/texture/RAINFX_ObjNormal_BoundaryMask.dds'
+     local textureRainBoundaryMask = appFolder .. '/texture/RAINFX_ObjNormal_BoundaryMask.dds'
+-    local testtextureRainSurfaceNormal = appFolder .. '/texture/RAINFX_ObjNormal_BoundaryMask.dds'
+ 
+     
+     --------------------------------------------------------
+@@ -360,7 +359,7 @@
+         RAIN_FORCE_AIRFLOW_INCLUDE_WIND = true,
+         -- false: original signed tangent airflow, true: downward visor
+         -- runoff with the original left/right tangent component.
+-        RAIN_AIRFLOW_DOWNWARD_MODE = true,
++        RAIN_AIRFLOW_DOWNWARD_MODE = false,
+         RAIN_AIRFLOW_DOWNWARD_GAIN = 0.33,
+ 
+         -- All external accelerations enter the GPU in SI m/s^2 and
+@@ -427,8 +426,8 @@
+         RAIN_GPU_PRELAID_DEBUG = false,
+         RAIN_GPU_STATE_CAPACITY_RAMP_POWER = 1.0,
+         -- Live birth-size keyframes in mm; a slot samples these at birth.
+-        RAIN_GPU_SIZE_MIN_DRY = 0.34,                   -- Default 0.35mm
+-        RAIN_GPU_SIZE_MAX_DRY = 0.41,                   -- Default 1.40mm
++        RAIN_GPU_SIZE_MIN_DRIZZLE = 0.34,                   -- Default 0.35mm
++        RAIN_GPU_SIZE_MAX_DRIZZLE = 0.41,                   -- Default 1.40mm
+         RAIN_GPU_SIZE_MIN_LIGHT = 0.35,                 -- Default 0.35mm
+         RAIN_GPU_SIZE_MAX_LIGHT = 0.45,                 -- Default 2.53mm
+         RAIN_GPU_SIZE_MIN_RAIN = 0.44,                  -- Default 0.91mm
+@@ -454,10 +453,14 @@
+         RAIN_GPU_STATE_RESPAWN_GAP_MAX = 0.75,
+ 
+         -- Stage 7C: physical-reference size-dependent surface max speed.
+-        -- 1 mm diameter occupies exactly 0.0029296875 visor UV in the
++        -- Update New RainFX mesh
++        -- 1 mm : 6px in 4096x1024
++        --  4:1 UV = 0.00146484375 : 0.005859375
++        --  1 mm diameter occupies exactly 0.00146484375 visor UV in the
++        --  radius : 0.000732421875
+         -- calibrated Debug 50 mesh measurement.
+-        RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.0029296875,
+-
++        RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM = 0.00146484375,      -- update to new mesh
++        
+         -- Coalescence + absorption steering (docs/RAINFX_COALESCENCE.md).
+         -- Pairs come from the async readback on the CPU (uniform grid);
+         -- both GPU state passes validate them identically on current data.
+@@ -554,18 +557,18 @@
+         -- always use exact Load, independently of this appearance setting.
+         RAIN_DYNAMIC_MICRO_POINT_LOAD = false,
+         RAIN_DYNAMIC_MICRO_POP_PICK = 0.35,     -- share of disks that cycle
+-        RAIN_DYNAMIC_MICRO_POP_PERIOD = 5.0,    -- s, x 0.5..1.5 per disk
++        RAIN_DYNAMIC_MICRO_POP_PERIOD = 3.0,    -- s, x 0.5..1.5 per disk
+         RAIN_DYNAMIC_MICRO_POP_OFF = 0.30,      -- share of the cycle absent
+         RAIN_DYNAMIC_MICRO_POP_FADE = 0.08,     -- share of the life fading out
+         RAIN_DYNAMIC_MICRO_POP_FLASH = 0.11,    -- landing highlight (x fog)
+         RAIN_DYNAMIC_MICRO_POP_ID_SCALE = 1.0,  -- id cells per pattern cell
+         -- Micro pattern v2 (docs/RAINFX_MICRO_PATTERN.md). Bake-time values;
+         -- changes need a Lua reload.
+-        RAIN_DYNAMIC_MICRO_PATTERN_STRATA = 1,          -- Micro strata
+-        RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE = 0.55,   -- Micro fist stratum presence
+-        RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE = 0.77,     -- Micro stratum presence
+-        RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN = 0.32, -- cells, FINE TUNED
+-        RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX = 0.55, -- cells, FINE TUNED
++        RAIN_DYNAMIC_MICRO_PATTERN_STRATA = 2,          -- Micro strata
++        RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE = 0.17,   -- Micro fist stratum presence
++        RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE = 1.00,     -- Micro stratum presence
++        RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN = 0.15, -- cells, FINE TUNED
++        RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MAX = 0.59, -- cells, FINE TUNED
+         RAIN_DYNAMIC_MICRO_PATTERN_RIM_CELLS = 0.07, -- superseded by RIM_TEXELS
+         -- Invisible cut line: the winner's outer ring (in pattern texels)
+         -- shows the unrefracted scene/haze, separating fragments.
+@@ -581,26 +584,57 @@
+         RAIN_DYNAMIC_MICRO_WATER_LENS_SLOPE = 0.8,      -- FINE TUNED
+         RAIN_DYNAMIC_MICRO_LAYER_OPACITY = 0.8,
+         -- Persistent UV wipe mask composited with the static micro layer.
+-        -- New Trail: one current-GPU segment history for liquid and clearance.
+-        RAIN_NEW_TRAIL_ENABLED = true,
+-        RAIN_NEW_TRAIL_MIN_SPEED_MM_S = 1.3653333333,
+-        RAIN_NEW_TRAIL_FULL_SPEED_MM_S = 34.1333333333,
+-        RAIN_NEW_TRAIL_MIN_DROP_MM = 0.20,
+-        RAIN_NEW_TRAIL_MIN_FOOTPRINT_MM = 0.04,
+-        RAIN_NEW_TRAIL_HEIGHT = 0.75,
+-        RAIN_NEW_TRAIL_GRADIENT_D = 0.35,
+-        RAIN_NEW_TRAIL_HEAD_GRADIENT_D = 0.32,
+-        RAIN_NEW_TRAIL_SPLASH_REF_MM = 0.0, -- migrate the current authored texel value once
+-        RAIN_NEW_TRAIL_SPLASH_MIN_MM = 0.0,
+-        RAIN_NEW_TRAIL_MICRO_RIM_D = -1.0,
+-        RAIN_NEW_TRAIL_REFRACT_D = 0.65,
+-        RAIN_NEW_TRAIL_BEAD_CYCLES_D = 1.25,
+-        RAIN_NEW_TRAIL_SHEET_RIPPLE = 0.08,
+-        RAIN_NEW_TRAIL_WET_RISE_SECONDS = 3.0,
+-        RAIN_NEW_TRAIL_WET_DRY_SECONDS = 20.0,
+-        RAIN_NEW_TRAIL_TRACK_SPRAY_GAIN = 0.0, -- optional track-puddle proxy, no measured spray
+-        RAIN_NEW_TRAIL_WET_FRICTION_GAIN = 0.15,
+-        RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,
++        
++        
++        --------------------------------------------------------
++        -- New Trail
++        --  one current-GPU segment history for liquid and clearance.
++        --------------------------------------------------------
++            RAIN_NEW_TRAIL_ENABLED = true,                              -- Enable New Trail
++            
++            RAIN_DYNAMIC_TRAIL_MASK_ENABLED = true,                     -- Clear Micro droplets
++
++            RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.31,                -- Liquid footprint width (x drop D)
++            RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE = 0.980,           -- Wipe footprint width (x drop D) 
++            RAIN_NEW_TRAIL_MIN_FOOTPRINT_MM = 0.04,                     -- Minimum footprint diameter (mm)
++            RAIN_NEW_TRAIL_MIN_DROP_MM = 0.20,                          -- Minimum film-producing drop diameter (mm)
++            RAIN_NEW_TRAIL_MIN_SPEED_MM_S = 1.3653333333,               -- Film starts moving at (mm/s)
++            RAIN_NEW_TRAIL_FULL_SPEED_MM_S = 34.1333333333,             -- Full speed response (mm/s)
++            RAIN_NEW_TRAIL_HEIGHT = 0.75,                               -- Film height at 1 model mm
++            -- Response diameter is a calibrated water-model input, separate from
++            -- the accepted motion/reference footprint and visible head/micro size.
++            RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE = 3.0,                  -- Water-model diameter multiplier
++            RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE = 0.3333333333333333,  -- Thin-trace output diameter compensation
++            
++            
++            RAIN_NEW_TRAIL_PIXEL_INTEGRATION = true,                    -- Integrate pixel footprint (thin path support)            
++            
++            RAIN_NEW_TRAIL_BANDLIMIT = true,                            -- Filter unresolved bead/ripple frequencies
++            
++
++            RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 0.46,      -- Liquid base lifetime (s)
++            RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 0.69,             -- Wipe recovery (s)
++            RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.75,        -- Thin film beading
++            RAIN_NEW_TRAIL_BEAD_CYCLES_D = 1.25,                -- Bead cycles per footprint D
++            RAIN_DYNAMIC_WATER_FIELD_SHEET_WIDEN = 2.34,        -- Sheet width gain
++            
++            -- Shear sheets
++            RAIN_DYNAMIC_IMPACT_SHEET_ENABLED = false,      
++            RAIN_NEW_TRAIL_SHEET_RIPPLE = 0.08,                 -- Sheet thickness ripple
++            RAIN_NEW_TRAIL_GRADIENT_D = 0.35,                   -- Gradient sampling radius (x footprint D)
++            RAIN_NEW_TRAIL_REFRACT_D = 0.65,                    -- Refraction displacement (x projected footprint D)
++            RAIN_DYNAMIC_TRAIL_REFRACT_PX = 34.5,               -- Maximum lens displacement (screen px) / image shift at slope 1 (render px)
++            RAIN_NEW_TRAIL_WET_RISE_SECONDS = 3.0,              -- Wet rise response (s)
++            RAIN_NEW_TRAIL_WET_DRY_SECONDS = 20.0,              -- Wet dry response (s)
++            RAIN_NEW_TRAIL_TRACK_SPRAY_GAIN = 0.0,              -- optional track-puddle proxy, no measured spray
++            RAIN_NEW_TRAIL_WET_FRICTION_GAIN = 0.15,            -- Pre-wet adhesion reduction (0 disables)
++
++            -- Other section 
++            RAIN_NEW_TRAIL_MICRO_RIM_D = 0.135,                  -- [Micro] Micro cut line width (x disk D)
++            RAIN_NEW_TRAIL_HEAD_GRADIENT_D = 0.32,              -- [WF heads and optics] Head gradient sampling radius (x drop D)
++            RAIN_NEW_TRAIL_SPLASH_REF_MM = 0.0, -- migrate the current authored texel value once
++            RAIN_NEW_TRAIL_SPLASH_MIN_MM = 0.0,
++
+         RAIN_DYNAMIC_TRAIL_MASK_DEBUG = false,
+         RAIN_DYNAMIC_TRAIL_MASK_WIPE_ENABLED = true,
+         RAIN_DYNAMIC_TRAIL_MASK_WIPE_STRENGTH = 1.5,
+@@ -620,12 +654,10 @@
+         -- width = diameter * scale + offset (mm), floored to MIN texels.
+         -- Legacy was a fixed 1.5 R / 0.75 R with a 1.4-texel radius floor,
+         -- which at 512 made most drops the same width.
+-        RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE = 0.980,     -- Wipe width, FINE TUNED
+         RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM = 0.0, -- Wipe width offset, FINE TUNED
+         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_SCALE = 0.60,   -- Liquid ridge width, FINE TUNED
+         RAIN_DYNAMIC_TRAIL_MASK_RIDGE_WIDTH_OFFSET_MM = 0.0,    -- Liquid ridge offset, FINE TUNED
+         RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS = 0.25,        -- Path min width, FINE TUNED
+-        RAIN_DYNAMIC_TRAIL_MASK_SECONDS = 0.69,
+         -- Head stamp source for the water field (legacy birth-mask optics,
+         -- its RGBA8 encoding and its decay path were removed 2026-10-02;
+         -- docs/RAINFX_WATER_FIELD.md §7).
+@@ -696,9 +728,6 @@
+         RAIN_DYNAMIC_WATER_FIELD_SPLASH_RESIDUAL = 0.65, -- remaining drop size
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED = true,
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_SIZE = 1024,
+-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS = 0.46,      -- WF trail lifetime, FINE TUNED
+-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_WIDTH = 0.31,        -- WF trail width, FINE TUNED
+-        RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE = 0.75,        -- WF trail bead noise, FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE_CELLS = 203.0, -- WF trail noise cells FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_SPEED = 0.004, -- visor UV / s
+         RAIN_DYNAMIC_WATER_FIELD_TRAIL_MIN_RADIUS = 0.677, -- head-mask texels; shared trail/sheet gate
+@@ -711,7 +740,6 @@
+         -- stores the sheet factor 0..1.
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_ENABLED = true,
+         -- Local impact film prototype. Kept opt-in until in-game tuning.
+-        RAIN_DYNAMIC_IMPACT_SHEET_ENABLED = false,
+         RAIN_DYNAMIC_IMPACT_SHEET_FLUX_START = 0.60, -- provisional influx threshold
+         RAIN_DYNAMIC_IMPACT_SHEET_FEED = 0.87, -- height / s per excess influx
+         RAIN_DYNAMIC_IMPACT_SHEET_SECONDS = 0.65,
+@@ -722,7 +750,6 @@
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_FULL_SPEED = 0.10,  -- UV / s
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_FORM = 1.0, -- shared shape strength for either trigger
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_HEIGHT_MIN = 0.75, -- sheet height floor before decay
+-        RAIN_DYNAMIC_WATER_FIELD_SHEET_WIDEN = 2.34,   -- + x trail width FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_THIN = 0.80,   -- amplitude loss, FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_PERSIST = 0.25, -- slower decay, FINE TUNED
+         RAIN_DYNAMIC_WATER_FIELD_SHEET_BLUR = 2.25,    -- extra mip, FINE TUNED
+@@ -749,7 +776,6 @@
+         -- trails are cylindrical lenses: sharp image shifted across the flow
+         -- by the thickness gradient instead of a blurred copy ("paint").
+         RAIN_DYNAMIC_TRAIL_REFRACT_V2 = true,
+-        RAIN_DYNAMIC_TRAIL_REFRACT_PX = 34.5,      -- image shift at slope 1 (render px)
+         RAIN_DYNAMIC_TRAIL_GRAD_WIDE_TEXELS = 4.8, -- ~ half a trail width (trail canvas)
+         RAIN_DYNAMIC_TRAIL_GRAD_MIX = 0.46,        -- 0 narrow (edges) .. 1 wide (interior)
+         RAIN_DYNAMIC_TRAIL_PROFILE_RANGE = 0.09,   -- G above threshold = full thickness
+@@ -806,7 +832,7 @@
+         RAIN_SURFACE_COAT_ADHESION = 0.55, -- contact-angle hysteresis approximation
+         RAIN_SURFACE_GLASS_EXTRA_DRAG = 1.5,
+         RAIN_SURFACE_COAT_RETENTION = 0.65,
+-        RAIN_DYNAMIC_SMEAR_TEXTURE = 'texture/Pre 7.0 Textures/smear_mask_v7_template_2048.png', -- app-relative
++        RAIN_DYNAMIC_SMEAR_TEXTURE = 'texture/smear_mask_v7_template_2048.png', -- app-relative
+         RAIN_DYNAMIC_SMEAR_USE_TEXTURE = true, -- false = procedural test mask
+         RAIN_DYNAMIC_SMEAR_NOSE_EXCLUDE = true,
+         RAIN_DYNAMIC_SMEAR_NOSE_U = 0.500,
+@@ -1130,33 +1156,35 @@
+ 
+ 
+ 
+-
+-
+-
+-        RAIN_VISOR_LAYER_OPTICS_NORMAL = 0.952,
+-        RAIN_VISOR_LAYER_OPTICS_REFRACTION_PX = 48.00,
+-        RAIN_VISOR_LAYER_OPTICS_BLUR_PX = 1.52, -- directional hairline split, not area blur
+-        RAIN_VISOR_LAYER_OPTICS_RIM_SHARPNESS = 3.96,
+-        RAIN_VISOR_LAYER_OPTICS_RIM_PEAK = 0.889,
+-        RAIN_VISOR_LAYER_OPTICS_LENS_GAIN = 0.85,
+-        RAIN_VISOR_LAYER_OPTICS_TRANSMISSION_LOSS = 0.53,
+-        RAIN_VISOR_LAYER_OPTICS_REFLECTION = 0.87,
+-        RAIN_VISOR_LAYER_OPTICS_REFLECTION_PX = 98.0,
++        -- E2/E3 Inner glass optics
++        RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW = false,
++        RAIN_VISOR_LAYER_OPTICS_BRIGHTNESS = 0.73,          -- Masked optics brightness (effect gain)   0.73
++        RAIN_VISOR_LAYER_OPTICS_CONVEX_TINT = 0.12,         -- 0 clear, 1 black; authored convex area only
++
++        RAIN_VISOR_LAYER_OPTICS_NORMAL = 1.211,             -- E2 relief normal strength  0.952
++        RAIN_VISOR_LAYER_OPTICS_REFRACTION_PX = 48.00,      -- E3 refraction (pixels)
++        RAIN_VISOR_LAYER_OPTICS_LENS_GAIN = 1.46,           -- E3 lens slope gain 0.85
++        RAIN_VISOR_LAYER_OPTICS_BLUR_PX = 1.52,             -- directional hairline split, not area blur 1.52
++        RAIN_VISOR_LAYER_OPTICS_RIM_SHARPNESS = 8.00,       -- Rim peak sharpness (higher = narrower) 3.96
++        RAIN_VISOR_LAYER_OPTICS_RIM_PEAK = 0.535,           -- Rim normal peak threshold 0.889
++        --E2 normal-map relief lighting
++        RAIN_VISOR_LAYER_OPTICS_RELIEF_SPEC = 1.51,         -- Relief highlight 1.69
++        RAIN_VISOR_LAYER_OPTICS_RELIEF_GLOSS = 0.27,        -- Relief gloss     0.18
++        RAIN_VISOR_LAYER_OPTICS_RELIEF_SHADE = 0.12,        -- Relief shading   0.75
++        RAIN_VISOR_LAYER_OPTICS_TRANSMISSION_LOSS = 0.27,   -- Rim transmission loss 0.53
++        RAIN_VISOR_LAYER_OPTICS_REFLECTION = 1.00,          -- Rim environment reflection 0.87
++        RAIN_VISOR_LAYER_OPTICS_REFLECTION_PX = 160.0,      -- Rim reflection reach (pixels) 98.0
++        --E2 Optics inside the outline band
+         RAIN_VISOR_LAYER_OPTICS_INTERIOR = true,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_PX = 25.85,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_NORMAL = 1.78,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BEND_PX = 16.0,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SPLIT_PX = 1.34,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_PX = 3.87,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_AMOUNT = 1.00,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_PX = 4.267,
+-        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_AMOUNT = 0.5,
+-        RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW = false,
+-        RAIN_VISOR_LAYER_OPTICS_BRIGHTNESS = 0.73,
+-        RAIN_VISOR_LAYER_OPTICS_CONVEX_TINT = 0.12, -- 0 clear, 1 black; authored convex area only
+-        RAIN_VISOR_LAYER_OPTICS_RELIEF_SPEC = 1.69,
+-        RAIN_VISOR_LAYER_OPTICS_RELIEF_GLOSS = 0.18,
+-        RAIN_VISOR_LAYER_OPTICS_RELIEF_SHADE = 0.75,
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_PX = 48.00,        -- Interior refraction (pixels) 25.85
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_NORMAL = 1.78,     -- Interior normal influence    1.78
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BEND_PX = 16.0,    -- Interior dome thickness (pixels) 16.0
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SPLIT_PX = 1.34,   -- Interior hairline split (pixels) 1.34
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_PX = 5.49,    -- Interior blur radius (pixels)    3.87
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_BLUR_AMOUNT = 0.55,-- Interior blur amount             1.00
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_PX = 6.920,   -- Interior soft defocus radius     4.267
++        RAIN_VISOR_LAYER_OPTICS_INTERIOR_SOFT_AMOUNT = 0.63, -- Interior soft defocus amount     0.5
++
+         RAIN_VISOR_LAYER_BAND_OPACITY = 1.00, -- top band blocks the scene (s55: was 0.92)
+         RAIN_VISOR_LAYER_BAND_EXTERNAL_LIGHT = false,
+         RAIN_VISOR_LAYER_BAND_UNLIT_BRIGHTNESS = 0.149,
+@@ -1575,6 +1603,8 @@
+         gRainAirDragCoeff = cfg.RUNTIME.RAIN_AIR_DRAG_COEFF,
+         gRainStatePhysicalDiameterUVPerMM =
+             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
++        gRainStatePhysicalRadiusUVPerMM = 
++                cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM * 0.5,    
+         gRainStatePhysicalMaxSpeed1MM =
+             cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_MAX_SPEED_1MM,
+         gRainStatePhysicalMaxSpeedExponent =
+@@ -1692,7 +1722,7 @@
+             Only the observed size dependence is retained. The 1 mm surface
+             speed is calibrated independently in Lua as UV/s.
+ 
+-            Radius uses the retained reference unit (default 0.0029296875
++            Radius uses the retained reference unit (default 0.00146484375
+             per 1 mm diameter), independent of the current KN5 UV scale.
+             The geometry metric supplies the real metres-to-UV conversion.
+         */
+@@ -2195,7 +2225,7 @@
+             // Same contact angle: footprint radius scales with volume^(1/3).
+             float merged = pow(max(selfR * selfR * selfR
+                 + partnerR * partnerR * partnerR, 1e-15), 1.0 / 3.0);
+-            return min(merged, gRainMergeMaxDiameterMM * 0.00146484375);
++            return min(merged, gRainMergeMaxDiameterMM * gRainStatePhysicalRadiusUVPerMM);
+         }
+ 
+         float rainMergeMassProfile(float diameterMM)
+@@ -2375,7 +2405,7 @@
+                 radius = lerp(radius, rainMergeRadius(radius, pMeta.r),
+                     isMerge);
+                 mass = lerp(mass, max(rainMergeMassProfile(
+-                    radius / 0.00146484375), 1.0), isMerge);
++                    radius / gRainStatePhysicalRadiusUVPerMM), 1.0), isMerge);
+                 // Absorption steering toward a drop ahead.
+                 float2 toOther = pState.rg - p;
+                 float dist = rainMetricLength(p,toOther);
+@@ -2466,12 +2496,12 @@
+         gRainStateLifecycle = 0.0,
+         gRainStateBoundaryMargin = 0.005,
+         gRainStateTargetOccupancy = 0.0,
+-        gRainSizeMinDry = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRY,
++        gRainSizeMinDrizzle = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_DRIZZLE,
+         gRainSizeMinLight = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_LIGHT,
+         gRainSizeMinRain = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RAIN,
+         gRainSizeMinHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_HEAVY,
+         gRainSizeMinRare = cfg.RUNTIME.RAIN_GPU_SIZE_MIN_RARE,
+-        gRainSizeMaxDry = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRY,
++        gRainSizeMaxDrizzle = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_DRIZZLE,
+         gRainSizeMaxLight = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_LIGHT,
+         gRainSizeMaxRain = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_RAIN,
+         gRainSizeMaxHeavy = cfg.RUNTIME.RAIN_GPU_SIZE_MAX_HEAVY,
+@@ -2482,6 +2512,8 @@
+         gRainStateRespawnGapMin = 0.15,
+         gRainStateRespawnGapMax = 0.75,
+         gRainStateRainIntensity = 0.0,
++        gRainStateRainWetness = 0.0,
++        gRainStateRainWater = 0.0,
+         gRainStateExposure = 1.0,
+         gRainStateAgeMin = 8.0,
+         gRainStateAgeMax = 18.0,
+@@ -2491,6 +2523,8 @@
+         gRainAttractReach = 1.6,
+         gRainAttractGain = 0.03,
+         gRainMergeMaxDiameterMM = 5.0,
++        gRainStatePhysicalRadiusUVPerMM = 
++                cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM / 2,
+     },
+ 
+     shader = [[
+@@ -2527,29 +2561,29 @@
+             );
+         }
+ 
+-        float rainStateBirthDiameterMM(float index, float rain)
++        float rainStateBirthDiameterMM(float index, float intensity, float wetness, float water)
+         {
+             float minimum, maximum;
+-            if (rain <= 0.03)
++            if (intensity <= 0.03)
+             {
+-                float t = saturate(rain / 0.03);
+-                minimum = lerp(gRainSizeMinDry, gRainSizeMinLight, t);
+-                maximum = lerp(gRainSizeMaxDry, gRainSizeMaxLight, t);
++                float t = saturate(intensity / 0.03);
++                minimum = lerp(gRainSizeMinDrizzle, gRainSizeMinLight, t);
++                maximum = lerp(gRainSizeMaxDrizzle, gRainSizeMaxLight, t);
+             }
+-            else if (rain <= 0.50)
++            else if (intensity <= 0.40)
+             {
+-                float t = saturate((rain - 0.03) / 0.47);
++                float t = saturate((intensity - 0.03) / 0.37);
+                 minimum = lerp(gRainSizeMinLight, gRainSizeMinRain, t);
+                 maximum = lerp(gRainSizeMaxLight, gRainSizeMaxRain, t);
+             }
+             else
+             {
+-                float t = saturate((rain - 0.50) / 0.50);
++                float t = saturate((intensity - 0.40) / 0.60);
+                 minimum = lerp(gRainSizeMinRain, gRainSizeMinHeavy, t);
+                 maximum = lerp(gRainSizeMaxRain, gRainSizeMaxHeavy, t);
+             }
+             float rareChance = lerp(gRainSizeRareChanceDry,
+-                gRainSizeRareChanceHeavy, saturate(rain));
++                gRainSizeRareChanceHeavy, saturate(intensity));
+             if (rainStateHash(index + 307.0) > 1.0 - rareChance)
+                 return lerp(gRainSizeMinRare, gRainSizeMaxRare, rainStateHash(index + 619.0));
+             float randomSize = rainStateHash(index + 101.0);
+@@ -2645,7 +2679,7 @@
+             // Same contact angle: footprint radius scales with volume^(1/3).
+             float merged = pow(max(selfR * selfR * selfR
+                 + partnerR * partnerR * partnerR, 1e-15), 1.0 / 3.0);
+-            return min(merged, gRainMergeMaxDiameterMM * 0.00146484375);
++            return min(merged, gRainMergeMaxDiameterMM * gRainStatePhysicalRadiusUVPerMM);
+         }
+ #endif
+ 
+@@ -2666,9 +2700,11 @@
+ 
+                 float diameterMM = gRainStateLifecycle > 0.5
+                     ? rainStateBirthDiameterMM(index,
+-                        gRainStateRainIntensity)
++                        gRainStateRainIntensity,
++                        gRainStateRainWetness,
++                        gRainStateRainWater)
+                     : rainStatePhysicalDiameterMM(index);
+-                float radius = diameterMM * 0.00146484375;
++                float radius = diameterMM * gRainStatePhysicalRadiusUVPerMM;
+                 float mass = rainStatePhysicalMassProfile(diameterMM);
+ 
+                 // Rain-dependent initial population prevents a dry startup
+@@ -2692,7 +2728,9 @@
+                 // existing single-channel state and readback footprint.
+                 float generation = floor(meta.a * 0.25);
+                 float status = meta.a - generation * 4.0;
+-                float rain = saturate(gRainStateRainIntensity);
++                float rainIntensity = saturate(gRainStateRainIntensity);
++                float rainWetness = saturate(gRainStateRainWetness);
++                float rainWater = saturate(gRainStateRainWater);
+                 if (status > 1.5)
+                 {
+                     float nextGeneration = fmod(generation + 1.0, 4096.0);
+@@ -2700,9 +2738,12 @@
+                     meta.b = 0.0;
+ 
+                     float diameterMM = rainStateBirthDiameterMM(
+-                        index + nextGeneration * 17.123, rain);
+-
+-                    meta.r = diameterMM * 0.00146484375;
++                        index + nextGeneration * 17.123, 
++                        rainIntensity,
++                        rainWetness,
++                        rainWater);
++
++                    meta.r = diameterMM * gRainStatePhysicalRadiusUVPerMM;
+                     meta.g = rainStatePhysicalMassProfile(diameterMM);
+ 
+                     return meta;
+@@ -2723,9 +2764,9 @@
+                     float admission = gRainSpawnAtlasEnabled > 0.5
+                         ? txRainSpawnAtlas.Load(int3((int)index, 0, 0)).b
+                         : rainStateHash(index + 419.0);
+-                    float gapScale = lerp(3.0, 0.5, sqrt(rain))
++                    float gapScale = lerp(3.0, 0.5, sqrt(rainIntensity))
+                         / max(gRainStateExposure, 1.0);
+-                    if (rain > 0.001
++                    if (rainIntensity > 0.001
+                         && admission < gRainStateTargetOccupancy
+                         && meta.b >= respawnGap * gapScale)
+                     {
+@@ -2762,7 +2803,7 @@
+                     meta.r = lerp(meta.r, rainMergeRadius(meta.r, pMeta.r),
+                         isMerge);
+                     meta.g = lerp(meta.g, rainStatePhysicalMassProfile(
+-                        meta.r / 0.00146484375), isMerge);
++                        meta.r / gRainStatePhysicalRadiusUVPerMM), isMerge);
+                 }
+ #endif
+                 // State pass checks the entire movement path and writes an
+@@ -2780,7 +2821,7 @@
+                 float ageRange = lerp(gRainStateAgeMin,
+                     gRainStateAgeMax,
+                     rainStateHash(index + generation * 5.197 + 211.0));
+-                if (rain <= 0.001)
++                if (rainIntensity <= 0.001)
+                     ageRange = min(ageRange, 2.0);
+                 if (meta.b + dt >= ageRange)
+                 {
+@@ -6329,7 +6370,7 @@
+ -- filling the existing 512 slots more rapidly at higher rain rates.
+ -- Store helpers on the existing state table to avoid Lua's chunk-local cap.
+ rainDynamicSceneCopyState.lifecycleTargetForRain = function(rain)
+-    if rain <= 0.001 then return 0.0 end
++    if rain <= 0.00001 then return 0.0 end
+     if rain <= 0.03 then
+         return 0.05 + 0.90 * math.sqrt(rain)
+     elseif rain <= 0.08 then
+@@ -6512,12 +6553,17 @@
+         cfg.RUNTIME.RAIN_GPU_STATE_RESPAWN_GAP_MAX
+ 
+     local initialSim = ac.getSim()
+-    local initialRain = initialSim and initialSim.rainIntensity or 0.0
++    local initialConditionSet = ac.ConditionsSet()
++    local initialRainIntensity = initialSim and initialSim.rainIntensity or 0.0
++    local initialRainWetness = initialSim and initialSim.rainWetness or 0.0
++    local initialRainWater = initialSim and initialSim.rainWater or 0.0
++    local initialHumidity = initialConditionSet and initialConditionSet.humidity or 0.0
++
+     if cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 then
+-        initialRain = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+-    end
+-    initialRain = math.max(0.0, math.min(1.0, initialRain or 0.0))
+-    rainDynamicSceneCopyState.lifecycleRainSmoothed = initialRain
++        initialRainIntensity = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
++    end
++    initialRainIntensity = math.max(0.0, math.min(1.0, initialRainIntensity or 0.0))
++    rainDynamicSceneCopyState.lifecycleRainSmoothed = initialRainIntensity
+     local initialCar = ac.getCar(0)
+     rainStateUpdateParams.values.gRainStateTravelMix =
+         rainDynamicSceneCopyState.lifecycleTravelMix(
+@@ -6525,13 +6571,15 @@
+     local initialExposure =
+         rainDynamicSceneCopyState.lifecycleExposureForVelocity(
+             initialCar and initialCar.velocity)
+-    rainStateUpdateParams.values.gRainStateRainIntensity = initialRain
+-    rainStateMetaUpdateParams.values.gRainStateRainIntensity = initialRain
++    rainStateMetaUpdateParams.values.gRainStateRainIntensity = initialRainIntensity
++    rainStateMetaUpdateParams.values.gRainStateRainWetness = initialRainWetness
++    rainStateMetaUpdateParams.values.gRainStateRainWater = initialRainWater
++    rainStateMetaUpdateParams.values.gRainStateHumidity = initialHumidity
+     rainStateMetaUpdateParams.values.gRainStateExposure = initialExposure
+     rainStateMetaUpdateParams.values.gRainStateTargetOccupancy =
+         math.min(1.0,
+-            rainDynamicSceneCopyState.lifecycleTargetForRain(initialRain)
+-                * rainDynamicSceneCopyState.lifecycleCapacityFactor(initialRain)
++            rainDynamicSceneCopyState.lifecycleTargetForRain(initialRainIntensity)
++                * rainDynamicSceneCopyState.lifecycleCapacityFactor(initialRainIntensity)
+                 * cfg.RUNTIME.RAIN_GPU_STATE_DENSITY_SCALE
+                 * initialExposure)
+     rainStateMetaUpdateParams.values.gRainStateAgeMin =
+@@ -6977,15 +7025,14 @@
+     rainStateUpdateParams.values.gRainStateTravelMix = travelMix
+     local exposure = rainDynamicSceneCopyState.lifecycleExposureForVelocity(
+         activeVelocity)
+-    rainStateUpdateParams.values.gRainStateRainIntensity = liveRain
+     -- Birth-size controls affect the next generation without rebuilding state.
+     for _, pair in ipairs({
+-        {'gRainSizeMinDry', 'RAIN_GPU_SIZE_MIN_DRY'},
++        {'gRainSizeMinDrizzle', 'RAIN_GPU_SIZE_MIN_DRIZZLE'},
+         {'gRainSizeMinLight', 'RAIN_GPU_SIZE_MIN_LIGHT'},
+         {'gRainSizeMinRain', 'RAIN_GPU_SIZE_MIN_RAIN'},
+         {'gRainSizeMinHeavy', 'RAIN_GPU_SIZE_MIN_HEAVY'},
+         {'gRainSizeMinRare', 'RAIN_GPU_SIZE_MIN_RARE'},
+-        {'gRainSizeMaxDry', 'RAIN_GPU_SIZE_MAX_DRY'},
++        {'gRainSizeMaxDrizzle', 'RAIN_GPU_SIZE_MAX_DRIZZLE'},
+         {'gRainSizeMaxLight', 'RAIN_GPU_SIZE_MAX_LIGHT'},
+         {'gRainSizeMaxRain', 'RAIN_GPU_SIZE_MAX_RAIN'},
+         {'gRainSizeMaxHeavy', 'RAIN_GPU_SIZE_MAX_HEAVY'},
+@@ -6994,7 +7041,6 @@
+         {'gRainSizeRareChanceDry', 'RAIN_GPU_SIZE_RARECHANCE_DRY'},
+         {'gRainSizeRareChanceHeavy', 'RAIN_GPU_SIZE_RARECHANCE_HEAVY'},
+     }) do
+-        --rainStateUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
+         rainStateMetaUpdateParams.values[pair[1]] = cfg.RUNTIME[pair[2]]
+     end
+ 
+@@ -15556,6 +15602,9 @@
+             gRainStatePhysicalDiameterUVPerMM =
+                 cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
+ 
++            gRainStatePhysicalRadiusUVPerMM = 
++                cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM / 2,
++
+             gRainObjectToWorld =
+                 startingTransform,
+ 
+@@ -17178,8 +17227,8 @@
+     ui.text('Dry=0, Light=0.03, Rain=0.50, Heavy=1.00. New births only.')
+     do
+         for _, key in ipairs({
+-            { 'Dry minimum', 'RAIN_GPU_SIZE_MIN_DRY' },
+-            { 'Dry maximum', 'RAIN_GPU_SIZE_MAX_DRY' },
++            { 'Dry minimum', 'RAIN_GPU_SIZE_MIN_DRIZZLE' },
++            { 'Dry maximum', 'RAIN_GPU_SIZE_MAX_DRIZZLE' },
+             { 'Light minimum', 'RAIN_GPU_SIZE_MIN_LIGHT' },
+             { 'Light maximum', 'RAIN_GPU_SIZE_MAX_LIGHT' },
+             { 'Rain minimum', 'RAIN_GPU_SIZE_MIN_RAIN' },
+@@ -17534,13 +17583,14 @@
+             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_GROW_SECONDS = value
+         end
+         value, changed = ui.combo('Birth mask resolution',
+-            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 2048 and 3
++            cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 4096 and 4
++                or cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 2048 and 3
+                 or cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE >= 1024 and 2
+                 or 1,
+-            { '512 x 128', '1024 x 256', '2048 x 512' })
++            { '512 x 128', '1024 x 256', '2048 x 512', '4096 x 1024' })
+         if changed then
+             cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE =
+-                ({ 512, 1024, 2048 })[value]
++                ({ 512, 1024, 2048, 4096 })[value]
+         end
+     end
+ end
+@@ -17663,7 +17713,21 @@
+     sl('Minimum film-producing drop diameter (mm)','RAIN_NEW_TRAIL_MIN_DROP_MM',.05,1,'%.2f mm')
+     sl('Film starts moving at (mm/s)','RAIN_NEW_TRAIL_MIN_SPEED_MM_S',.1,20,'%.2f mm/s')
+     sl('Full speed response (mm/s)','RAIN_NEW_TRAIL_FULL_SPEED_MM_S',5,150,'%.1f mm/s')
+-    sl('Reference film height','RAIN_NEW_TRAIL_HEIGHT',.1,1,'%.2f')
++    sl('Film height at 1 model mm','RAIN_NEW_TRAIL_HEIGHT',.1,1,'%.2f')
++    sl('Water-model diameter multiplier','RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE',1,6,'%.2f x')
++    sl('Thin-trace output diameter compensation','RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE',.1,1,'%.3f x')
++    if ui.button('Keep current thin-trace size (output = 1 / model)') then
++        r.RAIN_NEW_TRAIL_OUTPUT_DIAMETER_SCALE=1/math.max(r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE,1)
++        rainDynamicSceneCopyState.materialSettings:markDirty()
++    end
++    ui.text(string.format('100%% rain: output %.2f-%.2f mm; water model %.2f-%.2f mm; micro output %.2f mm',
++        r.RAIN_GPU_SIZE_MIN_HEAVY,r.RAIN_GPU_SIZE_MAX_HEAVY,
++        r.RAIN_GPU_SIZE_MIN_HEAVY*r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE,
++        r.RAIN_GPU_SIZE_MAX_HEAVY*r.RAIN_NEW_TRAIL_MODEL_DIAMETER_SCALE,
++        r.RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM))
++    ui.textWrapped('Heads/micro keep their current profile. Developed sheets use the water-model diameter; compensation keeps thin traces and clearing footprints small.')
++    ck('Integrate pixel footprint (thin path support)','RAIN_NEW_TRAIL_PIXEL_INTEGRATION')
++    ck('Filter unresolved bead/ripple frequencies','RAIN_NEW_TRAIL_BANDLIMIT')
+     sl('Liquid base lifetime (s)','RAIN_DYNAMIC_WATER_FIELD_TRAIL_SECONDS',.1,3,'%.2f s')
+     sl('Wipe recovery (s)','RAIN_DYNAMIC_TRAIL_MASK_SECONDS',.1,5,'%.2f s')
+     sl('Thin film beading','RAIN_DYNAMIC_WATER_FIELD_TRAIL_NOISE',0,1,'%.2f')
+@@ -17928,7 +17992,7 @@
+         wfSlider('Micro disk diameter (mm)',
+             'RAIN_DYNAMIC_MICRO_PATTERN_DIAMETER_MM', 0.2, 3.0, '%.2f')
+         wfSlider('Micro sampling quality (samples per nominal D)',
+-            'RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL', 1.5, 12.0, '%.2f')
++            'RAIN_DYNAMIC_MICRO_PATTERN_TEXELS_PER_CELL', 1.5, 36.0, '%.2f')
+         if cfg.RUNTIME.RAIN_NEW_TRAIL_ENABLED then
+             wfSlider('Micro cut line width (x disk D)','RAIN_NEW_TRAIL_MICRO_RIM_D',0,.25,'%.3f D')
+         else
+@@ -17937,9 +18001,9 @@
+         wfSlider('Micro strata',
+             'RAIN_DYNAMIC_MICRO_PATTERN_STRATA', 1.0, 6.0, '%.0f')
+         wfSlider('Micro first stratum presence',
+-            'RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE', 0.0, 1.0, '%.2f')
++            'RAIN_DYNAMIC_MICRO_PATTERN_FIRST_PRESENCE', 0.0, 1.0, '%.3f')
+         wfSlider('Micro stratum presence',
+-            'RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE', 0.0, 1.0, '%.2f')
++            'RAIN_DYNAMIC_MICRO_PATTERN_PRESENCE', 0.0, 1.0, '%.3f')
+         wfSlider('Micro radius min (cells)',
+             'RAIN_DYNAMIC_MICRO_PATTERN_RADIUS_MIN', 0.15, 0.85, '%.2f')
+         wfSlider('Micro radius max (cells)',
+@@ -18930,7 +18994,7 @@
+     ui.slider(
+         'Near Clip',
+         p.NEARCLIP,
+-        0.001,
++        0.000,
+         0.100,
+         '%.4f'
+     )
