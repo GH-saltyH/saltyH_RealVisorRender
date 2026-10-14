@@ -54,6 +54,10 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+| `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | ACTIVE | P1 game result/response-time diagnosis, opt-in P2 airborne DSD/normalized flux/normal impact diagnostics; LuaJIT invariants passed, GPU birth/event commit and P3 remain unbound |
+| `RAINFX_S77_SI_MOTION_PREVIEW.md` | REFERENCE | opt-in P1 persistent SI motion/volume/display separation, single-exit state/meta fix and epoch retirement; WARP/LuaJIT plus game qualitative validation passed, weaving/friction and driving cost still open |
+| `RAINFX_S76_SI_CORE_PRIMITIVES.md` | REFERENCE | P1 shared SI GPU functions and /WX WARP invariants; persistent state binding implemented as opt-in s77 preview |
+| `RAINFX_S75_WEATHER_INPUTS_AND_UNITS.md` | ACTIVE | P0 independent weather/G/metric panel and SI/contact helpers; installed-source/LuaJIT checks passed, user stationary/acceleration/braking logs confirm G excludes gravity |
 | `RAINFX_S74_CORE_IMPLEMENTATION_SCOPE.md` | ACTIVE | implementation branch derived from preserved 0c092e0; core physics/flow/sheet/impact first, Smear deferred and legacy local impact film excluded; documentation only |
 | `RAINFX_S73_PHYSICS_WEATHER_REFACTOR_DESIGN.md` | ACTIVE | design only: audited 6 px/mm calibration, volume/SI physics, independent display gain, CSP weather adapter, virtual impact and shared effect state; s74 core-first exclusions incorporated |
 | `RAINFX_S72_TRAIL_SAMPLING_AND_DIAMETER.md` | ACTIVE | carried phase, pixel integration/bandlimit, trail derivative floor; model diameter ×3 with compensated thin output, wide sheets, preserved head/micro profile; cost and GPU checks, game verification pending |

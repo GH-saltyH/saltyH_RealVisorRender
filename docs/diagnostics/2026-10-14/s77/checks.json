@@ -1,0 +1,85 @@
+{
+  "checks": [
+    {
+      "case": "actual persistent state shader uses SI acceleration and raw UV metric",
+      "output": [
+        0.5005000233650208,
+        -0.5009806752204895,
+        0.05000000074505806,
+        -0.09806649386882782
+      ]
+    },
+    {
+      "case": "physical transport invariant to legacy reference codec, x0.5/x2",
+      "passed": true
+    },
+    {
+      "case": "preview OFF state/meta are bit-identical to P0 baseline",
+      "passed": true
+    },
+    {
+      "case": "single-exit legacy init/waiting/eligible/respawn/active/expiry/dry-expiry are bit-identical",
+      "passed": true
+    },
+    {
+      "case": "rotated Jacobian preserves world gravity/inertia and changes only UV components",
+      "passed": true
+    },
+    {
+      "case": "meta.G is volume mm3; contact radius re-derived without changing volume",
+      "passed": true
+    },
+    {
+      "case": "display gain alters raster radius only; physical contact/volume remain identical",
+      "passed": true
+    },
+    {
+      "case": "paired merge conserves V and momentum; old display diameter cap is bypassed",
+      "passed": true
+    },
+    {
+      "case": "production merge+wetpath macro variant is /WX-clean; SI rejects legacy wetpath steering",
+      "passed": true
+    },
+    {
+      "case": "actual Lua bindings reuse four vectors; version reset disposes four banks and stale readbacks; GPU heads publish without CPU stamping",
+      "passed": true
+    }
+  ],
+  "whole_luajit_syntax": true,
+  "compiler": "FXC ps_5_0 /Ges /WX (archived warning-bearing reference without /WX)",
+  "baseline_dependencies_and_tuning_unchanged": {
+    "rain_environment.lua": true,
+    "rain_physics_units.lua": true,
+    "rain_trails.lua": true,
+    "rain_surface.lua": true,
+    "settings.ini": true,
+    "settings_mats.ini": true,
+    "shaders/e1HousingGeometry.hlsl": true,
+    "shaders/rainMirrorWater.hlsl": true,
+    "shaders/rainPhysicsSI.hlsl": true,
+    "shaders/rainSurfaceMetric.hlsl": true,
+    "shaders/rainTrailBin.hlsl": true,
+    "shaders/rainTrailDescriptor.hlsl": true,
+    "shaders/rainTrailResolve.hlsl": true,
+    "shaders/rainVisorDynamicDrop.hlsl": true,
+    "shaders/rainVisorLayer.hlsl": true,
+    "shaders/rainVisorOptics.hlsl": true,
+    "shaders/rainVisorScreen.hlsl": true,
+    "shaders/visorOpticsBake.hlsl": true,
+    "shaders/visorOpticsBright.hlsl": true,
+    "shaders/visorOpticsMask.hlsl": true,
+    "shaders/visorOpticsProbe.hlsl": true,
+    "shaders/visorOpticsStats.hlsl": true,
+    "shaders/visorOpticsSun.hlsl": true,
+    "shaders/visorOpticsTrace.hlsl": true,
+    "shaders/visorOpticsVisibility.hlsl": true
+  },
+  "installed_sources_match": {
+    "realvisor.lua": true,
+    "shaders/rainPhysicsSI.hlsl": true,
+    "shaders/rainStateEntry.hlsl": true,
+    "shaders/rainMetaEntry.hlsl": true
+  },
+  "actual_game_preview_pending": true
+}

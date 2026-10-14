@@ -2,6 +2,55 @@
 
 See `docs/README.md` for the document index and working rules.
 
+## Latest s78 P1 game result and P2 birth diagnostic preparation (2026-10-14)
+
+User stationary same-scene FPS 93 app OFF, 71 legacy, 76 P1: estimated
+whole-app frame costs +3.332/+2.405 ms. P1 pinning/direction/display-gain
+independence pass qualitative review. Immediate centre weaving remains
+open; current small physical sizes give viscous relaxation below one frame.
+Added opt-in airborne DSD/normalized reference-plane flux/normal-impact
+diagnostics with probability/volume/impulse and allocation invariants.
+Accepted P1 physics/shader/settings hashes are unchanged. GPU birth event
+commit, material impact calibration and P3 conserved film remain next.
+See `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md`.
+
+## Latest s77 P1 persistent SI motion preview (2026-10-14)
+
+Connected true volume/mm3, SI contact forces and world gravity/inertia to
+persistent state/meta with independent head display gain. Opt-in preview
+defaults OFF and omits Smear/legacy film/trail/wipe/splash/micro/haze. Mode
+changes dispose banks and reject stale epoch readbacks. Active state/meta
+entries now use initialized single-exit external programs, resolving the
+reproduced X4000 without warning suppression. /WX WARP checks cover legacy
+OFF identity, SI codec/rotation/display invariance, V/momentum merge and
+the macro variants; LuaJIT wiring checks cover pooling/reset/publication.
+Game qualitative motion/display validation is recorded; weaving/friction,
+driving cost and P2/P3 supply/impact/film remain next.
+See `RAINFX_S77_SI_MOTION_PREVIEW.md`.
+
+## Latest s76 SI core primitives and observed inertia (2026-10-14)
+
+User stationary G=0 and acceleration/braking Z signs establish gravity-free
+car acceleration; adapter now exposes its reversed world vector as inertia.
+Added the P1 shared GPU primitives for true volume/mass, contact-cap shape,
+static/dynamic pinning, cap air drag, stiff viscous/contact integration, SI
+Jacobian projection and volume/momentum merge. FXC /WX + D3D11 WARP checks
+pass, including display/UV independence. Persistent state/renderer binding,
+DSD/virtual impact and conservative film remain subsequent implementation.
+See `RAINFX_S76_SI_CORE_PRIMITIVES.md`.
+
+## Latest s75 P0 weather inputs and physical units (2026-10-14)
+
+Started implementation from user-published 3975491 on the physics branch.
+Added an independent allocation-bounded weather/phase observer and physical
+unit/contact-cap helpers, connected to an explicit RainFX P0 diagnostic panel.
+Valid zero/fallback, kPa/Pa, snow/sleet/hail transitions, raw G/world basis and
+skewed geometry metrics have LuaJIT fixture checks. Companion modules are
+installed with hash-guarded copies. Existing physics/shaders/tuning remain
+the baseline while P0 observes actual G/wind/metric inputs. Stationary,
+accelerating and braking snapshots requested before SI inertia activation.
+See `RAINFX_S75_WEATHER_INPUTS_AND_UNITS.md`.
+
 ## Latest s74 Core implementation scope and branch (2026-10-14)
 
 The user preserved the legacy at commit 0c092e0. Implementation now targets

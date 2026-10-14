@@ -1,0 +1,123 @@
+{
+  "scope": "P2 diagnostic preparation only; P1 physics/shaders unchanged",
+  "checks": [
+    {
+      "case": "P1 viscous relaxation milliseconds, 20 C theta90 shape80",
+      "values": {
+        "0.57": 1.681376057215237,
+        "0.65": 2.1864616318049794,
+        "0.76": 2.989112990604866,
+        "1.15": 6.844013036833338,
+        "2.25": 26.198726653284513
+      }
+    },
+    {
+      "case": "four normalized 128-bin seeds and exactly normalized vertical flux",
+      "seeds": [
+        {
+          "seed": 1,
+          "numberMeanMM": 0.19879184204743233,
+          "volumeMeanMM3": 0.006251067732543848,
+          "incidentUpMeanMM": 0.23040899456027264,
+          "volumeShareAbove2MM": 0.0,
+          "quantileMM": [
+            0.1016315792269553,
+            0.12747649394199392,
+            0.17619906144850606,
+            0.3051857266747631,
+            0.45047084064709536,
+            0.49418553491543477
+          ]
+        },
+        {
+          "seed": 2,
+          "numberMeanMM": 1.2060149704200223,
+          "volumeMeanMM3": 2.1387165860601223,
+          "incidentUpMeanMM": 1.4668653475355515,
+          "volumeShareAbove2MM": 0.6166878621238673,
+          "quantileMM": [
+            0.5104431466745949,
+            0.6431281399181848,
+            0.8889370199989293,
+            1.996662649707996,
+            3.693127546247242,
+            4.456163503386066
+          ]
+        },
+        {
+          "seed": 3,
+          "numberMeanMM": 1.6362514228455458,
+          "volumeMeanMM3": 6.729688997162165,
+          "incidentUpMeanMM": 2.056584021343323,
+          "volumeShareAbove2MM": 0.8927147130900206,
+          "quantileMM": [
+            0.5104431466745949,
+            0.6861391631995637,
+            1.116469579116146,
+            3.0450895831522033,
+            5.272603762513733,
+            6.198860676887995
+          ]
+        },
+        {
+          "seed": 4,
+          "numberMeanMM": 0.8870161941605232,
+          "volumeMeanMM3": 1.0069034082524304,
+          "incidentUpMeanMM": 1.1782683222387071,
+          "volumeShareAbove2MM": 0.4354357514043041,
+          "quantileMM": [
+            0.3051857266747631,
+            0.4222328200620216,
+            0.6431281399181848,
+            1.754184631328084,
+            3.1412866348791733,
+            3.937949659557395
+          ]
+        }
+      ]
+    },
+    {
+      "case": "continuous mixtures, ambient wind vs car encounter, track/RH/display independence and dry phase",
+      "maximumMeanStepMM": 0.011191163404083326
+    },
+    {
+      "case": "normal We/Re/Oh, conservative supplied-fraction partition and impulse bound",
+      "weber": 1576.8269230769229,
+      "reynolds": 11456.387225548902,
+      "ohnesorge": 0.0034661258632983014
+    },
+    {
+      "case": "actual lazy hook/UI, manual log, missing diagnostic module isolation, bounded frame allocation",
+      "retainedLuaGrowthKiB": 0.1015625
+    }
+  ],
+  "unchanged": {
+    "rain_environment.lua": true,
+    "rain_physics_units.lua": true,
+    "rain_surface.lua": true,
+    "rain_trails.lua": true,
+    "settings.ini": true,
+    "settings_mats.ini": true,
+    "shaders/e1HousingGeometry.hlsl": true,
+    "shaders/rainMetaEntry.hlsl": true,
+    "shaders/rainMirrorWater.hlsl": true,
+    "shaders/rainPhysicsSI.hlsl": true,
+    "shaders/rainStateEntry.hlsl": true,
+    "shaders/rainSurfaceMetric.hlsl": true,
+    "shaders/rainTrailBin.hlsl": true,
+    "shaders/rainTrailDescriptor.hlsl": true,
+    "shaders/rainTrailResolve.hlsl": true,
+    "shaders/rainVisorDynamicDrop.hlsl": true,
+    "shaders/rainVisorLayer.hlsl": true,
+    "shaders/rainVisorOptics.hlsl": true,
+    "shaders/rainVisorScreen.hlsl": true,
+    "shaders/visorOpticsBake.hlsl": true,
+    "shaders/visorOpticsBright.hlsl": true,
+    "shaders/visorOpticsMask.hlsl": true,
+    "shaders/visorOpticsProbe.hlsl": true,
+    "shaders/visorOpticsStats.hlsl": true,
+    "shaders/visorOpticsSun.hlsl": true,
+    "shaders/visorOpticsTrace.hlsl": true,
+    "shaders/visorOpticsVisibility.hlsl": true
+  }
+}

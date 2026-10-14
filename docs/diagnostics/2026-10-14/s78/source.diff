@@ -1,0 +1,182 @@
+--- s77/realvisor.lua
++++ s78/realvisor.lua
+@@ -409,6 +409,11 @@
+         RAIN_PHYSICS_STATIC_SPAN_COAT_DEG = 4.0,
+         RAIN_PHYSICS_DYNAMIC_SPAN_BARE_DEG = 6.0,
+         RAIN_PHYSICS_DYNAMIC_SPAN_COAT_DEG = 2.0,
++        -- P2 supply/impact diagnostics only. Rate is a look calibration, not an engine measurement.
++        RAIN_PHYSICS_BIRTH_DIAGNOSTICS = false,
++        RAIN_RATE_AT_INTENSITY_1_MM_H = 20.0,
++        RAIN_RATE_INTENSITY_POWER = 1.0,
++        RAIN_PHYSICS_DSD_SEED_OVERRIDE = 0.0, -- 0 estimated blend, 1..4 explicit seed
+ 
+         -- Persistent state:
+         -- 0 = disabled
+@@ -6528,6 +6533,16 @@
+     end
+     st.physicsInputsError=nil
+     st.physicsInputs:update(ac.getSim(),ac.getCar(0),cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE)
++    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS then
++        if not st.physicsBirth then
++            local factory,err=st.loadRuntimeModule('rain_birth_model.lua')
++            if not factory then st.physicsBirthError=err;return end
++            st.physicsBirth=factory()
++        end
++        st.physicsBirthError=nil
++        st.physicsBirth:update(st.physicsInputs,cfg.RUNTIME.RAIN_RATE_AT_INTENSITY_1_MM_H,
++            cfg.RUNTIME.RAIN_RATE_INTENSITY_POWER,cfg.RUNTIME.RAIN_PHYSICS_DSD_SEED_OVERRIDE)
++    end
+ end
+ rainDynamicSceneCopyState.siShader=(function()
+     local f=assert(io.open(appFolder..'/shaders/rainPhysicsSI.hlsl','rb'))
+@@ -17291,7 +17306,7 @@
+     if st.physicsInputsError then ui.textWrapped(st.physicsInputsError);return end
+     local p,u=st.physicsInputs,st.physicsUnits
+     if not p or not p.intensity then ui.text('Waiting for weather inputs');return end
+-    ui.text('P0: weather and unit validation (legacy simulation still active)')
++    ui.text('P0: independent weather and unit validation')
+     ui.text('Read-only observer. Display scaling, Smear and impact film do not feed these inputs.')
+     ui.text(string.format('I %.6f (%s)  raw %s  liquid I %.6f',p.intensity,p.sources.intensity,
+         tostring(p.rawIntensity),p.liquidIntensity))
+@@ -17363,6 +17378,44 @@
+     st.rainUISlider('Static hysteresis span: coat (deg)','RAIN_PHYSICS_STATIC_SPAN_COAT_DEG',0,60,'%.1f')
+     st.rainUISlider('Dynamic hysteresis span: bare (deg)','RAIN_PHYSICS_DYNAMIC_SPAN_BARE_DEG',0,60,'%.1f')
+     st.rainUISlider('Dynamic hysteresis span: coat (deg)','RAIN_PHYSICS_DYNAMIC_SPAN_COAT_DEG',0,60,'%.1f')
++    local responseRadius=u.contactRadiusMM(v,cfg.RUNTIME.RAIN_PHYSICS_CONTACT_ANGLE_DEG or 90)
++    local responseDrag=(cfg.RUNTIME.RAIN_PHYSICS_VISCOUS_SHAPE or 80)*u.viscosity*responseRadius*2*.001
++    ui.text(string.format('20 C reference D_eq=1.15 mm: viscous m/c %.3f ms (excludes aerodynamic/contact transients)',
++        u.massKG(v)/math.max(responseDrag,1e-20)*1000))
++    ui.separator()
++    if ui.checkbox('Enable P2 birth diagnostics (no simulation change)',cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS) then
++        cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS=not cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS
++    end
++    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS then
++        ui.text('Estimated airborne NUMBER distribution. Supply is not yet committed to GPU slots/film.')
++        st.rainUISlider('Estimated rate at I=1 (mm/h)','RAIN_RATE_AT_INTENSITY_1_MM_H',0,150,'%.1f')
++        st.rainUISlider('Estimated intensity power','RAIN_RATE_INTENSITY_POWER',.1,4,'%.2f')
++        st.rainUISlider('DSD override: 0 auto, 1 drizzle, 2 general, 3 tail, 4 windrich',
++            'RAIN_PHYSICS_DSD_SEED_OVERRIDE',0,4,'%.0f')
++        if st.physicsBirthError then ui.textWrapped(st.physicsBirthError) end
++        local b=st.physicsBirth
++        if b then
++            ui.text(string.format('Estimated rate %.3f mm/h; number concentration %.3f /m^3; number mean D %.3f mm',
++                b.rateMMH,b.numberDensityM3,b.meanDiameterMM))
++            ui.text(string.format('DSD weights drizzle/general/tail/windrich: %.3f / %.3f / %.3f / %.3f',
++                b.weights[1],b.weights[2],b.weights[3],b.weights[4]))
++            ui.text('Track wetness/puddles/RH do not create rain supply; car speed changes encounter, not airborne DSD.')
++            if b.supercooled then ui.text('Below liquid calibration range: freezing/condensation is not simulated.') end
++            if ui.button('Log P2 reference-plane encounter') then
++                -- Reference planes only. GPU binding will use the transformed local KN5 normal.
++                st.birthPlaneReport=st.birthPlaneReport or {}
++                local result=b:encounter(0,1,0,1,st.birthPlaneReport)
++                ac.log(string.format('%s Rain P2 reference up plane: estimated %.3f mm/h, N %.3f /m^2/s, V %.3f mm^3/m^2/s, incident mean D %.3f mm',
++                    appNameDebug,b.rateMMH,result.numberM2S,result.volumeMM3M2S,result.meanDiameterMM))
++                local car=ac.getCar(0)
++                if car and car.look then
++                    result=b:encounter(car.look.x,car.look.y,car.look.z,1,st.birthPlaneReport)
++                    ac.log(string.format('%s Rain P2 reference car-forward plane (not actual visor): N %.3f /m^2/s, V %.3f mm^3/m^2/s, incident mean D %.3f mm',
++                        appNameDebug,result.numberM2S,result.volumeMM3M2S,result.meanDiameterMM))
++                end
++            end
++        end
++    end
+ end
+ rainDynamicSceneCopyState.rainUISlider = function(label, key, lo, hi, fmt)
+     local value, changed = ui.slider(label, cfg.RUNTIME[key], lo, hi, fmt)
+--- s77/docs/README.md
++++ s78/docs/README.md
+@@ -54,7 +54,8 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+-| `RAINFX_S77_SI_MOTION_PREVIEW.md` | ACTIVE | opt-in P1 persistent SI motion/volume/display separation, single-exit state/meta warning fix, mode/readback retirement; /WX WARP/LuaJIT checks passed, game preview validation pending |
++| `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | ACTIVE | P1 game result/response-time diagnosis, opt-in P2 airborne DSD/normalized flux/normal impact diagnostics; LuaJIT invariants passed, GPU birth/event commit and P3 remain unbound |
++| `RAINFX_S77_SI_MOTION_PREVIEW.md` | REFERENCE | opt-in P1 persistent SI motion/volume/display separation, single-exit state/meta fix and epoch retirement; WARP/LuaJIT plus game qualitative validation passed, weaving/friction and driving cost still open |
+ | `RAINFX_S76_SI_CORE_PRIMITIVES.md` | REFERENCE | P1 shared SI GPU functions and /WX WARP invariants; persistent state binding implemented as opt-in s77 preview |
+ | `RAINFX_S75_WEATHER_INPUTS_AND_UNITS.md` | ACTIVE | P0 independent weather/G/metric panel and SI/contact helpers; installed-source/LuaJIT checks passed, user stationary/acceleration/braking logs confirm G excludes gravity |
+ | `RAINFX_S74_CORE_IMPLEMENTATION_SCOPE.md` | ACTIVE | implementation branch derived from preserved 0c092e0; core physics/flow/sheet/impact first, Smear deferred and legacy local impact film excluded; documentation only |
+--- s77/docs/RAINFX_ROADMAP.md
++++ s78/docs/RAINFX_ROADMAP.md
+@@ -1,6 +1,18 @@
+ # RainFX roadmap (accepted items, not scheduled) — updated 2026-10-14
+ 
+ See `docs/README.md` for the document index and working rules.
++
++## Latest s78 P1 game result and P2 birth diagnostic preparation (2026-10-14)
++
++User stationary same-scene FPS 93 app OFF, 71 legacy, 76 P1: estimated
++whole-app frame costs +3.332/+2.405 ms. P1 pinning/direction/display-gain
++independence pass qualitative review. Immediate centre weaving remains
++open; current small physical sizes give viscous relaxation below one frame.
++Added opt-in airborne DSD/normalized reference-plane flux/normal-impact
++diagnostics with probability/volume/impulse and allocation invariants.
++Accepted P1 physics/shader/settings hashes are unchanged. GPU birth event
++commit, material impact calibration and P3 conserved film remain next.
++See `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md`.
+ 
+ ## Latest s77 P1 persistent SI motion preview (2026-10-14)
+ 
+@@ -12,7 +24,8 @@
+ reproduced X4000 without warning suppression. /WX WARP checks cover legacy
+ OFF identity, SI codec/rotation/display invariance, V/momentum merge and
+ the macro variants; LuaJIT wiring checks cover pooling/reset/publication.
+-Actual game preview confirmation and P2/P3 supply/impact/film remain next.
++Game qualitative motion/display validation is recorded; weaving/friction,
++driving cost and P2/P3 supply/impact/film remain next.
+ See `RAINFX_S77_SI_MOTION_PREVIEW.md`.
+ 
+ ## Latest s76 SI core primitives and observed inertia (2026-10-14)
+--- s77/docs/RAINFX_S77_SI_MOTION_PREVIEW.md
++++ s78/docs/RAINFX_S77_SI_MOTION_PREVIEW.md
+@@ -1,6 +1,6 @@
+ # RainFX s77 — P1 SI 운동의 persistent GPU 연결
+ 
+-Date: 2026-10-14. Status: ACTIVE — P1 운동 프리뷰 구현/오프라인 검증 완료. 실게임 프리뷰 확인 및 P2/P3는 후속 작업.
++Date: 2026-10-14. Status: REFERENCE — P1 운동 프리뷰 구현/오프라인 검증 및 게임 정성 검증 통과. 위빙 마찰 교정·주행 비용 및 P2/P3는 후속 작업.
+ 
+ ## 1. 스탬프 범위
+ 
+@@ -125,8 +125,41 @@
+ SHA 불변이며, 새 entry와 common library는 game shader 링크에서도 SHA가
+ 일치한다. `checks.json`과 `source.diff`에 결과를 기록했다.
+ 
+-실게임 material/motion look, frame time, startup 및 실제 compiler 로그는
+-아직 P1 프리뷰에서 확인하지 않았다. WARP 결과는 실제 GPU 비용 측정이 아니다.
++### User result — 2026-10-14
++
++Heavy Rain 톤/구름, I=.60, track wetness=.60, track water=1.00,
++RH=.80, mist=0, air 22°C / road 18°C, ambient wind 14.8 km/h / direction 0.
++동일 정차 장면의 사용자 측정:
++
++| 상태 | FPS | 1000/FPS, ms | 앱 OFF 대비, ms |
++|---|---:|---:|---:|
++| 앱 OFF | 93 | 10.753 | — |
++| 앱 ON, P1 OFF | 71 | 14.085 | +3.332 |
++| 앱 ON, P1 ON | 76 | 13.158 | +2.405 |
++
++P1이 이 장면에서 약 .927 ms 빠르다. 단일 정차 장면의 전체 앱 비교이며
++SI solver만의 GPU 시간이나 주행/4096-slot stress 결과로 해석하지 않는다.
++프리뷰에서 legacy film 등도 빠지므로 차이를 전부 SI 운동의 효율로 돌릴 수 없다.
++
++- 정차 고착, 큰 방울의 더 이른 이동 시작, 작은 방울의 강한 고착을 관찰했다.
++- 직진 표면 흐름 및 횡가속/역방향 운동의 점진적인 방향 변화가 납득 가능했다.
++- 기울어진 영역에서 더 쉽게 이동하는 경향을 관찰했다.
++- display gain .460 및 1.5에서도 이동 민감도/전체 패턴이 비슷했다.
++  정성적 지지이며 정확한 동일 궤적/병합 비교는 아니다. 수치 불변성은 WARP로 검증했다.
++- 130 km/h 위빙에서 일부 큰 방울, 특히 중앙의 즉각적인 지그재그/정지가 남는다.
++
++현재 θ=90°, viscous shape=80에서 `tau=m/c`,
++`c=shape*mu*contactWidth_m`. 20°C, D_eq=.65 mm는 tau≈2.19 ms,
++1.15 mm는≈6.84 ms, 2.25 mm는≈26.20 ms다. 기존 작은 크기 프로파일은
++한 프레임보다 짧은 완화 시간을 만들며 새 힘에 빠르게 따라간다. kinetic pinning의
++proximal zero clamp도 힘 반전 때 정지할 수 있다. 따라서 관찰은 적분식과 일치하는
++후보 원인이 있지만 영상 궤적을 직접 분석하거나 실제 접촉선 마찰을 교정한 결론은 아니다.
++P2의 실제 airborne/retained 크기 분포 및 재질/점성 교정 후 재평가한다.
++display gain으로 물리 inertia를 보정하지 않는다.
++
++**P1 판정:** 기본 고착·운동 방향 및 display/physics 분리의 게임 정성 검증 통과.
++빠른 방향 반전/마찰 교정과 주행 비용은 열린 항목이다. 사용자는 FX를 검토할 수
++있었으며 별도 startup/compiler 로그를 제공하지 않았다.
+ 
+ ## 7. 사용 및 다음 단계
+ 
