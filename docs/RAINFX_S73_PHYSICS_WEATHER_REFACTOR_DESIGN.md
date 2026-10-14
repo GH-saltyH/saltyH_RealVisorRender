@@ -8,6 +8,8 @@ Date: 2026-10-14. Status: ACTIVE — 설계 및 현재 소스 감사 완료. 아
 
 이번 요청은 설계 작업이다. 현재 동작하는 물리식, 사용자가 조정한 설정, KN5 및 텍스처는 변경하지 않았다. G-force 충돌과 메모리 누수는 사용자가 해결을 확인한 상태로 유지한다. s72의 트레일 직경 ×3은 구현된 임시 반응 보정이다. 새 물리 모델에서는 이 값을 물리 직경으로 가져오지 않고 폐기한다.
 
+**사용자 범위 조정(s74, 2026-10-14):** 설계까지의 레거시는 Git 커밋 `0c092e0`에 보존되었다. 구현 브랜치는 `codex/rainfx-physics-weather`다. 새 모델의 기본 구현에서는 **Smear와 legacy local impact film을 제외**한다. 물리적 충돌·기본 flow·trail/rivulet/sheet의 표현력을 먼저 검증하고, 추가 보정의 필요성은 이후 판단한다. Smear는 제거 후보이며 아직 최종 삭제를 결정한 것은 아니다. 상세 범위는 `RAINFX_S74_CORE_IMPLEMENTATION_SCOPE.md`를 따른다.
+
 구현 목표는 다음과 같다.
 
 - 날씨는 유입·건조·상변화의 입력, 바이저의 물은 독립적인 지속 상태로 관리한다.
@@ -27,7 +29,7 @@ flowchart TD
   F --> E
   E --> G[공유 광학 평가]
   F --> G
-  H[오염 마스크와 재질] --> E
+  H[표면 재질과 코팅] --> E
   H --> G
   G --> I[표현 크기 보정과 픽셀 필터링]
 ```
@@ -49,7 +51,7 @@ flowchart TD
 | lifecycle | 비가 그치면 age 한도를 2초로 줄여 방울 삭제 | 증발·유출·흡수로 감소. 삭제된 물의 행선지 기록 |
 | `rain_trails.lua:environment` | .65 intensity + .35 density, wetness는 이 공급 목표로 평활화 | 입사 체적 유량과 바이저 물 재고로 대체. track puddles 대입 금지 |
 | `rainTrailDescriptor.hlsl` | core 직경과 다르게 **trail만 ×3**. 높이 0–1; 이력 max 합성 | mm/µm 기반 실제 접촉 크기와 수막. 체적 전달에는 add/보존 갱신, 광학 마스크만 max |
-| `smearUpdate` | intensity × 상대풍속/REF; cameraLook 기반 facing | 물리 공급/노출은 바이저 법선 기준. smear 광학·오염 반응은 물 상태에서 파생 |
+| `smearUpdate` | intensity × 상대풍속/REF; cameraLook 기반 facing | 기본 모델에서 제외. 물리 공급/노출은 별도 adapter와 바이저 법선으로 평가 |
 | haze 전달 | 주로 rain scalar와 절차 패턴 | 미세 물/수막에 의한 산란과 온도 기반 응결을 구분 |
 
 예: 현재 0.65 mm와 2.25 mm의 정규화 질량은 1.0055와 1.4175이다. 같은 액체의 구형 체적 등가 질량은 약 0.1435 mg와 5.9534 mg로 **41.48배** 차이 난다. 현재 모델에서는 그 차이가 약 1.41배로 압축된다. 바람 항력과 pinning이 같은 질량을 사용하지 않는 것이 크기별 반응 충돌의 직접적인 구조적 원인이다.
@@ -297,7 +299,7 @@ film height는 체적 이동을 보존하도록 add/흡수/유출 갱신한다. 
 
 저해상도 이력에서 subtexel 실제 물을 표현하기 위해 `height`와 `coverage`를 구분한다. 같은 평균 체적이 얇게 퍼진 물인지 좁고 두꺼운 길인지가 굴절을 다르게 만든다. 셀 평균 높이 하나만으로 이를 같게 만드는 것을 피한다. 공통 four-tap gradient를 metric으로 평가하고 resolved height/coverage에서 광학 normal을 만든다.
 
-wipe는 작은 방울/오염을 밀거나 흡수하는 접촉 효과다. 지나간 영역의 물을 삭제해서 clear mask를 만드는 것이 아니다. 물 제거량은 head/micro/film 간 전달 또는 유출로 계산한다. smear 마스크 내 wipe 억제 계약은 계속 유지한다.
+wipe는 작은 방울/오염을 밀거나 흡수하는 접촉 효과다. 지나간 영역의 물을 삭제해서 clear mask를 만드는 것이 아니다. 물 제거량은 head/micro/film 간 전달 또는 유출로 계산한다. 새 기본 모델은 Smear 마스크나 그 wipe 억제 계약에 의존하지 않는다. 레거시 계약은 향후 Smear 재도입을 검토할 경우의 참고 자료로 보존한다.
 
 deposit와 sweep은 **각 물리 프레임에 생성**한다. transport/evaporation만 별도 15–30 Hz로 실행할 수 있다. 기존 구간을 버리고 30 Hz마다 최신 구간만 그리면 다시 trail 간격이 벌어진다. 선형 exponential decay는 dt로 통합 가능하지만 비선형 이류·흡수·두께 변화가 단순 격프레임에서도 같다고 가정하지 않는다.
 
@@ -310,12 +312,15 @@ deposit와 sweep은 **각 물리 프레임에 생성**한다. transport/evaporat
 | impact | birth normal impulse, material, existing film | birth event 전용; 같은 generation 재발사 금지. splash 중 head/trail 중복 체적 생성 금지 |
 | flow | kg, 외력, contact line, local film | 실제 속도. intensity는 힘에 직접 곱하지 않음 |
 | trail/rivulet/sheet | deposit volume, height, connectivity, shear | 상태 간 연속 보간. film 없는 빠른 방울은 sheet로 승격하지 않음 |
-| smear | 기존 R/G 재질/오염 mask + 물 coverage/전단/국소 공급 | 물을 생성하지 않음. red의 fragment mixing·green blur 계약과 low-G wipe 억제 유지 |
+| smear (보류) | 기본 구현에서 입력·마스크·혼합 경로 제외 | flow/sheet/impact 검증 후 필요성 평가. 기본 물리·광학의 의존성 없음 |
+| local impact film (배제) | legacy flux 기반 추가 수막 이펙트 | 새 모델에 이관하지 않음. birth의 물리적 충돌과 실제 국소 deposit은 유지 |
 | haze / wet scattering | unresolved micro, coverage, material contamination | 위에 독립 흐린 full-screen layer를 중복 추가하지 않음 |
 | condensation/dew | local RH, surface T와 dew point | rainIntensity가 0이어도 가능. high RH만으로 자동 발생시키지 않음 |
 | micro pattern | 미세 유입/분열/응결 재고, 증발 | 개수·mass는 display gain과 분리. 오래된 비율로 무한 재생성 금지 |
 
-`RAINFX_SMEAR_MASK.md`의 의도는 fingerprint 같은 국소 패턴과 물방울/trail의 탁한 혼합이다. 이를 전부 물리적 foam이라고 단정하지 않는다. clean water의 sheet 자체를 smear로 만들지 않는다. 현재 R/G의 optical pattern과 tuning은 유지하면서 공통 물 상태가 reveal 강도를 제공한다. 매 frame water coverage=0인 곳에서 새로운 wet smear가 생기지 않도록 하고, 기존 오염의 dry baseline은 별도 표시 옵션으로 둔다.
+Smear는 일반 차량 유리와 특수 바이저의 물 노이즈 표현 차이를 만들기 위한 추가 보정이었다. 기본 물리 효과가 충분하면 제거 가능하다는 사용자의 지침에 따라 첫 구현에서 제외한다. `RAINFX_SMEAR_MASK.md`의 fingerprint/R/G 혼합·wipe 억제 계약은 레거시 비교 및 향후 필요성 평가용이다. 새 기본 모델의 품질 gate로 요구하지 않는다. 이후 복구를 검토할 때도 clean water의 sheet를 smear로 오인하거나 물 재고를 늘리는 방법은 사용하지 않는다.
+
+legacy local impact film도 별도 flux gate/canvas/opacity/wave layer 없이 배제한다. 새 충돌의 퍼짐·잔류 물은 물리적 입사 체적 원장에서 공급한다. core의 wind/공급/전단을 legacy `smearUpdate`에 의존시키지 않는다.
 
 광학은 shared coverage/물리 gradient/탁도에서 한 번 결정한다. head→film→micro의 물리 중복을 제거한 뒤 오염/blur를 평가한다. 이미 합성된 물을 다시 깨끗한 scene copy와 섞어서 없애지 않는다. 기존 native occlusion·post-rain inner-optics capture 계약은 그대로 준수한다.
 
@@ -382,7 +387,7 @@ DSD LUT를 추가하면 CSP/D3D sampler/texture 수 제한과 파라미터 동�
 | P0 | 읽기 전용 adapter·단위 debug·calibration fixture | SDK field, wind axis, G 포함 여부, 물리 transform/metric 검증 |
 | P1 | V 기반 meta, contact geometry, SI mass/forces/drag. 표시 gain 분리 | mesh/해상도/gain 변화에서 물리 결과 불변; 고착·이동 size 시험 |
 | P2 | 연속 DSD·물 유입량·birth virtual impact | 체적 budget, DSD number/volume 분포, phase 전환, 임펄스 제한 |
-| P3 | 질량 보존 deposit/micro/evaporation, 공통 효과 gates | trail/head 시간 일치, sheet 실제 굴절, smear mask 의도 유지 |
+| P3 | 질량 보존 deposit/micro/evaporation, 기본 물리 효과 gates | trail/head 시간 일치, sheet 실제 굴절, Smear/local impact film 없이 품질 검증 |
 | P4 | 필요 시 film transport·흡수·제한 child/midpoint | 추가 pass의 ms/메모리 gate 및 conservation 통과 |
 
 `PHYSICS_MODEL_VERSION`으로 새 상태/이력을 구분한다. 기존 튜닝을 덮어쓰지 않고 legacy profile을 보존한다. 상태 전환은 새 모델로 깨끗하게 초기화하며 같은 세션에서 구식 radius를 새 V로 재해석하지 않는다. user reset/재시작과 열/습윤 잔류 상태 초기화 정책을 명시한다.
@@ -412,7 +417,7 @@ mm/s·D 배수 UI는 유지하되 `D`가 eq/contact/display 중 무엇인지 명
 | Light Thunderstorm | .070/.100/.200/.500/20 | 타입만으로 큰 drop/splash 강제 금지 |
 | Thunderstorm | .130/.150/.400/.600/40 | 순간 입력 변화와 충돌 에너지 분리 |
 | Heavy Thunderstorm | .290/.250/.830/.700/70 | 넓은 분포/강풍 + 작은 방울 지속 |
-| Squalls | .013/.010/.196/.700/70 | 낮은 flux/큰 풍속에서 과도한 smear/sheet 방지 |
+| Squalls | .013/.010/.196/.700/70 | 낮은 flux/큰 풍속에서 공급 없는 sheet 생성 방지 |
 | Tornado | .212/.400/0/.800/100 | trackWater=0이어도 액체 강수 유입 |
 | Hurricane | .690/.900/0/.900/120 | high flux + small-rich 분포, puddle 의존성 배제 |
 

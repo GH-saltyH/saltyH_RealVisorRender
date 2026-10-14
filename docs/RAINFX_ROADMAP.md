@@ -2,6 +2,18 @@
 
 See `docs/README.md` for the document index and working rules.
 
+## Latest s74 Core implementation scope and branch (2026-10-14)
+
+The user preserved the legacy at commit 0c092e0. Implementation now targets
+`codex/rainfx-physics-weather`, derived from that commit. First build the
+physical drops, virtual impact, flow and volume-based trail/rivulet/sheet.
+Exclude Smear from the core path and do not port legacy local impact film.
+Keep physical impact/deposition; evaluate correction effects only after the
+core water behaviour and rendering have been reviewed. Smear remains a
+possible removal, not a decision to delete its legacy code now. Updated s73
+scope accordingly. This step changes documentation only.
+See `RAINFX_S74_CORE_IMPLEMENTATION_SCOPE.md`.
+
 ## Latest s73 Physics/weather refactor design (2026-10-14)
 
 Design only; runtime and user tuning unchanged. Verified the user's updated
