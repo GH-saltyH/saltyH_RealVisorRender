@@ -1,0 +1,143 @@
+--- s79/docs/RAINFX_ROADMAP.md
++++ s80/docs/RAINFX_ROADMAP.md
+@@ -1,6 +1,19 @@
+-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-14
++# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-15
+ 
+ See `docs/README.md` for the document index and working rules.
++
++## Latest s80 P2 game review and SI merge conservation (2026-10-15)
++
++User stationary app OFF91–94FPS, P1/P1+P2 both72–73FPS (+2.710–3.251ms whole app);
++P2 incremental cost is unresolved at this measurement precision. Actual cumulative
++budgets show residual -4.332008/-1.903673mm3 and film/micro reserves are still invisible.
++Reviewed timestamped samples of four supplied videos and estimated source incidence.
++Reproduced curved-metric one-sided SI merges and departed-partner exit double accounting.
++State/meta now share a symmetric distance and require both supported positions.
++Added committed simulation time/interval rate logs; no new GPU pass or per-drop CPU work.
++Actual shader /WX WARP cases and s79 numeric/wiring regression pass. Corrected game
++conservation gate is required before P3 spatial film/micro/trail rendering.
++See `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md`.
+ 
+ ## Latest s79 GPU physical birth and source budget (2026-10-14)
+ 
+--- s79/docs/RAINFX_S79_GPU_PHYSICAL_BIRTH.md
++++ s80/docs/RAINFX_S79_GPU_PHYSICAL_BIRTH.md
+@@ -1,6 +1,6 @@
+ # RainFX s79 — 물리 유입·가상 충돌의 GPU 연결
+ 
+-Date: 2026-10-14. Status: ACTIVE — opt-in P2 birth preview 구현 및 WARP/LuaJIT 검증 완료. 게임 입력 방향·룩·비용 검증 대기.
++Date: 2026-10-14. Status: REFERENCE — opt-in P2 birth preview 구현. 게임 결과 및 보존 오류 수정은 s80에서 이어진다.
+ 
+ ## 1. 기준과 범위
+ 
+@@ -181,3 +181,12 @@
+ 결과: `docs/diagnostics/2026-10-14/s79/{gpu_checks,binding_checks,source.diff}`.
+ 다음 게임 gate는 실제 budget, front/outward 방향, retained 크기/운동, P1 대비 비용이다.
+ 그 결과를 반영하여 P3 물 재고의 공간 배분/실제 trail·sheet를 연결한다.
++
++## 7. User result follow-up (2026-10-15)
++
++동일 정차 장면에서 앱 OFF91–94FPS, P1 및 P1+P2 모두72–73FPS였다.
++P2가 훨씬 성기고 상단 유입/하늘 방향 누적/빠른 이동이 관찰됐다.
++실제 cumulative budget은 정차 residual=-4.332008mm³, 주행=-1.903673mm³였다.
++곡면 reciprocal merge의 비대칭 승인 및 departed partner 이중 계상을 재현하고
++수정한 s80이 현재 빌드다. 보존과 전체 물 표현을 아직 게임 통과로 기록하지 않는다.
++상세 결과·비용·원장·영상 관찰과 재검증 절차는 `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md`를 본다.
+--- s79/docs/README.md
++++ s80/docs/README.md
+@@ -1,4 +1,4 @@
+-# RealVisor RainFX — docs index and working rules (2026-10-14)
++# RealVisor RainFX — docs index and working rules (2026-10-15)
+ 
+ Start here. This file lists every document in `docs/` with its state, the
+ current architecture in one screen, and the rules for working on the
+@@ -56,7 +56,8 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+-| `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | ACTIVE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; WARP/LuaJIT passed, game look/input/cost pending, P3 remains next |
++| `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` | ACTIVE | P2 user FPS/budget/videos, sparse supply and faster motion evaluation, reproduced SI one-sided/exit merge volume errors fixed, committed-time/rate logs; corrected game conservation gate before P3 |
++| `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | REFERENCE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; game results and merge correction follow in s80 |
+ | `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | REFERENCE | P1 game result/response-time diagnosis and P2 DSD/flux/impact diagnostic preparation; live GPU birth/event/budget preview follows in s79 |
+ | `RAINFX_S77_SI_MOTION_PREVIEW.md` | REFERENCE | opt-in P1 persistent SI motion/volume/display separation, single-exit state/meta fix and epoch retirement; WARP/LuaJIT plus game qualitative validation passed, weaving/friction and driving cost still open |
+ | `RAINFX_S76_SI_CORE_PRIMITIVES.md` | REFERENCE | P1 shared SI GPU functions and /WX WARP invariants; persistent state binding implemented as opt-in s77 preview |
+--- s79/rain_birth_gpu.lua
++++ s80/rain_birth_gpu.lua
+@@ -52,6 +52,7 @@
+         end
+         self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil
+         self.pending=false;self.logPending=false;self.logValues=nil;self.budgetFrame=nil;self.frame=nil
++        self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
+         self.eventParams.textures.txRainState=false;self.eventParams.textures.txRainStateMeta=false
+         self.blockParams.textures.txBirthEvent=false;self.blockParams.textures.txRainNewMeta=false
+         self.totalParams.textures.txBirthBlocks=false;self.totalParams.textures.txBirthPreviousTotals=false
+@@ -105,6 +106,9 @@
+         if self.budgetFrame~=sim.frame or self.frame==sim.frame then return false end
+         self.read=self.write;self.tick=(self.tick+1)%1048576;self.ready=true;self.frame=sim.frame;self.pending=false
+         self.publishedAreaM2=self.eventParams.values.gBirthAreaM2
++        -- Only committed simulation steps count; pending/retried draws add no time.
++        self.publishedSeconds=self.publishedSeconds+self.eventParams.values.gBirthDt
++        self.publishedSteps=self.publishedSteps+1
+         self.budgetFrame=nil;self.preparedFrame=nil
+         return true
+     end
+@@ -114,6 +118,7 @@
+         self.statsParams.textures.txBirthTotals=self.read
+         if self.stats:updateWithShader(self.statsParams)==false then return false end
+         self.logPending=true;local epoch=self.epoch;local frame=self.frame;local area=self.publishedAreaM2
++        local seconds=self.publishedSeconds;local steps=self.publishedSteps
+         self.stats:accessData(function(err,data)
+             if epoch~=self.epoch then if data then data:dispose() end;return end
+             self.logPending=false
+@@ -121,8 +126,17 @@
+             local v=self.logValues or {};for i=1,8 do v[i]=data:floatValue(i-1,0) end
+             data:dispose();self.logValues=v
+             local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]
+-            d.log(string.format('Rain P2 frame=%s mm3 input=%.6f film-reserve=%.6f micro-reserve=%.6f bounce=%.6f capacity=%.6f exit=%.6f drops=%.6f residual=%.6f arrivals=%.0f area=%.6f m2',
+-                tostring(frame),v[1],v[2],v[3],v[4],v[5],v[6],v[7],residual,v[8],area))
++            local previous=self.previousLog
++            local elapsed=seconds-(previous and previous.seconds or 0)
++            local inputDelta=v[1]-(previous and previous.input or 0)
++            local arrivalDelta=v[8]-(previous and previous.arrivals or 0)
++            local residualDelta=residual-(previous and previous.residual or 0)
++            local inputRate=elapsed>0 and inputDelta/elapsed or 0
++            local arrivalRate=elapsed>0 and arrivalDelta/elapsed or 0
++            d.log(string.format('Rain P2 frame=%s mm3 input=%.6f film-reserve=%.6f micro-reserve=%.6f bounce=%.6f capacity=%.6f exit=%.6f drops=%.6f residual=%.6f arrivals=%.0f area=%.6f m2 publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s arrivalRate=%.6f /s residualDelta=%.6f mm3',
++                tostring(frame),v[1],v[2],v[3],v[4],v[5],v[6],v[7],residual,v[8],area,
++                seconds,steps,elapsed,inputRate,arrivalRate,residualDelta))
++            self.previousLog={seconds=seconds,input=v[1],arrivals=v[8],residual=residual}
+         end)
+         return true
+     end
+--- s79/realvisor.lua
++++ s80/realvisor.lua
+@@ -2270,6 +2270,14 @@
+             float mergeValid = ok * mutual
+                 * (type < 1.5 ? 1.0 : 0.0)
+                 * (dist <= sumR * gRainMergeReach ? 1.0 : 0.0);
++            if(gRainSiOn>.5) {
++                // Reciprocal commands need a reciprocal distance on curved UVs.
++                // A one-sided approval creates or deletes the partner's volume.
++                float pairDist=max(dist,rainMetricLength(pState.rg,selfP-pState.rg));
++                mergeValid=ok*mutual*(type<1.5 ? 1 : 0)
++                    *(pairDist<=sumR*gRainMergeReach ? 1 : 0)
++                    *(rainValid(selfP)>=.5 && rainValid(pState.rg)>=.5 ? 1 : 0);
++            }
+             float attractValid = ok
+                 * (type > 1.5 ? 1.0 : 0.0)
+                 * (dist > 1e-7 ? 1.0 : 0.0)
+@@ -2728,6 +2736,13 @@
+             float mergeValid = ok * mutual
+                 * (type < 1.5 ? 1.0 : 0.0)
+                 * (dist <= sumR * gRainMergeReach ? 1.0 : 0.0);
++            if(gRainSiOn>.5) {
++                // Same pair predicate as the state pass; departed water cannot merge.
++                float pairDist=max(dist,rainMetricLength(pState.rg,selfP-pState.rg));
++                mergeValid=ok*mutual*(type<1.5 ? 1 : 0)
++                    *(pairDist<=sumR*gRainMergeReach ? 1 : 0)
++                    *(rainValid(selfP)>=.5 && rainValid(pState.rg)>=.5 ? 1 : 0);
++            }
+             float attractValid = ok
+                 * (type > 1.5 ? 1.0 : 0.0)
+                 * (dist > 1e-7 ? 1.0 : 0.0)

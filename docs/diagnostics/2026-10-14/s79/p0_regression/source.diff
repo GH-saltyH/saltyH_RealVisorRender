@@ -1,0 +1,778 @@
+--- 3975491/realvisor.lua
++++ s75/realvisor.lua
+@@ -398,6 +398,30 @@
+         -- Number of persistent droplet state texels.
+         -- One texel represents one persistent droplet.
+         RAIN_GPU_STATE_COUNT = 4096,
++        -- P1 opt-in motion validation. P2/P3 supply/film are not active yet.
++        RAIN_PHYSICS_SI_PREVIEW = false,
++        RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN = 0.7937005259840998,
++        RAIN_PHYSICS_CONTACT_ANGLE_DEG = 90.0,
++        RAIN_PHYSICS_LOCAL_AIR_FRACTION = 0.15, -- estimated boundary-layer exposure
++        RAIN_PHYSICS_VISCOUS_SHAPE = 80.0,
++        RAIN_PHYSICS_ATTACHED_CD = 1.0,
++        RAIN_PHYSICS_STATIC_SPAN_BARE_DEG = 20.0,
++        RAIN_PHYSICS_STATIC_SPAN_COAT_DEG = 4.0,
++        RAIN_PHYSICS_DYNAMIC_SPAN_BARE_DEG = 6.0,
++        RAIN_PHYSICS_DYNAMIC_SPAN_COAT_DEG = 2.0,
++        -- P2 supply/impact diagnostics only. Rate is a look calibration, not an engine measurement.
++        RAIN_PHYSICS_BIRTH_DIAGNOSTICS = false,
++        RAIN_RATE_AT_INTENSITY_1_MM_H = 20.0,
++        RAIN_RATE_INTENSITY_POWER = 1.0,
++        RAIN_PHYSICS_DSD_SEED_OVERRIDE = 0.0, -- 0 estimated blend, 1..4 explicit seed
++        RAIN_PHYSICS_P2_BIRTH_PREVIEW = false,
++        RAIN_BIRTH_DISPLAY_SCALE = 0.40, -- appearance only; independent of retained volume
++        RAIN_BIRTH_EXPOSURE = 1.0, -- estimated static shielding, not per-drop raycasts
++        RAIN_BIRTH_INCIDENT_AIR_FRACTION = 0.30, -- estimated near-helmet impact flow
++        RAIN_BIRTH_TANGENT_IMPULSE_FRACTION = 0.015,
++        RAIN_BIRTH_MIN_PERSISTENT_MM = 0.25,
++        RAIN_BIRTH_WET_OVERRIDE = 0.0, -- manual material-LUT diagnostic; not track wetness
++        RAIN_BIRTH_NORMAL_REVERSED = false,
+ 
+         -- Persistent state:
+         -- 0 = disabled
+@@ -1918,7 +1942,7 @@
+                 // The smooth baked normal determines incidence. The Jacobian
+                 // determines the actual movement plane; use it for redirection
+                 // so a normal/triangle mismatch cannot leak into lateral flow.
+-                float3 u,v;rainMetric(position,u,v);
++                float3 u=0,v=0;rainMetric(position,u,v);
+                 float3 movementNormal=mul(cross(u,v),(float3x3)gRainObjectToWorld);
+                 float normalLength=dot(movementNormal,movementNormal);
+                 movementNormal=normalLength>1e-20 ? movementNormal*rsqrt(max(normalLength,1e-20)) : normalWorld;
+@@ -2102,6 +2126,41 @@
+             float dt
+         )
+         {
++            if(gRainSiOn>.5) {
++                float3 u,v;rainMetric(position,u,v);
++                float3 uw=mul(u,(float3x3)gRainObjectToWorld),vw=mul(v,(float3x3)gRainObjectToWorld);
++                float3 crossUV=cross(uw,vw);float norm2=dot(crossUV,crossUV);
++                if(norm2>=1e-20 && mass>0) {
++                float3 n=crossUV*rsqrt(max(norm2,1e-20));
++                float3 speed=rainSiWorldVelocity(uw,vw,velocity);
++                float gravityOn=fmod(floor(gRainForceMask),2.0)>=.5 ? 1 : 0;
++                float inertiaOn=fmod(floor(gRainForceMask/2.0),2.0)>=.5 ? 1 : 0;
++                float airOn=fmod(floor(gRainForceMask/4.0),2.0)>=.5 ? 1 : 0;
++                float3 localAir=gRainSiAirWorld*gRainSiAirFraction;
++                if(gRainAirflowDownwardMode>.5 && airOn>.5) {
++                    float3 down=rainSiTangent(float3(0,-1,0),n);
++                    float len=length(down);
++                    if(len>1e-6) {
++                        down/=len;
++                        float along=dot(localAir,down);
++                        // Explicit user-selected approximate local surface-flow field.
++                        float desired=length(localAir)*.30*max(gRainAirflowDownwardGain,0);
++                        localAir+=down*(desired-along);
++                    }
++                }
++                float coat=saturate(rainCoating(position));
++                float staticHalf=.5*lerp(gRainSiStaticBare,gRainSiStaticCoat,coat);
++                float dynamicHalf=.5*lerp(gRainSiDynamicBare,gRainSiDynamicCoat,coat);
++                float3 next=rainSiSlideWorld(speed,float3(0,-9.80665,0)*gravityOn,
++                    gRainSiInertiaWorld*inertiaOn,localAir,n,mass,gRainSiTheta,
++                    max(gRainSiTheta-staticHalf,.1),min(gRainSiTheta+staticHalf,179.9),
++                    max(gRainSiTheta-dynamicHalf,.1),min(gRainSiTheta+dynamicHalf,179.9),
++                    gRainSiRhoWater,gRainSiMu,gRainSiGamma,gRainSiRhoAir,
++                    gRainSiAttachedCd*airOn,1,gRainSiViscousShape,dt);
++                velocity=rainSiProjectUV(uw,vw,next);
++                } else velocity=0;
++            }
++            else {
+             float forceMagnitude = 0.0;
+ 
+             float2 tangentForce =
+@@ -2160,6 +2219,7 @@
+                 );
+ 
+             velocity *= exp(-gRainGlassExtraDrag*(1-rainCoating(position))*dt);
++            }
+             return rainAdvance(position,velocity,dt);
+         }
+ 
+@@ -2225,6 +2285,7 @@
+             // Same contact angle: footprint radius scales with volume^(1/3).
+             float merged = pow(max(selfR * selfR * selfR
+                 + partnerR * partnerR * partnerR, 1e-15), 1.0 / 3.0);
++            if(gRainSiOn>.5) return merged; // uniform contact angle; volume has no display cap
+             return min(merged, gRainMergeMaxDiameterMM * gRainStatePhysicalRadiusUVPerMM);
+         }
+ 
+@@ -2270,9 +2331,9 @@
+                         -0.600, -0.500, -0.450
+                     };
+ 
+-                    uint i = (uint)index;
++                    uint i = (uint)max(index,0.0);
+                     uint ix = i % 3u;
+-                    uint iy = i / 3u;
++                    uint iy = min(i / 3u,2u);
+ 
+                     // Debug 36 test points are raw visor UV values.
+                     // Legacy calibration values only constrain this fixed
+@@ -2307,7 +2368,7 @@
+             float2 p = state.rg;
+             float2 v = state.ba;
+             float radius = meta.r;
+-            float mass = max(meta.g, 1.0);
++            float mass = gRainSiOn>.5 ? max(meta.g,0) : max(meta.g,1.0);
+             float dt = max(gRainStateDeltaTime, 0.0);
+ 
+             /*
+@@ -2394,8 +2455,8 @@
+                 // Survivor: volume-weighted centre and momentum (weights are
+                 // zero when not merging), so it is pulled toward the drop it
+                 // swallowed and changes course.
+-                float selfV = radius * radius * radius;
+-                float otherV = pMeta.r * pMeta.r * pMeta.r * isMerge;
++                float selfV = gRainSiOn>.5 ? mass : radius * radius * radius;
++                float otherV = (gRainSiOn>.5 ? max(pMeta.g,0) : pMeta.r * pMeta.r * pMeta.r) * isMerge;
+                 float total = max(selfV + otherV, 1e-15);
+                 float3 momentum=(rainMomentum(p,v)*selfV
+                     +rainMomentum(pState.rg,pState.ba)*otherV)/total;
+@@ -2404,8 +2465,10 @@
+                 v = rainMetricProject(p,momentum);
+                 radius = lerp(radius, rainMergeRadius(radius, pMeta.r),
+                     isMerge);
+-                mass = lerp(mass, max(rainMergeMassProfile(
++                if(gRainSiOn>.5) mass=selfV+otherV;
++                else mass = lerp(mass, max(rainMergeMassProfile(
+                     radius / gRainStatePhysicalRadiusUVPerMM), 1.0), isMerge);
++                isAttract*=gRainSiOn>.5 ? 0 : 1;
+                 // Absorption steering toward a drop ahead.
+                 float2 toOther = pState.rg - p;
+                 float dist = rainMetricLength(p,toOther);
+@@ -2427,7 +2490,7 @@
+             // slides into it. Only the component across the motion is
+             // applied (no braking, and a drop's own trail behind it is
+             // symmetric). Straight-line code: no branches, no loops.
+-            if(gRainWetPathGain>0 && dt>0 && rainMetricLength(p,v)>max(gRainWetPathMinSpeed,1e-6)) {
++            if(gRainSiOn<.5 && gRainWetPathGain>0 && dt>0 && rainMetricLength(p,v)>max(gRainWetPathMinSpeed,1e-6)) {
+                 float wsp0 = rainMetricLength(p,v);
+                 float2 wdir0 = v / max(wsp0, 1e-7);
+                 // Read AHEAD of the drop: its own fresh trail lies behind.
+@@ -2563,7 +2626,7 @@
+ 
+         float rainStateBirthDiameterMM(float index, float intensity, float wetness, float water)
+         {
+-            float minimum, maximum;
++            float minimum=0, maximum=0;
+             if (intensity <= 0.03)
+             {
+                 float t = saturate(intensity / 0.03);
+@@ -2593,6 +2656,7 @@
+ 
+         float rainStatePhysicalMassProfile(float diameterMM)
+         {
++            if(gRainSiOn>.5) return rainSiVolumeMM3(diameterMM);
+             float volumeMin = 0.5 * 0.5 * 0.5;
+             float volumeMax = 6.0 * 6.0 * 6.0;
+             float volume = diameterMM * diameterMM * diameterMM;
+@@ -2679,6 +2743,7 @@
+             // Same contact angle: footprint radius scales with volume^(1/3).
+             float merged = pow(max(selfR * selfR * selfR
+                 + partnerR * partnerR * partnerR, 1e-15), 1.0 / 3.0);
++            if(gRainSiOn>.5) return merged;
+             return min(merged, gRainMergeMaxDiameterMM * gRainStatePhysicalRadiusUVPerMM);
+         }
+ #endif
+@@ -2704,7 +2769,8 @@
+                         gRainStateRainWetness,
+                         gRainStateRainWater)
+                     : rainStatePhysicalDiameterMM(index);
+-                float radius = diameterMM * gRainStatePhysicalRadiusUVPerMM;
++                float radius = gRainSiOn>.5 ? rainSiContactRadiusMM(rainSiVolumeMM3(diameterMM),gRainSiTheta)
++                    *gRainStatePhysicalRadiusUVPerMM*2 : diameterMM*gRainStatePhysicalRadiusUVPerMM;
+                 float mass = rainStatePhysicalMassProfile(diameterMM);
+ 
+                 // Rain-dependent initial population prevents a dry startup
+@@ -2743,7 +2809,8 @@
+                         rainWetness,
+                         rainWater);
+ 
+-                    meta.r = diameterMM * gRainStatePhysicalRadiusUVPerMM;
++                    meta.r = gRainSiOn>.5 ? rainSiContactRadiusMM(rainSiVolumeMM3(diameterMM),gRainSiTheta)
++                        *gRainStatePhysicalRadiusUVPerMM*2 : diameterMM*gRainStatePhysicalRadiusUVPerMM;
+                     meta.g = rainStatePhysicalMassProfile(diameterMM);
+ 
+                     return meta;
+@@ -2798,11 +2865,13 @@
+                         // Absorbed: dead now, normal respawn gap later.
+                         meta.a = generation * 4.0;
+                         meta.b = 0.0;
++                        if(gRainSiOn>.5) {meta.r=0;meta.g=0;}
+                         return meta;
+                     }
+                     meta.r = lerp(meta.r, rainMergeRadius(meta.r, pMeta.r),
+                         isMerge);
+-                    meta.g = lerp(meta.g, rainStatePhysicalMassProfile(
++                    if(gRainSiOn>.5) meta.g+=max(pMeta.g,0)*isMerge;
++                    else meta.g = lerp(meta.g, rainStatePhysicalMassProfile(
+                         meta.r / gRainStatePhysicalRadiusUVPerMM), isMerge);
+                 }
+ #endif
+@@ -2815,6 +2884,7 @@
+                 {
+                     meta.a = generation * 4.0;
+                     meta.b = 0.0;
++                    if(gRainSiOn>.5) {meta.r=0;meta.g=0;}
+                     return meta;
+                 }
+ 
+@@ -2823,7 +2893,7 @@
+                     rainStateHash(index + generation * 5.197 + 211.0));
+                 if (rainIntensity <= 0.001)
+                     ageRange = min(ageRange, 2.0);
+-                if (meta.b + dt >= ageRange)
++                if (gRainSiOn<.5 && meta.b + dt >= ageRange)
+                 {
+                     meta.a = generation * 4.0;
+                     meta.b = 0.0;
+@@ -2831,6 +2901,8 @@
+                 }
+             }
+ 
++            if(gRainSiOn>.5 && abs(meta.a-4*floor(meta.a/4)-1)<.25)
++                meta.r=rainSiContactRadiusMM(meta.g,gRainSiTheta)*gRainStatePhysicalRadiusUVPerMM*2;
+             meta.b += dt;
+             return meta;
+         }
+@@ -6453,9 +6525,109 @@
+ end
+ 
+ rainDynamicSceneCopyState.surface = dofile(appFolder..'/rain_surface.lua')(appFolder,cfg.RUNTIME)
+-rainStateUpdateParams.shader = rainDynamicSceneCopyState.surface.shader..rainStateUpdateParams.shader
+-rainStateMetaUpdateParams.shader = rainDynamicSceneCopyState.surface.shader..rainStateMetaUpdateParams.shader
++-- P0 observer: independent inputs, no live state/shader/Smear mutation.
++rainDynamicSceneCopyState.physicsInputsUpdate=function()
++    local st=rainDynamicSceneCopyState
++    if not st.physicsInputs then
++        local factory,err=st.loadRuntimeModule('rain_environment.lua')
++        if not factory then st.physicsInputsError=err;return end
++        -- User P0 logs: stationary G=0; acceleration/braking Z signs match.
++        st.physicsInputs=factory({api=ac,gExcludesGravity=true})
++    end
++    if not st.physicsUnits then
++        local factory,err=st.loadRuntimeModule('rain_physics_units.lua')
++        if not factory then st.physicsInputsError=err;return end
++        st.physicsUnits=factory()
++    end
++    st.physicsInputsError=nil
++    st.physicsInputs:update(ac.getSim(),ac.getCar(0),cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE)
++    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS or cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++        if not st.physicsBirth then
++            local factory,err=st.loadRuntimeModule('rain_birth_model.lua')
++            if not factory then st.physicsBirthError=err;return end
++            st.physicsBirth=factory()
++        end
++        st.physicsBirthError=nil
++        st.physicsBirth:update(st.physicsInputs,cfg.RUNTIME.RAIN_RATE_AT_INTENSITY_1_MM_H,
++            cfg.RUNTIME.RAIN_RATE_INTENSITY_POWER,cfg.RUNTIME.RAIN_PHYSICS_DSD_SEED_OVERRIDE)
++    end
++end
++rainDynamicSceneCopyState.siShader=(function()
++    local f=assert(io.open(appFolder..'/shaders/rainPhysicsSI.hlsl','rb'))
++    local code=f:read('*a');f:close();return code
++end)()
++rainDynamicSceneCopyState.bindSIParams=function(p)
++    local st=rainDynamicSceneCopyState;local r=cfg.RUNTIME;local e=st.physicsInputs
++    local v=p.values
++    v.gRainSiOn=r.RAIN_PHYSICS_SI_PREVIEW and 1 or 0
++    v.gRainBirthOn=r.RAIN_PHYSICS_SI_PREVIEW and r.RAIN_PHYSICS_P2_BIRTH_PREVIEW
++        and r.RAIN_GPU_STATE_LIFECYCLE and (r.RAIN_GPU_STATE_MODE==3 or r.RAIN_GPU_STATE_MODE==6) and 1 or 0
++    p.textures=p.textures or {}
++    p.textures.txRainBirthEvent=v.gRainBirthOn>.5 and p.textures.txRainBirthEvent or false
++    v.gRainSiTheta=r.RAIN_PHYSICS_CONTACT_ANGLE_DEG
++    v.gRainSiRhoWater=998.2;v.gRainSiMu=.001002;v.gRainSiGamma=.0728
++    v.gRainSiRhoAir=e and e.airDensity or 1.20
++    v.gRainSiViscousShape=r.RAIN_PHYSICS_VISCOUS_SHAPE
++    v.gRainSiAttachedCd=r.RAIN_PHYSICS_ATTACHED_CD
++    v.gRainSiAirFraction=r.RAIN_PHYSICS_LOCAL_AIR_FRACTION
++    v.gRainSiStaticBare=r.RAIN_PHYSICS_STATIC_SPAN_BARE_DEG
++    v.gRainSiStaticCoat=r.RAIN_PHYSICS_STATIC_SPAN_COAT_DEG
++    v.gRainSiDynamicBare=r.RAIN_PHYSICS_DYNAMIC_SPAN_BARE_DEG
++    v.gRainSiDynamicCoat=r.RAIN_PHYSICS_DYNAMIC_SPAN_COAT_DEG
++    v.gRainSiInertiaWorld=v.gRainSiInertiaWorld or vec3()
++    v.gRainSiAirWorld=v.gRainSiAirWorld or vec3()
++    if e and e.inertiaVerified then v.gRainSiInertiaWorld:set(e.inertiaX,e.inertiaY,e.inertiaZ)
++    else v.gRainSiInertiaWorld:set(0,0,0) end
++    if e then
++        local wind=r.RAIN_FORCE_AIRFLOW_INCLUDE_WIND and 1 or 0
++        v.gRainSiAirWorld:set(e.windX*wind-e.velocityX,-e.velocityY,e.windZ*wind-e.velocityZ)
++    else v.gRainSiAirWorld:set(0,0,0) end
++end
++rainDynamicSceneCopyState.bindSIParams(rainStateUpdateParams)
++rainDynamicSceneCopyState.bindSIParams(rainStateMetaUpdateParams)
++rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
++rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,transform)
++    local st=rainDynamicSceneCopyState
++    if not st.physicsBirth then st.physicsInputsUpdate() end
++    if not st.physicsBirth then return false end
++    if not st.physicalBirthGPU then
++        local factory,err=st.loadRuntimeModule('rain_birth_gpu.lua')
++        if not factory then st.physicsBirthError=err;return false end
++        local ok,result=pcall(factory,{folder=appFolder,runtime=cfg.RUNTIME,surface=st.surface,core=st.siShader,
++            measure=st.measure,log=function(message) ac.log(appNameDebug..' '..message) end})
++        if not ok then st.physicsBirthError=tostring(result);return false end
++        st.physicalBirthGPU=result
++    end
++    st.physicsBirthError=nil
++    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth)
++    if not ok then st.physicsBirthError=tostring(ready);return false end
++    st.physicsBirthError=st.physicalBirthGPU.assetError or st.physicalBirthGPU.error
++    return ready
++end
++rainDynamicSceneCopyState.stateEntryShader=(function()
++    local f=assert(io.open(appFolder..'/shaders/rainStateEntry.hlsl','rb'))
++    local code=f:read('*a');f:close();return code
++end)()
++rainDynamicSceneCopyState.stateHelpers=(function()
++    local a=assert(rainStateUpdateParams.shader:find('        float4 main(PS_IN pin) {',1,true))
++    return rainStateUpdateParams.shader:sub(1,a-1)
++end)()
++rainStateUpdateParams.shader = rainDynamicSceneCopyState.surface.shader..rainDynamicSceneCopyState.siShader
++    ..rainDynamicSceneCopyState.stateHelpers..rainDynamicSceneCopyState.stateEntryShader
++rainDynamicSceneCopyState.metaEntryShader=(function()
++    local f=assert(io.open(appFolder..'/shaders/rainMetaEntry.hlsl','rb'))
++    local code=f:read('*a');f:close();return code
++end)()
++rainDynamicSceneCopyState.metaHelpers=(function()
++    local a=assert(rainStateMetaUpdateParams.shader:find('        float4 main(PS_IN pin) {',1,true))
++    return rainStateMetaUpdateParams.shader:sub(1,a-1)
++end)()
++rainStateMetaUpdateParams.shader = rainDynamicSceneCopyState.surface.shader..rainDynamicSceneCopyState.siShader
++    ..rainDynamicSceneCopyState.metaHelpers..rainDynamicSceneCopyState.metaEntryShader
+ local function initializeRainGPUState()
++    rainDynamicSceneCopyState.bindSIParams(rainStateUpdateParams)
++    rainDynamicSceneCopyState.bindSIParams(rainStateMetaUpdateParams)
+     if not rainDynamicSceneCopyState.surface:validate() then return false end
+     rainDynamicSceneCopyState.surface:bind(rainStateUpdateParams)
+     rainStateUpdateParams.textures.txRainPhysicalSites=rainDynamicSceneCopyState.surface.root..'spawn_sites.dds'
+@@ -6561,6 +6733,9 @@
+ 
+     if cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0 then
+         initialRainIntensity = cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
++    end
++    if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and rainDynamicSceneCopyState.physicsInputs then
++        initialRainIntensity=rainDynamicSceneCopyState.physicsInputs.liquidIntensity
+     end
+     initialRainIntensity = math.max(0.0, math.min(1.0, initialRainIntensity or 0.0))
+     rainDynamicSceneCopyState.lifecycleRainSmoothed = initialRainIntensity
+@@ -6660,7 +6835,7 @@
+         state.mergeSnapshot = nil
+     end
+     local wantMerge = r.RAIN_GPU_STATE_MERGE_ENABLED
+-    local wantAttract = r.RAIN_GPU_STATE_ATTRACT_ENABLED
++    local wantAttract = r.RAIN_GPU_STATE_ATTRACT_ENABLED and not r.RAIN_PHYSICS_SI_PREVIEW
+     if not lifecycleOn or not rainDynamicStateHasSnapshot
+         or not (wantMerge or wantAttract) then
+         if state.mergeActive then
+@@ -6813,12 +6988,38 @@
+     return fn(...)
+ end
+ local function updateRainGPUState(sim)
++    local siChanged=rainDynamicSceneCopyState.siConfigured~=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++        or rainDynamicSceneCopyState.birthConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true)
++    if siChanged then
++        rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
++        rainDynamicStateReadbackReady=false
++        rainStateSingleDropDirty=true
++        rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++        rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
++        rainDynamicSceneCopyState.gpuHeadsActive=false
++        rainDynamicStateHasSnapshot=false
++        if rainDynamicSceneCopyState.newTrail then rainDynamicSceneCopyState.newTrail:dispose() end
++        rainDynamicSceneCopyState.waterTrailRead=nil;rainDynamicSceneCopyState.waterTrailReady=false
++        rainDynamicSceneCopyState.trailMaskRead=nil;rainDynamicSceneCopyState.newTrailActive=false
++    end
+     if rainStateSingleDropDirty
+         or (
+             rainStateConfiguredMode ~= nil
+             and rainStateConfiguredMode ~= cfg.RUNTIME.RAIN_GPU_STATE_MODE
+         )
+     then
++        if not siChanged then
++            rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
++            rainDynamicStateReadbackReady=false;rainDynamicStateHasSnapshot=false
++            rainDynamicSceneCopyState.gpuHeadsActive=false
++        end
++        if rainDynamicSceneCopyState.physicalBirthGPU then rainDynamicSceneCopyState.physicalBirthGPU:dispose() end
++        rainStateUpdateParams.textures.txRainBirthEvent=false
++        rainStateMetaUpdateParams.textures.txRainBirthEvent=false
++        if rainStateA then rainStateA:dispose() end
++        if rainStateB then rainStateB:dispose() end
++        if rainStateMetaA then rainStateMetaA:dispose() end
++        if rainStateMetaB then rainStateMetaB:dispose() end
+         rainStateA = nil
+         rainStateB = nil
+         rainStateMetaA = nil
+@@ -6837,6 +7038,8 @@
+     if not initializeRainGPUState() or not rainStateInitialized then
+         return
+     end
++    rainDynamicSceneCopyState.bindSIParams(rainStateUpdateParams)
++    rainDynamicSceneCopyState.bindSIParams(rainStateMetaUpdateParams)
+ 
+     local frame = sim and sim.frame
+     if frame == nil or rainStateLastFrame == frame then
+@@ -7016,6 +7219,9 @@
+             * (1.0 - math.exp(-math.min(dt, 0.05) * response))
+         rainDynamicSceneCopyState.lifecycleRainSmoothed = liveRain
+     end
++    if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and rainDynamicSceneCopyState.physicsInputs then
++        liveRain=rainDynamicSceneCopyState.physicsInputs.liquidIntensity
++    end
+     liveRain = math.max(0.0, math.min(1.0, liveRain))
+     local activeCar = ac.getCar(0)
+     local activeVelocity = activeCar and activeCar.velocity
+@@ -7128,9 +7334,18 @@
+     rainStateUpdateParams.values.gRainBirthRamp =
+         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_RAMP_SECONDS
+ 
++    if rainStateUpdateParams.values.gRainBirthOn>.5 then
++        if not rainDynamicSceneCopyState.preparePhysicsBirth(readState,readMeta,count,sim,transform) then return false end
++        rainStateUpdateParams.textures.txRainBirthEvent=rainDynamicSceneCopyState.physicalBirthGPU.events
++        rainStateMetaUpdateParams.textures.txRainBirthEvent=rainDynamicSceneCopyState.physicalBirthGPU.events
++    end
+     local transportReady=rainDynamicSceneCopyState.measure('State transport',writeState.updateWithShader,writeState,rainStateUpdateParams)
+     local lifecycleReady=rainDynamicSceneCopyState.measure('State lifecycle',writeMeta.updateWithShader,writeMeta,rainStateMetaUpdateParams)
+     if transportReady==false or lifecycleReady==false then return false end
++    if rainStateUpdateParams.values.gRainBirthOn>.5 then
++        if not rainDynamicSceneCopyState.physicalBirthGPU:budget(writeMeta,sim) then return false end
++        if not rainDynamicSceneCopyState.physicalBirthGPU:publish(sim) then return false end
++    end
+ 
+     rainStateReadIsA = not rainStateReadIsA
+ end
+@@ -8397,6 +8612,7 @@
+     slot.velocityRange=slot.params.values.gRainStateVelocityEncodeRange
+     slot.requestFrame = requestFrame
+     slot.requestTime = rainDynamicStateRenderClock
++    slot.modelEpoch=rainDynamicSceneCopyState.siEpoch or 0
+ 
+     slot.canvas:updateWithShader(slot.params)
+ 
+@@ -8405,6 +8621,10 @@
+ 
+     slot.canvas:accessData(function(err, data)
+         slot.pending = false
++        if slot.modelEpoch~=(rainDynamicSceneCopyState.siEpoch or 0) then
++            if data then data:dispose() end
++            return
++        end
+         local profileStart=cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0
+ 
+         if err or not data then
+@@ -9534,6 +9754,10 @@
+ end
+ rainDynamicSceneCopyState.smearUpdate = function(state, sim)
+     local r = cfg.RUNTIME
++    if r.RAIN_PHYSICS_SI_PREVIEW then
++        state.smearLevel=0;state.smearDensity=0;state.smearFacing=0;state.smearTarget=0
++        state.smearTriggered=false;return 0
++    end
+     if sim.frame ~= nil and state.smearFrame == sim.frame then
+         return state.smearLevel or 0.0
+     end
+@@ -10343,6 +10567,10 @@
+ -- Persistent, noisily decaying trail canvas (thinner copies of moving heads).
+ rainDynamicSceneCopyState.waterFieldUpdateTrail = function(state, stamps,
+     headSize, sim)
++    if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then
++        state.waterTrailRead=nil;state.waterTrailReady=false;state.waterTrailComposite=nil
++        return
++    end
+     if state.newTrailActive then state.pendingSplash=nil;return end
+     if not cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_TRAIL_ENABLED then
+         state.waterTrailReady = false
+@@ -10700,7 +10928,7 @@
+     if(metric.a<.5) {pos=0;R=0;vel=0;idx=0;gen=0;rUV=0;return false;}
+     vel = rgPlane(st.ba);
+     rUV = max(me.r, 0.0);
+-    R = rUV * gSize;
++    R = rUV * gSize * (gHeadDisplayGain>0 ? gHeadDisplayGain : 1);
+     idx = (float)i + 1.0;          // Lua slots are 1-based (seeds)
+     gen = floor(packed / 4.0);
+     if (abs(status - 1.0) > 0.25) return false;
+@@ -11045,6 +11273,9 @@
+     values.gSummaryWords = summaryWords
+     values.gSparseWords = r.RAIN_GPU_HEADS_SPARSE_WORDS and 1.0 or 0.0
+     values.gCount = count
++    values.gHeadDisplayGain=r.RAIN_PHYSICS_SI_PREVIEW and r.RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN
++        *(r.RAIN_PHYSICS_P2_BIRTH_PREVIEW and r.RAIN_GPU_STATE_LIFECYCLE
++            and (r.RAIN_GPU_STATE_MODE==3 or r.RAIN_GPU_STATE_MODE==6) and r.RAIN_BIRTH_DISPLAY_SCALE or 1) or 1
+     values.gKs = math.max(1.0, r.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
+     values.gMaxRadii = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII
+     values.gLookback = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS
+@@ -11060,7 +11291,7 @@
+     values.gLobesOn = r.RAIN_DYNAMIC_WATER_FIELD_LOBES and 1.0 or 0.0
+     values.gFlipY = r.RAIN_GPU_HEADS_FLIP_Y and 1.0 or 0.0
+     values.gDebug = r.RAIN_GPU_HEADS_DEBUG or 0
+-    values.gSweepEnabled=not st.newTrailActive and r.RAIN_DYNAMIC_TRAIL_MASK_ENABLED and 1 or 0
++    values.gSweepEnabled=not r.RAIN_PHYSICS_SI_PREVIEW and not st.newTrailActive and r.RAIN_DYNAMIC_TRAIL_MASK_ENABLED and 1 or 0
+     values.gSweepWidthScale=r.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE
+     values.gSweepWidthOffset=r.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM*r.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM*size*.5
+     values.gSweepMinRadius=math.max(.25,r.RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS)*size/math.max(r.RAIN_DYNAMIC_TRAIL_MASK_SIZE,1)*.5
+@@ -11135,7 +11366,7 @@
+ end
+ rainDynamicSceneCopyState.newTrailMode=function(sim)
+     local st=rainDynamicSceneCopyState
+-    local want=cfg.RUNTIME.RAIN_NEW_TRAIL_ENABLED and cfg.RUNTIME.RAIN_GPU_HEADS
++    local want=not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_NEW_TRAIL_ENABLED and cfg.RUNTIME.RAIN_GPU_HEADS
+     local r=cfg.RUNTIME
+     if want then
+         st.pendingSplash=nil -- retired CPU trail queue has no consumer in New Trail
+@@ -11384,7 +11615,15 @@
+     return res
+ end
+ rainDynamicSceneCopyState.updateBirthMask = function(sim)
+-    if not rainDynamicStateHasSnapshot then return end
++    if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then
++        local st=rainDynamicSceneCopyState
++        st.waterTrailRead=nil;st.waterTrailReady=false;st.waterTrailComposite=nil
++        st.trailMaskRead=nil;st.newTrailActive=false
++        if st.gpuSplashList then for i=#st.gpuSplashList,1,-1 do st.gpuSplashList[i]=nil end end
++        if st.gpuOverrides then for i=#st.gpuOverrides,1,-1 do st.gpuOverrides[i]=nil end end
++        if st.gpuOverride then st.gpuOverride:clear(rgbm.colors.transparent) end
++    end
++    if not rainDynamicStateHasSnapshot and not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then return end
+     local state = rainDynamicSceneCopyState
+     local size = math.max(128, math.floor(
+         cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE))
+@@ -11425,7 +11664,7 @@
+     -- R1.1: GPU heads fill the canvas; the CPU pass then only overlays the
+     -- splash / tear pieces and records splash overrides.
+     state.gpuHeadsActive = false
+-    if (waterField or state.newTrailActive) and cfg.RUNTIME.RAIN_GPU_HEADS then
++    if (cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW or waterField or state.newTrailActive) and cfg.RUNTIME.RAIN_GPU_HEADS then
+         local tg = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+         local okG, resG = pcall(state.measure,'Heads total',state.gpuHeadsRun,target,size,sim)
+         state.gpuHeadsActive = okG and resG == true
+@@ -11439,6 +11678,12 @@
+         state.profGpuSubmitMs = ((cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0) - tg) * 1000.0
+     end
+ 
++    if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then
++        state.birthMaskReady=state.gpuHeadsActive
++        state.birthMaskFrame=state.gpuHeadsActive and sim.frame or nil
++        if not state.gpuHeadsActive then state.birthMaskRead=nil end
++        return state.gpuHeadsActive
++    end
+     local cpuBuildStart = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and os.preciseClock() or 0.0
+     local stamps = {}
+     local count = rainDynamicStateReadbackCount
+@@ -14974,12 +15219,12 @@
+             ),
+ 
+             gDynamicDropMicroPatternEnabled =
+-                cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
++                not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
+                 and rainDynamicSceneCopyState.microPatternReady
+                 and 1.0 or 0.0,
+             gDynamicDropMicroDebug =
+                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_DEBUG and 1.0 or 0.0,
+-            gDynamicDropMicroRain = (cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED and 1 or 0)*math.max(0.0, math.min(1.0,
++            gDynamicDropMicroRain = (not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED and 1 or 0)*math.max(0.0, math.min(1.0,
+                 cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0
+                     and cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
+                     or sim.rainIntensity or 0.0))
+@@ -15114,7 +15359,7 @@
+             gDynamicDropLargeEdgeSoft = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_EDGE_SOFT,
+             gDynamicDropSmearIntensity = rainDynamicSceneCopyState.smearUpdate(
+                 rainDynamicSceneCopyState, sim),
+-            gDynamicDropSmear = (cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
++            gDynamicDropSmear = (not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
+                 and ((rainDynamicSceneCopyState.smearLevel or 0.0) > 0.001
+                     or cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG > 0))
+                 and 1.0 or 0.0,
+@@ -15190,7 +15435,7 @@
+             gDynamicDropWaterToneRatioMax = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_RATIO_MAX,
+             gDynamicDropWaterToneBgMip = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_BG_MIP,
+             gDynamicDropHazeEnabled =
+-                cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED and 1.0 or 0.0,
++                not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED and 1.0 or 0.0,
+             gDynamicDropHazeMistCells = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_MIST_CELLS,
+             gDynamicDropHazeOrderCells =
+                 cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ORDER_CELLS,
+@@ -16592,6 +16837,7 @@
+     rainDynamicSceneCopyState.nativeCaptureHide()
+     if rainDynamicSurfaceMesh then rainDynamicSurfaceMesh:setVisible(false,false);rainDynamicSurfaceMesh:setShadows(false) end
+     rainDynamicSceneCopyState.materialSettings:flush()
++    rainDynamicSceneCopyState.physicsInputsUpdate()
+ 
+     --------------------------------------------------------
+     -- Initialize
+@@ -17106,6 +17352,153 @@
+ 
+ -- RainFX UI: callbacks keep local variables isolated and only draw open panels.
+ rainDynamicSceneCopyState.rainUIPanels = {}
++rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
++    local st=rainDynamicSceneCopyState
++    st.physicsInputsUpdate()
++    if st.physicsInputsError then ui.textWrapped(st.physicsInputsError);return end
++    local p,u=st.physicsInputs,st.physicsUnits
++    if not p or not p.intensity then ui.text('Waiting for weather inputs');return end
++    ui.text('P0: independent weather and unit validation')
++    ui.text('Read-only observer. Display scaling, Smear and impact film do not feed these inputs.')
++    ui.text(string.format('I %.6f (%s)  raw %s  liquid I %.6f',p.intensity,p.sources.intensity,
++        tostring(p.rawIntensity),p.liquidIntensity))
++    ui.text(string.format('Types %s -> %s  transition %.3f  liquid fraction %.3f',
++        tostring(p.currentType),tostring(p.upcomingType),p.transition,p.liquidFraction))
++    ui.text(string.format('Track wetness %.4f (%s)  puddles %.4f (%s)',
++        p.trackWetness,p.sources.trackWetness,p.trackWater,p.sources.trackWater))
++    ui.text('Track values are not visor water or a measured spray flux.')
++    ui.text(string.format('RH %.4f (%s)  T %.2f C (%s)  p %.1f Pa (%s)',
++        p.humidity,p.sources.humidity,p.temperatureC,p.sources.temperature,p.pressurePa,p.sources.pressure))
++    ui.text(string.format('Dew point %s C  air density estimate %.4f kg/m^3',
++        p.dewPointC and string.format('%.2f',p.dewPointC) or 'unknown',p.airDensity))
++    ui.text(p.dewPointStatus..'; no condensation is generated')
++    ui.separator()
++    ui.text(string.format('World wind (%.3f, %.3f, %.3f) m/s  valid=%s',
++        p.windX,p.windY,p.windZ,tostring(p.windValid)))
++    ui.text(string.format('Car %.2f km/h  relative air (%.3f, %.3f, %.3f) m/s',
++        p.carSpeedMS*3.6,p.airX,p.airY,p.airZ))
++    ui.text(string.format('Raw car G (%.5f, %.5f, %.5f)  valid=%s',
++        p.carGx,p.carGy,p.carGz,tostring(p.carGValid)))
++    ui.text(string.format('World raw G x 9.80665 (%.4f, %.4f, %.4f) m/s^2  basis=%s',
++        p.rawWorldAccelerationX,p.rawWorldAccelerationY,p.rawWorldAccelerationZ,tostring(p.basisValid)))
++    ui.text(string.format('Stationary samples %d  mean car G (%.5f, %.5f, %.5f)',
++        p.stationaryCount,p.stationaryGx,p.stationaryGy,p.stationaryGz))
++    ui.text('Gravity convention: '..p.gravityConvention..'; rotation units: '..p.rotationUnits)
++    ui.text(string.format('Inertial acceleration (%.4f, %.4f, %.4f) m/s^2  verified=%s',
++        p.inertiaX,p.inertiaY,p.inertiaZ,tostring(p.inertiaVerified)))
++    ui.text('Observed G excludes gravity. Inertia reverses raw world acceleration; gravity is added separately.')
++    if ui.button('Reset stationary samples') then p:resetStationary() end
++    ui.sameLine()
++    if ui.button('Log input snapshot') then ac.log(appNameDebug..' '..p:format()) end
++    ui.separator()
++    ui.text(string.format('Invalid/capped input masks: %d / %d  updates=%d  solid enums=%s',
++        p.invalidMask,p.clampedMask,p.updates,tostring(p.solidEnumAvailable)))
++    ui.text(string.format('Legacy calibration: 4096x1024 U=%.9f/mm  %.3f px/mm',
++        cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM,
++        cfg.RUNTIME.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM*4096))
++    if st.surface.ready then
++        local a,b,c=st.surface:metric(.5,-.5)
++        if a then
++            local x,y,area=u.metricCalibration(a,b,c,st.surface.scale,4096,1024)
++            if x then ui.text(string.format('KN5 centre metric: U %.3f px/mm  V %.3f px/mm  cell %.6f mm^2',x,y,area)) end
++        else ui.text('KN5 centre sample is outside the supported rain surface') end
++    else ui.text('KN5 metric is awaiting geometry/hash validation') end
++    ui.text('Local metric can differ from the nominal 6 px/mm; physical/visual transform separation is P1.')
++    ui.separator()
++    local v=u.volumeMM3(1.15);local radius=u.contactRadiusMM(v,90)
++    ui.text(string.format('20 C reference: D_eq 1.15 mm -> V %.4f mm^3, mass %.4f mg, contact D %.4f mm (theta=90)',
++        v,u.massKG(v)*1e6,radius*2))
++    ui.text('Reference geometry only; contact angles and aerodynamic exposure still require calibration.')
++    ui.separator()
++    ui.text('P1 SI motion preview: volume/contact-force transport. P2 birth is a separate opt-in preview below.')
++    if ui.checkbox('Enable P1 SI motion preview',cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW) then
++        if cfg.RUNTIME.RAIN_GPU_HEADS then
++            cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++            if not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false end
++            st.siUIError=nil
++        else st.siUIError='P1 preview requires GPU heads enabled' end
++    end
++    if st.siUIError then ui.text(st.siUIError) end
++    ui.text('Switching resets rain state. Preview omits Smear, local film, legacy trails/wipes/splashes/micro/haze.')
++    ui.text('P1 uses the legacy birth-size profile; P2 uses estimated airborne DSD/retained volume. Theta is provisional and uniform.')
++    ui.text('Water properties use the 20 C reference in this preview; weather-dependent properties are next.')
++    st.rainUISlider('Display diameter gain (render only)','RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN',.1,2,'%.3f')
++    st.rainUISlider('Contact angle (degrees)','RAIN_PHYSICS_CONTACT_ANGLE_DEG',30,150,'%.1f')
++    st.rainUISlider('Local air fraction (estimated)','RAIN_PHYSICS_LOCAL_AIR_FRACTION',0,1,'%.3f')
++    st.rainUISlider('Viscous shape coefficient','RAIN_PHYSICS_VISCOUS_SHAPE',1,300,'%.1f')
++    st.rainUISlider('Attached cap drag coefficient','RAIN_PHYSICS_ATTACHED_CD',0,3,'%.2f')
++    st.rainUISlider('Static hysteresis span: bare (deg)','RAIN_PHYSICS_STATIC_SPAN_BARE_DEG',0,60,'%.1f')
++    st.rainUISlider('Static hysteresis span: coat (deg)','RAIN_PHYSICS_STATIC_SPAN_COAT_DEG',0,60,'%.1f')
++    st.rainUISlider('Dynamic hysteresis span: bare (deg)','RAIN_PHYSICS_DYNAMIC_SPAN_BARE_DEG',0,60,'%.1f')
++    st.rainUISlider('Dynamic hysteresis span: coat (deg)','RAIN_PHYSICS_DYNAMIC_SPAN_COAT_DEG',0,60,'%.1f')
++    local responseRadius=u.contactRadiusMM(v,cfg.RUNTIME.RAIN_PHYSICS_CONTACT_ANGLE_DEG or 90)
++    local responseDrag=(cfg.RUNTIME.RAIN_PHYSICS_VISCOUS_SHAPE or 80)*u.viscosity*responseRadius*2*.001
++    ui.text(string.format('20 C reference D_eq=1.15 mm: viscous m/c %.3f ms (excludes aerodynamic/contact transients)',
++        u.massKG(v)/math.max(responseDrag,1e-20)*1000))
++    ui.separator()
++    if ui.checkbox('Enable P2 physical birth preview',cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW) then
++        if cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++            cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false;st.siUIError=nil
++        elseif cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_GPU_HEADS and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
++            and (cfg.RUNTIME.RAIN_GPU_STATE_MODE==3 or cfg.RUNTIME.RAIN_GPU_STATE_MODE==6) then
++            cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
++            st.siUIError=nil
++        else st.siUIError='P2 requires P1 SI preview, GPU heads and lifecycle mode 3 or 6' end
++    end
++    if cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++        ui.text('P2 starts empty and resets the rain/budget banks. Material retention/impact flow are estimated.')
++        ui.text('Supply uses physical rate/area/incidence; legacy density/occupancy/respawn-gap controls do not feed P2.')
++        ui.text('Film/micro/capacity reserves are recorded but not rendered until P3. No legacy local impact film.')
++        st.rainUISlider('P2 display scale (render only)','RAIN_BIRTH_DISPLAY_SCALE',.05,2,'%.3f')
++        st.rainUISlider('Estimated source exposure','RAIN_BIRTH_EXPOSURE',0,1,'%.3f')
++        st.rainUISlider('Estimated incident-air fraction','RAIN_BIRTH_INCIDENT_AIR_FRACTION',0,1,'%.3f')
++        st.rainUISlider('Tangent impulse fraction','RAIN_BIRTH_TANGENT_IMPULSE_FRACTION',0,1,'%.3f')
++        st.rainUISlider('Minimum persistent airborne D (mm)','RAIN_BIRTH_MIN_PERSISTENT_MM',.05,1,'%.3f')
++        st.rainUISlider('Manual local wet-state override (not track)','RAIN_BIRTH_WET_OVERRIDE',0,1,'%.3f')
++        if ui.checkbox('Reverse outward normal (calibration)',cfg.RUNTIME.RAIN_BIRTH_NORMAL_REVERSED) then
++            cfg.RUNTIME.RAIN_BIRTH_NORMAL_REVERSED=not cfg.RUNTIME.RAIN_BIRTH_NORMAL_REVERSED
++        end
++        if st.physicalBirthGPU then
++            if st.physicalBirthGPU.assetError then ui.textWrapped(st.physicalBirthGPU.assetError) end
++            ui.text(string.format('P2 physical area %.5f m^2; published ticks %d; pending=%s',
++                st.physicalBirthGPU.localAreaM2*st.surface.scale^2,st.physicalBirthGPU.tick,tostring(st.physicalBirthGPU.pending)))
++            if ui.button('Log P2 actual GPU budget') then st.physicalBirthGPU:logBudget() end
++        end
++    end
++    if ui.checkbox('Enable P2 birth diagnostics (no simulation change)',cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS) then
++        cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS=not cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS
++    end
++    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS or cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++        ui.text('Estimated airborne NUMBER distribution; P2 commits attached drops and records reservoir water.')
++        st.rainUISlider('Estimated rate at I=1 (mm/h)','RAIN_RATE_AT_INTENSITY_1_MM_H',0,150,'%.1f')
++        st.rainUISlider('Estimated intensity power','RAIN_RATE_INTENSITY_POWER',.1,4,'%.2f')
++        st.rainUISlider('DSD override: 0 auto, 1 drizzle, 2 general, 3 tail, 4 windrich',
++            'RAIN_PHYSICS_DSD_SEED_OVERRIDE',0,4,'%.0f')
++        if st.physicsBirthError then ui.textWrapped(st.physicsBirthError) end
++        local b=st.physicsBirth
++        if b then
++            ui.text(string.format('Estimated rate %.3f mm/h; number concentration %.3f /m^3; number mean D %.3f mm',
++                b.rateMMH,b.numberDensityM3,b.meanDiameterMM))
++            ui.text(string.format('DSD weights drizzle/general/tail/windrich: %.3f / %.3f / %.3f / %.3f',
++                b.weights[1],b.weights[2],b.weights[3],b.weights[4]))
++            ui.text('Track wetness/puddles/RH do not create rain supply; car speed changes encounter, not airborne DSD.')
++            if b.supercooled then ui.text('Below liquid calibration range: freezing/condensation is not simulated.') end
++            if ui.button('Log P2 reference-plane encounter') then
++                -- Reference planes only. GPU binding will use the transformed local KN5 normal.
++                st.birthPlaneReport=st.birthPlaneReport or {}
++                local result=b:encounter(0,1,0,1,st.birthPlaneReport)
++                ac.log(string.format('%s Rain P2 reference up plane: estimated %.3f mm/h, N %.3f /m^2/s, V %.3f mm^3/m^2/s, incident mean D %.3f mm',
++                    appNameDebug,b.rateMMH,result.numberM2S,result.volumeMM3M2S,result.meanDiameterMM))
++                local car=ac.getCar(0)
++                if car and car.look then
++                    result=b:encounter(car.look.x,car.look.y,car.look.z,1,st.birthPlaneReport)
++                    ac.log(string.format('%s Rain P2 reference car-forward plane (not actual visor): N %.3f /m^2/s, V %.3f mm^3/m^2/s, incident mean D %.3f mm',
++                        appNameDebug,result.numberM2S,result.volumeMM3M2S,result.meanDiameterMM))
++                end
++            end
++        end
++    end
++end
+ rainDynamicSceneCopyState.rainUISlider = function(label, key, lo, hi, fmt)
+     local value, changed = ui.slider(label, cfg.RUNTIME[key], lo, hi, fmt)
+     if changed then
+@@ -17309,6 +17702,10 @@
+ rainDynamicSceneCopyState.rainUIPanels['forces'] = function()
+     local tfSlider = rainDynamicSceneCopyState.rainUISlider
+     local tfCheck = rainDynamicSceneCopyState.rainUICheck
++    if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then
++        ui.text('SI preview uses source toggles, but ignores legacy gain/adhesion/speed sliders below.')
++        ui.text('Use the P0/P1 panel for contact material, local air, viscous drag and display-only size.')
++    end
+     local movingCap, movingCapChanged = ui.slider(
+         'Moving drop speed / calibrated cap',
+         cfg.RUNTIME.RAIN_GPU_STATE_MOBILE_SPEED_MULTIPLIER,
+@@ -19412,6 +19809,7 @@
+     ui.text('Choose a group to open its settings. Values remain live when the popup is closed.')
+     ui.separator()
+     ui.text('Simulation and births')
++    rainDynamicSceneCopyState.rainUIGroup('Weather inputs and physical units (P0)', 'physics_inputs')
+     ui.columns(2, false, '##RainFXMenu_Simulation_and_births')
+     rainDynamicSceneCopyState.rainUIGroup('Population and GPU birth sites', 'population')
+     ui.nextColumn()

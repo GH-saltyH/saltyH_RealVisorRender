@@ -1,0 +1,58 @@
+{
+  "realvisor.lua": {
+    "source": "5dc338ab3aaedd77a3591ee337ceca07027f7cae27059351e4be184c91b300f5",
+    "installed": "5dc338ab3aaedd77a3591ee337ceca07027f7cae27059351e4be184c91b300f5"
+  },
+  "rain_birth_gpu.lua": {
+    "source": "00697f0f05beeda2da75e4b52048143b9e67fc2666e952a27be6ded9eb282b06",
+    "installed": "00697f0f05beeda2da75e4b52048143b9e67fc2666e952a27be6ded9eb282b06"
+  },
+  "rain_birth_model.lua": {
+    "source": "1dfd57fe47feebfb4a9f4b5dcb1d25217723bc07222f0539d341218556795014",
+    "installed": "1dfd57fe47feebfb4a9f4b5dcb1d25217723bc07222f0539d341218556795014"
+  },
+  "shaders/rainBirthEvent.hlsl": {
+    "source": "af874c57d6feca22ea6bb007fef0102ff21f6ffda8d1a9cdb328506335620166",
+    "installed": "af874c57d6feca22ea6bb007fef0102ff21f6ffda8d1a9cdb328506335620166"
+  },
+  "shaders/rainBirthBlocks.hlsl": {
+    "source": "2214a73f9d6d29a52d98ff316a5ef64a90f05022d45f7e1934aafed6050edb38",
+    "installed": "2214a73f9d6d29a52d98ff316a5ef64a90f05022d45f7e1934aafed6050edb38"
+  },
+  "shaders/rainBirthTotals.hlsl": {
+    "source": "7ada70ae88484003a50734b7adf953811bdc7f90458b47002a0f439d50aa1bbf",
+    "installed": "7ada70ae88484003a50734b7adf953811bdc7f90458b47002a0f439d50aa1bbf"
+  },
+  "shaders/rainBirthStats.hlsl": {
+    "source": "fad4a3264482ca002996bc519c99a7437512c81a2e3eb33b12f7bd7730e58bc8",
+    "installed": "fad4a3264482ca002996bc519c99a7437512c81a2e3eb33b12f7bd7730e58bc8"
+  },
+  "shaders/rainStateEntry.hlsl": {
+    "source": "4858d6cb9322556ad31e9c479a21cee6b9f72a5cb064ffe0d83a06f88e8953f6",
+    "installed": "4858d6cb9322556ad31e9c479a21cee6b9f72a5cb064ffe0d83a06f88e8953f6"
+  },
+  "shaders/rainMetaEntry.hlsl": {
+    "source": "29242b5e5259e423cbeadd2e26114eb2cdbd5ee2075a9c88be0acb00f47e218a",
+    "installed": "29242b5e5259e423cbeadd2e26114eb2cdbd5ee2075a9c88be0acb00f47e218a"
+  },
+  "texture/RAIN_BIRTH/assets.json": {
+    "source": "5d08cb9ee5112447d3790f7b019fe4e6159bb29ec344ae7cd603758cba3b273e",
+    "installed": "5d08cb9ee5112447d3790f7b019fe4e6159bb29ec344ae7cd603758cba3b273e"
+  },
+  "texture/RAIN_BIRTH/dsd.dds": {
+    "source": "da764340556ab31a5c66ff4923dcea0fa6a7a7a9c74bdc544d1c4fc779b0795e",
+    "installed": "da764340556ab31a5c66ff4923dcea0fa6a7a7a9c74bdc544d1c4fc779b0795e"
+  },
+  "texture/RAIN_BIRTH/geometry.lua": {
+    "source": "76abb3e12e50e3c91dd897d28f347336f405cc7d7e4ff76087f5645c4acfbb85",
+    "installed": "76abb3e12e50e3c91dd897d28f347336f405cc7d7e4ff76087f5645c4acfbb85"
+  },
+  "texture/RAIN_BIRTH/impact_estimated.dds": {
+    "source": "2f61040bd7f505dc49283993b1a2ca5566e924a60277e2f7f6f2e2aa0addd21e",
+    "installed": "2f61040bd7f505dc49283993b1a2ca5566e924a60277e2f7f6f2e2aa0addd21e"
+  },
+  "texture/RAIN_BIRTH/sites.dds": {
+    "source": "c1dd518db0bc202c326c717dc2ff5025fbcca4b426f58711b66b7c1ccbd7f052",
+    "installed": "c1dd518db0bc202c326c717dc2ff5025fbcca4b426f58711b66b7c1ccbd7f052"
+  }
+}

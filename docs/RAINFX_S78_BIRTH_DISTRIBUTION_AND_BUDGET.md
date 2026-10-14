@@ -1,6 +1,6 @@
 # RainFX s78 — P1 게임 판정과 P2 크기·유입·충돌 계산 준비
 
-Date: 2026-10-14. Status: ACTIVE — P1 게임 결과 기록, P2 진단 계산과 UI 구현/검증 완료. GPU birth/event commit은 아직 연결하지 않았다.
+Date: 2026-10-14. Status: REFERENCE — P1 게임 결과 기록과 P2 진단 계산 준비. 당시 미연결 GPU birth/event commit과 원장은 후속 s79 preview에서 연결했다.
 
 ## 1. 이번 단계와 남은 구현
 

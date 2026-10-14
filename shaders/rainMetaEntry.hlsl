@@ -14,11 +14,19 @@ float4 main(PS_IN pin) {
         float status=gRainStateLifecycle>.5 && rainStateHash(index+419)>=gRainStateTargetOccupancy ? 0 : 1;
         if(gRainSiOn>.5 && status<.5) {radius=0;volume=0;}
         result=float4(radius,volume,0,status);
+        if(gRainBirthOn>.5)result=0; // P2 begins empty: all water enters through a budgeted event.
     } else {
         result=txRainStateMeta.SampleLevel(samPointRainMeta,suv,0);
         float dt=max(gRainStateDeltaTime,0);
         bool age=true;
-        if(gRainStateLifecycle>.5) {
+        float4 birth=0;
+        [branch] if(gRainBirthOn>.5)birth=txRainBirthEvent.Load(int3((int)index,0,0));
+        float oldGeneration=floor(result.a*.25);
+        float expectedTag=fmod(oldGeneration+1,4096)+1;
+        if(gRainBirthOn>.5 && result.a-oldGeneration*4<.5 && birth.a==expectedTag && birth.b>0) {
+            result=float4(rainSiContactRadiusMM(birth.b,gRainSiTheta)*gRainStatePhysicalRadiusUVPerMM*2,
+                birth.b,0,(birth.a-1)*4+1);age=false;
+        } else if(gRainStateLifecycle>.5) {
             float generation=floor(result.a*.25),status=result.a-generation*4;
             float rain=saturate(gRainStateRainIntensity);
             if(status>1.5) {
@@ -29,6 +37,8 @@ float4 main(PS_IN pin) {
                 result.r=gRainSiOn>.5 ? rainSiContactRadiusMM(result.g,gRainSiTheta)*gRainStatePhysicalRadiusUVPerMM*2
                     : d*gRainStatePhysicalRadiusUVPerMM;
                 result.a=next*4+1;result.b=0;age=false;
+            } else if(status<.5 && gRainBirthOn>.5) {
+                result.b=0;age=false; // No occupancy gate, synthetic gap or pending respawn.
             } else if(status<.5) {
                 result.b+=dt;age=false;
                 float gap=lerp(gRainStateRespawnGapMin,gRainStateRespawnGapMax,

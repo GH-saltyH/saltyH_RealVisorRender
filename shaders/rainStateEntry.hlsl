@@ -24,7 +24,12 @@ float4 main(PS_IN pin) {
         float dt=max(gRainStateDeltaTime,0);
         bool moving=true;
         result=float4(p,v);
-        if(gRainStateLifecycle>.5) {
+        float4 birth=0;
+        [branch] if(gRainBirthOn>.5)birth=txRainBirthEvent.Load(int3((int)index,0,0));
+        float expectedTag=fmod(floor(meta.a*.25)+1,4096)+1;
+        if(gRainBirthOn>.5 && meta.a-4*floor(meta.a*.25)<.5 && birth.a==expectedTag && birth.b>0) {
+            result=float4(birth.rg,txRainBirthEvent.Load(int3((int)index,1,0)).rg);moving=false;
+        } else if(gRainStateLifecycle>.5) {
             float generation=floor(meta.a*.25),status=meta.a-generation*4;
             if(status>1.5) {
                 float2 pos=p;
@@ -36,7 +41,7 @@ float4 main(PS_IN pin) {
         if(moving) {
             float jitter=frac(sin(index*12.9898+78.233)*43758.5453);
             float hold=gRainBirthHold*(.6+.8*jitter);
-            float k=gRainStateLifecycle>.5 ? saturate((meta.b-hold)/max(gRainBirthRamp,1e-3)) : 1;
+            float k=gRainStateLifecycle>.5 && gRainBirthOn<.5 ? saturate((meta.b-hold)/max(gRainBirthRamp,1e-3)) : 1;
             k=k*k*(3-2*k);dt*=k;v*=k>0 ? 1 : 0;
 #ifdef RAIN_MERGE_CODE
             if(gRainMergeEnabled>.5 && gRainStateLifecycle>.5

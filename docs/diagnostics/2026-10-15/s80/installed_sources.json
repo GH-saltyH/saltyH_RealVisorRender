@@ -1,0 +1,49 @@
+{
+  "preservedRuntimeTuning": true,
+  "sources": {
+    "realvisor.lua": {
+      "sha256": "3c4d574cf1bd2a3225fefa6c95e45d0f3dfdc279bb2999cacfe1a77e3ba38fed",
+      "installedMatch": true
+    },
+    "rain_birth_gpu.lua": {
+      "sha256": "2268b6cff1d5b69e5d78744f32e1f5eb7e66633b602871a28621acb439455219",
+      "installedMatch": true
+    },
+    "rain_birth_model.lua": {
+      "sha256": "1dfd57fe47feebfb4a9f4b5dcb1d25217723bc07222f0539d341218556795014",
+      "installedMatch": true
+    },
+    "rain_environment.lua": {
+      "sha256": "37d451332168226f7dedd1f7ad0de1d5228632321f928013dd601891c609ba4a",
+      "installedMatch": true
+    },
+    "rain_physics_units.lua": {
+      "sha256": "38da523cde792d278b98dc99bb2562a9af08b528e74beb35e803354c88dcb416",
+      "installedMatch": true
+    },
+    "shaders/rainStateEntry.hlsl": {
+      "sha256": "4858d6cb9322556ad31e9c479a21cee6b9f72a5cb064ffe0d83a06f88e8953f6",
+      "installedMatch": true
+    },
+    "shaders/rainMetaEntry.hlsl": {
+      "sha256": "29242b5e5259e423cbeadd2e26114eb2cdbd5ee2075a9c88be0acb00f47e218a",
+      "installedMatch": true
+    },
+    "shaders/rainBirthEvent.hlsl": {
+      "sha256": "af874c57d6feca22ea6bb007fef0102ff21f6ffda8d1a9cdb328506335620166",
+      "installedMatch": true
+    },
+    "shaders/rainBirthBlocks.hlsl": {
+      "sha256": "2214a73f9d6d29a52d98ff316a5ef64a90f05022d45f7e1934aafed6050edb38",
+      "installedMatch": true
+    },
+    "shaders/rainBirthTotals.hlsl": {
+      "sha256": "7ada70ae88484003a50734b7adf953811bdc7f90458b47002a0f439d50aa1bbf",
+      "installedMatch": true
+    },
+    "shaders/rainBirthStats.hlsl": {
+      "sha256": "fad4a3264482ca002996bc519c99a7437512c81a2e3eb33b12f7bd7730e58bc8",
+      "installedMatch": true
+    }
+  }
+}

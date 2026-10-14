@@ -1,0 +1,58 @@
+{
+  "compiler": "FXC ps_5_0 /Ges /WX",
+  "checks": [
+    {
+      "case": "actual same-event state/volume commit, empty initialization, no stale generation replay",
+      "volumeMM3": 0.14379331374868284
+    },
+    {
+      "case": "persistent source/film/micro/bounce/capacity/edge/drop inventory balance and stats staging",
+      "finalTotalsMM3": [
+        55.216590881347656,
+        11.043322563171387,
+        5.521661281585693,
+        11.043322563171387,
+        18.40553092956543,
+        9.202765464782715,
+        0.0,
+        384.0
+      ],
+      "residualMM3": -1.52587890625e-05
+    },
+    {
+      "case": "bounded high-rate overflow and microscopic source route conserve volume",
+      "passed": true
+    },
+    {
+      "case": "actual authored/explicit outward normal, grazing rejection and raw SI skew/reference invariance",
+      "passed": true
+    },
+    {
+      "case": "rotated world incidence and physical scale2 area4/UV-velocity-half",
+      "passed": true
+    },
+    {
+      "case": "P2 OFF legacy and P1 state/meta are bit-identical to acc0c63",
+      "passed": true
+    },
+    {
+      "case": "P2 production merge/wetpath macros /WX compile and conserve V/momentum",
+      "passed": true
+    },
+    {
+      "case": "4096-slot immutable event execution, finite values and no CPU stamp limit",
+      "passed": true
+    },
+    {
+      "case": "real 128-bin DSD and terminal-speed encounter rejection sample statistics, 65536 proposals",
+      "volumeRatio": 0.9626700627643933,
+      "countRatio": 0.9915151649922246,
+      "volumeZScore": -1.9083861285647723
+    },
+    {
+      "case": "precise GPU Kahan retains sub-ULP supply against 1e8 mm3 cumulative total",
+      "increment": 8.0,
+      "compensation": -0.5
+    }
+  ]
+}

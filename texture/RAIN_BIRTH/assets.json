@@ -1,0 +1,19 @@
+{
+  "areaM2": 0.04028860095237055,
+  "sha256": {
+    "texture/RAIN_GEOMETRY/du.dds": "143afb1939afd16f10fa3c0277058e1a8254966b25a85629a36d8812f99a583e",
+    "texture/RAIN_GEOMETRY/dv.dds": "cace1302aa31b2028711f7db31cf2fd5ddd3328cb62be51e842be9a11c6b45cd",
+    "texture/RAIN_GEOMETRY/normal.dds": "37106242e5df4b7fcb81a56574e3ebecca3d7c98207e4ab6a6284ae8ec9c2e79",
+    "texture/RAIN_GEOMETRY/spawn_sites.dds": "60c5c1eeffa3ef4154b31472a8f74730331a054e933f68b18ac812cd6076e165",
+    "texture/RAIN_GEOMETRY/surface.verify": "1a99533d310e85ac23e89c57d62431ab3bf191a273744e38c833dc07b1348086",
+    "texture/RAINFX_ObjNormal_BoundaryMask.dds": "08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",
+    "rain_birth_model.lua": "1dfd57fe47feebfb4a9f4b5dcb1d25217723bc07222f0539d341218556795014",
+    "texture/RAIN_BIRTH/dsd.dds": "da764340556ab31a5c66ff4923dcea0fa6a7a7a9c74bdc544d1c4fc779b0795e",
+    "texture/RAIN_BIRTH/impact_estimated.dds": "2f61040bd7f505dc49283993b1a2ca5566e924a60277e2f7f6f2e2aa0addd21e",
+    "texture/RAIN_BIRTH/sites.dds": "c1dd518db0bc202c326c717dc2ff5025fbcca4b426f58711b66b7c1ccbd7f052"
+  },
+  "authoredAlignmentMin": 0.07400958240032196,
+  "weakAlignmentSites": 2,
+  "sourceSites": 8192,
+  "confidence": "estimated material/DSD; baked physical metric area"
+}

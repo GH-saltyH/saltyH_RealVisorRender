@@ -1,0 +1,118 @@
+{
+  "date": "2026-10-15",
+  "build": "s79",
+  "samples": [
+    {
+      "label": "stationary",
+      "frame": 710668,
+      "input": 4476.677734,
+      "film": 514.779907,
+      "micro": 349.602966,
+      "bounce": 1368.95105,
+      "capacity": 85.293922,
+      "exit": 1575.328369,
+      "drops": 587.053528,
+      "residualReported": -4.332008,
+      "arrivals": 432,
+      "areaM2": 0.040289,
+      "fractionsPercent": {
+        "film": 11.49915043225669,
+        "micro": 7.809428928618072,
+        "bounce": 30.57962023048765,
+        "capacity": 1.905295110974812,
+        "exit": 35.18967552735616,
+        "drops": 13.11359813866825
+      },
+      "residualCalculatedMM3": -4.3320080000003145,
+      "residualPercent": -0.09676836836163276,
+      "elapsedSeconds": null,
+      "fps": null
+    },
+    {
+      "label": "driving_100_150_kmh",
+      "frame": 723626,
+      "input": 13793.625,
+      "film": 1832.92334,
+      "micro": 1487.909912,
+      "bounce": 5287.489258,
+      "capacity": 166.471283,
+      "exit": 4998.470703,
+      "drops": 22.264177,
+      "residualReported": -1.903673,
+      "arrivals": 1769,
+      "areaM2": 0.040289,
+      "fractionsPercent": {
+        "film": 13.288191755249255,
+        "micro": 10.786938980869786,
+        "bounce": 38.33284765969787,
+        "capacity": 1.2068711669340002,
+        "exit": 36.237542364679335,
+        "drops": 0.16140917996538257
+      },
+      "residualCalculatedMM3": -1.9036729999988893,
+      "residualPercent": -0.01380110739561855,
+      "elapsedSeconds": null,
+      "fps": null
+    }
+  ],
+  "idealPlanes": {
+    "rateMMH": 12.179580000000001,
+    "weights": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "numberMeanDiameterMM": 1.6362514228455458,
+    "numberMeanVolumeMM3": 6.729688997162165,
+    "volumeWeightedTerminalMS": 8.280122984847745,
+    "numberDensityM3": 60.71528385797498,
+    "sourceHash": "1dfd57fe47feebfb4a9f4b5dcb1d25217723bc07222f0539d341218556795014",
+    "planes": [
+      {
+        "label": "upward",
+        "numberPerSecond": 12.453727156791238,
+        "volumeMM3PerSecond": 136.3050662187426,
+        "arrivalMeanDiameterMM": 2.0565840213433235
+      },
+      {
+        "label": "vertical_facing_ambient_wind",
+        "numberPerSecond": 3.392763178991141,
+        "volumeMM3PerSecond": 22.832241035633615,
+        "arrivalMeanDiameterMM": 1.6362514228455467
+      },
+      {
+        "label": "vertical_leeward",
+        "numberPerSecond": 0.0,
+        "volumeMM3PerSecond": 0.0,
+        "arrivalMeanDiameterMM": 0
+      }
+    ]
+  },
+  "performanceStationary": {
+    "appOffFPS": [
+      91,
+      94
+    ],
+    "P1FPS": [
+      72,
+      73
+    ],
+    "P1P2FPS": [
+      72,
+      73
+    ],
+    "wholeAppAddedMS": [
+      2.709619147975312,
+      3.250591016548464
+    ],
+    "P2IncrementMS": null,
+    "note": "No resolvable P2 FPS difference; no isolated GPU timing."
+  },
+  "limits": [
+    "Cumulative snapshots have no elapsed-time field; do not derive observed rates.",
+    "P0 snapshots and budget frames differ; not simultaneous.",
+    "Ideal plane area equals full curved-mesh area only for normalization, not measured visor flux.",
+    "Stationary FPS provided in follow-up; driving cost is unmeasured."
+  ]
+}

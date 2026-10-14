@@ -1,4 +1,4 @@
-# RealVisor RainFX — docs index and working rules (2026-10-14)
+# RealVisor RainFX — docs index and working rules (2026-10-15)
 
 Start here. This file lists every document in `docs/` with its state, the
 current architecture in one screen, and the rules for working on the
@@ -12,6 +12,8 @@ project.
   - It runs the GPU-persistent rain state machine:
     - `rainStateUpdateParams`: position and velocity (RGBA texels);
     - `rainStateMetaUpdateParams`: radius, mass and lifecycle.
+    - Opt-in P1 uses actual volume/SI motion. Opt-in P2 adds physical-area/normal
+      birth events and a conserved source/reservoir budget; P3 film rendering remains next.
 - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
   in-scene stage. The stage is `main.smoke` by user setting
@@ -54,7 +56,9 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
-| `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | ACTIVE | P1 game result/response-time diagnosis, opt-in P2 airborne DSD/normalized flux/normal impact diagnostics; LuaJIT invariants passed, GPU birth/event commit and P3 remain unbound |
+| `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` | REFERENCE | P2 FPS/budget/videos and SI merge correction; corrected 60% stationary/straight game conservation passed (interval error ≤6.10e-6), measured source rates; P3 spatial film/micro/trail next |
+| `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | REFERENCE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; game results and merge correction follow in s80 |
+| `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | REFERENCE | P1 game result/response-time diagnosis and P2 DSD/flux/impact diagnostic preparation; live GPU birth/event/budget preview follows in s79 |
 | `RAINFX_S77_SI_MOTION_PREVIEW.md` | REFERENCE | opt-in P1 persistent SI motion/volume/display separation, single-exit state/meta fix and epoch retirement; WARP/LuaJIT plus game qualitative validation passed, weaving/friction and driving cost still open |
 | `RAINFX_S76_SI_CORE_PRIMITIVES.md` | REFERENCE | P1 shared SI GPU functions and /WX WARP invariants; persistent state binding implemented as opt-in s77 preview |
 | `RAINFX_S75_WEATHER_INPUTS_AND_UNITS.md` | ACTIVE | P0 independent weather/G/metric panel and SI/contact helpers; installed-source/LuaJIT checks passed, user stationary/acceleration/braking logs confirm G excludes gravity |

@@ -1,6 +1,46 @@
-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-14
+# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-15
 
 See `docs/README.md` for the document index and working rules.
+
+## s80 follow-up: P2 actual-game conservation passed (2026-10-15)
+
+Six corrected-game snapshots at cumulative 53.512–67.533 mL input show absolute
+residual ≤.003304 mm3. The four stable stationary/100–150 km/h straight intervals
+have relative residualDelta/input ≤6.09135e-6, below the 1e-4 design criterion.
+Observed rates are 43.917926/82.924185 mm3/s and 5.767867/14.587958 arrivals/s;
+film+micro receive 20.64465%/29.10952% of the stable-interval input.
+P2 conservation gate passed for the supplied conditions; no runtime/tuning changes.
+P3 spatial deposition, same-frame conserved trail, physical film optics and
+evaporation/runoff are now the next stage. Historical reserve totals must not
+be injected as current field water; field version/epoch starts with an explicit reset.
+Absolute material/weather calibration and P3 rendering remain unverified.
+See `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` §7.
+
+## Initial s80 delivery: P2 game review and SI merge correction (2026-10-15)
+
+User stationary app OFF91–94FPS, P1/P1+P2 both72–73FPS (+2.710–3.251ms whole app);
+P2 incremental cost is unresolved at this measurement precision. Actual cumulative
+budgets show residual -4.332008/-1.903673mm3 and film/micro reserves are still invisible.
+Reviewed timestamped samples of four supplied videos and estimated source incidence.
+Reproduced curved-metric one-sided SI merges and departed-partner exit double accounting.
+State/meta now share a symmetric distance and require both supported positions.
+Added committed simulation time/interval rate logs; no new GPU pass or per-drop CPU work.
+Actual shader /WX WARP cases and s79 numeric/wiring regression pass. Corrected game
+conservation gate is required before P3 spatial film/micro/trail rendering.
+See `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md`.
+
+## Latest s79 GPU physical birth and source budget (2026-10-14)
+
+Started from user stamp acc0c63. Added opt-in P2 physical-area/outward-normal
+arrival sampling, estimated virtual impact and shared-generation state/meta
+commit. GPU cumulative reserves/exit/inventory balance are atomically
+published with source/state; pending steps and stale readbacks are isolated.
+Display-only P2 compensation, small offline LUTs and async asset checks are
+connected. /WX WARP and actual Lua wiring checks pass, including 4096 events,
+volume/momentum/normal/reference invariants, P2 OFF identity and long-session
+sum compensation. Game input direction/look/cost verification is next;
+film/micro are reserve totals pending P3 spatial water/evaporation/optics.
+See `RAINFX_S79_GPU_PHYSICAL_BIRTH.md`.
 
 ## Latest s78 P1 game result and P2 birth diagnostic preparation (2026-10-14)
 
