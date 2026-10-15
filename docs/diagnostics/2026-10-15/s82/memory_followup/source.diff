@@ -1,0 +1,138 @@
+--- s82-initial/docs/README.md
++++ s82-memory/docs/README.md
+@@ -15,7 +15,8 @@
+     - Opt-in P1 uses actual volume/SI motion. Opt-in P2 adds physical-area/normal
+       birth events and a conserved source/reservoir budget. Opt-in P3 adds spatial
+       incident/trail water, paired head loss, evaporation/runoff and physical-height optics;
+-      supplied 60% game water budgets pass; long-run precision/memory and active film transport remain next.
++      supplied 60% water budgets and 3-minute/40-toggle memory observations pass;
++      long-run precision/cost and active film transport remain next.
+ - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
+   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
+   in-scene stage. The stage is `main.smoke` by user setting
+@@ -58,7 +59,7 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+-| `RAINFX_S82_P3_GAME_REVIEW.md` | ACTIVE | supplied P3 game conservation passes (interval error ≤2.043e-5); actual media/cost review, 100 reset cycles, long float32 arithmetic limit; post-GC plateau/trail quality/P4 transport remain open |
++| `RAINFX_S82_P3_GAME_REVIEW.md` | ACTIVE | supplied P3 conservation passes (interval error ≤2.043e-5); 3-minute/40-toggle game memory shows no sustained accumulation, 100 reset fixtures; long float32 precision, trail quality and P4 transport remain open |
+ | `RAINFX_S81_P3_SPATIAL_WATER_PREVIEW.md` | REFERENCE | first P3 conserved spatial film/micro/trail, paired head loss, wet impact/evaporation/runoff, um optics and manual field budget; initial game findings and limits follow in s82 |
+ | `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` | REFERENCE | P2 FPS/budget/videos and SI merge correction; corrected 60% stationary/straight game conservation passed (interval error ≤6.10e-6), measured source rates; P3 spatial film/micro/trail next |
+ | `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | REFERENCE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; game results and merge correction follow in s80 |
+--- s82-initial/docs/RAINFX_ROADMAP.md
++++ s82-memory/docs/RAINFX_ROADMAP.md
+@@ -10,11 +10,15 @@
+ samples of both16-second videos. Individual head/trail continuity remains unresolved.
+ Reported P2/P3 66/65FPS is within roughly1FPS measurement uncertainty.
+ 100 production mode-reset fixtures keep live-bank counts constant and release all
+-banks, but142→165MB before GC does not establish actual post-GC memory plateau.
++banks. Follow-up actual replay Memory ranges show no sustained accumulation over
++3 minutes or up to40 P3 toggles: P2 minimum66→66MB, P3 minimum68.98→62.13MB;
++toggle reference64.33MB, after5 toggles67.76MB, after40 toggles64.45MB.
++Startup-dependent declining P3 minima and33.3ms sampling limit interpretation;
++the observed-range memory check passes, not a universal leak-free certification.
+ Long production float32 arithmetic stress identifies a precision limit beyond the
+ short original test; compensation storage/bandwidth must be evaluated with P4.
+ No runtime/tuning changes in this review. Active transport/drainage/reabsorption,
+-long precision and actual memory/cost gates remain open. See `RAINFX_S82_P3_GAME_REVIEW.md`.
++long precision and10-minute/100%/4096 memory/cost gates remain open. See `RAINFX_S82_P3_GAME_REVIEW.md`.
+ 
+ ## s81 first P3 spatial water preview (2026-10-15)
+ 
+--- s82-initial/docs/RAINFX_S82_P3_GAME_REVIEW.md
++++ s82-memory/docs/RAINFX_S82_P3_GAME_REVIEW.md
+@@ -1,6 +1,6 @@
+ # RainFX s82 — P3 실제 게임 원장·표현·비용 검토
+ 
+-Date: 2026-10-15. Status: ACTIVE — 제공된 60% 조건의 원장 gate 통과. P3 전체 품질·장시간 정밀도·실제 메모리 plateau는 미확정.
++Date: 2026-10-15. Status: ACTIVE — 제공된60% 원장 및3분/40회 토글 메모리 누적 관찰 gate 통과. P3 전체 품질·장시간 정밀도·10분/100% 비용 gate는 계속.
+ 
+ ## 1. 기준과 사용자 결과
+ 
+@@ -145,10 +145,49 @@
+ 
+ - **통과:** 제공된60% 정차/직진의 물 원장; P3 field 생성과 정상 광학 표현의 근거.
+ - **현 비용 관찰:** 추가 비용은 사용자 측정의 약1FPS 오차 내. 성능 전체 통과 아님.
+-- **미확정:** 개별 head/trail 연결 품질, 실제 GC 후 메모리 plateau,
+-  100%/4096 조건과 장시간 수치 정밀도.
++- **메모리 후속 판정:** 아래§7의3분/40회 토글 범위에서 지속 누적이 관찰되지 않았다.
++- **미확정:** 개별 head/trail 연결 품질, 10분 및100%/4096 조건의 메모리·비용,
++  장시간 수치 정밀도.
+ - **다음 구현:** 원장·정밀도 비용을 함께 검증하며 P4 보존적 수송·배수/재흡수 진행.
+   Smear 및 legacy local impact film을 다시 켜서 고임을 가리지 않는다.
+ 
+ 이번 결과로 P3 전체 또는 물리/material calibration 전체를 완료 처리하지 않는다.
+ 사용자 측정과 진단을 보존했고, s81 runtime SHA와 튜닝은 그대로다.
++
++## 7. 사용자 실제 메모리 후속 측정 (2026-10-15)
++
++같은 리플레이를 재생하고30FPS 녹화에서 Memory 최대/최소를 관찰했다.
++시간 표본 간격은 약33.3ms다. 아래 두 끝값은 모두 **Memory/MB**이며 FPS가 아니다.
++원본 수치/관찰은 `s82/memory_followup/measurements.json`, 계산은 `checks.json`에 있다.
++
++| 조건 | 최소/MB | 최대/MB | 해당 기준 대비 최소 변화/MB | 최대 변화/MB |
++|---|---:|---:|---:|---:|
++| P2 리플레이 시작 | 66.00 | 121.00 | — | — |
++| P2 3분 후 | 66.00 | 123.80 | .00 | +2.80 |
++| P3 리플레이 시작 | 68.98 | 138.10 | — | — |
++| P3 3분 후 | 62.13 | 114.82 | −6.85 | −23.28 |
++| P3 토글 비교 기준 | 64.33 | 125.39 | — | — |
++| P3 OFF→ON5회 후 | 67.76 | 132.21 | +3.43 | +6.82 |
++| P3 OFF→ON40회 후 | 64.45 | 124.68 | +.12 | −.71 |
++
++토글 비교는 사용자가 게임 진입 후 두번째 사이클에서 관찰했다.
++5회→40회에서는 최소−3.31MB, 최대−7.53MB로 내려갔다.
++토글 횟수가 늘수록 회수되지 않은 물체가 계속 쌓이는 패턴을 이 수치에서 찾을 수 없다.
++5회에서 오른 값만 분리해 누수라고 판정하거나40회−기준 차이를 횟수로 나누어
++누수율을 추정하지 않는다.
++
++사용자는 P3에서 리플레이 시작 직후 시간이 지날수록 최소 Memory가 내려가는
++패턴을 공통으로 관찰했다. 초기 작업/캐시 수명·GC 타이밍 등의 변화와 양립하지만
++각 기여를 이번 범위 값으로 특정할 수 없다. P2의 같은 시간 패턴은 관찰하지 않았다.
++이 시간 편향 때문에 P2/P3 순간 범위로 모드별 고정 메모리 차이도 확정하지 않는다.
++
++**판정:** 제공된3분 유지 및40회 토글 범위에서 지속 메모리 누적은 관찰되지 않았다.
++앞선 실제 Lua 소유권100회 검사(캔버스 mock)와 함께, 현재 P3 토글 경로의
++지속 누수 의심을 뒷받침하는 근거는 없다. 이 범위의 메모리 누적 관찰 gate는 통과로 기록한다.
++앞선142→165MB GC 전 peak 증가만으로 누수를 의심했던 항목은 본 결과로 갱신한다.
++runtime cleanup이나 강제 GC를 추가할 근거도 없어 물리/광학/메모리 코드는 유지했다.
++
++이는 모든 상황에서 누수가 없다는 인증이 아니다. 전체 영상/원시 시계열과 반복 표본이
++없으며30FPS 표본은 더 짧은 peak나 정확한 GC 직후 trough를 놓칠 수 있다.
++앱 Memory는 별도 GPU/driver 자원량 측정도 아니다. 설계의10분 warm run 및
++100% 강수/4096 활성 슬롯/p99 gate는 별도로 남는다. 현재 자료에 대한 반복 측정 요청은 추가하지 않는다.
+--- s82-initial/docs/tools/review_s82_p3_game.py
++++ s82-memory/docs/tools/review_s82_p3_game.py
+@@ -42,9 +42,31 @@
+     maxAbsoluteResidual=max(abs(r['residual']) for r in rows),
+     nominalIncrementalFrameMS=1000/65-1000/66,
+     fpsMeasurement='P2 66, P3 65; user uncertainty around one FPS; not isolated GPU timing',
+-    memoryMeasurement='142 then 165 MB BEFORE GC, both modes; no post-GC floors or controlled toggle series',
++    memoryMeasurement='Initial report: 142 then 165 MB before GC. Subsequent minimum/maximum ranges are analyzed separately in memory_followup/checks.json when present.',
+     runtimeUnchanged=unchanged)
+ (OUT/'game_checks.json').write_text(json.dumps(report,indent=2))
++memoryPath=OUT/'memory_followup/measurements.json'
++if memoryPath.exists():
++    memory=json.loads(memoryPath.read_text())
++    measurements={r['id']:r for r in memory['measurements']}
++    comparisons=[]
++    for a,b in [('p2_start','p2_3min'),('p3_start','p3_3min'),
++                ('p3_reference','p3_5toggles'),('p3_reference','p3_40toggles'),
++                ('p3_5toggles','p3_40toggles')]:
++        comparisons.append(dict(start=a,end=b,
++            minDeltaMB=round(measurements[b]['minMB']-measurements[a]['minMB'],6),
++            maxDeltaMB=round(measurements[b]['maxMB']-measurements[a]['maxMB'],6)))
++    memoryReport=dict(measurements=memory,comparisons=comparisons,
++        result='No sustained Memory accumulation observed in supplied 3-minute and up-to-40-toggle runs.',
++        gate='Observed-range memory accumulation check passed, not a universal leak-free certification.',
++        limits=['30 FPS sampling can miss shorter peaks or exact post-GC troughs.',
++                'P3 minimum declines after replay start; unmatched elapsed times confound small differences.',
++                'Single ranges, no raw timeline/repeats; do not fit a per-toggle leak rate.',
++                'App Memory is not an isolated measurement of driver/GPU residency.',
++                '10-minute and 100%/4096-active-slot memory/p99 gate remains open.'],
++        runtimeUnchanged=unchanged)
++    (OUT/'memory_followup/checks.json').write_text(json.dumps(memoryReport,indent=2))
++    print('Memory follow-up:',json.dumps(comparisons,indent=2))
+ print(json.dumps({k:v for k,v in report.items() if k not in ('samples','runtimeUnchanged','groups')},indent=2))
+ print(json.dumps(groups,indent=2))
+ if '--media' in __import__('sys').argv:

@@ -1,0 +1,16 @@
+{
+  "sameFrameTwoReadbacks": true,
+  "diagnosticShape": [
+    16,
+    1
+  ],
+  "fieldShape": [
+    66,
+    72
+  ],
+  "coarseShape": [
+    5,
+    8
+  ],
+  "resetAndStaleEpoch": true
+}

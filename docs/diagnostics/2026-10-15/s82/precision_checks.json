@@ -1,0 +1,54 @@
+{
+  "compiler": "FXC /Ges /WX, D3D11 WARP",
+  "scope": "production pfResolve arithmetic in a single shader loop, no spatial/bin/source integration",
+  "cases": [
+    {
+      "steps": 42007,
+      "expectedMM3": 0.06160560138827975,
+      "residualMM3": 2.760608053620217e-05,
+      "relativeInputError": 0.0008214726034712175,
+      "stockAndLosses": [
+        0.052516452968120575,
+        0.004999991971999407,
+        0.004061550367623568,
+        0.0
+      ]
+    },
+    {
+      "steps": 66000,
+      "expectedMM3": 0.08080000195354842,
+      "residualMM3": -6.919942734384676e-07,
+      "relativeInputError": 1.3105951762489927e-05,
+      "stockAndLosses": [
+        0.06942158192396164,
+        0.004999993834644556,
+        0.00637911818921566,
+        0.0
+      ]
+    },
+    {
+      "steps": 42007,
+      "expectedMM3": 0.9521539789627695,
+      "residualMM3": -0.0010281087827479496,
+      "relativeInputError": 0.0011124864542003037,
+      "stockAndLosses": [
+        0.9439784288406372,
+        0.004999999888241291,
+        0.004203659016638994,
+        0.0
+      ]
+    },
+    {
+      "steps": 66000,
+      "expectedMM3": 1.4799999667193333,
+      "residualMM3": -0.00232816321295104,
+      "relativeInputError": 0.0016034182279290631,
+      "stockAndLosses": [
+        1.4702531099319458,
+        0.004999999888241291,
+        0.007075020112097263,
+        0.0
+      ]
+    }
+  ]
+}

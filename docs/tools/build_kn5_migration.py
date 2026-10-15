@@ -17,6 +17,7 @@ commands=[
  [sys.executable,str(ROOT/'docs/tools/build_fx_atlases.py')],
  [sys.executable,str(ROOT/'docs/tools/build_rain_spawn_sites.py')],
  [sys.executable,str(ROOT/'docs/tools/build_s79_birth_assets.py')],
+ [sys.executable,str(ROOT/'docs/tools/build_s81_film_cells.py')],
  [sys.executable,str(ROOT/'docs/tools/build_visor_contamination.py')],
  [sys.executable,str(ROOT/'docs/tools/check_kn5_migration.py')],
 ]

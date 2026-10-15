@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-15",
+  "build": "unchanged s81, s82 review",
+  "source": "user measurements from recording the same replay",
+  "metric": "app profiler Memory, MB; both endpoints are memory, not FPS",
+  "samplingFPS": 30,
+  "samplingIntervalMS": 33.333333333333336,
+  "measurements": [
+    {"id": "p2_start", "mode": "P2", "phase": "replay start", "minMB": 66.0, "maxMB": 121.0},
+    {"id": "p2_3min", "mode": "P2", "phase": "after 3 minutes", "minMB": 66.0, "maxMB": 123.8},
+    {"id": "p3_start", "mode": "P3", "phase": "replay start", "minMB": 68.98, "maxMB": 138.1},
+    {"id": "p3_3min", "mode": "P3", "phase": "after 3 minutes", "minMB": 62.13, "maxMB": 114.82},
+    {"id": "p3_reference", "mode": "P3", "phase": "second cycle since game entry", "toggles": 0, "minMB": 64.33, "maxMB": 125.39},
+    {"id": "p3_5toggles", "mode": "P3", "phase": "second cycle since game entry", "toggles": 5, "minMB": 67.76, "maxMB": 132.21},
+    {"id": "p3_40toggles", "mode": "P3", "phase": "second cycle since game entry", "toggles": 40, "minMB": 64.45, "maxMB": 124.68}
+  ],
+  "userObservations": [
+    "All P3 measurements showed a progressively declining minimum after replay start; P2 was not observed for this pattern.",
+    "P3 time-dependent bias is present; comparisons share that bias but are not exactly time-matched.",
+    "No meaningful accumulation pattern was observed after 5 versus 40 toggles."
+  ]
+}

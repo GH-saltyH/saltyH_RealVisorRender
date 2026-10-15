@@ -2,6 +2,86 @@
 
 See `docs/README.md` for the document index and working rules.
 
+## Latest s85 P4 regime diagnosis and pool transfer prototype (2026-10-15)
+
+Supplied paired stationary/137km/h snapshots confirm49.0823%/44.8306% of film mass
+is in CFL-limited cells; mass-weighted model velocity retention52.0827%/59.7221%.
+Worst-C cells have full coverage/coating, normal .37mm2 area/.58mm stride/~9m/s2
+tangent acceleration, but5.17–11.91mm columns. Equivalent sphere diameters of their
+local masses are1.54–2.03mm: do not shrink physical diameters/display gain.
+P4a quasi-steady h^2 mobility and missing localized pooling/phase redistribution
+are outside the intended regime; conservation still passes, transport-time gate stays open.
+Offline /WX WARP prototype passes6 localized pool-to-free-head volume/ownership/
+actual donor-gather gates, including full slots/rain priority/sheet rejection.
+Bounded integrated candidate+P2 event expansion estimates+1 pass/+80KiB at4096,
+not measured game ms. P4b runtime integration still requires preserved incident
+position, internal-return counter, paired field/flux debit and atomic publication.
+Runtime/tuning/installation unchanged. No further identical logs requested.
+See `RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md`.
+
+## s84 P4a game review (2026-10-15)
+
+After a continuous replay session warm-up >30 minutes, supplied P4 stationary/
+137 km/h budgets pass: max stable-interval relative error2.77438e-5, residual
+.079355mm3. Recompute intervals from cumulative snapshots because intermediate
+button clicks are omitted. User observes comparable P3/P4 FPS in supplied60%.
+P4 transport-time accuracy fails: raw Courant568..97620, limited cells0.626..1.401%
+but their film inventory reaches986mm3. Flow/water logs differ in frame, so exact
+limited mass shares require paired snapshots. Real-mesh100/1000um unit probes
+show max C5.38/538 even with correct SI units and gravity only.
+Added manual16-float thickness/limited mass/argmax cell metric logs and same-frame
+budget+flow button requests. Steady physical shaders/prepare/publish and tuning
+remain unchanged. P4b model choice follows peak-height/metric/retention evidence;
+long precision and100%/4096 workload gates remain open. See `RAINFX_S84_P4_GAME_REVIEW.md`.
+
+## s83 P4a film transport preview (2026-10-15)
+
+Added opt-in donor/upwind film transport from the shared P1 world transform,
+gravity/inertia and local air/downward settings. Four stored directional fluxes
+are gathered in the existing P3 resolve; unsupported recipients record runoff.
+One extra steady pass and4.00MiB flux storage, no CPU drop loop or draw pass.
+Courant0.8 limits positivity and can slow physical time; manual-only max/limited
+cell/volume logs expose that limitation. Micro stays pinned until joining film;
+head reabsorption, pressure/contact-line solver and children remain deferred.
+Compensated manual snapshots improve reduction precision without extra steady
+storage; persistent float32 accumulation remains an open long-run gate.
+WARP9/P3 GPU13/Lua pending/ownership/40-toggle fixtures pass. Game cost/CFL/look
+validation is next; P4 remains OFF by default. See `RAINFX_S83_P4_FILM_TRANSPORT.md`.
+
+## s82 P3 game review (2026-10-15)
+
+Supplied six 60% stationary/137 km/h logs pass water conservation: maximum
+stable-interval relative error2.04288e-5, cumulative residual .070037mm3 at29.915mL.
+Normal/film-height images show spatial water and lens regions; reviewed timestamped
+samples of both16-second videos. Individual head/trail continuity remains unresolved.
+Reported P2/P3 66/65FPS is within roughly1FPS measurement uncertainty.
+100 production mode-reset fixtures keep live-bank counts constant and release all
+banks. Follow-up actual replay Memory ranges show no sustained accumulation over
+3 minutes or up to40 P3 toggles: P2 minimum66→66MB, P3 minimum68.98→62.13MB;
+toggle reference64.33MB, after5 toggles67.76MB, after40 toggles64.45MB.
+Startup-dependent declining P3 minima and33.3ms sampling limit interpretation;
+the observed-range memory check passes, not a universal leak-free certification.
+Long production float32 arithmetic stress identifies a precision limit beyond the
+short original test; compensation storage/bandwidth must be evaluated with P4.
+No runtime/tuning changes in this review. Active transport/drainage/reabsorption,
+long precision and10-minute/100%/4096 memory/cost gates remain open. See `RAINFX_S82_P3_GAME_REVIEW.md`.
+
+## s81 first P3 spatial water preview (2026-10-15)
+
+Continued from user stamp 1ad4a95 (P2 Conservation Passed). Added opt-in
+1024x256 spatial incident film/micro/capacity water and same-frame conserved
+head trail debit. Integer tent/segment integration, boundary halo/coverage,
+micro-to-film joining, previous-field wet impact and explicit head/field
+evaporation/runoff now feed physical micrometre optics. No Smear/legacy film.
+Eleven pending points preserve all read banks; metadata scratch ownership is
+exchanged only on atomic publication. Whole-field budget reductions/readback
+run only on a manual request, with matching published source counters.
+Raw added storage is about 17.856 MiB and six steady passes; actual game cost
+and visual quality are pending. WARP/production lens/Lua/regression gates pass.
+Active field drainage/advection and reabsorption remain deferred; long-rain
+field accumulation is a known limit of this first preview.
+See `RAINFX_S81_P3_SPATIAL_WATER_PREVIEW.md` for the first game gate.
+
 ## s80 follow-up: P2 actual-game conservation passed (2026-10-15)
 
 Six corrected-game snapshots at cumulative 53.512–67.533 mL input show absolute

@@ -1,0 +1,579 @@
+--- s78/docs/RAINFX_ROADMAP.md
++++ s79/docs/RAINFX_ROADMAP.md
+@@ -1,6 +1,46 @@
+-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-14
++# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-15
+ 
+ See `docs/README.md` for the document index and working rules.
++
++## s80 follow-up: P2 actual-game conservation passed (2026-10-15)
++
++Six corrected-game snapshots at cumulative 53.512–67.533 mL input show absolute
++residual ≤.003304 mm3. The four stable stationary/100–150 km/h straight intervals
++have relative residualDelta/input ≤6.09135e-6, below the 1e-4 design criterion.
++Observed rates are 43.917926/82.924185 mm3/s and 5.767867/14.587958 arrivals/s;
++film+micro receive 20.64465%/29.10952% of the stable-interval input.
++P2 conservation gate passed for the supplied conditions; no runtime/tuning changes.
++P3 spatial deposition, same-frame conserved trail, physical film optics and
++evaporation/runoff are now the next stage. Historical reserve totals must not
++be injected as current field water; field version/epoch starts with an explicit reset.
++Absolute material/weather calibration and P3 rendering remain unverified.
++See `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` §7.
++
++## Initial s80 delivery: P2 game review and SI merge correction (2026-10-15)
++
++User stationary app OFF91–94FPS, P1/P1+P2 both72–73FPS (+2.710–3.251ms whole app);
++P2 incremental cost is unresolved at this measurement precision. Actual cumulative
++budgets show residual -4.332008/-1.903673mm3 and film/micro reserves are still invisible.
++Reviewed timestamped samples of four supplied videos and estimated source incidence.
++Reproduced curved-metric one-sided SI merges and departed-partner exit double accounting.
++State/meta now share a symmetric distance and require both supported positions.
++Added committed simulation time/interval rate logs; no new GPU pass or per-drop CPU work.
++Actual shader /WX WARP cases and s79 numeric/wiring regression pass. Corrected game
++conservation gate is required before P3 spatial film/micro/trail rendering.
++See `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md`.
++
++## Latest s79 GPU physical birth and source budget (2026-10-14)
++
++Started from user stamp acc0c63. Added opt-in P2 physical-area/outward-normal
++arrival sampling, estimated virtual impact and shared-generation state/meta
++commit. GPU cumulative reserves/exit/inventory balance are atomically
++published with source/state; pending steps and stale readbacks are isolated.
++Display-only P2 compensation, small offline LUTs and async asset checks are
++connected. /WX WARP and actual Lua wiring checks pass, including 4096 events,
++volume/momentum/normal/reference invariants, P2 OFF identity and long-session
++sum compensation. Game input direction/look/cost verification is next;
++film/micro are reserve totals pending P3 spatial water/evaporation/optics.
++See `RAINFX_S79_GPU_PHYSICAL_BIRTH.md`.
+ 
+ ## Latest s78 P1 game result and P2 birth diagnostic preparation (2026-10-14)
+ 
+--- s78/docs/RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md
++++ s79/docs/RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md
+@@ -1,6 +1,6 @@
+ # RainFX s78 — P1 게임 판정과 P2 크기·유입·충돌 계산 준비
+ 
+-Date: 2026-10-14. Status: ACTIVE — P1 게임 결과 기록, P2 진단 계산과 UI 구현/검증 완료. GPU birth/event commit은 아직 연결하지 않았다.
++Date: 2026-10-14. Status: REFERENCE — P1 게임 결과 기록과 P2 진단 계산 준비. 당시 미연결 GPU birth/event commit과 원장은 후속 s79 preview에서 연결했다.
+ 
+ ## 1. 이번 단계와 남은 구현
+ 
+--- s78/docs/README.md
++++ s79/docs/README.md
+@@ -1,4 +1,4 @@
+-# RealVisor RainFX — docs index and working rules (2026-10-14)
++# RealVisor RainFX — docs index and working rules (2026-10-15)
+ 
+ Start here. This file lists every document in `docs/` with its state, the
+ current architecture in one screen, and the rules for working on the
+@@ -12,6 +12,8 @@
+   - It runs the GPU-persistent rain state machine:
+     - `rainStateUpdateParams`: position and velocity (RGBA texels);
+     - `rainStateMetaUpdateParams`: radius, mass and lifecycle.
++    - Opt-in P1 uses actual volume/SI motion. Opt-in P2 adds physical-area/normal
++      birth events and a conserved source/reservoir budget; P3 film rendering remains next.
+ - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
+   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
+   in-scene stage. The stage is `main.smoke` by user setting
+@@ -54,7 +56,9 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+-| `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | ACTIVE | P1 game result/response-time diagnosis, opt-in P2 airborne DSD/normalized flux/normal impact diagnostics; LuaJIT invariants passed, GPU birth/event commit and P3 remain unbound |
++| `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` | REFERENCE | P2 FPS/budget/videos and SI merge correction; corrected 60% stationary/straight game conservation passed (interval error ≤6.10e-6), measured source rates; P3 spatial film/micro/trail next |
++| `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | REFERENCE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; game results and merge correction follow in s80 |
++| `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | REFERENCE | P1 game result/response-time diagnosis and P2 DSD/flux/impact diagnostic preparation; live GPU birth/event/budget preview follows in s79 |
+ | `RAINFX_S77_SI_MOTION_PREVIEW.md` | REFERENCE | opt-in P1 persistent SI motion/volume/display separation, single-exit state/meta fix and epoch retirement; WARP/LuaJIT plus game qualitative validation passed, weaving/friction and driving cost still open |
+ | `RAINFX_S76_SI_CORE_PRIMITIVES.md` | REFERENCE | P1 shared SI GPU functions and /WX WARP invariants; persistent state binding implemented as opt-in s77 preview |
+ | `RAINFX_S75_WEATHER_INPUTS_AND_UNITS.md` | ACTIVE | P0 independent weather/G/metric panel and SI/contact helpers; installed-source/LuaJIT checks passed, user stationary/acceleration/braking logs confirm G excludes gravity |
+--- s78/docs/tools/build_kn5_migration.py
++++ s79/docs/tools/build_kn5_migration.py
+@@ -16,6 +16,8 @@
+  [sys.executable,str(ROOT/'docs/tools/build_rain_step_limits.py')],
+  [sys.executable,str(ROOT/'docs/tools/build_fx_atlases.py')],
+  [sys.executable,str(ROOT/'docs/tools/build_rain_spawn_sites.py')],
++ [sys.executable,str(ROOT/'docs/tools/build_s79_birth_assets.py')],
++ [sys.executable,str(ROOT/'docs/tools/build_s81_film_cells.py')],
+  [sys.executable,str(ROOT/'docs/tools/build_visor_contamination.py')],
+  [sys.executable,str(ROOT/'docs/tools/check_kn5_migration.py')],
+ ]
+--- s78/docs/tools/install_s75_inputs.ps1
++++ s79/docs/tools/install_s75_inputs.ps1
+@@ -1,7 +1,7 @@
+ $ErrorActionPreference = 'Stop'
+ $taskProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+ $taskGameRoot = 'D:\Games\Assetto Corsa\apps\lua\realvisor'
+-$taskModules = @('rain_environment.lua', 'rain_physics_units.lua', 'rain_birth_model.lua')
++$taskModules = @('rain_environment.lua', 'rain_physics_units.lua', 'rain_birth_model.lua', 'rain_birth_gpu.lua', 'rain_film.lua')
+ $taskRecordPath = Join-Path $taskProjectRoot 'docs/diagnostics/2026-10-14/s75/installed_modules.json'
+ $taskPrevious = @{}
+ if (Test-Path -LiteralPath $taskRecordPath) {
+--- s78/realvisor.lua
++++ s79/realvisor.lua
+@@ -398,7 +398,7 @@
+         -- Number of persistent droplet state texels.
+         -- One texel represents one persistent droplet.
+         RAIN_GPU_STATE_COUNT = 4096,
+-        -- P1 opt-in motion validation. P2/P3 supply/film are not active yet.
++        -- P1/P2 opt-in physics previews. P3 spatial film remains next.
+         RAIN_PHYSICS_SI_PREVIEW = false,
+         RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN = 0.7937005259840998,
+         RAIN_PHYSICS_CONTACT_ANGLE_DEG = 90.0,
+@@ -414,6 +414,26 @@
+         RAIN_RATE_AT_INTENSITY_1_MM_H = 20.0,
+         RAIN_RATE_INTENSITY_POWER = 1.0,
+         RAIN_PHYSICS_DSD_SEED_OVERRIDE = 0.0, -- 0 estimated blend, 1..4 explicit seed
++        RAIN_PHYSICS_P2_BIRTH_PREVIEW = false,
++        RAIN_BIRTH_DISPLAY_SCALE = 0.40, -- appearance only; independent of retained volume
++        RAIN_BIRTH_EXPOSURE = 1.0, -- estimated static shielding, not per-drop raycasts
++        RAIN_BIRTH_INCIDENT_AIR_FRACTION = 0.30, -- estimated near-helmet impact flow
++        RAIN_BIRTH_TANGENT_IMPULSE_FRACTION = 0.015,
++        RAIN_BIRTH_MIN_PERSISTENT_MM = 0.25,
++        RAIN_BIRTH_WET_OVERRIDE = 0.0, -- manual material-LUT diagnostic; not track wetness
++        RAIN_BIRTH_NORMAL_REVERSED = false,
++        RAIN_PHYSICS_P3_FILM_PREVIEW = false,
++        RAIN_FILM_DEPOSIT_BARE = 0.35, -- estimated finite-drop coating coefficient
++        RAIN_FILM_DEPOSIT_COAT = 0.05,
++        RAIN_FILM_MIN_SPEED_MM_S = 1.0,
++        RAIN_FILM_SHEAR_WIDEN = 0.50,
++        RAIN_FILM_EVAP_DRY_UM_S = 0.05, -- estimated at RH=0, 20C, still air
++        RAIN_FILM_MICRO_JOIN_UM = 20.0, -- estimated continuum micro coalescence threshold
++        RAIN_FILM_WET_HEIGHT_UM = 20.0, -- estimated equivalent height for fully wet impact response
++        RAIN_FILM_OPTICAL_GAIN = 1.0, -- appearance only; lever arm uses camera-to-film distance
++        RAIN_FILM_OPTICAL_MAX_PX = 24.0,
++        RAIN_FILM_MICRO_MIP = 2.0,
++        RAIN_FILM_DEBUG = 0,
+ 
+         -- Persistent state:
+         -- 0 = disabled
+@@ -2262,6 +2282,14 @@
+             float mergeValid = ok * mutual
+                 * (type < 1.5 ? 1.0 : 0.0)
+                 * (dist <= sumR * gRainMergeReach ? 1.0 : 0.0);
++            if(gRainSiOn>.5) {
++                // Reciprocal commands need a reciprocal distance on curved UVs.
++                // A one-sided approval creates or deletes the partner's volume.
++                float pairDist=max(dist,rainMetricLength(pState.rg,selfP-pState.rg));
++                mergeValid=ok*mutual*(type<1.5 ? 1 : 0)
++                    *(pairDist<=sumR*gRainMergeReach ? 1 : 0)
++                    *(rainValid(selfP)>=.5 && rainValid(pState.rg)>=.5 ? 1 : 0);
++            }
+             float attractValid = ok
+                 * (type > 1.5 ? 1.0 : 0.0)
+                 * (dist > 1e-7 ? 1.0 : 0.0)
+@@ -2720,6 +2748,13 @@
+             float mergeValid = ok * mutual
+                 * (type < 1.5 ? 1.0 : 0.0)
+                 * (dist <= sumR * gRainMergeReach ? 1.0 : 0.0);
++            if(gRainSiOn>.5) {
++                // Same pair predicate as the state pass; departed water cannot merge.
++                float pairDist=max(dist,rainMetricLength(pState.rg,selfP-pState.rg));
++                mergeValid=ok*mutual*(type<1.5 ? 1 : 0)
++                    *(pairDist<=sumR*gRainMergeReach ? 1 : 0)
++                    *(rainValid(selfP)>=.5 && rainValid(pState.rg)>=.5 ? 1 : 0);
++            }
+             float attractValid = ok
+                 * (type > 1.5 ? 1.0 : 0.0)
+                 * (dist > 1e-7 ? 1.0 : 0.0)
+@@ -6533,7 +6568,7 @@
+     end
+     st.physicsInputsError=nil
+     st.physicsInputs:update(ac.getSim(),ac.getCar(0),cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE)
+-    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS then
++    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS or cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
+         if not st.physicsBirth then
+             local factory,err=st.loadRuntimeModule('rain_birth_model.lua')
+             if not factory then st.physicsBirthError=err;return end
+@@ -6552,6 +6587,10 @@
+     local st=rainDynamicSceneCopyState;local r=cfg.RUNTIME;local e=st.physicsInputs
+     local v=p.values
+     v.gRainSiOn=r.RAIN_PHYSICS_SI_PREVIEW and 1 or 0
++    v.gRainBirthOn=r.RAIN_PHYSICS_SI_PREVIEW and r.RAIN_PHYSICS_P2_BIRTH_PREVIEW
++        and r.RAIN_GPU_STATE_LIFECYCLE and (r.RAIN_GPU_STATE_MODE==3 or r.RAIN_GPU_STATE_MODE==6) and 1 or 0
++    p.textures=p.textures or {}
++    p.textures.txRainBirthEvent=v.gRainBirthOn>.5 and p.textures.txRainBirthEvent or false
+     v.gRainSiTheta=r.RAIN_PHYSICS_CONTACT_ANGLE_DEG
+     v.gRainSiRhoWater=998.2;v.gRainSiMu=.001002;v.gRainSiGamma=.0728
+     v.gRainSiRhoAir=e and e.airDensity or 1.20
+@@ -6574,6 +6613,46 @@
+ rainDynamicSceneCopyState.bindSIParams(rainStateUpdateParams)
+ rainDynamicSceneCopyState.bindSIParams(rainStateMetaUpdateParams)
+ rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
++rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
++rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,transform)
++    local st=rainDynamicSceneCopyState
++    if not st.physicsBirth then st.physicsInputsUpdate() end
++    if not st.physicsBirth then return false end
++    if not st.physicalBirthGPU then
++        local factory,err=st.loadRuntimeModule('rain_birth_gpu.lua')
++        if not factory then st.physicsBirthError=err;return false end
++        local ok,result=pcall(factory,{folder=appFolder,runtime=cfg.RUNTIME,surface=st.surface,core=st.siShader,
++            measure=st.measure,log=function(message) ac.log(appNameDebug..' '..message) end})
++        if not ok then st.physicsBirthError=tostring(result);return false end
++        st.physicalBirthGPU=result
++    end
++    st.physicsBirthError=nil
++    local wet=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and st.physicalFilmGPU
++        and st.physicalFilmGPU.ready and st.physicalFilmGPU.optics or nil
++    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth,wet)
++    if not ok then st.physicsBirthError=tostring(ready);return false end
++    st.physicsBirthError=st.physicalBirthGPU.assetError or st.physicalBirthGPU.error
++    return ready
++end
++rainDynamicSceneCopyState.preparePhysicsFilm=function(oldState,oldMeta,newState,newMeta,events,count,sim,motionDt)
++    local st=rainDynamicSceneCopyState
++    if not st.physicalFilmGPU then
++        local factory,err=st.loadRuntimeModule('rain_film.lua')
++        if not factory then st.physicsFilmError=err;return false end
++        local start=assert(st.gpuHeadsPassB:find('void rgWalk(',1,true))
++        local ok,result=pcall(factory,{folder=appFolder,runtime=cfg.RUNTIME,surface=st.surface,core=st.siShader,
++            measure=st.measure,summary=st.gpuHeadsSummaryPass,traversal=st.gpuHeadsPassB:sub(start),
++            log=function(message) ac.log(appNameDebug..' '..message) end})
++        if not ok then st.physicsFilmError=tostring(result);return false end
++        st.physicalFilmGPU=result
++    end
++    local ok,ready=pcall(st.physicalFilmGPU.prepare,st.physicalFilmGPU,oldState,oldMeta,newState,newMeta,
++        events,count,sim,st.physicsInputs,motionDt)
++    if not ok then st.physicsFilmError=tostring(ready);return false end
++    st.physicsFilmError=st.physicalFilmGPU.assetError
++    return ready
++end
+ rainDynamicSceneCopyState.stateEntryShader=(function()
+     local f=assert(io.open(appFolder..'/shaders/rainStateEntry.hlsl','rb'))
+     local code=f:read('*a');f:close();return code
+@@ -6958,11 +7037,15 @@
+ end
+ local function updateRainGPUState(sim)
+     local siChanged=rainDynamicSceneCopyState.siConfigured~=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++        or rainDynamicSceneCopyState.birthConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true)
++        or rainDynamicSceneCopyState.filmConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true)
+     if siChanged then
+         rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
+         rainDynamicStateReadbackReady=false
+         rainStateSingleDropDirty=true
+         rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++        rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
++        rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+         rainDynamicSceneCopyState.gpuHeadsActive=false
+         rainDynamicStateHasSnapshot=false
+         if rainDynamicSceneCopyState.newTrail then rainDynamicSceneCopyState.newTrail:dispose() end
+@@ -6975,6 +7058,15 @@
+             and rainStateConfiguredMode ~= cfg.RUNTIME.RAIN_GPU_STATE_MODE
+         )
+     then
++        if not siChanged then
++            rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
++            rainDynamicStateReadbackReady=false;rainDynamicStateHasSnapshot=false
++            rainDynamicSceneCopyState.gpuHeadsActive=false
++        end
++        if rainDynamicSceneCopyState.physicalBirthGPU then rainDynamicSceneCopyState.physicalBirthGPU:dispose() end
++        if rainDynamicSceneCopyState.physicalFilmGPU then rainDynamicSceneCopyState.physicalFilmGPU:dispose() end
++        rainStateUpdateParams.textures.txRainBirthEvent=false
++        rainStateMetaUpdateParams.textures.txRainBirthEvent=false
+         if rainStateA then rainStateA:dispose() end
+         if rainStateB then rainStateB:dispose() end
+         if rainStateMetaA then rainStateMetaA:dispose() end
+@@ -7293,9 +7385,35 @@
+     rainStateUpdateParams.values.gRainBirthRamp =
+         cfg.RUNTIME.RAIN_GPU_STATE_BIRTH_RAMP_SECONDS
+ 
++    if rainStateUpdateParams.values.gRainBirthOn>.5 then
++        if not rainDynamicSceneCopyState.preparePhysicsBirth(readState,readMeta,count,sim,transform) then return false end
++        rainStateUpdateParams.textures.txRainBirthEvent=rainDynamicSceneCopyState.physicalBirthGPU.events
++        rainStateMetaUpdateParams.textures.txRainBirthEvent=rainDynamicSceneCopyState.physicalBirthGPU.events
++    end
+     local transportReady=rainDynamicSceneCopyState.measure('State transport',writeState.updateWithShader,writeState,rainStateUpdateParams)
+     local lifecycleReady=rainDynamicSceneCopyState.measure('State lifecycle',writeMeta.updateWithShader,writeMeta,rainStateMetaUpdateParams)
+     if transportReady==false or lifecycleReady==false then return false end
++    if rainStateUpdateParams.values.gRainBirthOn>.5 then
++        local st=rainDynamicSceneCopyState
++        local film=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and true or false
++        local finalMeta=writeMeta
++        if film then
++            if not st.preparePhysicsFilm(readState,readMeta,writeState,writeMeta,st.physicalBirthGPU.events,count,sim,
++                rainStateUpdateParams.values.gRainStateDeltaTime) then return false end
++            finalMeta=st.physicalFilmGPU.metaScratch
++        end
++        if not st.physicalBirthGPU:budget(finalMeta,sim,film and st.physicalFilmGPU.descriptors or nil) then return false end
++        if film then
++            local ok,ready=pcall(st.physicalFilmGPU.budget,st.physicalFilmGPU,st.physicalBirthGPU.write,sim)
++            if not ok then st.physicsFilmError=tostring(ready);return false end
++            if not ready then return false end
++        end
++        if not rainDynamicSceneCopyState.physicalBirthGPU:publish(sim) then return false end
++        if film then
++            finalMeta=st.physicalFilmGPU:publish(sim,writeMeta)
++            if rainStateReadIsA then rainStateMetaB=finalMeta else rainStateMetaA=finalMeta end
++        end
++    end
+ 
+     rainStateReadIsA = not rainStateReadIsA
+ end
+@@ -11223,7 +11341,9 @@
+     values.gSummaryWords = summaryWords
+     values.gSparseWords = r.RAIN_GPU_HEADS_SPARSE_WORDS and 1.0 or 0.0
+     values.gCount = count
+-    values.gHeadDisplayGain=r.RAIN_PHYSICS_SI_PREVIEW and r.RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN or 1
++    values.gHeadDisplayGain=r.RAIN_PHYSICS_SI_PREVIEW and r.RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN
++        *(r.RAIN_PHYSICS_P2_BIRTH_PREVIEW and r.RAIN_GPU_STATE_LIFECYCLE
++            and (r.RAIN_GPU_STATE_MODE==3 or r.RAIN_GPU_STATE_MODE==6) and r.RAIN_BIRTH_DISPLAY_SCALE or 1) or 1
+     values.gKs = math.max(1.0, r.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
+     values.gMaxRadii = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII
+     values.gLookback = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS
+@@ -15143,7 +15263,9 @@
+             txDynamicBirthMask =
+                 rainDynamicSceneCopyState.birthMaskRead or false,
+             txDynamicWaterTrail =
+-                rainDynamicSceneCopyState.waterTrailComposite
++                (cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
++                    and rainDynamicSceneCopyState.physicalFilmGPU.ready and rainDynamicSceneCopyState.physicalFilmGPU.optics)
++                or rainDynamicSceneCopyState.waterTrailComposite
+                 or rainDynamicSceneCopyState.waterTrailRead or false,
+         },
+         values = {
+@@ -15425,6 +15547,14 @@
+             gDynamicDropCameraForward = sim.cameraLook,
+             gDynamicDropDepthOnly = 0.0,
+             gDynamicDropNewTrail=rainDynamicSceneCopyState.newTrailActive and 1 or 0,
++            gDynamicDropP3On=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
++                and cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
++                and rainDynamicSceneCopyState.physicalFilmGPU.ready and 1 or 0,
++            gDynamicDropP3Grid=vec2(1024,256),
++            gDynamicDropP3OpticalGain=cfg.RUNTIME.RAIN_FILM_OPTICAL_GAIN,
++            gDynamicDropP3MaxPx=cfg.RUNTIME.RAIN_FILM_OPTICAL_MAX_PX,
++            gDynamicDropP3MicroMip=cfg.RUNTIME.RAIN_FILM_MICRO_MIP,
++            gDynamicDropP3Debug=cfg.RUNTIME.RAIN_FILM_DEBUG,
+             gDynamicDropNewTrailGradientD=cfg.RUNTIME.RAIN_NEW_TRAIL_GRADIENT_D,
+             gDynamicDropNewHeadGradientD=cfg.RUNTIME.RAIN_NEW_TRAIL_HEAD_GRADIENT_D,
+             gDynamicDropNewTrailRefractD=cfg.RUNTIME.RAIN_NEW_TRAIL_REFRACT_D,
+@@ -17358,16 +17488,19 @@
+         v,u.massKG(v)*1e6,radius*2))
+     ui.text('Reference geometry only; contact angles and aerodynamic exposure still require calibration.')
+     ui.separator()
+-    ui.text('P1 SI motion preview: volume/contact-force transport. P2 impact and P3 film are not active yet.')
++    ui.text('P1 SI motion preview: volume/contact-force transport. P2 birth is a separate opt-in preview below.')
+     if ui.checkbox('Enable P1 SI motion preview',cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW) then
+-        if cfg.RUNTIME.RAIN_GPU_HEADS then
++        if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW or cfg.RUNTIME.RAIN_GPU_HEADS then
+             cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
++            if not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then
++                cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false;cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=false
++            end
+             st.siUIError=nil
+         else st.siUIError='P1 preview requires GPU heads enabled' end
+     end
+     if st.siUIError then ui.text(st.siUIError) end
+     ui.text('Switching resets rain state. Preview omits Smear, local film, legacy trails/wipes/splashes/micro/haze.')
+-    ui.text('Current birth-size profile is used until P2. Material angles are provisional; theta is uniform.')
++    ui.text('P1 uses the legacy birth-size profile; P2 uses estimated airborne DSD/retained volume. Theta is provisional and uniform.')
+     ui.text('Water properties use the 20 C reference in this preview; weather-dependent properties are next.')
+     st.rainUISlider('Display diameter gain (render only)','RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN',.1,2,'%.3f')
+     st.rainUISlider('Contact angle (degrees)','RAIN_PHYSICS_CONTACT_ANGLE_DEG',30,150,'%.1f')
+@@ -17383,11 +17516,71 @@
+     ui.text(string.format('20 C reference D_eq=1.15 mm: viscous m/c %.3f ms (excludes aerodynamic/contact transients)',
+         u.massKG(v)/math.max(responseDrag,1e-20)*1000))
+     ui.separator()
++    if ui.checkbox('Enable P2 physical birth preview',cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW) then
++        if cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++            cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false;cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=false;st.siUIError=nil
++        elseif cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_GPU_HEADS and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
++            and (cfg.RUNTIME.RAIN_GPU_STATE_MODE==3 or cfg.RUNTIME.RAIN_GPU_STATE_MODE==6) then
++            cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
++            st.siUIError=nil
++        else st.siUIError='P2 requires P1 SI preview, GPU heads and lifecycle mode 3 or 6' end
++    end
++    if cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++        ui.text('P2 starts empty and resets the rain/budget banks. Material retention/impact flow are estimated.')
++        ui.text('Supply uses physical rate/area/incidence; legacy density/occupancy/respawn-gap controls do not feed P2.')
++        ui.text(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW
++            and 'P3 places new film/micro/capacity water spatially; historical reserve totals are not injected.'
++            or 'Film/micro/capacity reserves are recorded but not rendered until P3. No legacy local impact film.')
++        st.rainUISlider('P2 display scale (render only)','RAIN_BIRTH_DISPLAY_SCALE',.05,2,'%.3f')
++        st.rainUISlider('Estimated source exposure','RAIN_BIRTH_EXPOSURE',0,1,'%.3f')
++        st.rainUISlider('Estimated incident-air fraction','RAIN_BIRTH_INCIDENT_AIR_FRACTION',0,1,'%.3f')
++        st.rainUISlider('Tangent impulse fraction','RAIN_BIRTH_TANGENT_IMPULSE_FRACTION',0,1,'%.3f')
++        st.rainUISlider('Minimum persistent airborne D (mm)','RAIN_BIRTH_MIN_PERSISTENT_MM',.05,1,'%.3f')
++        st.rainUISlider('Manual local wet-state override (not track)','RAIN_BIRTH_WET_OVERRIDE',0,1,'%.3f')
++        if ui.checkbox('Reverse outward normal (calibration)',cfg.RUNTIME.RAIN_BIRTH_NORMAL_REVERSED) then
++            cfg.RUNTIME.RAIN_BIRTH_NORMAL_REVERSED=not cfg.RUNTIME.RAIN_BIRTH_NORMAL_REVERSED
++        end
++        if st.physicalBirthGPU then
++            if st.physicalBirthGPU.assetError then ui.textWrapped(st.physicalBirthGPU.assetError) end
++            ui.text(string.format('P2 physical area %.5f m^2; published ticks %d; pending=%s',
++                st.physicalBirthGPU.localAreaM2*st.surface.scale^2,st.physicalBirthGPU.tick,tostring(st.physicalBirthGPU.pending)))
++            if ui.button('Log P2 actual GPU budget') then st.physicalBirthGPU:logBudget() end
++        end
++    end
++    ui.separator()
++    if ui.checkbox('Enable P3 conserved film preview',cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW) then
++        if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=false
++        elseif cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
++            and cfg.RUNTIME.RAIN_GPU_HEADS and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
++            and (cfg.RUNTIME.RAIN_GPU_STATE_MODE==3 or cfg.RUNTIME.RAIN_GPU_STATE_MODE==6) then
++            cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=true;st.siUIError=nil
++        else st.siUIError='P3 requires P1/P2 previews, GPU heads and lifecycle mode 3 or 6' end
++    end
++    if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then
++        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. No Smear/local impact film; active film transport and reabsorption are deferred.')
++        st.rainUISlider('Estimated trail coefficient: bare','RAIN_FILM_DEPOSIT_BARE',0,1,'%.3f')
++        st.rainUISlider('Estimated trail coefficient: coat','RAIN_FILM_DEPOSIT_COAT',0,1,'%.3f')
++        st.rainUISlider('Minimum trail speed (mm/s)','RAIN_FILM_MIN_SPEED_MM_S',0,20,'%.2f')
++        st.rainUISlider('Shear width gain','RAIN_FILM_SHEAR_WIDEN',0,2,'%.2f')
++        st.rainUISlider('Estimated dry evaporation (um/s)','RAIN_FILM_EVAP_DRY_UM_S',0,1,'%.3f')
++        st.rainUISlider('Micro coalescence height (um, bare)','RAIN_FILM_MICRO_JOIN_UM',1,100,'%.1f')
++        st.rainUISlider('Fully wet impact height (um)','RAIN_FILM_WET_HEIGHT_UM',1,100,'%.1f')
++        st.rainUISlider('Film optical gain (render only)','RAIN_FILM_OPTICAL_GAIN',0,3,'%.2f')
++        st.rainUISlider('Film displacement limit (screen px)','RAIN_FILM_OPTICAL_MAX_PX',0,64,'%.1f')
++        st.rainUISlider('Micro scattering mip (render only)','RAIN_FILM_MICRO_MIP',0,5,'%.2f')
++        st.rainUISlider('P3 view: 0 optics, 1 film um, 2 micro um, 3 coverage','RAIN_FILM_DEBUG',0,3,'%.0f')
++        if st.physicsFilmError then ui.textWrapped(st.physicsFilmError) end
++        if st.physicalFilmGPU then
++            ui.text(string.format('P3 1024x256 + runoff halo; ready=%s pending=%s; estimated evap %.5f um/s',
++                tostring(st.physicalFilmGPU.ready),tostring(st.physicalFilmGPU.pending),st.physicalFilmGPU.evapUMS or 0))
++            if ui.button('Log P3 actual water budget') then st.physicalFilmGPU:logBudget() end
++        end
++    end
+     if ui.checkbox('Enable P2 birth diagnostics (no simulation change)',cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS) then
+         cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS=not cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS
+     end
+-    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS then
+-        ui.text('Estimated airborne NUMBER distribution. Supply is not yet committed to GPU slots/film.')
++    if cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS or cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
++        ui.text('Estimated airborne NUMBER distribution; P2 commits attached drops and records reservoir water.')
+         st.rainUISlider('Estimated rate at I=1 (mm/h)','RAIN_RATE_AT_INTENSITY_1_MM_H',0,150,'%.1f')
+         st.rainUISlider('Estimated intensity power','RAIN_RATE_INTENSITY_POWER',.1,4,'%.2f')
+         st.rainUISlider('DSD override: 0 auto, 1 drizzle, 2 general, 3 tail, 4 windrich',
+--- s78/shaders/rainMetaEntry.hlsl
++++ s79/shaders/rainMetaEntry.hlsl
+@@ -14,11 +14,19 @@
+         float status=gRainStateLifecycle>.5 && rainStateHash(index+419)>=gRainStateTargetOccupancy ? 0 : 1;
+         if(gRainSiOn>.5 && status<.5) {radius=0;volume=0;}
+         result=float4(radius,volume,0,status);
++        if(gRainBirthOn>.5)result=0; // P2 begins empty: all water enters through a budgeted event.
+     } else {
+         result=txRainStateMeta.SampleLevel(samPointRainMeta,suv,0);
+         float dt=max(gRainStateDeltaTime,0);
+         bool age=true;
+-        if(gRainStateLifecycle>.5) {
++        float4 birth=0;
++        [branch] if(gRainBirthOn>.5)birth=txRainBirthEvent.Load(int3((int)index,0,0));
++        float oldGeneration=floor(result.a*.25);
++        float expectedTag=fmod(oldGeneration+1,4096)+1;
++        if(gRainBirthOn>.5 && result.a-oldGeneration*4<.5 && birth.a==expectedTag && birth.b>0) {
++            result=float4(rainSiContactRadiusMM(birth.b,gRainSiTheta)*gRainStatePhysicalRadiusUVPerMM*2,
++                birth.b,0,(birth.a-1)*4+1);age=false;
++        } else if(gRainStateLifecycle>.5) {
+             float generation=floor(result.a*.25),status=result.a-generation*4;
+             float rain=saturate(gRainStateRainIntensity);
+             if(status>1.5) {
+@@ -29,6 +37,8 @@
+                 result.r=gRainSiOn>.5 ? rainSiContactRadiusMM(result.g,gRainSiTheta)*gRainStatePhysicalRadiusUVPerMM*2
+                     : d*gRainStatePhysicalRadiusUVPerMM;
+                 result.a=next*4+1;result.b=0;age=false;
++            } else if(status<.5 && gRainBirthOn>.5) {
++                result.b=0;age=false; // No occupancy gate, synthetic gap or pending respawn.
+             } else if(status<.5) {
+                 result.b+=dt;age=false;
+                 float gap=lerp(gRainStateRespawnGapMin,gRainStateRespawnGapMax,
+--- s78/shaders/rainStateEntry.hlsl
++++ s79/shaders/rainStateEntry.hlsl
+@@ -24,7 +24,12 @@
+         float dt=max(gRainStateDeltaTime,0);
+         bool moving=true;
+         result=float4(p,v);
+-        if(gRainStateLifecycle>.5) {
++        float4 birth=0;
++        [branch] if(gRainBirthOn>.5)birth=txRainBirthEvent.Load(int3((int)index,0,0));
++        float expectedTag=fmod(floor(meta.a*.25)+1,4096)+1;
++        if(gRainBirthOn>.5 && meta.a-4*floor(meta.a*.25)<.5 && birth.a==expectedTag && birth.b>0) {
++            result=float4(birth.rg,txRainBirthEvent.Load(int3((int)index,1,0)).rg);moving=false;
++        } else if(gRainStateLifecycle>.5) {
+             float generation=floor(meta.a*.25),status=meta.a-generation*4;
+             if(status>1.5) {
+                 float2 pos=p;
+@@ -36,7 +41,7 @@
+         if(moving) {
+             float jitter=frac(sin(index*12.9898+78.233)*43758.5453);
+             float hold=gRainBirthHold*(.6+.8*jitter);
+-            float k=gRainStateLifecycle>.5 ? saturate((meta.b-hold)/max(gRainBirthRamp,1e-3)) : 1;
++            float k=gRainStateLifecycle>.5 && gRainBirthOn<.5 ? saturate((meta.b-hold)/max(gRainBirthRamp,1e-3)) : 1;
+             k=k*k*(3-2*k);dt*=k;v*=k>0 ? 1 : 0;
+ #ifdef RAIN_MERGE_CODE
+             if(gRainMergeEnabled>.5 && gRainStateLifecycle>.5
+--- s78/shaders/rainVisorDynamicDrop.hlsl
++++ s79/shaders/rainVisorDynamicDrop.hlsl
+@@ -314,7 +314,7 @@
+ float4 rainHazeOrClip(float2 posH, float2 patternUV)
+ {
+     float4 haze = rainOver(rainHazeEval(posH, patternUV));
+-    clip(max(haze.a, gFlowCoverage) - 0.003);
++    if(gDynamicDropP3On<.5)clip(max(haze.a, gFlowCoverage) - 0.003);
+     return haze;
+ }
+ 
+@@ -1250,6 +1250,49 @@
+     return float4(0.0, 0.0, 0.0, 0.0);
+ }
+ 
++// P3 conserved field: the reused trail texture stores film/micro height in um.
++// Prism deflection uses physical height slope and camera-to-film distance.
++// Optical gain cannot create water or change dynamics.
++float4 rainPhysicalFilm(PS_IN pin) {
++    float2 uv=saturate(float2(pin.Tex.x+4,pin.Tex.y+1));
++    float2 dx=ddx(uv),dy=ddy(uv),texel=1/gDynamicDropP3Grid;
++    float2 heights=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0).rg;
++    float filmCover=1-exp(-max(heights.x,0)/2);
++    float microCover=.6*(1-exp(-max(heights.y,0)/8));
++    float alpha=1-(1-filmCover)*(1-microCover);
++    if(gDynamicDropP3Debug>.5) {
++        float h=gDynamicDropP3Debug<1.5 ? heights.x : heights.y;
++        float k=saturate(log2(1+max(h,0))/log2(1001));
++        return gDynamicDropP3Debug>2.5 ? float4(filmCover,microCover,0,.85)
++            : float4(k,k*k,1-k,.85);
++    }
++    if(alpha<1e-5)return 0;
++    float hu1=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv+float2(texel.x,0)),0).r;
++    float hu0=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv-float2(texel.x,0)),0).r;
++    float hv1=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv+float2(0,texel.y)),0).r;
++    float hv0=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv-float2(0,texel.y)),0).r;
++    float2 gradUV=float2(hu1-hu0,hv1-hv0)*1e-6/(2*texel);
++    float2 p=float2(uv.x,uv.y-1);float3 u,v;rainMetric(p,u,v);
++    float physicalScale=.001/max(gRainReferencePerMM*gRainMetersPerUnit,1e-12);
++    float a=max(length(u)*physicalScale,1e-9),b=dot(normalize(u+1e-20),v)*physicalScale;
++    float c=sqrt(max(dot(v,v)*physicalScale*physicalScale-b*b,1e-18));
++    float2 slope=float2(gradUV.x/a,(gradUV.y-b*gradUV.x/a)/c);
++    // Small-prism water/air approximation n-1≈.333; bounded optical sampling.
++    slope*=min(1,.8/max(length(slope),1e-9));
++    float pathMM=length(pin.PosC)*1000;
++    float2 physicalOffset=slope*(.333*pathMM*gDynamicDropP3OpticalGain*gRainReferencePerMM);
++    float2 offsetUV=rainMetricOffset(p,physicalOffset);
++    float determinant=dx.x*dy.y-dx.y*dy.x;
++    float2 offsetPx=abs(determinant)>1e-14 ?
++        float2(offsetUV.x*dy.y-offsetUV.y*dy.x,dx.x*offsetUV.y-dx.y*offsetUV.x)/determinant : 0;
++    offsetPx*=min(1,gDynamicDropP3MaxPx/max(length(offsetPx),1e-9));
++    float2 ratio=gDynamicDropInvRenderTargetSize/gDynamicDropInvScreenSize;
++    float2 sceneUV=pin.PosH.xy*gDynamicDropInvScreenSize*ratio;
++    float3 color=rainSnap(samLinearClamp,saturate(sceneUV+offsetPx*gDynamicDropInvRenderTargetSize),
++        microCover*gDynamicDropP3MicroMip).rgb;
++    return float4(color,saturate(alpha));
++}
++
+ // Entry point. The depth occlusion pass (realvisor.lua, exact mode) shades
+ // every visor pixel exactly as the colour pass and writes depth only where
+ // the SOLID element (water, film, micro drop; not haze, not the smear facet
+@@ -1321,6 +1364,14 @@
+         gFogTone = lerp(float3(l, l, l), m, saturate(gDynamicDropLdrFogSat));
+     }
+     c = rainDropMain(pin);
++#ifndef RAIN_DEPTH_ONLY
++    if(gDynamicDropP3On>.5 && gDynamicDropDepthOnly<.5) {
++        float4 field=rainPhysicalFilm(pin);
++        float outAlpha=c.a+(1-c.a)*field.a;
++        float3 color=(c.rgb*c.a+(1-c.a)*field.rgb*field.a)/max(outAlpha,1e-9);
++        c=gDynamicDropP3Debug>.5 ? field : float4(color,outAlpha);
++    }
++#endif
+ #ifdef RAIN_DEPTH_ONLY
+     // Compile a separate coverage program. FXC can remove all RGB scene taps,
+     // refraction, lens noise and lighting which do not determine coverage.

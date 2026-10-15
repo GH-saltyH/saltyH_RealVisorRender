@@ -314,7 +314,7 @@ float4 rainHazeEval(float2 posH, float2 patternUV)
 float4 rainHazeOrClip(float2 posH, float2 patternUV)
 {
     float4 haze = rainOver(rainHazeEval(posH, patternUV));
-    clip(max(haze.a, gFlowCoverage) - 0.003);
+    if(gDynamicDropP3On<.5)clip(max(haze.a, gFlowCoverage) - 0.003);
     return haze;
 }
 
@@ -1250,6 +1250,49 @@ float4 rainDropMain(PS_IN pin)
     return float4(0.0, 0.0, 0.0, 0.0);
 }
 
+// P3 conserved field: the reused trail texture stores film/micro height in um.
+// Prism deflection uses physical height slope and camera-to-film distance.
+// Optical gain cannot create water or change dynamics.
+float4 rainPhysicalFilm(PS_IN pin) {
+    float2 uv=saturate(float2(pin.Tex.x+4,pin.Tex.y+1));
+    float2 dx=ddx(uv),dy=ddy(uv),texel=1/gDynamicDropP3Grid;
+    float2 heights=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0).rg;
+    float filmCover=1-exp(-max(heights.x,0)/2);
+    float microCover=.6*(1-exp(-max(heights.y,0)/8));
+    float alpha=1-(1-filmCover)*(1-microCover);
+    if(gDynamicDropP3Debug>.5) {
+        float h=gDynamicDropP3Debug<1.5 ? heights.x : heights.y;
+        float k=saturate(log2(1+max(h,0))/log2(1001));
+        return gDynamicDropP3Debug>2.5 ? float4(filmCover,microCover,0,.85)
+            : float4(k,k*k,1-k,.85);
+    }
+    if(alpha<1e-5)return 0;
+    float hu1=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv+float2(texel.x,0)),0).r;
+    float hu0=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv-float2(texel.x,0)),0).r;
+    float hv1=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv+float2(0,texel.y)),0).r;
+    float hv0=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv-float2(0,texel.y)),0).r;
+    float2 gradUV=float2(hu1-hu0,hv1-hv0)*1e-6/(2*texel);
+    float2 p=float2(uv.x,uv.y-1);float3 u,v;rainMetric(p,u,v);
+    float physicalScale=.001/max(gRainReferencePerMM*gRainMetersPerUnit,1e-12);
+    float a=max(length(u)*physicalScale,1e-9),b=dot(normalize(u+1e-20),v)*physicalScale;
+    float c=sqrt(max(dot(v,v)*physicalScale*physicalScale-b*b,1e-18));
+    float2 slope=float2(gradUV.x/a,(gradUV.y-b*gradUV.x/a)/c);
+    // Small-prism water/air approximation n-1≈.333; bounded optical sampling.
+    slope*=min(1,.8/max(length(slope),1e-9));
+    float pathMM=length(pin.PosC)*1000;
+    float2 physicalOffset=slope*(.333*pathMM*gDynamicDropP3OpticalGain*gRainReferencePerMM);
+    float2 offsetUV=rainMetricOffset(p,physicalOffset);
+    float determinant=dx.x*dy.y-dx.y*dy.x;
+    float2 offsetPx=abs(determinant)>1e-14 ?
+        float2(offsetUV.x*dy.y-offsetUV.y*dy.x,dx.x*offsetUV.y-dx.y*offsetUV.x)/determinant : 0;
+    offsetPx*=min(1,gDynamicDropP3MaxPx/max(length(offsetPx),1e-9));
+    float2 ratio=gDynamicDropInvRenderTargetSize/gDynamicDropInvScreenSize;
+    float2 sceneUV=pin.PosH.xy*gDynamicDropInvScreenSize*ratio;
+    float3 color=rainSnap(samLinearClamp,saturate(sceneUV+offsetPx*gDynamicDropInvRenderTargetSize),
+        microCover*gDynamicDropP3MicroMip).rgb;
+    return float4(color,saturate(alpha));
+}
+
 // Entry point. The depth occlusion pass (realvisor.lua, exact mode) shades
 // every visor pixel exactly as the colour pass and writes depth only where
 // the SOLID element (water, film, micro drop; not haze, not the smear facet
@@ -1321,6 +1364,14 @@ float4 main(PS_IN pin)
         gFogTone = lerp(float3(l, l, l), m, saturate(gDynamicDropLdrFogSat));
     }
     c = rainDropMain(pin);
+#ifndef RAIN_DEPTH_ONLY
+    if(gDynamicDropP3On>.5 && gDynamicDropDepthOnly<.5) {
+        float4 field=rainPhysicalFilm(pin);
+        float outAlpha=c.a+(1-c.a)*field.a;
+        float3 color=(c.rgb*c.a+(1-c.a)*field.rgb*field.a)/max(outAlpha,1e-9);
+        c=gDynamicDropP3Debug>.5 ? field : float4(color,outAlpha);
+    }
+#endif
 #ifdef RAIN_DEPTH_ONLY
     // Compile a separate coverage program. FXC can remove all RGB scene taps,
     // refraction, lens noise and lighting which do not determine coverage.

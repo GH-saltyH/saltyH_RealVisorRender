@@ -1,0 +1,15 @@
+{
+  "width": 1024,
+  "height": 256,
+  "areaM2": 0.04028860095951334,
+  "flowConnectedUV": true,
+  "flowDiscontinuousEdges": 0,
+  "flowDegenerateCells": 0,
+  "sha256": {
+    "texture/RAIN_GEOMETRY/du.dds": "143afb1939afd16f10fa3c0277058e1a8254966b25a85629a36d8812f99a583e",
+    "texture/RAIN_GEOMETRY/dv.dds": "cace1302aa31b2028711f7db31cf2fd5ddd3328cb62be51e842be9a11c6b45cd",
+    "texture/RAIN_GEOMETRY/position.dds": "c77c56b7bbbf4f1bf65c3dc0897e3f295d9e07b3db3c0d549d14ab26bc82eb7a",
+    "texture/RAINFX_ObjNormal_BoundaryMask.dds": "08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",
+    "texture/RAIN_FILM/cells.dds": "60924e0299d0d95a4643ce6109edfdc897a781d046f55222ce4908cb1a3f4af2"
+  }
+}

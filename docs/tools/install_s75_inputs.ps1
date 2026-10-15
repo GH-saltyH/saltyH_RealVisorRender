@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $taskProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $taskGameRoot = 'D:\Games\Assetto Corsa\apps\lua\realvisor'
-$taskModules = @('rain_environment.lua', 'rain_physics_units.lua', 'rain_birth_model.lua', 'rain_birth_gpu.lua')
+$taskModules = @('rain_environment.lua', 'rain_physics_units.lua', 'rain_birth_model.lua', 'rain_birth_gpu.lua', 'rain_film.lua')
 $taskRecordPath = Join-Path $taskProjectRoot 'docs/diagnostics/2026-10-14/s75/installed_modules.json'
 $taskPrevious = @{}
 if (Test-Path -LiteralPath $taskRecordPath) {

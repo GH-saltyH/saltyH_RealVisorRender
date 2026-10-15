@@ -1,0 +1,43 @@
+{
+  "compiler": "FXC /Ges /WX, D3D11 WARP",
+  "sixteenFloatValues": [
+    132827.6875,
+    40.0,
+    40.0,
+    1.0,
+    100.0,
+    1.0,
+    6.022841262165457e-06,
+    0.0,
+    132827.6875,
+    20.0,
+    5.0,
+    100.0,
+    132827.6875,
+    0.25,
+    500.0000305175781,
+    1414.213623046875
+  ],
+  "argmaxRowsMatch": true,
+  "unitProbe": [
+    {
+      "heightUM": 100,
+      "maxCourant": 5.38258171081543,
+      "medianCourant": 0.7886817455291748,
+      "limitedCellPercent": 49.005063948581444
+    },
+    {
+      "heightUM": 1000,
+      "maxCourant": 538.2581787109375,
+      "medianCourant": 78.8681869506836,
+      "limitedCellPercent": 100.0
+    }
+  ],
+  "steadyShadersUnchanged": {
+    "shaders/rainFilmFlow.hlsl": true,
+    "shaders/rainFilmFlowPass.hlsl": true,
+    "shaders/rainFilmResolve.hlsl": true,
+    "shaders/rainFilmDescriptor.hlsl": true,
+    "shaders/rainFilmOptics.hlsl": true
+  }
+}

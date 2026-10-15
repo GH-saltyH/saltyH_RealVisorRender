@@ -30,17 +30,17 @@ return function(d)
         gBirthObjectToWorld=mat4x4.identity(),gBirthNormalSign=1,gBirthExposure=1,
         gBirthIncidentAirFraction=1,gBirthTangentFraction=0,gBirthWetOverride=0,gBirthMinPersistentMM=.25,
         gBirthRhoWater=998.2,gBirthMu=.001002,gBirthGamma=.0728,gBirthTheta=90,
-        gBirthAdvanceBare=100,gBirthAdvanceCoat=92},textures={
+        gBirthAdvanceBare=100,gBirthAdvanceCoat=92,gBirthWetOn=0,gBirthWetHeightUM=20},textures={
         txBirthDsd=folder..'dsd.dds',txBirthImpact=folder..'impact_estimated.dds',
         txBirthSites=folder..'sites.dds',
-        txRainState=false,txRainStateMeta=false}}
+        txRainState=false,txRainStateMeta=false,txBirthWetHeight=false}}
     d.surface:bind(st.eventParams)
     st.blockParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.blockCode,
-        values={gBirthCount=1,gBirthBlocks=1},textures={txBirthEvent=false,txRainNewMeta=false}}
+        values={gBirthCount=1,gBirthBlocks=1,gBirthFilmOn=0},textures={txBirthEvent=false,txRainNewMeta=false,txBirthTransfers=false}}
     st.totalParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.totalCode,
-        values={gBirthBlocks=1},textures={txBirthBlocks=false,txBirthPreviousTotals=false}}
+        values={gBirthBlocks=1,gBirthFilmOn=0},textures={txBirthBlocks=false,txBirthPreviousTotals=false}}
     st.statsParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.statsCode,
-        textures={txBirthTotals=false},values={}}
+        textures={txBirthTotals=false},values={gBirthFilmOn=0}}
     local function canvas(w,h,format,name)
         local c=ui.ExtraCanvas(vec2(w,h),1,render.AntialiasingMode.None,format)
         c:setName(name);c:clear(rgbm(0,0,0,0));return c
@@ -50,15 +50,17 @@ return function(d)
         for _,name in ipairs({'events','blocks','totalsA','totalsB','stats'}) do
             if self[name] then self[name]:dispose();self[name]=nil end
         end
-        self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil
+        self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil;self.write=nil;self.filmMode=nil
         self.pending=false;self.logPending=false;self.logValues=nil;self.budgetFrame=nil;self.frame=nil
         self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
         self.eventParams.textures.txRainState=false;self.eventParams.textures.txRainStateMeta=false
+        self.eventParams.textures.txBirthWetHeight=false
         self.blockParams.textures.txBirthEvent=false;self.blockParams.textures.txRainNewMeta=false
+        self.blockParams.textures.txBirthTransfers=false
         self.totalParams.textures.txBirthBlocks=false;self.totalParams.textures.txBirthPreviousTotals=false
         self.statsParams.textures.txBirthTotals=false
     end
-    function st:prepare(state,meta,count,sim,transform,model)
+    function st:prepare(state,meta,count,sim,transform,model,wetHeight)
         self.preparedFrame=nil
         self.budgetFrame=nil
         if self.frame==sim.frame then return false end
@@ -67,13 +69,14 @@ return function(d)
             self.error='P2 preview supports 1..4096 integer slots';return false
         end
         self.error=nil
-        if self.count~=count then
+        local filmMode=r.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+        if self.count~=count or self.filmMode~=filmMode then
             self:dispose();self.blockCount=math.ceil(count/64)
             self.events=canvas(count,4,render.TextureFormat.R32G32B32A32.Float,'P2 immutable birth events')
-            self.blocks=canvas(self.blockCount,2,render.TextureFormat.R32G32B32A32.Float,'P2 budget reduction')
-            self.totalsA=canvas(1,4,render.TextureFormat.R32G32B32A32.Float,'P2 budget A')
-            self.totalsB=canvas(1,4,render.TextureFormat.R32G32B32A32.Float,'P2 budget B')
-            self.read=self.totalsA;self.count=count
+            self.blocks=canvas(self.blockCount,filmMode and 3 or 2,render.TextureFormat.R32G32B32A32.Float,'P2 budget reduction')
+            self.totalsA=canvas(1,filmMode and 6 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 budget A')
+            self.totalsB=canvas(1,filmMode and 6 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 budget B')
+            self.read=self.totalsA;self.count=count;self.filmMode=filmMode
         end
         local p=self.eventParams;local v=p.values
         v.gBirthCount=count;v.gBirthTick=self.tick;v.gBirthDt=math.max(sim.dt or 0,0)
@@ -84,6 +87,8 @@ return function(d)
         v.gBirthExposure=r.RAIN_BIRTH_EXPOSURE;v.gBirthIncidentAirFraction=r.RAIN_BIRTH_INCIDENT_AIR_FRACTION
         v.gBirthTangentFraction=r.RAIN_BIRTH_TANGENT_IMPULSE_FRACTION
         v.gBirthWetOverride=r.RAIN_BIRTH_WET_OVERRIDE;v.gBirthMinPersistentMM=r.RAIN_BIRTH_MIN_PERSISTENT_MM
+        v.gBirthWetOn=wetHeight and 1 or 0;v.gBirthWetHeightUM=r.RAIN_FILM_WET_HEIGHT_UM or 20
+        p.textures.txBirthWetHeight=wetHeight or false
         v.gBirthTheta=r.RAIN_PHYSICS_CONTACT_ANGLE_DEG
         v.gBirthAdvanceBare=math.min(179.9,math.max(.1,v.gBirthTheta+r.RAIN_PHYSICS_STATIC_SPAN_BARE_DEG*.5))
         v.gBirthAdvanceCoat=math.min(179.9,math.max(.1,v.gBirthTheta+r.RAIN_PHYSICS_STATIC_SPAN_COAT_DEG*.5))
@@ -91,12 +96,14 @@ return function(d)
         if d.measure('P2 birth events',self.events.updateWithShader,self.events,p)==false then self.pending=true;return false end
         self.preparedFrame=sim.frame;self.pending=false;return true
     end
-    function st:budget(newMeta,sim)
+    function st:budget(newMeta,sim,transfers)
         if self.preparedFrame~=sim.frame then return false end
         local p=self.blockParams;p.values.gBirthCount=self.count;p.values.gBirthBlocks=self.blockCount
         p.textures.txBirthEvent=self.events;p.textures.txRainNewMeta=newMeta
+        if self.filmMode and not transfers then return false end
+        p.textures.txBirthTransfers=transfers or false;p.values.gBirthFilmOn=self.filmMode and 1 or 0
         if d.measure('P2 budget blocks',self.blocks.updateWithShader,self.blocks,p)==false then self.pending=true;return false end
-        local p=self.totalParams;p.values.gBirthBlocks=self.blockCount
+        local p=self.totalParams;p.values.gBirthBlocks=self.blockCount;p.values.gBirthFilmOn=self.filmMode and 1 or 0
         p.textures.txBirthBlocks=self.blocks;p.textures.txBirthPreviousTotals=self.read
         self.write=self.read==self.totalsA and self.totalsB or self.totalsA
         if d.measure('P2 budget totals',self.write.updateWithShader,self.write,p)==false then self.pending=true;return false end
@@ -114,7 +121,9 @@ return function(d)
     end
     function st:logBudget()
         if not self.ready or self.logPending then return false end
-        if not self.stats then self.stats=canvas(8,1,render.TextureFormat.R32.Float,'P2 manual budget readback') end
+        local statsCount=self.filmMode and 12 or 8
+        if not self.stats then self.stats=canvas(statsCount,1,render.TextureFormat.R32.Float,'P2 manual budget readback') end
+        self.statsParams.values.gBirthFilmOn=self.filmMode and 1 or 0
         self.statsParams.textures.txBirthTotals=self.read
         if self.stats:updateWithShader(self.statsParams)==false then return false end
         self.logPending=true;local epoch=self.epoch;local frame=self.frame;local area=self.publishedAreaM2
@@ -123,9 +132,9 @@ return function(d)
             if epoch~=self.epoch then if data then data:dispose() end;return end
             self.logPending=false
             if err or not data then if data then data:dispose() end;d.log('P2 budget readback failed: '..tostring(err));return end
-            local v=self.logValues or {};for i=1,8 do v[i]=data:floatValue(i-1,0) end
+            local v=self.logValues or {};for i=1,statsCount do v[i]=data:floatValue(i-1,0) end
             data:dispose();self.logValues=v
-            local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]
+            local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]-(statsCount>8 and v[9] or 0)
             local previous=self.previousLog
             local elapsed=seconds-(previous and previous.seconds or 0)
             local inputDelta=v[1]-(previous and previous.input or 0)
@@ -137,6 +146,7 @@ return function(d)
                 tostring(frame),v[1],v[2],v[3],v[4],v[5],v[6],v[7],residual,v[8],area,
                 seconds,steps,elapsed,inputRate,arrivalRate,residualDelta))
             self.previousLog={seconds=seconds,input=v[1],arrivals=v[8],residual=residual}
+            if statsCount>8 then d.log(string.format('Rain P2 P3 transfers: headEvap=%.6f trail=%.6f kernelCappedTotal=%.0f',v[9],v[10],v[11])) end
         end)
         return true
     end

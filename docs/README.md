@@ -13,7 +13,12 @@ project.
     - `rainStateUpdateParams`: position and velocity (RGBA texels);
     - `rainStateMetaUpdateParams`: radius, mass and lifecycle.
     - Opt-in P1 uses actual volume/SI motion. Opt-in P2 adds physical-area/normal
-      birth events and a conserved source/reservoir budget; P3 film rendering remains next.
+      birth events and a conserved source/reservoir budget. Opt-in P3 adds spatial
+      incident/trail water, paired head loss, evaporation/runoff and physical-height optics;
+      supplied 60% water budgets and 3-minute/40-toggle memory observations pass;
+      opt-in P4a conserves water with observed comparable FPS, but high Courant fails
+      transport time accuracy; s85 confirms localized millimetre columns outside the
+      P4a quasi-steady regime and tests an offline conserved pool-to-head prototype.
 - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
   in-scene stage. The stage is `main.smoke` by user setting
@@ -56,6 +61,11 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+| `RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md` | ACTIVE | same-frame data confirms 45–49% film inventory is CFL-limited; full-coverage/coated peak cells and valid SI units; offline /WX WARP conserved localized-pool-to-head prototype, P4b handoff design/cost; game runtime unchanged |
+| `RAINFX_S84_P4_GAME_REVIEW.md` | REFERENCE | supplied P4 water budgets pass and FPS observed comparable; high-C transport-time gate fails; real-mesh unit probes, media review, same-frame16-float thickness/limited-mass/metric diagnostics; physical transport unchanged |
+| `RAINFX_S83_P4_FILM_TRANSPORT.md` | REFERENCE | opt-in P4a four-neighbour conserved film transport/runoff, P1 world forces/downward air, manual limiter stats, compensated snapshot sum; +4MiB/one pass; game findings and expanded diagnostics follow in s84 |
+| `RAINFX_S82_P3_GAME_REVIEW.md` | REFERENCE | supplied P3 conservation passes (interval error ≤2.043e-5); 3-minute/40-toggle game memory shows no sustained accumulation, 100 reset fixtures; long float32 precision/trail quality remain open, first P4 transport follows in s83 |
+| `RAINFX_S81_P3_SPATIAL_WATER_PREVIEW.md` | REFERENCE | first P3 conserved spatial film/micro/trail, paired head loss, wet impact/evaporation/runoff, um optics and manual field budget; initial game findings and limits follow in s82 |
 | `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` | REFERENCE | P2 FPS/budget/videos and SI merge correction; corrected 60% stationary/straight game conservation passed (interval error ≤6.10e-6), measured source rates; P3 spatial film/micro/trail next |
 | `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | REFERENCE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; game results and merge correction follow in s80 |
 | `RAINFX_S78_BIRTH_DISTRIBUTION_AND_BUDGET.md` | REFERENCE | P1 game result/response-time diagnosis and P2 DSD/flux/impact diagnostic preparation; live GPU birth/event/budget preview follows in s79 |

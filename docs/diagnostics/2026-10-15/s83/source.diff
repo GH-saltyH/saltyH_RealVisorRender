@@ -1,0 +1,492 @@
+--- s82/docs/RAINFX_ROADMAP.md
++++ s83/docs/RAINFX_ROADMAP.md
+@@ -2,7 +2,21 @@
+ 
+ See `docs/README.md` for the document index and working rules.
+ 
+-## Latest s82 P3 game review (2026-10-15)
++## Latest s83 P4a film transport preview (2026-10-15)
++
++Added opt-in donor/upwind film transport from the shared P1 world transform,
++gravity/inertia and local air/downward settings. Four stored directional fluxes
++are gathered in the existing P3 resolve; unsupported recipients record runoff.
++One extra steady pass and4.00MiB flux storage, no CPU drop loop or draw pass.
++Courant0.8 limits positivity and can slow physical time; manual-only max/limited
++cell/volume logs expose that limitation. Micro stays pinned until joining film;
++head reabsorption, pressure/contact-line solver and children remain deferred.
++Compensated manual snapshots improve reduction precision without extra steady
++storage; persistent float32 accumulation remains an open long-run gate.
++WARP9/P3 GPU13/Lua pending/ownership/40-toggle fixtures pass. Game cost/CFL/look
++validation is next; P4 remains OFF by default. See `RAINFX_S83_P4_FILM_TRANSPORT.md`.
++
++## s82 P3 game review (2026-10-15)
+ 
+ Supplied six 60% stationary/137 km/h logs pass water conservation: maximum
+ stable-interval relative error2.04288e-5, cumulative residual .070037mm3 at29.915mL.
+--- s82/docs/RAINFX_S82_P3_GAME_REVIEW.md
++++ s83/docs/RAINFX_S82_P3_GAME_REVIEW.md
+@@ -1,6 +1,6 @@
+ # RainFX s82 — P3 실제 게임 원장·표현·비용 검토
+ 
+-Date: 2026-10-15. Status: ACTIVE — 제공된60% 원장 및3분/40회 토글 메모리 누적 관찰 gate 통과. P3 전체 품질·장시간 정밀도·10분/100% 비용 gate는 계속.
++Date: 2026-10-15. Status: REFERENCE — 제공된60% 원장 및3분/40회 토글 메모리 누적 관찰 gate 통과. P4a 수송은 s83에서 진행; 전체 품질·장시간 정밀도·10분/100% 비용 gate는 계속.
+ 
+ ## 1. 기준과 사용자 결과
+ 
+--- s82/docs/README.md
++++ s83/docs/README.md
+@@ -16,7 +16,7 @@
+       birth events and a conserved source/reservoir budget. Opt-in P3 adds spatial
+       incident/trail water, paired head loss, evaporation/runoff and physical-height optics;
+       supplied 60% water budgets and 3-minute/40-toggle memory observations pass;
+-      long-run precision/cost and active film transport remain next.
++      opt-in P4a now transports film conservatively; game CFL/cost and long-run precision remain next.
+ - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
+   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
+   in-scene stage. The stage is `main.smoke` by user setting
+@@ -59,7 +59,8 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+-| `RAINFX_S82_P3_GAME_REVIEW.md` | ACTIVE | supplied P3 conservation passes (interval error ≤2.043e-5); 3-minute/40-toggle game memory shows no sustained accumulation, 100 reset fixtures; long float32 precision, trail quality and P4 transport remain open |
++| `RAINFX_S83_P4_FILM_TRANSPORT.md` | ACTIVE | opt-in P4a four-neighbour conserved film transport/runoff, P1 world forces/downward air, manual limiter stats, compensated snapshot sum; +4MiB/one pass, game CFL/cost/long precision gate pending |
++| `RAINFX_S82_P3_GAME_REVIEW.md` | REFERENCE | supplied P3 conservation passes (interval error ≤2.043e-5); 3-minute/40-toggle game memory shows no sustained accumulation, 100 reset fixtures; long float32 precision/trail quality remain open, first P4 transport follows in s83 |
+ | `RAINFX_S81_P3_SPATIAL_WATER_PREVIEW.md` | REFERENCE | first P3 conserved spatial film/micro/trail, paired head loss, wet impact/evaporation/runoff, um optics and manual field budget; initial game findings and limits follow in s82 |
+ | `RAINFX_S80_P2_GAME_REVIEW_AND_MERGE.md` | REFERENCE | P2 FPS/budget/videos and SI merge correction; corrected 60% stationary/straight game conservation passed (interval error ≤6.10e-6), measured source rates; P3 spatial film/micro/trail next |
+ | `RAINFX_S79_GPU_PHYSICAL_BIRTH.md` | REFERENCE | opt-in P2 real-area/normal source, virtual impact/shared generation commit, GPU reservoir budget and display compensation; game results and merge correction follow in s80 |
+--- s82/docs/tools/build_s81_film_cells.py
++++ s83/docs/tools/build_s81_film_cells.py
+@@ -17,10 +17,24 @@
+ hdr=struct.pack('<31I',124,0x2100f,256,1024,1024*16,0,1,*([0]*11),32,4,0x30315844,*([0]*5),0x1000,0,0,0,0)
+ path=ASSET/'cells.dds';path.write_bytes(b'DDS '+hdr+struct.pack('<5I',2,3,0,1,0)+cells.astype('<f4').tobytes())
+ verify=(GEO/'surface.verify').read_text().splitlines()
+-sourceNames=['texture/RAIN_GEOMETRY/du.dds','texture/RAIN_GEOMETRY/dv.dds','texture/RAINFX_ObjNormal_BoundaryMask.dds']
++sourceNames=['texture/RAIN_GEOMETRY/du.dds','texture/RAIN_GEOMETRY/dv.dds','texture/RAIN_GEOMETRY/position.dds','texture/RAINFX_ObjNormal_BoundaryMask.dds']
+ sha={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in sourceNames}
+ sha['texture/RAIN_FILM/cells.dds']=hashlib.sha256(path.read_bytes()).hexdigest()
+ assert abs(float(cells[:,:,0].sum(dtype=np.float64))-float(area.sum()))<float(area.sum())*1e-7
+-(ASSET/'geometry.lua').write_text('return {version="rain-film-v1",width=1024,height=256,pad=16,modelHash="'+verify[0]+'",maskHash="'+verify[1]+'",cellsHash="'+sha['texture/RAIN_FILM/cells.dds']+'"}\n')
+-(ASSET/'assets.json').write_text(json.dumps(dict(width=1024,height=256,areaM2=float(cells[:,:,0].sum(dtype=np.float64))/1e6,sha256=sha),indent=2))
++# P4's 4-neighbour stencil requires a physically continuous supported UV domain.
++# Reject a new seam topology for P4, while allowing P3 deposition to keep working.
++points=field('position')[1::2,1::2,:3].astype(np.float64)
++U=u[1::2,1::2,:3].astype(np.float64);V=v[1::2,1::2,:3].astype(np.float64)
++supported=cells[:,:,0]>0;badEdges=0
++for axis,derivative in ((1,U/1024),(0,V/256)):
++    neighbours=supported[:,:-1]&supported[:,1:] if axis==1 else supported[:-1]&supported[1:]
++    expected=np.linalg.norm(derivative[:,:-1] if axis==1 else derivative[:-1],axis=2)
++    chord=np.linalg.norm(np.diff(points,axis=axis),axis=2)
++    badEdges+=int(np.sum(neighbours&(chord>np.maximum(4*expected,.002))))
++degenerate=int(np.sum(supported&(np.linalg.norm(np.cross(U,V),axis=2)<1e-12)))
++flowConnected=badEdges==0 and degenerate==0
++(ASSET/'geometry.lua').write_text('return {version="rain-film-v1",width=1024,height=256,pad=16,flowConnectedUV='+str(flowConnected).lower()+',modelHash="'+verify[0]+'",maskHash="'+verify[1]+'",cellsHash="'+sha['texture/RAIN_FILM/cells.dds']+'"}\n')
++(ASSET/'assets.json').write_text(json.dumps(dict(width=1024,height=256,areaM2=float(cells[:,:,0].sum(dtype=np.float64))/1e6,
++    flowConnectedUV=flowConnected,flowDiscontinuousEdges=badEdges,flowDegenerateCells=degenerate,sha256=sha),indent=2))
+ print('P3 cells: 1024x256, supported area',float(cells[:,:,0].sum(dtype=np.float64))/1e6,'m2')
++print('P4 connected UV:',flowConnected,'discontinuous edges:',badEdges,'degenerate cells:',degenerate)
+--- s82/docs/tools/check_s82_p3_precision_and_reset.py
++++ s83/docs/tools/check_s82_p3_precision_and_reset.py
+@@ -10,7 +10,8 @@
+ base=(ROOT/'docs/tools/check_s63_gpu.py').read_text();env={'__file__':str(ROOT/'docs/tools/check_s63_gpu.py')}
+ exec(base[:base.index('report=[]')],env);env['OUT']=OUT
+ resolve=(ROOT/'shaders/rainFilmResolve.hlsl').read_text()
+-body=resolve[resolve.index('float4 pfResolve('):]
++start=resolve.index('float4 pfTransportFlux(') if 'float4 pfTransportFlux(' in resolve else resolve.index('float4 pfResolve(')
++body=resolve[start:]
+ assert body.count('float4 old=txFilmPrevious.Load(int3(p,0));')==1
+ body=body.replace('float4 pfResolve(float2 cell,float4 fresh)','float4 pfResolve(float2 cell,float4 fresh,float4 old)')
+ body=body.replace('float4 old=txFilmPrevious.Load(int3(p,0));','')
+--- s82/rain_film.lua
++++ s83/rain_film.lua
+@@ -31,6 +31,9 @@
+         gFilmReductionSize=vec2(66,18),gFilmScale2=1,gFilmDt=0,gFilmMotionDt=0,gFilmTheta=90,
+         gFilmMu=.001002,gFilmGamma=.0728,gFilmAirMS=0,gFilmEvapUMS=0,gFilmMicroJoinUM=20,
+         gFilmDepositBare=.35,gFilmDepositCoat=.05,gFilmMinSpeedMS=.001,gFilmWiden=.5,
++        gFilmFlowOn=0,gFilmFlowCf=.005,gFilmFlowCFL=.8,gFilmFlowReduce=0,
++        gFilmObjectToWorld=mat4x4.identity(),gFilmAccelerationWorld=vec3(0,-9.80665,0),
++        gFilmAirWorld=vec3(),gFilmAirRho=1.2,gFilmAirDownward=0,gFilmAirDownwardGain=1,
+         gCount=1,gTile=vec2(32,32),gTilesX=33,gTilesY=9,gWords=1,gMaskW=33,
+         gSummaryW=33,gSummaryWords=1,gSparseWords=1,gFlipY=0,gDebug=0}
+     st.values=values
+@@ -42,7 +45,20 @@
+     st.binParams=params(code('rainFilmBin'),{txFilmDescriptors=false})
+     st.summaryParams=params(d.summary,{txMask=false})
+     st.resolveParams=params(code('rainFilmResolve')..traversal,{txFilmDescriptors=false,txMask=false,txSummary=false,
++        txFilmPrevious=false,txFilmFlux=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    local flowCode=d.surface.shader..d.core..code('rainFilmFlow')
++    st.flowParams=params(flowCode..code('rainFilmFlowPass'),{
+         txFilmPrevious=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    st.flowBlocksParams=params(flowCode..code('rainFilmFlowBlocks'),{
++        txFilmPrevious=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    d.surface:bind(st.flowParams);d.surface:bind(st.flowBlocksParams)
++    st.flowCoarseParams=params(flowCode..code('rainFilmFlowBlocks'),{
++        txFilmPrevious=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    d.surface:bind(st.flowCoarseParams)
++    local flowValues={};for key,value in pairs(values) do flowValues[key]=value end
++    flowValues.gFilmReductionSize=vec2(5,2);flowValues.gFilmPaddedSize=vec2(66,18)
++    flowValues.gFilmFlowReduce=1;st.flowCoarseParams.values=flowValues
++    st.flowStatsParams=params(code('rainFilmFlowStats'),{txFilmFlowBlocks=false})
+     st.blocksParams=params(code('rainFilmBlocks'),{txFilmCurrent=false})
+     st.blocksSecondParams=params(code('rainFilmBlocks'),{txFilmCurrent=false})
+     local secondValues={};for key,value in pairs(values) do secondValues[key]=value end
+@@ -59,23 +75,27 @@
+     end
+     function st:dispose()
+         self.epoch=self.epoch+1
+-        for _,name in ipairs({'descriptors','metaScratch','mask','summary','a','b','blocks','blocksSecond','totals','opticsA','opticsB','stats'}) do
++        for _,name in ipairs({'descriptors','metaScratch','mask','summary','a','b','blocks','blocksSecond','totals','opticsA','opticsB','stats',
++            'flux','flowBlocks','flowCoarse','flowStats'}) do
+             if self[name] then self[name]:dispose();self[name]=nil end
+         end
+         self.count=nil;self.ready=false;self.pending=false;self.read=nil;self.optics=nil;self.birthRead=nil
+         self.write=nil;self.opticsWrite=nil;self.pendingBirthTotals=nil
+-        self.frame=nil;self.preparedFrame=nil;self.budgetFrame=nil;self.logPending=false
++        self.frame=nil;self.preparedFrame=nil;self.budgetFrame=nil;self.logPending=false;self.flowLogPending=false;self.flowMode=nil
+         self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
+         for _,p in ipairs({self.descriptorParams,self.metaParams,self.binParams,self.summaryParams,self.resolveParams,
+-            self.blocksParams,self.blocksSecondParams,self.totalsParams,self.opticsParams,self.statsParams}) do
++            self.blocksParams,self.blocksSecondParams,self.totalsParams,self.opticsParams,self.statsParams,
++            self.flowParams,self.flowBlocksParams,self.flowCoarseParams,self.flowStatsParams}) do
+             for key in pairs(p.textures) do if type(p.textures[key])~='string' then p.textures[key]=false end end
+         end
+     end
+-    function st:prepare(oldState,oldMeta,newState,newMeta,events,count,sim,inputs,motionDt)
++    function st:prepare(oldState,oldMeta,newState,newMeta,events,count,sim,inputs,motionDt,motion)
+         self.preparedFrame=nil;self.budgetFrame=nil
+         if self.assetPending or self.assetError then self.pending=true;return false end
+         if self.frame==sim.frame or count<1 or count>4096 or count~=math.floor(count) then return false end
+-        if self.count~=count then
++        local flowMode=r.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
++        assert(not flowMode or geometry.flowConnectedUV==true,'P4 requires the connected-UV film bake: rebuild film cells')
++        if self.count~=count or self.flowMode~=flowMode then
+             self:dispose();local words=math.ceil(count/96)
+             local v=self.values;v.gWords=words;v.gMaskW=33*words;v.gSummaryWords=math.ceil(words/96);v.gSummaryW=33*v.gSummaryWords
+             self.descriptors=canvas(count,5,render.TextureFormat.R32G32B32A32.Float,'P3 conservative descriptors')
+@@ -86,7 +106,8 @@
+             self.b=canvas(1056,288,render.TextureFormat.R32G32B32A32.Float,'P3 field B');self.read=self.a
+             self.opticsA=canvas(1024,256,render.TextureFormat.R16G16B16A16.Float,'P3 physical height A')
+             self.opticsB=canvas(1024,256,render.TextureFormat.R16G16B16A16.Float,'P3 physical height B');self.optics=self.opticsA
+-            self.count=count
++            if flowMode then self.flux=canvas(1024,256,render.TextureFormat.R32G32B32A32.Float,'P4 donor face flux') end
++            self.count=count;self.flowMode=flowMode
+         end
+         local v=self.values;v.gFilmCount=count;v.gCount=count
+         v.gFilmScale2=d.surface.scale^2;v.gFilmDt=math.max(sim.dt or 0,0);v.gFilmMotionDt=math.max(motionDt or 0,0)
+@@ -100,6 +121,24 @@
+         local thermal=math.exp(17.625*t/(243.04+t)-17.625*20/(243.04+20))
+         v.gFilmEvapUMS=r.RAIN_FILM_EVAP_DRY_UM_S*(1-rh)*thermal*(1+.5*math.sqrt(v.gFilmAirMS))
+         self.evapUMS=v.gFilmEvapUMS
++        v.gFilmFlowOn=flowMode and 1 or 0
++        if flowMode then
++            assert(motion and motion.gRainObjectToWorld,'P4 requires the P1 world transform/force inputs')
++            v.gFilmObjectToWorld=motion.gRainObjectToWorld
++            v.gFilmFlowCf=r.RAIN_FILM_FLOW_CF;v.gFilmFlowCFL=.8
++            local mask=motion.gRainForceMask or 7
++            local gravity=math.floor(mask)%2;local inertia=math.floor(mask/2)%2;local air=math.floor(mask/4)%2
++            local force=motion.gRainSiInertiaWorld
++            v.gFilmAccelerationWorld:set(inertia*(force and force.x or 0),
++                inertia*(force and force.y or 0)-9.80665*gravity,inertia*(force and force.z or 0))
++            local wind=motion.gRainSiAirWorld;local k=(motion.gRainSiAirFraction or 0)*air
++            v.gFilmAirWorld:set((wind and wind.x or 0)*k,(wind and wind.y or 0)*k,(wind and wind.z or 0)*k)
++            v.gFilmAirRho=motion.gRainSiRhoAir or 1.2
++            v.gFilmAirDownward=motion.gRainAirflowDownwardMode or 0
++            v.gFilmAirDownwardGain=motion.gRainAirflowDownwardGain or 1
++            d.surface:bind(self.flowParams)
++            self.flowParams.textures.txFilmPrevious=self.read
++        end
+         d.surface:bind(self.descriptorParams);d.surface:bind(self.metaParams)
+         local tx=self.descriptorParams.textures
+         tx.txFilmNewState=newState;tx.txFilmNewMeta=newMeta;tx.txFilmOldState=oldState;tx.txFilmOldMeta=oldMeta;tx.txFilmBirthEvent=events
+@@ -108,6 +147,7 @@
+         self.summaryParams.textures.txMask=self.mask
+         local tx=self.resolveParams.textures
+         tx.txFilmDescriptors=self.descriptors;tx.txMask=self.mask;tx.txSummary=self.summary;tx.txFilmPrevious=self.read
++        tx.txFilmFlux=self.flux or false
+         self.write=self.read==self.a and self.b or self.a
+         self.opticsWrite=self.optics==self.opticsA and self.opticsB or self.opticsA
+         self.opticsParams.textures.txFilmCurrent=self.write
+@@ -115,12 +155,38 @@
+         if not self:step('P3 paired meta',self.metaScratch,self.metaParams) then return false end
+         if not self:step('P3 sparse tiles',self.mask,self.binParams) then return false end
+         if not self:step('P3 sparse summary',self.summary,self.summaryParams) then return false end
++        if flowMode and not self:step('P4 face flux',self.flux,self.flowParams) then return false end
+         if not self:step('P3 field deposition',self.write,self.resolveParams) then return false end
+         if not self:step('P3 physical height',self.opticsWrite,self.opticsParams) then return false end
+         self.preparedFrame=sim.frame;self.pending=false;return true
+     end
+     function st:step(key,target,p)
+         if d.measure(key,target.updateWithShader,target,p)==false then self.pending=true;return false end
++        return true
++    end
++    function st:logFlow()
++        if not self.ready or not self.flowMode or self.flowLogPending then return false end
++        if not self.flowBlocks then
++            self.flowBlocks=canvas(66,18,render.TextureFormat.R32G32B32A32.Float,'P4 manual Courant blocks')
++            self.flowCoarse=canvas(5,2,render.TextureFormat.R32G32B32A32.Float,'P4 manual Courant coarse')
++            self.flowStats=canvas(4,1,render.TextureFormat.R32.Float,'P4 manual Courant readback')
++        end
++        d.surface:bind(self.flowBlocksParams)
++        self.flowBlocksParams.textures.txFilmPrevious=self.read
++        self.flowCoarseParams.textures.txFilmFlowBlocks=self.flowBlocks
++        self.flowStatsParams.textures.txFilmFlowBlocks=self.flowCoarse
++        if not self:step('P4 manual Courant blocks',self.flowBlocks,self.flowBlocksParams) then return false end
++        if not self:step('P4 manual Courant coarse',self.flowCoarse,self.flowCoarseParams) then return false end
++        if self.flowStats:updateWithShader(self.flowStatsParams)==false then return false end
++        self.flowLogPending=true;local epoch=self.epoch;local frame=self.frame;local dt=self.values.gFilmDt
++        self.flowStats:accessData(function(err,data)
++            if epoch~=self.epoch then if data then data:dispose() end;return end
++            self.flowLogPending=false
++            if err or not data then if data then data:dispose() end;d.log('P4 limiter readback failed');return end
++            local c,l,w,v=data:floatValue(0,0),data:floatValue(1,0),data:floatValue(2,0),data:floatValue(3,0);data:dispose()
++            d.log(string.format('Rain P4 current-field estimate frame=%s dt=%.6f maxCourant=%.6f limitedCells=%.0f wetCells=%.0f limitedFilmMM3=%.6f limit=0.8',
++                tostring(frame),dt,c,l,w,v))
++        end)
+         return true
+     end
+     function st:budget(birthTotals,sim)
+@@ -154,7 +220,7 @@
+         self.statsParams.textures.txFilmTotals=self.totals
+         if self.stats:updateWithShader(self.statsParams)==false then return false end
+         self.logPending=true;local epoch=self.epoch;local frame=self.frame
+-        local seconds=self.publishedSeconds;local steps=self.publishedSteps
++        local seconds=self.publishedSeconds;local steps=self.publishedSteps;local transport=self.flowMode and 'P4' or 'P3'
+         self.stats:accessData(function(err,data)
+             if epoch~=self.epoch then if data then data:dispose() end;return end
+             self.logPending=false
+@@ -164,9 +230,9 @@
+             local prev=self.previousLog;local interval=seconds-(prev and prev.seconds or 0)
+             local inputRate=interval>0 and (v[9]-(prev and prev.input or 0))/interval or 0
+             local residualDelta=residual-(prev and prev.residual or 0)
+-            d.log(string.format('Rain P3 frame=%s mm3 input=%.6f film=%.6f micro=%.6f drops=%.6f bounce=%.6f exit=%.6f headEvap=%.6f fieldEvap=%.6f runoff=%.6f trailTransferred=%.6f residual=%.6f arrivals=%.0f publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s residualDelta=%.6f mm3',
++            d.log(string.format('Rain P3 frame=%s mm3 input=%.6f film=%.6f micro=%.6f drops=%.6f bounce=%.6f exit=%.6f headEvap=%.6f fieldEvap=%.6f runoff=%.6f trailTransferred=%.6f residual=%.6f arrivals=%.0f publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s residualDelta=%.6f mm3 transport=%s',
+                 tostring(frame),v[9],v[1],v[2],v[12],v[10],v[11],v[13],v[3],v[4],v[14],residual,v[16],
+-                seconds,steps,interval,inputRate,residualDelta))
++                seconds,steps,interval,inputRate,residualDelta,transport))
+             self.previousLog={seconds=seconds,input=v[9],residual=residual}
+         end)
+         return true
+--- s82/realvisor.lua
++++ s83/realvisor.lua
+@@ -423,6 +423,8 @@
+         RAIN_BIRTH_WET_OVERRIDE = 0.0, -- manual material-LUT diagnostic; not track wetness
+         RAIN_BIRTH_NORMAL_REVERSED = false,
+         RAIN_PHYSICS_P3_FILM_PREVIEW = false,
++        RAIN_PHYSICS_P4_TRANSPORT_PREVIEW = false,
++        RAIN_FILM_FLOW_CF = 0.005, -- estimated local surface air skin-friction coefficient
+         RAIN_FILM_DEPOSIT_BARE = 0.35, -- estimated finite-drop coating coefficient
+         RAIN_FILM_DEPOSIT_COAT = 0.05,
+         RAIN_FILM_MIN_SPEED_MM_S = 1.0,
+@@ -6615,6 +6617,7 @@
+ rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
+ rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
+ rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
++rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
+ rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,transform)
+     local st=rainDynamicSceneCopyState
+     if not st.physicsBirth then st.physicsInputsUpdate() end
+@@ -6648,7 +6651,7 @@
+         st.physicalFilmGPU=result
+     end
+     local ok,ready=pcall(st.physicalFilmGPU.prepare,st.physicalFilmGPU,oldState,oldMeta,newState,newMeta,
+-        events,count,sim,st.physicsInputs,motionDt)
++        events,count,sim,st.physicsInputs,motionDt,rainStateUpdateParams.values)
+     if not ok then st.physicsFilmError=tostring(ready);return false end
+     st.physicsFilmError=st.physicalFilmGPU.assetError
+     return ready
+@@ -7039,6 +7042,7 @@
+     local siChanged=rainDynamicSceneCopyState.siConfigured~=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
+         or rainDynamicSceneCopyState.birthConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true)
+         or rainDynamicSceneCopyState.filmConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true)
++        or rainDynamicSceneCopyState.flowConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true)
+     if siChanged then
+         rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
+         rainDynamicStateReadbackReady=false
+@@ -7046,6 +7050,7 @@
+         rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
+         rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
+         rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
++        rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
+         rainDynamicSceneCopyState.gpuHeadsActive=false
+         rainDynamicStateHasSnapshot=false
+         if rainDynamicSceneCopyState.newTrail then rainDynamicSceneCopyState.newTrail:dispose() end
+@@ -17557,7 +17562,15 @@
+         else st.siUIError='P3 requires P1/P2 previews, GPU heads and lifecycle mode 3 or 6' end
+     end
+     if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then
+-        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. No Smear/local impact film; active film transport and reabsorption are deferred.')
++        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. No Smear/local impact film. P4 adds film transport; head reabsorption remains deferred.')
++        if ui.checkbox('Enable P4 conservative transport preview (resets water)',cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW) then
++            cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW
++        end
++        if cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW then
++            st.rainUISlider('Estimated film air skin friction Cf','RAIN_FILM_FLOW_CF',0,.03,'%.4f')
++            ui.textWrapped('P4 moves film only. Four-neighbour donor flux is limited at Courant 0.8; high speeds can be numerically slowed. Check limiter log. No pressure/contact-line solver or head reabsorption.')
++            if st.physicalFilmGPU and ui.button('Log P4 transport limiter') then st.physicalFilmGPU:logFlow() end
++        end
+         st.rainUISlider('Estimated trail coefficient: bare','RAIN_FILM_DEPOSIT_BARE',0,1,'%.3f')
+         st.rainUISlider('Estimated trail coefficient: coat','RAIN_FILM_DEPOSIT_COAT',0,1,'%.3f')
+         st.rainUISlider('Minimum trail speed (mm/s)','RAIN_FILM_MIN_SPEED_MM_S',0,20,'%.2f')
+--- s82/shaders/rainFilmBlocks.hlsl
++++ s83/shaders/rainFilmBlocks.hlsl
+@@ -1,9 +1,13 @@
+ float4 main(PS_IN pin) {
+     int2 block=min((int2)(pin.Tex*gFilmReductionSize),(int2)gFilmReductionSize-1);
+-    float4 total=0;
++    float4 total=0,compensation=0;
+     [loop]for(int y=0;y<16;++y) [loop]for(int x=0;x<16;++x) {
+         int2 p=block*16+int2(x,y);
+-        if(all(p<(int2)gFilmPaddedSize))total+=txFilmCurrent.Load(int3(p,0));
++        if(all(p<(int2)gFilmPaddedSize)) {
++            precise float4 adjusted=txFilmCurrent.Load(int3(p,0))-compensation;
++            precise float4 next=total+adjusted;
++            compensation=(next-total)-adjusted;total=next;
++        }
+     }
+     return total;
+ }
+--- s82/shaders/rainFilmResolve.hlsl
++++ s83/shaders/rainFilmResolve.hlsl
+@@ -36,9 +36,23 @@
+         acc.rg+=birth.zw*pfBasis(birth.xy,cell,support);
+     }
+ }
++float4 pfTransportFlux(int2 inner) {
++    if(any(inner<0)||any(inner>=(int2)gFilmGrid))return 0;
++    return txFilmFlux.Load(int3(inner,0));
++}
+ float4 pfResolve(float2 cell,float4 fresh) {
+     int2 p=(int2)cell,inner=p-(int)gFilmPad;
+     float4 old=txFilmPrevious.Load(int3(p,0));
++    if(gFilmFlowOn>.5) {
++        float4 outgoing=pfTransportFlux(inner);
++        precise float remainX=old.r-(outgoing.x+outgoing.y);
++        precise float remainY=remainX-(outgoing.z+outgoing.w);
++        float arriving=pfTransportFlux(inner+int2(-1,0)).y
++            +pfTransportFlux(inner+int2(1,0)).x
++            +pfTransportFlux(inner+int2(0,-1)).w
++            +pfTransportFlux(inner+int2(0,1)).z;
++        old.r=max(remainY,0)+arriving;
++    }
+     float2 incoming=max(fresh.rg,0),water=max(old.rg,0)+incoming;
+     if(water.x+water.y<=0)return float4(0,0,old.ba);
+     float area=0;
+--- s82/shaders/rainFilmTotals.hlsl
++++ s83/shaders/rainFilmTotals.hlsl
+@@ -10,9 +10,13 @@
+         float4 a=txFilmBirthTotals.Load(int3(0,4,0)),b=txFilmBirthTotals.Load(int3(0,1,0));
+         result=float4(a.xy,b.x,b.w);
+     } else {
+-    float4 delta=0;
++    float4 delta=0,compensation=0;
+     [loop]for(uint y=0u;y<(uint)gFilmReductionSize.y;++y)
+-        [loop]for(uint x=0u;x<(uint)gFilmReductionSize.x;++x)delta+=txFilmBlocks.Load(int3(x,y,0));
++        [loop]for(uint x=0u;x<(uint)gFilmReductionSize.x;++x) {
++            precise float4 adjusted=txFilmBlocks.Load(int3(x,y,0))-compensation;
++            precise float4 next=delta+adjusted;
++            compensation=(next-delta)-adjusted;delta=next;
++        }
+     // Losses live cumulatively in each physical cell. Reduction is requested
+     // only for a manual snapshot, so no full-field budget scan runs every frame.
+     result=row==0u ? delta : 0;
+--- s82/texture/RAIN_FILM/assets.json
++++ s83/texture/RAIN_FILM/assets.json
+@@ -2,9 +2,13 @@
+   "width": 1024,
+   "height": 256,
+   "areaM2": 0.04028860095951334,
++  "flowConnectedUV": true,
++  "flowDiscontinuousEdges": 0,
++  "flowDegenerateCells": 0,
+   "sha256": {
+     "texture/RAIN_GEOMETRY/du.dds": "143afb1939afd16f10fa3c0277058e1a8254966b25a85629a36d8812f99a583e",
+     "texture/RAIN_GEOMETRY/dv.dds": "cace1302aa31b2028711f7db31cf2fd5ddd3328cb62be51e842be9a11c6b45cd",
++    "texture/RAIN_GEOMETRY/position.dds": "c77c56b7bbbf4f1bf65c3dc0897e3f295d9e07b3db3c0d549d14ab26bc82eb7a",
+     "texture/RAINFX_ObjNormal_BoundaryMask.dds": "08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",
+     "texture/RAIN_FILM/cells.dds": "60924e0299d0d95a4643ce6109edfdc897a781d046f55222ce4908cb1a3f4af2"
+   }
+--- s82/texture/RAIN_FILM/geometry.lua
++++ s83/texture/RAIN_FILM/geometry.lua
+@@ -1 +1 @@
+-return {version="rain-film-v1",width=1024,height=256,pad=16,modelHash="2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",maskHash="08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",cellsHash="60924e0299d0d95a4643ce6109edfdc897a781d046f55222ce4908cb1a3f4af2"}
++return {version="rain-film-v1",width=1024,height=256,pad=16,flowConnectedUV=true,modelHash="2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",maskHash="08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",cellsHash="60924e0299d0d95a4643ce6109edfdc897a781d046f55222ce4908cb1a3f4af2"}
+--- /dev/null
++++ s83/shaders/rainFilmFlow.hlsl
+@@ -0,0 +1,38 @@
++// P4a reduced, quasi-steady thin-film donor transport. Not a contact-line/CFD solver.
++// Flux channels are actual departing film volumes / mm3: left,right,up,down.
++struct FilmFlow { float4 flux; float courant; };
++FilmFlow ffEvaluate(int2 p) {
++    FilmFlow result;result.flux=0;result.courant=0;
++    int2 inner=p-(int)gFilmPad;
++    if(any(inner<0)||any(inner>=(int2)gFilmGrid))return result;
++    float volume=max(txFilmPrevious.Load(int3(p,0)).r,0);
++    float area=txFilmCells.Load(int3(inner,0)).r*gFilmScale2;
++    if(volume<=0||area<=0||gFilmDt<=0)return result;
++    float2 uv=(inner+.5)/gFilmGrid;
++    float3 u,v;rainMetric(float2(uv.x,uv.y-1),u,v);
++    float3 uw=mul(u,(float3x3)gFilmObjectToWorld),vw=mul(v,(float3x3)gFilmObjectToWorld);
++    float3 crossUV=cross(uw,vw);float n2=dot(crossUV,crossUV);
++    if(n2<1e-20)return result;
++    float3 n=crossUV*rsqrt(max(n2,1e-20));
++    float3 air=gFilmAirWorld;
++    if(gFilmAirDownward>.5) {
++        float3 down=rainSiTangent(float3(0,-1,0),n);float len=length(down);
++        if(len>1e-6) {down/=len;air+=down*(length(air)*.30*max(gFilmAirDownwardGain,0)-dot(air,down));}
++    }
++    air=rainSiTangent(air,n);
++    float3 tau=.5*gFilmAirRho*gFilmFlowCf*length(air)*air;
++    float h=volume/area*.001; // mm3/mm2 -> m; physical stock only.
++    float3 velocity=rainSiTangent(gFilmAccelerationWorld,n)*(998.2*h*h/(3*gFilmMu))
++        +tau*(h/(2*gFilmMu));
++    float2 travel=rainSiProjectUV(uw,vw,velocity)*gFilmGrid*gFilmDt;
++    result.courant=abs(travel.x)+abs(travel.y);
++    float2 share=abs(travel)*min(1,gFilmFlowCFL/max(result.courant,1e-30));
++    // Matched quantized debits: gather subtracts in this same X then Y order.
++    precise float restX=volume-volume*share.x;
++    precise float movedX=volume-restX;
++    precise float restY=restX-volume*share.y;
++    precise float movedY=restX-restY;
++    result.flux=float4(travel.x<0 ? movedX : 0,travel.x>=0 ? movedX : 0,
++                      travel.y<0 ? movedY : 0,travel.y>=0 ? movedY : 0);
++    return result;
++}
+--- /dev/null
++++ s83/shaders/rainFilmFlowBlocks.hlsl
+@@ -0,0 +1,19 @@
++// Manual-only current-field Courant estimate. Coarse reduction preserves MAX/SUM.
++float4 main(PS_IN pin) {
++    int2 block=min((int2)(pin.Tex*gFilmReductionSize),(int2)gFilmReductionSize-1);
++    float4 result=0;
++    [loop]for(int y=0;y<16;++y) [loop]for(int x=0;x<16;++x) {
++        int2 p=block*16+int2(x,y);
++        if(any(p>=(int2)gFilmPaddedSize))continue;
++        float4 value=0;
++        if(gFilmFlowReduce>.5)value=txFilmFlowBlocks.Load(int3(p,0));
++        else {
++            FilmFlow f=ffEvaluate(p);
++            float volume=max(txFilmPrevious.Load(int3(p,0)).r,0);
++            value=float4(f.courant,f.courant>gFilmFlowCFL ? 1 : 0,volume>0 ? 1 : 0,
++                f.courant>gFilmFlowCFL ? volume : 0);
++        }
++        result.x=max(result.x,value.x);result.yzw+=value.yzw;
++    }
++    return result;
++}
+--- /dev/null
++++ s83/shaders/rainFilmFlowPass.hlsl
+@@ -0,0 +1,4 @@
++float4 main(PS_IN pin) {
++    int2 p=min((int2)(pin.Tex*gFilmGrid),(int2)gFilmGrid-1)+(int)gFilmPad;
++    return ffEvaluate(p).flux;
++}
+--- /dev/null
++++ s83/shaders/rainFilmFlowStats.hlsl
+@@ -0,0 +1,8 @@
++float4 main(PS_IN pin) {
++    float4 result=0;
++    [loop]for(int y=0;y<2;++y) [loop]for(int x=0;x<5;++x) {
++        float4 value=txFilmFlowBlocks.Load(int3(x,y,0));
++        result.x=max(result.x,value.x);result.yzw+=value.yzw;
++    }
++    int index=min((int)(pin.Tex.x*4),3);return result[index];
++}

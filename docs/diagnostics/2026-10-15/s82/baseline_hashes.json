@@ -1,0 +1,197 @@
+[
+  {
+    "modified": "2026-10-14T18:15:46.4664190Z",
+    "path": "realvisor.lua",
+    "hash": "5883B915E6FAE40A03772BAE1C855B8857DCC86D449A7D8927A0CBFAA27D5D18"
+  },
+  {
+    "modified": "2026-10-14T17:47:58.1570820Z",
+    "path": "rain_birth_gpu.lua",
+    "hash": "A0F7CE0F01FEE7602DA24006C0C0811F66445EFCB4EF43186387890E5B1C116C"
+  },
+  {
+    "modified": "2026-10-14T18:04:37.4846486Z",
+    "path": "rain_film.lua",
+    "hash": "4B86AF0A97AA4CAEC4EF147F26D434881D31CCAE5FE3B634B6DF61BD3C2AEE98"
+  },
+  {
+    "modified": "2026-10-14T18:15:47.0685225Z",
+    "path": "docs/README.md",
+    "hash": "D5760AE8B054F509C522BAC156907D41DE9306538C014372BBA72F22BA2766B6"
+  },
+  {
+    "modified": "2026-10-14T18:15:47.3768856Z",
+    "path": "docs/RAINFX_ROADMAP.md",
+    "hash": "8D25862768CAFBCBB99BF20815E9D961DB345137E19190579D0EC6BEE18FF39C"
+  },
+  {
+    "modified": "2026-10-14T18:15:46.7607848Z",
+    "path": "docs/RAINFX_S81_P3_SPATIAL_WATER_PREVIEW.md",
+    "hash": "8E8E2FE1707F5CA5BDD1136721B4CC3927085B2BE0B08D27E5B0FB3B220C2D79"
+  },
+  {
+    "modified": "2026-10-11T17:40:07.7381494Z",
+    "path": "shaders/e1HousingGeometry.hlsl",
+    "hash": "79052460960877638DFCD2348E1EFD9B05B2948B98A4F589955ED0355C2546AF"
+  },
+  {
+    "modified": "2026-10-14T16:54:54.8868721Z",
+    "path": "shaders/rainBirthBlocks.hlsl",
+    "hash": "1EDCF3E1C8866F490643B4B030D8E202D27A5C9AB94F8ACA7A8A9AEBF275B2AF"
+  },
+  {
+    "modified": "2026-10-14T17:29:58.0950327Z",
+    "path": "shaders/rainBirthEvent.hlsl",
+    "hash": "4D5A657E0D2C50E56DED4CDD5C788DD20BDFE37469E1BFBA0F68C675E57762C7"
+  },
+  {
+    "modified": "2026-10-14T16:54:55.4666045Z",
+    "path": "shaders/rainBirthStats.hlsl",
+    "hash": "3B89C9639CFDC64AB860785FAB44B3922BC39F1C48067461DC2BCEAD618B0FE4"
+  },
+  {
+    "modified": "2026-10-14T16:54:55.1802412Z",
+    "path": "shaders/rainBirthTotals.hlsl",
+    "hash": "AA8AC481941EF0E8E5066510A1C86A8A4CD7143120CC2C37355372B90DE7AED6"
+  },
+  {
+    "modified": "2026-10-14T16:52:13.9969380Z",
+    "path": "shaders/rainFilmBin.hlsl",
+    "hash": "55EAD1F012504643FFE300333819B8059B79038AF17F86C3E9E7C8414904FC57"
+  },
+  {
+    "modified": "2026-10-14T16:52:14.5830676Z",
+    "path": "shaders/rainFilmBlocks.hlsl",
+    "hash": "68F403CC0089D159892E14B66217EAE95B143446B91BF7D1A56EE75A8B64C516"
+  },
+  {
+    "modified": "2026-10-14T17:12:21.3372687Z",
+    "path": "shaders/rainFilmDescriptor.hlsl",
+    "hash": "6487F894DE27B49A697C6E45C70877DA012317EB7A4C1DB66ABCF9946D86D2C7"
+  },
+  {
+    "modified": "2026-10-14T17:47:57.3130952Z",
+    "path": "shaders/rainFilmMeta.hlsl",
+    "hash": "CE8ABB140F59508292D17DDC469775DD91440CC366FFCA792D7AAD31F729A519"
+  },
+  {
+    "modified": "2026-10-14T16:52:15.1502779Z",
+    "path": "shaders/rainFilmOptics.hlsl",
+    "hash": "3369383257E51A90282F1563EA9A8244C53366BB36F61C667809C038312330EA"
+  },
+  {
+    "modified": "2026-10-14T17:47:57.0244289Z",
+    "path": "shaders/rainFilmResolve.hlsl",
+    "hash": "74AC9D6A485DD0F04AE8E815A584BDEACA032E7689EDCB53ADD623402A2A749E"
+  },
+  {
+    "modified": "2026-10-14T16:52:15.4482078Z",
+    "path": "shaders/rainFilmStats.hlsl",
+    "hash": "6E5E9282E947A0F07714521EBF80E3ADCDE2F46D04700AE07D44FEF3B8C7B358"
+  },
+  {
+    "modified": "2026-10-14T18:04:37.7748045Z",
+    "path": "shaders/rainFilmTotals.hlsl",
+    "hash": "5F9E2D3AF400768F8DE0C0026BC2F045C59F07942A170D8DB4F9F23B67F950AE"
+  },
+  {
+    "modified": "2026-10-14T13:02:42.8320945Z",
+    "path": "shaders/rainMetaEntry.hlsl",
+    "hash": "29242B5E5259E423CBEADD2E26114EB2CDBD5EE2075A9C88BE0ACB00F47E218A"
+  },
+  {
+    "modified": "2026-10-11T18:39:26.8809236Z",
+    "path": "shaders/rainMirrorWater.hlsl",
+    "hash": "3FB0792B4F503B0975ECA5A03847757BC9C4B8FD0BE65BA301FE756C2CB8303E"
+  },
+  {
+    "modified": "2026-10-14T10:02:25.9952519Z",
+    "path": "shaders/rainPhysicsSI.hlsl",
+    "hash": "4486E11E68BCD9EC137AEAFB04576A056073B3B9B6112FF6A8F23D11AF9806DE"
+  },
+  {
+    "modified": "2026-10-14T13:02:42.5422460Z",
+    "path": "shaders/rainStateEntry.hlsl",
+    "hash": "4858D6CB9322556AD31E9C479A21CEE6B9F72A5CB064FFE0D83A06F88E8953F6"
+  },
+  {
+    "modified": "2026-10-12T04:26:45.6462019Z",
+    "path": "shaders/rainSurfaceMetric.hlsl",
+    "hash": "4DDE640CBB36C4D1C41D8A64D4849E9D6D018269D2A918511547CF723A7C3ED3"
+  },
+  {
+    "modified": "2026-10-12T10:06:36.4475455Z",
+    "path": "shaders/rainTrailBin.hlsl",
+    "hash": "B76E70DFB5D42F604118B11ED1D0AD27A2AA07F0023BDFF245D35C203D0175CB"
+  },
+  {
+    "modified": "2026-10-12T16:22:23.3013849Z",
+    "path": "shaders/rainTrailDescriptor.hlsl",
+    "hash": "BA8E5EAD85A746313C63990967E8CB3FDA576B26E5AE540D7DA309B47E7459BF"
+  },
+  {
+    "modified": "2026-10-12T16:34:30.4422207Z",
+    "path": "shaders/rainTrailResolve.hlsl",
+    "hash": "03ED6F55D9D4B70A7FB4E169FBFFB3D60F3411E49FA27FBB9412D218B47C8A9B"
+  },
+  {
+    "modified": "2026-10-14T17:09:24.2848168Z",
+    "path": "shaders/rainVisorDynamicDrop.hlsl",
+    "hash": "DD49AC987832AF713EF5106CFCA4CDBA0F6FB68E29D8545206308E487653B266"
+  },
+  {
+    "modified": "2026-10-12T12:36:16.9362502Z",
+    "path": "shaders/rainVisorLayer.hlsl",
+    "hash": "7311DD7F2DD3161A6FB11A748AFC0FA3A30EFCB43D55D69100E415AE4C8878FB"
+  },
+  {
+    "modified": "2026-10-12T04:27:44.8593737Z",
+    "path": "shaders/rainVisorOptics.hlsl",
+    "hash": "480F1253037029D3DD17D3F629760DF7241A71ECBAA3A418089D1BE004FCFF8F"
+  },
+  {
+    "modified": "2026-10-11T18:14:02.1444403Z",
+    "path": "shaders/rainVisorScreen.hlsl",
+    "hash": "42E3F581633C920E75B413A6DF3570B4013C3E1A658E3039A6A53D0BD4F6A7EB"
+  },
+  {
+    "modified": "2026-10-10T08:16:00.8134461Z",
+    "path": "shaders/visorOpticsBake.hlsl",
+    "hash": "3431216FE1DEF574DDA06BBE99A1968706423EE3CB16A96451ED9D7087E678BD"
+  },
+  {
+    "modified": "2026-10-10T06:12:25.0459105Z",
+    "path": "shaders/visorOpticsBright.hlsl",
+    "hash": "0E5087C565580AAEB1638EB916D61A21C677C75EF35E242097BE6E9BCD9AA2AD"
+  },
+  {
+    "modified": "2026-10-10T06:18:04.2275515Z",
+    "path": "shaders/visorOpticsMask.hlsl",
+    "hash": "A8823F7E89D67C2BE67036EE82550E8A984B552ABA18B8BDBC86365B08EEE215"
+  },
+  {
+    "modified": "2026-10-09T12:11:24.6289264Z",
+    "path": "shaders/visorOpticsProbe.hlsl",
+    "hash": "EADC06C640CADF73E58FDDB7A27135EFBEBBA65A66E4FCD861B65F93709BB861"
+  },
+  {
+    "modified": "2026-10-10T05:43:08.0624396Z",
+    "path": "shaders/visorOpticsStats.hlsl",
+    "hash": "F39BA5B760BDB19A0553C97945F98822470D3A7352BE0BF7678F3E9423DD6773"
+  },
+  {
+    "modified": "2026-10-09T12:11:24.9418424Z",
+    "path": "shaders/visorOpticsSun.hlsl",
+    "hash": "9ECBDA8BA326F04E01BF0960F1B71E6D5D71F5B78B22C4F08B1DF3903DD70D2E"
+  },
+  {
+    "modified": "2026-10-11T17:40:07.7454983Z",
+    "path": "shaders/visorOpticsTrace.hlsl",
+    "hash": "5FBCDF38254EBD3EC57EC4761CC9B9E8E80D746435BCB47A1DD3B9FDDA681EB2"
+  },
+  {
+    "modified": "2026-10-10T08:16:01.1135088Z",
+    "path": "shaders/visorOpticsVisibility.hlsl",
+    "hash": "CF59B060900C1F03DA51DC805C5FE8059902601F85913D923470DBD35300E936"
+  }
+]

@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-15",
+  "sessionStep": "s82",
+  "runtimeAndAssetsUnchangedFromS81": {
+    "realvisor.lua": true,
+    "rain_birth_gpu.lua": true,
+    "rain_film.lua": true,
+    "rain_birth_model.lua": true,
+    "rain_surface.lua": true,
+    "rain_physics_units.lua": true,
+    "rain_environment.lua": true,
+    "shaders/rainFilmBin.hlsl": true,
+    "shaders/rainFilmBlocks.hlsl": true,
+    "shaders/rainFilmDescriptor.hlsl": true,
+    "shaders/rainFilmMeta.hlsl": true,
+    "shaders/rainFilmOptics.hlsl": true,
+    "shaders/rainFilmResolve.hlsl": true,
+    "shaders/rainFilmStats.hlsl": true,
+    "shaders/rainFilmTotals.hlsl": true,
+    "shaders/rainBirthEvent.hlsl": true,
+    "shaders/rainBirthBlocks.hlsl": true,
+    "shaders/rainBirthTotals.hlsl": true,
+    "shaders/rainBirthStats.hlsl": true,
+    "shaders/rainVisorDynamicDrop.hlsl": true,
+    "texture/RAIN_FILM/assets.json": true,
+    "texture/RAIN_FILM/cells.dds": true,
+    "texture/RAIN_FILM/geometry.lua": true
+  },
+  "scope": "P3 user data review, targeted arithmetic and ownership diagnostics; full P3 completion remains open",
+  "reports": [
+    "game_checks.json",
+    "precision_checks.json",
+    "reset_checks.json",
+    "binding_checks.json",
+    "media.json"
+  ],
+  "sourceStamp": "1ad4a95f48d7b683f38b9134bf6c202eb363780e + unchanged s81 delivery",
+  "filmMeanStationaryUM": [
+    86.4070519971514,
+    87.593923267466
+  ],
+  "filmMeanDrivingUM": [
+    175.0384847339092,
+    200.36604847894384
+  ]
+}

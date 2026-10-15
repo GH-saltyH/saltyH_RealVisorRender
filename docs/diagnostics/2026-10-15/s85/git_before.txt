@@ -1,0 +1,51 @@
+ M docs/RAINFX_ROADMAP.md
+ M docs/README.md
+ M docs/diagnostics/2026-10-14/s75/installed_modules.json
+ M docs/tools/build_kn5_migration.py
+ M docs/tools/install_s75_inputs.ps1
+ M rain_birth_gpu.lua
+ M realvisor.lua
+ M shaders/rainBirthBlocks.hlsl
+ M shaders/rainBirthEvent.hlsl
+ M shaders/rainBirthStats.hlsl
+ M shaders/rainBirthTotals.hlsl
+ M shaders/rainVisorDynamicDrop.hlsl
+?? docs/RAINFX_S81_P3_SPATIAL_WATER_PREVIEW.md
+?? docs/RAINFX_S82_P3_GAME_REVIEW.md
+?? docs/RAINFX_S83_P4_FILM_TRANSPORT.md
+?? docs/RAINFX_S84_P4_GAME_REVIEW.md
+?? docs/diagnostics/2026-10-15/s81/
+?? docs/diagnostics/2026-10-15/s82/
+?? docs/diagnostics/2026-10-15/s83/
+?? docs/diagnostics/2026-10-15/s84/
+?? docs/diagnostics/2026-10-15/s85/
+?? docs/images/s81_P3/
+?? docs/images/s83_P4/
+?? docs/tools/build_s81_film_cells.py
+?? docs/tools/check_s81_film_binding.py
+?? docs/tools/check_s81_film_gpu.py
+?? docs/tools/check_s81_film_lens.py
+?? docs/tools/check_s81_legacy.py
+?? docs/tools/check_s82_p3_precision_and_reset.py
+?? docs/tools/check_s83_flow_binding.py
+?? docs/tools/check_s83_flow_gpu.py
+?? docs/tools/check_s84_flow_diagnostics.py
+?? docs/tools/finalize_s81.py
+?? docs/tools/finalize_s83.py
+?? docs/tools/finalize_s84.py
+?? docs/tools/review_s82_p3_game.py
+?? docs/tools/review_s84_p4_game.py
+?? rain_film.lua
+?? shaders/rainFilmBin.hlsl
+?? shaders/rainFilmBlocks.hlsl
+?? shaders/rainFilmDescriptor.hlsl
+?? shaders/rainFilmFlow.hlsl
+?? shaders/rainFilmFlowBlocks.hlsl
+?? shaders/rainFilmFlowPass.hlsl
+?? shaders/rainFilmFlowStats.hlsl
+?? shaders/rainFilmMeta.hlsl
+?? shaders/rainFilmOptics.hlsl
+?? shaders/rainFilmResolve.hlsl
+?? shaders/rainFilmStats.hlsl
+?? shaders/rainFilmTotals.hlsl
+?? texture/RAIN_FILM/

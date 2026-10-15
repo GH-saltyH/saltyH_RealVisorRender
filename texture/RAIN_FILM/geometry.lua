@@ -1,0 +1,1 @@
+return {version="rain-film-v1",width=1024,height=256,pad=16,flowConnectedUV=true,modelHash="2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",maskHash="08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",cellsHash="60924e0299d0d95a4643ce6109edfdc897a781d046f55222ce4908cb1a3f4af2"}

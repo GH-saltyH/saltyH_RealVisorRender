@@ -58,7 +58,12 @@ float4 main(PS_IN pin) {
         [branch] if(packet>.5) {
         float weber=rainSiWeber(descriptor.x,vn,gBirthRhoWater,gBirthGamma);
         float coat=rainCoating(p);
-        float4 shares=rbImpactFractions(weber,coat,gBirthWetOverride);
+        float wet=gBirthWetOverride;
+        if(gBirthWetOn>.5) {
+            float2 heightUM=txBirthWetHeight.SampleLevel(samLinearClamp,float2(p.x,p.y+1),0).rg;
+            wet=max(wet,saturate((heightUM.x+heightUM.y)/max(gBirthWetHeightUM,1e-6)));
+        }
+        float4 shares=rbImpactFractions(weber,coat,wet);
         float attached=incoming*shares.x;
         float film=incoming*shares.y,micro=incoming*shares.z,rebound=incoming*shares.w;
         bool microscopic=descriptor.x<gBirthMinPersistentMM;

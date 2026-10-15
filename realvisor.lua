@@ -348,6 +348,8 @@ local cfg = scriptSettings:mapConfig({
 
         RAIN_ENABLED = true,
 
+        RAIN_DYNAMIC_BIRTH_MASK_LOG = true,
+
         ------------------------------------------------------------
         -- Unified external-force source controls (Phase A)
         ------------------------------------------------------------
@@ -422,6 +424,20 @@ local cfg = scriptSettings:mapConfig({
         RAIN_BIRTH_MIN_PERSISTENT_MM = 0.25,
         RAIN_BIRTH_WET_OVERRIDE = 0.0, -- manual material-LUT diagnostic; not track wetness
         RAIN_BIRTH_NORMAL_REVERSED = false,
+        RAIN_PHYSICS_P3_FILM_PREVIEW = false,
+        RAIN_PHYSICS_P4_TRANSPORT_PREVIEW = false,
+        RAIN_FILM_FLOW_CF = 0.005, -- estimated local surface air skin-friction coefficient
+        RAIN_FILM_DEPOSIT_BARE = 0.35, -- estimated finite-drop coating coefficient
+        RAIN_FILM_DEPOSIT_COAT = 0.05,
+        RAIN_FILM_MIN_SPEED_MM_S = 1.0,
+        RAIN_FILM_SHEAR_WIDEN = 0.50,
+        RAIN_FILM_EVAP_DRY_UM_S = 0.05, -- estimated at RH=0, 20C, still air
+        RAIN_FILM_MICRO_JOIN_UM = 20.0, -- estimated continuum micro coalescence threshold
+        RAIN_FILM_WET_HEIGHT_UM = 20.0, -- estimated equivalent height for fully wet impact response
+        RAIN_FILM_OPTICAL_GAIN = 1.0, -- appearance only; lever arm uses camera-to-film distance
+        RAIN_FILM_OPTICAL_MAX_PX = 24.0,
+        RAIN_FILM_MICRO_MIP = 2.0,
+        RAIN_FILM_DEBUG = 0,
 
         -- Persistent state:
         -- 0 = disabled
@@ -6602,6 +6618,8 @@ rainDynamicSceneCopyState.bindSIParams(rainStateUpdateParams)
 rainDynamicSceneCopyState.bindSIParams(rainStateMetaUpdateParams)
 rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
 rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
+rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
 rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,transform)
     local st=rainDynamicSceneCopyState
     if not st.physicsBirth then st.physicsInputsUpdate() end
@@ -6615,9 +6633,29 @@ rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,tran
         st.physicalBirthGPU=result
     end
     st.physicsBirthError=nil
-    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth)
+    local wet=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and st.physicalFilmGPU
+        and st.physicalFilmGPU.ready and st.physicalFilmGPU.optics or nil
+    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth,wet)
     if not ok then st.physicsBirthError=tostring(ready);return false end
     st.physicsBirthError=st.physicalBirthGPU.assetError or st.physicalBirthGPU.error
+    return ready
+end
+rainDynamicSceneCopyState.preparePhysicsFilm=function(oldState,oldMeta,newState,newMeta,events,count,sim,motionDt)
+    local st=rainDynamicSceneCopyState
+    if not st.physicalFilmGPU then
+        local factory,err=st.loadRuntimeModule('rain_film.lua')
+        if not factory then st.physicsFilmError=err;return false end
+        local start=assert(st.gpuHeadsPassB:find('void rgWalk(',1,true))
+        local ok,result=pcall(factory,{folder=appFolder,runtime=cfg.RUNTIME,surface=st.surface,core=st.siShader,
+            measure=st.measure,summary=st.gpuHeadsSummaryPass,traversal=st.gpuHeadsPassB:sub(start),
+            log=function(message) ac.log(appNameDebug..' '..message) end})
+        if not ok then st.physicsFilmError=tostring(result);return false end
+        st.physicalFilmGPU=result
+    end
+    local ok,ready=pcall(st.physicalFilmGPU.prepare,st.physicalFilmGPU,oldState,oldMeta,newState,newMeta,
+        events,count,sim,st.physicsInputs,motionDt,rainStateUpdateParams.values)
+    if not ok then st.physicsFilmError=tostring(ready);return false end
+    st.physicsFilmError=st.physicalFilmGPU.assetError
     return ready
 end
 rainDynamicSceneCopyState.stateEntryShader=(function()
@@ -7005,12 +7043,16 @@ end
 local function updateRainGPUState(sim)
     local siChanged=rainDynamicSceneCopyState.siConfigured~=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
         or rainDynamicSceneCopyState.birthConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true)
+        or rainDynamicSceneCopyState.filmConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true)
+        or rainDynamicSceneCopyState.flowConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true)
     if siChanged then
         rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
         rainDynamicStateReadbackReady=false
         rainStateSingleDropDirty=true
         rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
         rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
+        rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+        rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
         rainDynamicSceneCopyState.gpuHeadsActive=false
         rainDynamicStateHasSnapshot=false
         if rainDynamicSceneCopyState.newTrail then rainDynamicSceneCopyState.newTrail:dispose() end
@@ -7029,6 +7071,7 @@ local function updateRainGPUState(sim)
             rainDynamicSceneCopyState.gpuHeadsActive=false
         end
         if rainDynamicSceneCopyState.physicalBirthGPU then rainDynamicSceneCopyState.physicalBirthGPU:dispose() end
+        if rainDynamicSceneCopyState.physicalFilmGPU then rainDynamicSceneCopyState.physicalFilmGPU:dispose() end
         rainStateUpdateParams.textures.txRainBirthEvent=false
         rainStateMetaUpdateParams.textures.txRainBirthEvent=false
         if rainStateA then rainStateA:dispose() end
@@ -7358,8 +7401,25 @@ local function updateRainGPUState(sim)
     local lifecycleReady=rainDynamicSceneCopyState.measure('State lifecycle',writeMeta.updateWithShader,writeMeta,rainStateMetaUpdateParams)
     if transportReady==false or lifecycleReady==false then return false end
     if rainStateUpdateParams.values.gRainBirthOn>.5 then
-        if not rainDynamicSceneCopyState.physicalBirthGPU:budget(writeMeta,sim) then return false end
+        local st=rainDynamicSceneCopyState
+        local film=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and true or false
+        local finalMeta=writeMeta
+        if film then
+            if not st.preparePhysicsFilm(readState,readMeta,writeState,writeMeta,st.physicalBirthGPU.events,count,sim,
+                rainStateUpdateParams.values.gRainStateDeltaTime) then return false end
+            finalMeta=st.physicalFilmGPU.metaScratch
+        end
+        if not st.physicalBirthGPU:budget(finalMeta,sim,film and st.physicalFilmGPU.descriptors or nil) then return false end
+        if film then
+            local ok,ready=pcall(st.physicalFilmGPU.budget,st.physicalFilmGPU,st.physicalBirthGPU.write,sim)
+            if not ok then st.physicsFilmError=tostring(ready);return false end
+            if not ready then return false end
+        end
         if not rainDynamicSceneCopyState.physicalBirthGPU:publish(sim) then return false end
+        if film then
+            finalMeta=st.physicalFilmGPU:publish(sim,writeMeta)
+            if rainStateReadIsA then rainStateMetaB=finalMeta else rainStateMetaA=finalMeta end
+        end
     end
 
     rainStateReadIsA = not rainStateReadIsA
@@ -11986,7 +12046,7 @@ rainDynamicSceneCopyState.updateBirthMask = function(sim)
     state.birthMaskPuddles = (state.birthMaskPuddles or 0) + puddles
     state.birthMaskMaxMotion = math.max(
         state.birthMaskMaxMotion or 0.0, maxMotionRadii)
-    if sim.frame % 180 == 0 then
+    if cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_LOG and sim.frame % 180 == 0 then
         ac.log(appNameDebug .. ' Dynamic birth mask: '
             .. tostring(size) .. 'x' .. tostring(math.max(1,math.floor(size/4)))
             .. ' stamps=' .. tostring(state.birthMaskStamps)
@@ -15210,7 +15270,9 @@ float4 main(PS_IN pin)
             txDynamicBirthMask =
                 rainDynamicSceneCopyState.birthMaskRead or false,
             txDynamicWaterTrail =
-                rainDynamicSceneCopyState.waterTrailComposite
+                (cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
+                    and rainDynamicSceneCopyState.physicalFilmGPU.ready and rainDynamicSceneCopyState.physicalFilmGPU.optics)
+                or rainDynamicSceneCopyState.waterTrailComposite
                 or rainDynamicSceneCopyState.waterTrailRead or false,
         },
         values = {
@@ -15492,6 +15554,14 @@ float4 main(PS_IN pin)
             gDynamicDropCameraForward = sim.cameraLook,
             gDynamicDropDepthOnly = 0.0,
             gDynamicDropNewTrail=rainDynamicSceneCopyState.newTrailActive and 1 or 0,
+            gDynamicDropP3On=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
+                and cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
+                and rainDynamicSceneCopyState.physicalFilmGPU.ready and 1 or 0,
+            gDynamicDropP3Grid=vec2(1024,256),
+            gDynamicDropP3OpticalGain=cfg.RUNTIME.RAIN_FILM_OPTICAL_GAIN,
+            gDynamicDropP3MaxPx=cfg.RUNTIME.RAIN_FILM_OPTICAL_MAX_PX,
+            gDynamicDropP3MicroMip=cfg.RUNTIME.RAIN_FILM_MICRO_MIP,
+            gDynamicDropP3Debug=cfg.RUNTIME.RAIN_FILM_DEBUG,
             gDynamicDropNewTrailGradientD=cfg.RUNTIME.RAIN_NEW_TRAIL_GRADIENT_D,
             gDynamicDropNewHeadGradientD=cfg.RUNTIME.RAIN_NEW_TRAIL_HEAD_GRADIENT_D,
             gDynamicDropNewTrailRefractD=cfg.RUNTIME.RAIN_NEW_TRAIL_REFRACT_D,
@@ -17373,6 +17443,12 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
     if st.physicsInputsError then ui.textWrapped(st.physicsInputsError);return end
     local p,u=st.physicsInputs,st.physicsUnits
     if not p or not p.intensity then ui.text('Waiting for weather inputs');return end
+    if ui.checkbox('toggle RAIN_GPU_STATE_LIFECYCLE_LOG',cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE_LOG) then
+        cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE_LOG=not cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE_LOG
+    end
+    if ui.checkbox('toggle RAIN_DYNAMIC_BIRTH_MASK_LOG',cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_LOG) then
+        cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_LOG=not cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_LOG
+    end
     ui.text('P0: independent weather and unit validation')
     ui.text('Read-only observer. Display scaling, Smear and impact film do not feed these inputs.')
     ui.text(string.format('I %.6f (%s)  raw %s  liquid I %.6f',p.intensity,p.sources.intensity,
@@ -17429,7 +17505,9 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
     if ui.checkbox('Enable P1 SI motion preview',cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW) then
         if cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW or cfg.RUNTIME.RAIN_GPU_HEADS then
             cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
-            if not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false end
+            if not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW then
+                cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false;cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=false
+            end
             st.siUIError=nil
         else st.siUIError='P1 preview requires GPU heads enabled' end
     end
@@ -17453,7 +17531,7 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
     ui.separator()
     if ui.checkbox('Enable P2 physical birth preview',cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW) then
         if cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
-            cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false;st.siUIError=nil
+            cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=false;cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=false;st.siUIError=nil
         elseif cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_GPU_HEADS and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
             and (cfg.RUNTIME.RAIN_GPU_STATE_MODE==3 or cfg.RUNTIME.RAIN_GPU_STATE_MODE==6) then
             cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
@@ -17463,7 +17541,9 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
     if cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW then
         ui.text('P2 starts empty and resets the rain/budget banks. Material retention/impact flow are estimated.')
         ui.text('Supply uses physical rate/area/incidence; legacy density/occupancy/respawn-gap controls do not feed P2.')
-        ui.text('Film/micro/capacity reserves are recorded but not rendered until P3. No legacy local impact film.')
+        ui.text(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW
+            and 'P3 places new film/micro/capacity water spatially; historical reserve totals are not injected.'
+            or 'Film/micro/capacity reserves are recorded but not rendered until P3. No legacy local impact film.')
         st.rainUISlider('P2 display scale (render only)','RAIN_BIRTH_DISPLAY_SCALE',.05,2,'%.3f')
         st.rainUISlider('Estimated source exposure','RAIN_BIRTH_EXPOSURE',0,1,'%.3f')
         st.rainUISlider('Estimated incident-air fraction','RAIN_BIRTH_INCIDENT_AIR_FRACTION',0,1,'%.3f')
@@ -17478,6 +17558,43 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
             ui.text(string.format('P2 physical area %.5f m^2; published ticks %d; pending=%s',
                 st.physicalBirthGPU.localAreaM2*st.surface.scale^2,st.physicalBirthGPU.tick,tostring(st.physicalBirthGPU.pending)))
             if ui.button('Log P2 actual GPU budget') then st.physicalBirthGPU:logBudget() end
+        end
+    end
+    ui.separator()
+    if ui.checkbox('Enable P3 conserved film preview',cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW) then
+        if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=false;st.siUIError=nil
+        elseif cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
+            and cfg.RUNTIME.RAIN_GPU_HEADS and cfg.RUNTIME.RAIN_GPU_STATE_LIFECYCLE
+            and (cfg.RUNTIME.RAIN_GPU_STATE_MODE==3 or cfg.RUNTIME.RAIN_GPU_STATE_MODE==6) then
+            cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW=true;st.siUIError=nil
+        else st.siUIError='P3 requires P1/P2 previews, GPU heads and lifecycle mode 3 or 6' end
+    end
+    if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then
+        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. No Smear/local impact film. P4 adds film transport; head reabsorption remains deferred.')
+        if ui.checkbox('Enable P4 conservative transport preview (resets water)',cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW) then
+            cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW
+        end
+        if cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW then
+            st.rainUISlider('Estimated film air skin friction Cf','RAIN_FILM_FLOW_CF',0,.03,'%.4f')
+            ui.textWrapped('P4 moves film only. Four-neighbour donor flux is limited at Courant 0.8; high speeds can be numerically slowed. Check limiter log. No pressure/contact-line solver or head reabsorption.')
+            if st.physicalFilmGPU and ui.button('Log P4 transport limiter') then st.physicalFilmGPU:logFlow() end
+        end
+        st.rainUISlider('Estimated trail coefficient: bare','RAIN_FILM_DEPOSIT_BARE',0,1,'%.3f')
+        st.rainUISlider('Estimated trail coefficient: coat','RAIN_FILM_DEPOSIT_COAT',0,1,'%.3f')
+        st.rainUISlider('Minimum trail speed (mm/s)','RAIN_FILM_MIN_SPEED_MM_S',0,20,'%.2f')
+        st.rainUISlider('Shear width gain','RAIN_FILM_SHEAR_WIDEN',0,2,'%.2f')
+        st.rainUISlider('Estimated dry evaporation (um/s)','RAIN_FILM_EVAP_DRY_UM_S',0,1,'%.3f')
+        st.rainUISlider('Micro coalescence height (um, bare)','RAIN_FILM_MICRO_JOIN_UM',1,100,'%.1f')
+        st.rainUISlider('Fully wet impact height (um)','RAIN_FILM_WET_HEIGHT_UM',1,100,'%.1f')
+        st.rainUISlider('Film optical gain (render only)','RAIN_FILM_OPTICAL_GAIN',0,3,'%.2f')
+        st.rainUISlider('Film displacement limit (screen px)','RAIN_FILM_OPTICAL_MAX_PX',0,64,'%.1f')
+        st.rainUISlider('Micro scattering mip (render only)','RAIN_FILM_MICRO_MIP',0,5,'%.2f')
+        st.rainUISlider('P3 view: 0 optics, 1 film um, 2 micro um, 3 coverage','RAIN_FILM_DEBUG',0,3,'%.0f')
+        if st.physicsFilmError then ui.textWrapped(st.physicsFilmError) end
+        if st.physicalFilmGPU then
+            ui.text(string.format('P3 1024x256 + runoff halo; ready=%s pending=%s; estimated evap %.5f um/s',
+                tostring(st.physicalFilmGPU.ready),tostring(st.physicalFilmGPU.pending),st.physicalFilmGPU.evapUMS or 0))
+            if ui.button('Log P3 actual water budget') then st.physicalFilmGPU:logSnapshot() end
         end
     end
     if ui.checkbox('Enable P2 birth diagnostics (no simulation change)',cfg.RUNTIME.RAIN_PHYSICS_BIRTH_DIAGNOSTICS) then
