@@ -12,7 +12,8 @@ float4 main(PS_IN pin) {
                 float4 transfer=txBirthTransfers.Load(int3(i,1,0));
                 if(row==0u)event.y+=transfer.x;
                 if(row==2u)event=float4(transfer.w,transfer.x,
-                    txBirthTransfers.Load(int3(i,3,0)).z,0);
+                    txBirthTransfers.Load(int3(i,3,0)).z,
+                    gPoolOn>.5 ? txBirthEvent.Load(int3(i,4,0)).z : 0);
             }
             if(row==1u) {
                 float4 meta=txRainNewMeta.Load(int3(i,0,0));

@@ -1,0 +1,14 @@
+{
+  "compiler": "FXC /Ges /WX, D3D11 WARP",
+  "bitIdenticalTo": "a23527e",
+  "cases": [
+    "sparse",
+    "rain",
+    "overflow",
+    "occupied",
+    "occupied_overflow",
+    "microscopic",
+    "wet_override",
+    "reversed_normal"
+  ]
+}

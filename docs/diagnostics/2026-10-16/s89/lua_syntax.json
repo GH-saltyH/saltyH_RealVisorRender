@@ -1,0 +1,8 @@
+{
+  "wholeLuaSyntax": true,
+  "files": [
+    "realvisor.lua",
+    "rain_film.lua",
+    "rain_birth_gpu.lua"
+  ]
+}

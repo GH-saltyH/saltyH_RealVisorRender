@@ -53,7 +53,7 @@ float4 main(PS_IN pin) {
     float4 allocation=txFilmBirthEvent.Load(int3(i,2,0)),ledger=txFilmBirthEvent.Load(int3(i,3,0));
     float film=max(allocation.y,0)+max(ledger.x,0),micro=max(allocation.z,0);
     if(film+micro>0) {
-        float2 p=source.xy;
+        float2 p=gPoolOn>.5 ? txFilmBirthEvent.Load(int3(i,4,0)).xy : source.xy;
         incident=float4(float2(p.x,p.y+1)*gFilmGrid+gFilmPad-.5,film,micro);
         float beta=max(txFilmBirthEvent.Load(int3(i,1,0)).z,1);
         float radiusMM=rainSiContactRadiusMM(max(allocation.x,0),gFilmTheta)*beta;

@@ -1,0 +1,131 @@
+{
+  "step": "s86",
+  "date": "2026-10-15",
+  "branch": "codex/rainfx-physics-weather",
+  "base": "a23527e5bdf539b379adc66cdb5c4f450b067b3c",
+  "preservedExistingTuning": true,
+  "newDefaultOffFlag": "RAIN_PHYSICS_P4_POOL_PREVIEW",
+  "physicalGeometryAssetsUnchanged": true,
+  "unchangedOtherRuntime": {
+    "lib.lua": true,
+    "material_settings.lua": true,
+    "native_glass_occlusion.lua": true,
+    "native_glass_state.lua": true,
+    "rain_birth_model.lua": true,
+    "rain_environment.lua": true,
+    "rain_physics_units.lua": true,
+    "rain_surface.lua": true,
+    "rain_trails.lua": true,
+    "shaders/e1HousingGeometry.hlsl": true,
+    "shaders/rainBirthStats.hlsl": true,
+    "shaders/rainBirthTotals.hlsl": true,
+    "shaders/rainFilmBin.hlsl": true,
+    "shaders/rainFilmBlocks.hlsl": true,
+    "shaders/rainFilmFlowBlocks.hlsl": true,
+    "shaders/rainFilmFlowPass.hlsl": true,
+    "shaders/rainFilmFlowStats.hlsl": true,
+    "shaders/rainFilmMeta.hlsl": true,
+    "shaders/rainFilmStats.hlsl": true,
+    "shaders/rainMetaEntry.hlsl": true,
+    "shaders/rainMirrorWater.hlsl": true,
+    "shaders/rainPhysicsSI.hlsl": true,
+    "shaders/rainStateEntry.hlsl": true,
+    "shaders/rainSurfaceMetric.hlsl": true,
+    "shaders/rainTrailBin.hlsl": true,
+    "shaders/rainTrailDescriptor.hlsl": true,
+    "shaders/rainTrailResolve.hlsl": true,
+    "shaders/rainVisorLayer.hlsl": true,
+    "shaders/rainVisorOptics.hlsl": true,
+    "shaders/rainVisorScreen.hlsl": true,
+    "shaders/visorOpticsBake.hlsl": true,
+    "shaders/visorOpticsBright.hlsl": true,
+    "shaders/visorOpticsMask.hlsl": true,
+    "shaders/visorOpticsProbe.hlsl": true,
+    "shaders/visorOpticsStats.hlsl": true,
+    "shaders/visorOpticsSun.hlsl": true,
+    "shaders/visorOpticsTrace.hlsl": true,
+    "shaders/visorOpticsVisibility.hlsl": true,
+    "visor_optics.lua": true
+  },
+  "sourceFiles": {
+    "rain_birth_gpu.lua": {
+      "sha256": "e55ebef242bfd0ca3d6dc563b7ad84c92a7d3f1bda547f6a5ee08c33f7e8df6d",
+      "installedMatch": true
+    },
+    "rain_film.lua": {
+      "sha256": "04e3c08857d7df8ac160c3a9aa9ee6bb53db0ad8674af0b8d61527e2a80aca22",
+      "installedMatch": true
+    },
+    "realvisor.lua": {
+      "sha256": "7062b897788eb966828fc7ddfcf9a0f945f6abcc34fea12e4e6b504b5091ba48",
+      "installedMatch": true
+    },
+    "shaders/rainBirthBlocks.hlsl": {
+      "sha256": "5bcf392eac9473064e79775673dd5baeecc1eeaea1df33fbf838825dfa58fcdd",
+      "installedMatch": true
+    },
+    "shaders/rainBirthEvent.hlsl": {
+      "sha256": "2a8d721ef591e321c6d6645d0d2432db8996f29f8ba305e3ab8a6876903ce8f3",
+      "installedMatch": true
+    },
+    "shaders/rainFilmDescriptor.hlsl": {
+      "sha256": "785455737766034f70bc01d7991ee844945ec682356dd6eded0d94e028e9b0a0",
+      "installedMatch": true
+    },
+    "shaders/rainFilmFlow.hlsl": {
+      "sha256": "3c3ef64e2a51e1ff9395c4aba9c150d95ffdd5c24dd9ddfa2edc45a35f91510d",
+      "installedMatch": true
+    },
+    "shaders/rainFilmOptics.hlsl": {
+      "sha256": "d01104ec78280602e2aa15c0f86058b3eb823505d6fa519943f89c6c31eee5a8",
+      "installedMatch": true
+    },
+    "shaders/rainFilmPoolAddress.hlsl": {
+      "sha256": "d286b678235c38faad582cd47148a6a49693d337b6905f1f0f130d9ce67e6d63",
+      "installedMatch": true
+    },
+    "shaders/rainFilmPoolAvailable.hlsl": {
+      "sha256": "3355905b0ef894b17d57922a6a83bfa4ce007573c29694b9a5e53ae6c68be240",
+      "installedMatch": true
+    },
+    "shaders/rainFilmPoolCandidate.hlsl": {
+      "sha256": "f5aa75c07de632f2aa22522b038def9cd261f54c7e7009f95e97970042d52c63",
+      "installedMatch": true
+    },
+    "shaders/rainFilmResolve.hlsl": {
+      "sha256": "ece743a06cdddfe6708582de105d305e2b35c0ce8044223e8de14fe3541ea3be",
+      "installedMatch": true
+    },
+    "shaders/rainFilmTotals.hlsl": {
+      "sha256": "49516d441d1b24b460da8514c58d7bc08408b8856ac65342dd5062f71addd09f",
+      "installedMatch": true
+    },
+    "shaders/rainVisorDynamicDrop.hlsl": {
+      "sha256": "8c2f75df26337b7a3ab3c38b6aa1271e4ef895ae9c969932677fa8385259b05c",
+      "installedMatch": true
+    }
+  },
+  "changedDocuments": [
+    "docs/RAINFX_ROADMAP.md",
+    "docs/RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md",
+    "docs/README.md"
+  ],
+  "newDocument": "docs/RAINFX_S86_P4B_POOL_RETURN.md",
+  "reports": [
+    "pool_gpu_checks.json",
+    "pool_binding_checks.json",
+    "realmesh_checks.json",
+    "birth_off_checks.json",
+    "lens_checks.json",
+    "s81_gpu_regression.json",
+    "s83_gpu_regression.json"
+  ],
+  "extraSteadyPasses": 1,
+  "extraPayloadBytesAt4096": 81920,
+  "steadyReadbacksAdded": 0,
+  "drawPassesAdded": 0,
+  "actualGameCost": "unmeasured",
+  "gameGate": "pending: classification, source/field ledger, limiter change, look and cost",
+  "open": "Broad film pressure/inertia transport, field momentum closure and long float32 accuracy",
+  "committedOrPushed": false
+}

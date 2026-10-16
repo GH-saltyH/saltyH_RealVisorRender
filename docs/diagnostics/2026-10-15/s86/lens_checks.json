@@ -1,0 +1,13 @@
+{
+  "compiler": "full production shader, FXC /Ges /WX, D3D11 WARP",
+  "refractionRGBDelta": 1.0,
+  "substantialAlpha": 1.0,
+  "emptyFieldNoGhost": true,
+  "uncoveredPixelsClear": true,
+  "P3OffBitIdenticalToP2Stamp": true,
+  "nativeFrontExcluded": true,
+  "transparentFilmWritesNoOpaqueDepth": true,
+  "poolDebugVisible": true,
+  "poolDebugDoesNotAffectOptics": true,
+  "nativeAlsoOccludesPoolDebug": true
+}

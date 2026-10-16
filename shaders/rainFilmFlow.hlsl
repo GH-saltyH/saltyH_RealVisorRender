@@ -5,7 +5,7 @@ FilmFlow ffEvaluate(int2 p) {
     FilmFlow result;result.flux=0;result.courant=0;
     int2 inner=p-(int)gFilmPad;
     if(any(inner<0)||any(inner>=(int2)gFilmGrid))return result;
-    float volume=max(txFilmPrevious.Load(int3(p,0)).r,0);
+    float volume=poolAvailable(p);
     float area=txFilmCells.Load(int3(inner,0)).r*gFilmScale2;
     if(volume<=0||area<=0||gFilmDt<=0)return result;
     float2 uv=(inner+.5)/gFilmGrid;

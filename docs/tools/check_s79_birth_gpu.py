@@ -12,9 +12,10 @@ env['types'].update({'gBirthWeights':'float4','gBirthAirWorld':'float3','gBirthO
     'gRainObjectToWorld':'float4x4','gRainAcceleration':'float3','gRainAirVelocityWorld':'float3',
     'gRainSiInertiaWorld':'float3','gRainSiAirWorld':'float3','gRainStateSingleDropPosition':'float2',
     'gRainWetPathTexel':'float2'})
+env['types']['gFilmGrid']='float2'
 source=(ROOT/'realvisor.lua').read_text(encoding='utf-8-sig')
 metric=(ROOT/'shaders/rainSurfaceMetric.hlsl').read_text();core=(ROOT/'shaders/rainPhysicsSI.hlsl').read_text()
-def code(name):return (ROOT/f'shaders/{name}.hlsl').read_text()
+from rain_shader_source import source as code
 def helpers(text,key):return re.sub(r'SamplerState\s+\w+\s*\{.*?\};','',inline(text,key),flags=re.S).split('        float4 main(PS_IN pin) {')[0]
 stateCode=metric+core+helpers(source,'local rainStateUpdateParams =')+code('rainStateEntry')
 metaCode=metric+core+helpers(source,'local rainStateMetaUpdateParams =')+code('rainMetaEntry')

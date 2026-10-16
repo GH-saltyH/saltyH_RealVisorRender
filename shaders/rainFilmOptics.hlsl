@@ -6,5 +6,7 @@ float4 main(PS_IN pin) {
     float2 heightUM=area>0 ? water/area*1000 : 0;
     // The half-float optical texture is a bounded read-only representation.
     // Inventory remains uncapped float32 mm3 in the physical field.
-    return float4(min(heightUM,60000),0,0);
+    float returnedUM=area>0 ? poolTransfer(inner+(int)gFilmPad)/area*1000 : 0;
+    // B is a display-only last-published-step return marker, never inventory.
+    return float4(min(heightUM,60000),min(returnedUM,60000),0);
 }

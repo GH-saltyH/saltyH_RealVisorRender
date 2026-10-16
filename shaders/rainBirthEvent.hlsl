@@ -26,16 +26,18 @@ float4 rbImpactFractions(float weber,float coat,float wet) {
 }
 float4 main(PS_IN pin) {
     uint count=(uint)max(gBirthCount,1),index=min((uint)(pin.Tex.x*count),count-1u);
-    uint row=min((uint)(pin.Tex.y*4),3u),tick=(uint)gBirthTick;
+    uint rows=gPoolOn>.5 ? 5u : 4u;
+    uint row=min((uint)(pin.Tex.y*rows),rows-1u),tick=(uint)gBirthTick;
     float4 oldMeta=txRainStateMeta.Load(int3(index,0,0));float4 oldState=txRainState.Load(int3(index,0,0));
     float generation=floor(oldMeta.a*.25),status=oldMeta.a-4*generation;
     float exitVolume=status>.5 && status<1.5 && rainValid(oldState.rg)<.5 ? max(oldMeta.g,0) : 0;
-    float4 spawn=0,motion=0,allocation=0,ledger=float4(0,exitVolume,0,0);
+    float4 spawn=0,motion=0,allocation=0,ledger=float4(0,exitVolume,0,0),pool=0;
     [branch] if(gBirthNumberDensity>0 && gBirthDt>0 && gBirthExposure>0) {
     uint seed=index*131u+tick*8191u+(uint)generation*104729u;
     uint width=1u,height=1u;txBirthSites.GetDimensions(width,height);
     uint site=rbHash(seed+3u)%max(width,1u);
     float4 location=txBirthSites.Load(int3(site,0,0));float2 p=float2(location.x,location.y-1);
+    pool.xy=p; // Preserve the original incident centre if head birth uses a pool.
     float4 descriptor=rbDsd(rbRandom(seed+23u));
     float3 du,dv;rainMetric(p,du,dv);
     float3 uw=mul(du,(float3x3)gBirthObjectToWorld),vw=mul(dv,(float3x3)gBirthObjectToWorld);
@@ -85,6 +87,19 @@ float4 main(PS_IN pin) {
         }
     }
     }
-    float4 result=row==0u ? spawn : row==1u ? motion : row==2u ? allocation : ledger;
+    [branch] if(gPoolOn>.5 && status==0 && oldMeta.g<=0 && spawn.z<=0) {
+        uint tiles=poolTileCount(),tile=(index%tiles+poolRotation())%tiles;
+        if(poolOwner(tile)==index) {
+            float4 candidate=txPoolCandidates.Load(int3(tile,0,0));
+            float2 p=(candidate.xy+.5)/gFilmGrid;p.y-=1;
+            if(candidate.w>.5 && candidate.z>0 && rainValid(p)>.5) {
+                spawn=float4(p,candidate.z,fmod(generation+1,4096)+1);
+                // No field momentum is stored. Reconstituted unresolved pool
+                // starts at rest; P1 applies forces from the following step.
+                motion.xy=0;pool.z=candidate.z;
+            }
+        }
+    }
+    float4 result=row==0u ? spawn : row==1u ? motion : row==2u ? allocation : row==3u ? ledger : pool;
     return result;
 }

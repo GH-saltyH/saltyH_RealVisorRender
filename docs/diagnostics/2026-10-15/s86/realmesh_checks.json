@@ -1,0 +1,18 @@
+{
+  "compiler": "FXC ps_5_0 /Ges /WX, D3D11 WARP",
+  "actualGeometryAndMask": true,
+  "field": "Synthetic: 1um background and two provided cell masses; not reconstructed game spatial field.",
+  "cells": [
+    [
+      464,
+      208
+    ],
+    [
+      551,
+      211
+    ]
+  ],
+  "acceptedHeads": 2,
+  "returnedMM3": 6.320216178894043,
+  "displayCoefficientsIndependent": true
+}

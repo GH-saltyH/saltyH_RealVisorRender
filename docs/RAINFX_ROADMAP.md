@@ -1,8 +1,90 @@
-# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-15
+# RainFX roadmap (accepted items, not scheduled) — updated 2026-10-16
 
 See `docs/README.md` for the document index and working rules.
 
-## Latest s85 P4 regime diagnosis and pool transfer prototype (2026-10-15)
+## Latest s90 velocity characteristics and curved transport bridge (2026-10-16)
+
+Implemented offline sampled-velocity characteristic intervals: exact piecewise
+linear frozen-field integration, affine-block skips, connected row/column clips
+and explicit runoff prevent crossing holes. Added positive limited-linear source
+reconstruction; equal0.2s prescribed-density profile L1 at30/60/144Hz is at most
+.1583%, with centroid error4.65e-5cells. This is not coupled film time convergence.
+GPU axis admission rejects bad/status/unordered intervals before recipient work,
+keeps old packets/zero loss; full app head/source/clock transaction remains open.
+Actual-mesh synthetic100um SI-force/pool-debit bridge: volume residual6.96e-7mm3,
+momentum+outflow+wall residual<1.14e-8 in packet units, display independent.
+Dry-cell zero velocity creates a false front stagnation layer (100→100.8647 versus
+104-cell uniform free-flight reference). Implement physical dry-front extension/
+closure before game adoption. Six operator passes/axis plus predictor/packet/
+velocity stages need fusion/cost gates; no game ms measured. Runtime/tuning/assets
+unchanged, no reload or repeat logs requested. See s90 topic document.
+
+## s89 video review and positive overlap remap (2026-10-16)
+
+Supplied18.833s video shows a translucent purple field/green head diagnostic.
+Direction response is expected from current gravity/inertia/air projection;
+background transmission and mesh extent cannot certify water thickness or time
+accuracy. Added view6 with the same RGB channels at alpha1 in this rain pass;
+later visor optics remain. View5/normal/head+film s87 bit-equivalence, scene
+independence, native/depth and full /WX GPU gates pass; no new pass/storage/API.
+Offline source-local interval overlap avoids s88 negative-stock/global-prefix
+thin-translation failures. Eight GPU arithmetic groups pass, but physical
+trajectories, curved holes, variable-flow time convergence and atomic integration
+are pending. Three remap passes/axis excluding mapping; hierarchy reduces typical
+visits but adversarial broad overlaps remain N^2/row. No performance guarantee,
+no physical runtime/tuning change or repeated game log matrix requested.
+See `RAINFX_S89_VIDEO_AND_POSITIVE_REMAP.md`.
+
+## s88 film transport candidate gates (2026-10-16)
+
+Offline finite-inertia predictor + paired momentum gather passes frozen-height
+30/60/144Hz analytic motion, UV/rotation, production volume gather, planar momentum
+and evaporation/new-stock tests. It needs8MiB/+2 passes but warm supplied peak-scale
+estimates still give C16.37/58.44: inertia alone does not solve transport-time loss.
+A tiled-prefix long-travel reference handles uniform +/-60.25-cell translation
+and boundary runoff, but arbitrary face travel creates negative stock and global
+float32 prefixes misplace thin packets behind large stock. Neither candidate is
+adopted. Next remap gate requires noncrossing characteristics/conservative overlap,
+local thin-stock precision, paired momentum/volume and bounded resource cost.
+All production runtime/tuning/assets remain staged s87; no install or repeat game
+log matrix requested. See `RAINFX_S88_FILM_TRANSPORT_CANDIDATES.md`.
+
+## s87 P4b game review and same-UV link view (2026-10-16)
+
+Supplied paired stationary/137kmh P4b snapshots pass water balance: cumulative
+relative residual6.99e-7/1.72e-6, mixed transition interval2.05e-6. Internal return
+9.39/306.87mm3; maximum field height.474/.874mm and no >1mm stock. Limited film
+mass11.75/17.25%, velocity retention91.84/86.28%. Earlier P4a snapshots had different
+accumulation/source history, so comparisons are qualitative rather than matched ratios.
+Approximately40s P4b OFF/ON captures show67/67FPS, Memory82.52/85.99MB; no observed
+incremental FPS loss, no leak conclusion from single Memory samples.
+User video uses head-only display scale2 and WF slope debug2. Actual GPU same-head
+tests confirm shared position/segment/time and invariant trail transfer across head
+display gains. P1 head dynamics and P4 quasi-steady field motion/optics are still
+different laws; existing-head wet-path feedback/absorption/shared optical normal
+remain incomplete. Do not dismiss separation as merely a debug setting.
+Added P3 view5 (red film/green displayed head/blue micro), no physical changes or
+new canvas/pass. Full shader /WX and s86 normal-output equivalence pass; preserve
+the user's BODY_FABRIC_CULL material addition. See `RAINFX_S87_P4B_GAME_REVIEW.md`.
+
+## s86 P4b conserved localized pool return (2026-10-15)
+
+From user stamp a23527e, added default-OFF P4b pool return to the actual P2/P3
+pipeline. One bounded region pass reads only the previous published field;
+unique rotating free-slot ownership preserves same-frame rain-head priority.
+Five-row events retain the original incident centre and internal return volume.
+Head, donor flux, field debit and P2/P3 ledgers share the event and atomic publish.
+Fixed slot-group/region rotation aliasing at4096. Added last-step view4 marker;
+current-field Courant estimates ignore already-debited/speculative pool events.
+Extra payload16KiB+16*slots (+80KiB at4096), +1 pass, no steady readback/CPU loop.
+Production /WX WARP8 gates, actual-mesh synthetic pool probe, eight nonempty
+P4b-OFF bit-equivalence cases, full optics/depth/native gates, P3/P4 numerical
+regression13/9, actual Lua13 pending points/40 toggles pass.
+Game classification/cost/limiter improvement pending. Broad film pressure/inertia
+transport and long-session float32 gates remain open. Existing tuning preserved.
+See `RAINFX_S86_P4B_POOL_RETURN.md`.
+
+## s85 P4 regime diagnosis and pool transfer prototype (2026-10-15)
 
 Supplied paired stationary/137km/h snapshots confirm49.0823%/44.8306% of film mass
 is in CFL-limited cells; mass-weighted model velocity retention52.0827%/59.7221%.

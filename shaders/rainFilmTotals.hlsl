@@ -9,6 +9,8 @@ float4 main(PS_IN pin) {
     } else if(row==3u) {
         float4 a=txFilmBirthTotals.Load(int3(0,4,0)),b=txFilmBirthTotals.Load(int3(0,1,0));
         result=float4(a.xy,b.x,b.w);
+    } else if(row==1u) {
+        result.x=txFilmBirthTotals.Load(int3(0,4,0)).w; // Cumulative internal return.
     } else {
     float4 delta=0,compensation=0;
     [loop]for(uint y=0u;y<(uint)gFilmReductionSize.y;++y)

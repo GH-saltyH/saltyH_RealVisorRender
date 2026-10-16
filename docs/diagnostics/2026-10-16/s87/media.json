@@ -1,0 +1,23 @@
+{
+  "video": "docs/videos/s86_P4b_GAME_REVIEW/s86_P4bTest_137kmh_LooksSeparate.mp4",
+  "sampleTimes": [
+    0.5,
+    3,
+    6,
+    9,
+    12,
+    15,
+    18,
+    21,
+    24,
+    27,
+    30,
+    36
+  ],
+  "duration": 39.366667,
+  "fps": 30,
+  "resolution": [
+    2560,
+    1440
+  ]
+}

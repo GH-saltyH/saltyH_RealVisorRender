@@ -1254,19 +1254,30 @@ float4 rainDropMain(PS_IN pin)
 // Prism deflection uses physical height slope and camera-to-film distance.
 // Optical gain cannot create water or change dynamics.
 float4 rainPhysicalFilm(PS_IN pin) {
+    float4 result=0; // Single exit avoids FXC X4000 after inlining debug branches.
     float2 uv=saturate(float2(pin.Tex.x+4,pin.Tex.y+1));
     float2 dx=ddx(uv),dy=ddy(uv),texel=1/gDynamicDropP3Grid;
-    float2 heights=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0).rg;
+    float4 waterHeight=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0);
+    float2 heights=waterHeight.rg;
     float filmCover=1-exp(-max(heights.x,0)/2);
     float microCover=.6*(1-exp(-max(heights.y,0)/8));
     float alpha=1-(1-filmCover)*(1-microCover);
     if(gDynamicDropP3Debug>.5) {
-        float h=gDynamicDropP3Debug<1.5 ? heights.x : heights.y;
+        // One-coordinate diagnostic: R film um, G displayed head support,
+        // B unresolved micro um. No reconstructed volume or dynamics input.
+        // Keep the debug expression straight-line: FXC reports X4000 on
+        // conditional texture-derived temporaries in this inlined function.
+        float head=txDynamicBirthMask.SampleLevel(samLinearClamp,uv,0).g;
+        float3 link=float3(saturate(log2(1+max(heights.x,0))/log2(1001)),
+            smoothstep(gDynamicDropWFThreshold-.004,gDynamicDropWFThreshold+.004,head),
+            saturate(log2(1+max(heights.y,0))/log2(1001)));
+        float h=gDynamicDropP3Debug>3.5 ? waterHeight.b : gDynamicDropP3Debug<1.5 ? heights.x : heights.y;
         float k=saturate(log2(1+max(h,0))/log2(1001));
-        return gDynamicDropP3Debug>2.5 ? float4(filmCover,microCover,0,.85)
+        // View 6 removes scene transmission in this pass. Later E2/E3 optics
+        // can still modify the diagnostic; this never changes water or depth.
+        result=gDynamicDropP3Debug>4.5 ? float4(link,gDynamicDropP3Debug>5.5 ? 1 : .85) : gDynamicDropP3Debug>3.5 ? float4(k,.2*k,k,.85) : gDynamicDropP3Debug>2.5 ? float4(filmCover,microCover,0,.85)
             : float4(k,k*k,1-k,.85);
-    }
-    if(alpha<1e-5)return 0;
+    } else if(alpha>=1e-5) {
     float hu1=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv+float2(texel.x,0)),0).r;
     float hu0=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv-float2(texel.x,0)),0).r;
     float hv1=txDynamicWaterTrail.SampleLevel(samLinearClamp,saturate(uv+float2(0,texel.y)),0).r;
@@ -1290,7 +1301,9 @@ float4 rainPhysicalFilm(PS_IN pin) {
     float2 sceneUV=pin.PosH.xy*gDynamicDropInvScreenSize*ratio;
     float3 color=rainSnap(samLinearClamp,saturate(sceneUV+offsetPx*gDynamicDropInvRenderTargetSize),
         microCover*gDynamicDropP3MicroMip).rgb;
-    return float4(color,saturate(alpha));
+    result=float4(color,saturate(alpha));
+    }
+    return result;
 }
 
 // Entry point. The depth occlusion pass (realvisor.lua, exact mode) shades

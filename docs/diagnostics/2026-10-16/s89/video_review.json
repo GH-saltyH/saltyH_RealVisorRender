@@ -1,0 +1,29 @@
+{
+  "source": "E:/_db_Media/Rec_Encoded/OBS_SOURCES_QHD/film um check.mp4",
+  "reviewedSamplesSeconds": [
+    0.2,
+    1.5,
+    3,
+    4.5,
+    6,
+    7.5,
+    9,
+    10.5,
+    12,
+    13.5,
+    15,
+    16.5,
+    18
+  ],
+  "nativeDetailFramesSeconds": [
+    3,
+    15
+  ],
+  "assessed": "Direction/distribution response is expected from current projected force model. Does not pass physical timing or unified head/film motion.",
+  "inferredView": "Likely view5 from green heads plus purple film/micro; UI not visible, exact number unconfirmed.",
+  "cautions": [
+    "Background transmission and downstream optics affect visible colour",
+    "Whole debug mesh extent is not wet coverage",
+    "13 samples are not all-frame glitch or per-drop trajectory certification"
+  ]
+}

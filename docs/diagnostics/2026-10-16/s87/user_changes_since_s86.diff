@@ -1,0 +1,37 @@
+--- delivered_s86/realvisor.lua
++++ user_current/realvisor.lua
+@@ -5068,7 +5068,33 @@
+ 
+             visible = true,
+         },
+-        
++
++                
++        {
++            id = 'KN5FABRIC',
++
++            meshName = 
++                'BODY_FABRIC_CULL',
++
++            materialName = 
++                'mtBODY_FABRIC',
++
++            targetMesh = nil,
++            materialQueryRef = nil,
++
++            parameters = 
++                PARAMS_KS_PERPIXEL_MULTIMAP,
++
++            values = {},
++
++            inputBuffers = {},
++            
++            loaded = false,
++            lastError = nil,
++
++            visible = true,
++        },
++
+         {
+             id = 'KN5BODY',
+ 

@@ -43,6 +43,7 @@ float4 pfTransportFlux(int2 inner) {
 float4 pfResolve(float2 cell,float4 fresh) {
     int2 p=(int2)cell,inner=p-(int)gFilmPad;
     float4 old=txFilmPrevious.Load(int3(p,0));
+    old.r=poolAvailable(p); // The head owns this water before donor transport.
     if(gFilmFlowOn>.5) {
         float4 outgoing=pfTransportFlux(inner);
         precise float remainX=old.r-(outgoing.x+outgoing.y);

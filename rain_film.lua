@@ -32,6 +32,7 @@ return function(d)
         gFilmMu=.001002,gFilmGamma=.0728,gFilmAirMS=0,gFilmEvapUMS=0,gFilmMicroJoinUM=20,
         gFilmDepositBare=.35,gFilmDepositCoat=.05,gFilmMinSpeedMS=.001,gFilmWiden=.5,
         gFilmFlowOn=0,gFilmFlowCf=.005,gFilmFlowCFL=.8,gFilmFlowReduce=0,
+        gPoolOn=0,gPoolCount=1,gPoolTick=0,
         gFilmObjectToWorld=mat4x4.identity(),gFilmAccelerationWorld=vec3(0,-9.80665,0),
         gFilmAirWorld=vec3(),gFilmAirRho=1.2,gFilmAirDownward=0,gFilmAirDownwardGain=1,
         gCount=1,gTile=vec2(32,32),gTilesX=33,gTilesY=9,gWords=1,gMaskW=33,
@@ -44,20 +45,25 @@ return function(d)
     d.surface:bind(st.descriptorParams);d.surface:bind(st.metaParams)
     st.binParams=params(code('rainFilmBin'),{txFilmDescriptors=false})
     st.summaryParams=params(d.summary,{txMask=false})
-    st.resolveParams=params(code('rainFilmResolve')..traversal,{txFilmDescriptors=false,txMask=false,txSummary=false,
-        txFilmPrevious=false,txFilmFlux=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
-    local flowCode=d.surface.shader..d.core..code('rainFilmFlow')
+    local poolCode=code('rainFilmPoolAddress')..code('rainFilmPoolAvailable')
+    st.resolveParams=params(poolCode..code('rainFilmResolve')..traversal,{txFilmDescriptors=false,txMask=false,txSummary=false,
+        txFilmPrevious=false,txFilmFlux=false,txFilmBirthEvent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+    local flowCode=d.surface.shader..d.core..poolCode..code('rainFilmFlow')
     st.flowParams=params(flowCode..code('rainFilmFlowPass'),{
-        txFilmPrevious=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+        txFilmPrevious=false,txFilmBirthEvent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
     st.flowBlocksParams=params(flowCode..code('rainFilmFlowBlocks'),{
-        txFilmPrevious=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+        txFilmPrevious=false,txFilmBirthEvent=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+    -- Manual diagnostics inspect the published field, never a speculative event
+    -- or an already-debited transfer from the preceding simulation step.
+    local manualFlowValues={};for key,value in pairs(values) do manualFlowValues[key]=value end
+    manualFlowValues.gPoolOn=0;st.flowBlocksParams.values=manualFlowValues
     d.surface:bind(st.flowParams);d.surface:bind(st.flowBlocksParams)
     st.flowCoarseParams=params(flowCode..code('rainFilmFlowBlocks'),{
-        txFilmPrevious=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+        txFilmPrevious=false,txFilmBirthEvent=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
     d.surface:bind(st.flowCoarseParams)
     local flowValues={};for key,value in pairs(values) do flowValues[key]=value end
     flowValues.gFilmReductionSize=vec2(5,2);flowValues.gFilmPaddedSize=vec2(66,18)
-    flowValues.gFilmFlowReduce=1;st.flowCoarseParams.values=flowValues
+    flowValues.gFilmFlowReduce=1;flowValues.gPoolOn=0;st.flowCoarseParams.values=flowValues
     st.flowStatsParams=params(code('rainFilmFlowStats'),{txFilmFlowBlocks=false})
     st.blocksParams=params(code('rainFilmBlocks'),{txFilmCurrent=false})
     st.blocksSecondParams=params(code('rainFilmBlocks'),{txFilmCurrent=false})
@@ -67,7 +73,8 @@ return function(d)
     st.totalsParams=params(code('rainFilmTotals'),{txFilmBlocks=false,txFilmBirthTotals=false})
     local totalValues={};for key,value in pairs(values) do totalValues[key]=value end
     totalValues.gFilmReductionSize=vec2(5,2);st.totalsParams.values=totalValues
-    st.opticsParams=params(code('rainFilmOptics'),{txFilmCurrent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+    st.opticsParams=params(poolCode..code('rainFilmOptics'),{txFilmCurrent=false,txFilmPrevious=false,
+        txFilmBirthEvent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
     st.statsParams=params(code('rainFilmStats'),{txFilmTotals=false})
     local function canvas(w,h,format,name)
         local c=ui.ExtraCanvas(vec2(w,h),1,render.AntialiasingMode.None,format)
@@ -81,7 +88,7 @@ return function(d)
         end
         self.count=nil;self.ready=false;self.pending=false;self.read=nil;self.optics=nil;self.birthRead=nil
         self.write=nil;self.opticsWrite=nil;self.pendingBirthTotals=nil
-        self.frame=nil;self.preparedFrame=nil;self.budgetFrame=nil;self.logPending=false;self.flowLogPending=false;self.flowMode=nil
+        self.frame=nil;self.preparedFrame=nil;self.budgetFrame=nil;self.logPending=false;self.flowLogPending=false;self.flowMode=nil;self.poolMode=nil
         self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
         for _,p in ipairs({self.descriptorParams,self.metaParams,self.binParams,self.summaryParams,self.resolveParams,
             self.blocksParams,self.blocksSecondParams,self.totalsParams,self.opticsParams,self.statsParams,
@@ -89,13 +96,14 @@ return function(d)
             for key in pairs(p.textures) do if type(p.textures[key])~='string' then p.textures[key]=false end end
         end
     end
-    function st:prepare(oldState,oldMeta,newState,newMeta,events,count,sim,inputs,motionDt,motion)
+    function st:prepare(oldState,oldMeta,newState,newMeta,events,count,sim,inputs,motionDt,motion,poolTick)
         self.preparedFrame=nil;self.budgetFrame=nil
         if self.assetPending or self.assetError then self.pending=true;return false end
         if self.frame==sim.frame or count<1 or count>4096 or count~=math.floor(count) then return false end
         local flowMode=r.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
+        local poolMode=flowMode and r.RAIN_PHYSICS_P4_POOL_PREVIEW==true
         assert(not flowMode or geometry.flowConnectedUV==true,'P4 requires the connected-UV film bake: rebuild film cells')
-        if self.count~=count or self.flowMode~=flowMode then
+        if self.count~=count or self.flowMode~=flowMode or self.poolMode~=poolMode then
             self:dispose();local words=math.ceil(count/96)
             local v=self.values;v.gWords=words;v.gMaskW=33*words;v.gSummaryWords=math.ceil(words/96);v.gSummaryW=33*v.gSummaryWords
             self.descriptors=canvas(count,5,render.TextureFormat.R32G32B32A32.Float,'P3 conservative descriptors')
@@ -107,7 +115,7 @@ return function(d)
             self.opticsA=canvas(1024,256,render.TextureFormat.R16G16B16A16.Float,'P3 physical height A')
             self.opticsB=canvas(1024,256,render.TextureFormat.R16G16B16A16.Float,'P3 physical height B');self.optics=self.opticsA
             if flowMode then self.flux=canvas(1024,256,render.TextureFormat.R32G32B32A32.Float,'P4 donor face flux') end
-            self.count=count;self.flowMode=flowMode
+            self.count=count;self.flowMode=flowMode;self.poolMode=poolMode
         end
         local v=self.values;v.gFilmCount=count;v.gCount=count
         v.gFilmScale2=d.surface.scale^2;v.gFilmDt=math.max(sim.dt or 0,0);v.gFilmMotionDt=math.max(motionDt or 0,0)
@@ -122,6 +130,7 @@ return function(d)
         v.gFilmEvapUMS=r.RAIN_FILM_EVAP_DRY_UM_S*(1-rh)*thermal*(1+.5*math.sqrt(v.gFilmAirMS))
         self.evapUMS=v.gFilmEvapUMS
         v.gFilmFlowOn=flowMode and 1 or 0
+        v.gPoolOn=poolMode and 1 or 0;v.gPoolCount=count;v.gPoolTick=poolTick or 0
         if flowMode then
             assert(motion and motion.gRainObjectToWorld,'P4 requires the P1 world transform/force inputs')
             v.gFilmObjectToWorld=motion.gRainObjectToWorld
@@ -138,6 +147,7 @@ return function(d)
             v.gFilmAirDownwardGain=motion.gRainAirflowDownwardGain or 1
             d.surface:bind(self.flowParams)
             self.flowParams.textures.txFilmPrevious=self.read
+            self.flowParams.textures.txFilmBirthEvent=events
         end
         d.surface:bind(self.descriptorParams);d.surface:bind(self.metaParams)
         local tx=self.descriptorParams.textures
@@ -147,10 +157,11 @@ return function(d)
         self.summaryParams.textures.txMask=self.mask
         local tx=self.resolveParams.textures
         tx.txFilmDescriptors=self.descriptors;tx.txMask=self.mask;tx.txSummary=self.summary;tx.txFilmPrevious=self.read
-        tx.txFilmFlux=self.flux or false
+        tx.txFilmFlux=self.flux or false;tx.txFilmBirthEvent=events
         self.write=self.read==self.a and self.b or self.a
         self.opticsWrite=self.optics==self.opticsA and self.opticsB or self.opticsA
         self.opticsParams.textures.txFilmCurrent=self.write
+        self.opticsParams.textures.txFilmBirthEvent=events;self.opticsParams.textures.txFilmPrevious=self.read
         if not self:step('P3 descriptors',self.descriptors,self.descriptorParams) then return false end
         if not self:step('P3 paired meta',self.metaScratch,self.metaParams) then return false end
         if not self:step('P3 sparse tiles',self.mask,self.binParams) then return false end
@@ -171,6 +182,8 @@ return function(d)
             self.flowCoarse=canvas(5,8,render.TextureFormat.R32G32B32A32.Float,'P4 manual Courant coarse')
             self.flowStats=canvas(16,1,render.TextureFormat.R32.Float,'P4 manual Courant readback')
         end
+        for key,value in pairs(self.values) do self.flowBlocksParams.values[key]=value end
+        self.flowBlocksParams.values.gPoolOn=0
         d.surface:bind(self.flowBlocksParams)
         self.flowBlocksParams.textures.txFilmPrevious=self.read
         self.flowCoarseParams.textures.txFilmFlowBlocks=self.flowBlocks
@@ -227,7 +240,7 @@ return function(d)
         self.statsParams.textures.txFilmTotals=self.totals
         if self.stats:updateWithShader(self.statsParams)==false then return false end
         self.logPending=true;local epoch=self.epoch;local frame=self.frame
-        local seconds=self.publishedSeconds;local steps=self.publishedSteps;local transport=self.flowMode and 'P4' or 'P3'
+        local seconds=self.publishedSeconds;local steps=self.publishedSteps;local transport=self.poolMode and 'P4b' or self.flowMode and 'P4' or 'P3'
         self.stats:accessData(function(err,data)
             if epoch~=self.epoch then if data then data:dispose() end;return end
             self.logPending=false
@@ -237,9 +250,9 @@ return function(d)
             local prev=self.previousLog;local interval=seconds-(prev and prev.seconds or 0)
             local inputRate=interval>0 and (v[9]-(prev and prev.input or 0))/interval or 0
             local residualDelta=residual-(prev and prev.residual or 0)
-            d.log(string.format('Rain P3 frame=%s mm3 input=%.6f film=%.6f micro=%.6f drops=%.6f bounce=%.6f exit=%.6f headEvap=%.6f fieldEvap=%.6f runoff=%.6f trailTransferred=%.6f residual=%.6f arrivals=%.0f publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s residualDelta=%.6f mm3 transport=%s',
+            d.log(string.format('Rain P3 frame=%s mm3 input=%.6f film=%.6f micro=%.6f drops=%.6f bounce=%.6f exit=%.6f headEvap=%.6f fieldEvap=%.6f runoff=%.6f trailTransferred=%.6f residual=%.6f arrivals=%.0f publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s residualDelta=%.6f mm3 transport=%s poolReturned=%.6f',
                 tostring(frame),v[9],v[1],v[2],v[12],v[10],v[11],v[13],v[3],v[4],v[14],residual,v[16],
-                seconds,steps,interval,inputRate,residualDelta,transport))
+                seconds,steps,interval,inputRate,residualDelta,transport,v[5]))
             self.previousLog={seconds=seconds,input=v[9],residual=residual}
         end)
         return true

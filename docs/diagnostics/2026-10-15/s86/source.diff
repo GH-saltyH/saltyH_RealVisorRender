@@ -1,0 +1,1319 @@
+--- a23527e/docs/RAINFX_ROADMAP.md
++++ s86/docs/RAINFX_ROADMAP.md
+@@ -2,7 +2,24 @@
+ 
+ See `docs/README.md` for the document index and working rules.
+ 
+-## Latest s85 P4 regime diagnosis and pool transfer prototype (2026-10-15)
++## Latest s86 P4b conserved localized pool return (2026-10-15)
++
++From user stamp a23527e, added default-OFF P4b pool return to the actual P2/P3
++pipeline. One bounded region pass reads only the previous published field;
++unique rotating free-slot ownership preserves same-frame rain-head priority.
++Five-row events retain the original incident centre and internal return volume.
++Head, donor flux, field debit and P2/P3 ledgers share the event and atomic publish.
++Fixed slot-group/region rotation aliasing at4096. Added last-step view4 marker;
++current-field Courant estimates ignore already-debited/speculative pool events.
++Extra payload16KiB+16*slots (+80KiB at4096), +1 pass, no steady readback/CPU loop.
++Production /WX WARP8 gates, actual-mesh synthetic pool probe, eight nonempty
++P4b-OFF bit-equivalence cases, full optics/depth/native gates, P3/P4 numerical
++regression13/9, actual Lua13 pending points/40 toggles pass.
++Game classification/cost/limiter improvement pending. Broad film pressure/inertia
++transport and long-session float32 gates remain open. Existing tuning preserved.
++See `RAINFX_S86_P4B_POOL_RETURN.md`.
++
++## s85 P4 regime diagnosis and pool transfer prototype (2026-10-15)
+ 
+ Supplied paired stationary/137km/h snapshots confirm49.0823%/44.8306% of film mass
+ is in CFL-limited cells; mass-weighted model velocity retention52.0827%/59.7221%.
+--- a23527e/docs/RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md
++++ s86/docs/RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md
+@@ -1,6 +1,6 @@
+ # RainFX s85 — P4 수송 범위 진단과 보존적 고임 전환 원형
+ 
+-Date: 2026-10-15. Status: ACTIVE — 같은 프레임 자료로 P4a의 두꺼운 고임/준정상 수송 문제 확인. P4b GPU 전환 원형의 물 보존 검증 완료. **게임 P4b는 아직 미구현이며 P4 수송 시간 gate는 열려 있다.**
++Date: 2026-10-15. Status: REFERENCE — 같은 프레임 자료로 P4a의 두꺼운 고임/준정상 수송 문제 확인. P4b GPU 전환 원형의 물 보존 검증 완료. **이 단계는 원형이며 실제 런타임 연결은 후속 s86 참조. P4 수송 시간 gate는 열려 있다.**
+ 
+ ## 1. 이번 단계의 범위
+ 
+--- /dev/null
++++ s86/docs/RAINFX_S86_P4B_POOL_RETURN.md
+@@ -0,0 +1,158 @@
++# RainFX s86 — P4b 국소 고임→P1 방울 보존 전환
++
++Date: 2026-10-15. Status: ACTIVE — a23527e에서 이어 실제 P2/P3 파이프라인에 P4b 연결. Production GPU/Lua/광학 회귀 검증 통과. **실제 게임의 비용·고임 분류·수송 시간 개선은 검증 대기.**
++
++## 1. 기준과 사용법
++
++사용자가 s85 상태를 `a23527e`로 스탬프한 clean tree에서 시작했다.
++변경 전 Lua/HLSL/문서는 `diagnostics/2026-10-15/s86/baseline`에 보존했다.
++기존 물리·날씨·표시 크기·E2/E3/G-force/재질 튜닝은 보존한다.
++이번 변경은 **국소 고임의 표현을 수막에서 기존 P1 방울로 옮기는 것**이다.
++연속 수막의 압력·관성 solver를 완성한 단계는 아니다.
++
++앱 **reload 필요**. RainFX → Weather inputs and physical units (P0):
++
++1. P1 SI motion, P2 physical birth, P3 conserved film, P4 conservative transport를 켠다.
++2. `Enable P4b localized pool return (resets water)`를 켠다.
++3. 정상 광학은 기존 view0, 수막 두께는 view1이다.
++4. 새 view4는 **마지막 게시 step의 전환 위치/높이**를 보라색으로 표시한다.
++   누적 field나 새로운 물 재고가 아니며, 드문 전환은 순간적으로만 보인다.
++5. `Log P3 actual water budget`은 같은 frame의 원장+P4 현재 field 추정을 출력한다.
++   원장에 `transport=P4b poolReturned=...`가 추가된다.
++
++새 키는 `RAIN_PHYSICS_P4_POOL_PREVIEW=false` 하나다. 기본 OFF다.
++P4b/P4/P3/P2/P1 토글은 전체 source·head·field 재고와 시계를 초기화한다.
++P4 또는 P3가 꺼지면 P4b는 동작하지 않는다. P4b OFF/ON 비용 비교는
++**같은 리플레이 시점과 같은 초기화 후 누적 시간**에서 해야 한다.
++GPU heads/lifecycle mode3 또는6의 기존 P1/P2 조건도 유지한다.
++
++## 2. 후보와 슬롯 배정
++
++`rainFilmPoolCandidate.hlsl`은 1024×256 field를16×16 region1024개로 나누고
++각 region의 가장 높은 full-coverage 셀 하나만 조사한다.
++네 이웃의 최대 높이를 background로 남기고 초과량을 요청한다.
++float32 셀이 실제 잃을 수 있는 체적을 record에 저장한다.
++
++다음 조건을 모두 만족해야 후보가 된다.
++
++- supported/full-coverage 셀이며 네 이웃도 supported/full-coverage;
++- 초과 물량의 등가 구 직경이 기존 persistent-head 최소값 이상;
++- 초과 높이가 같은 물량과 현재 접촉각의 spherical-cap 높이보다 큼;
++- 그 cap의 물리 footprint가 현재 셀 면적보다 넓음.
++
++최소값은 `RAIN_BIRTH_MIN_PERSISTENT_MM`를 공유한다. 이는 persistent head로
++보낼 최소 표현 체적의 등가 직경 조건이며, 표면 물의 실제 최소 존재 크기는 아니다.
++display gain, optical gain, 화면 텍셀 크기는 이 판단에 들어가지 않는다.
++partial boundary, uniform sheet, 연결된 평평한 ridge, 얇은 trail은 유지한다.
++최고점이 거절되면 같은 region의 다른 점까지 무제한 탐색하지 않는다.
++
++`rainFilmPoolAddress.hlsl`의 region↔slot 매핑은 한 프레임에 일대일이다.
++슬롯이 region보다 많으면 한 slot group씩 순환하고, **group을 모두 돈 뒤**
++region 회전을 한 칸 진행한다. `tick % regionCount`를 group 선택과 함께 쓰면
++4096슬롯에서 특정 빈 슬롯이 일부 region만 반복해 맡는 aliasing이 생겼다.
++고친 매핑에서는 그 슬롯도4096 published step 안에1024 region 모두를 방문한다.
++전체 후보가 매 프레임 모든 빈 슬롯을 검색하는 구조는 아니다.
++
++## 3. P2/P3의 원자적 연결
++
++새 런타임 Lua 모듈이나 새 SDK API는 추가하지 않았다.
++
++1. P2가 **이전 게시 field**로 후보 pass를 실행한다. 초기화·resize 직후에는
++   유효 field가 없으므로 후보0으로 시작한다. speculative write field는 읽지 않는다.
++2. 기존 P2 event를 P4b일 때만4행→5행으로 확장한다.
++3. 원래 rain attached birth가 없고, 배정 슬롯이 status0/volume0일 때만 고임을 받는다.
++   비가 그친 상태에서도 고임 복귀는 가능하다. 슬롯이 없으면 물은 field에 남는다.
++4. event0행은 새 head 위치/체적/generation tag를 기록한다. 기존 state/meta의
++   generation handshake를 그대로 사용하므로 같은 event가 재생되지 않는다.
++5. event4행은 **원래 빗물 충돌 위치.xy + 내부 복귀 체적.z**다.
++   P3 descriptor는 이 원래 위치에 rain film/micro를 놓는다.
++   고임 head 위치로 rain source를 끌고 가지 않는다. rain beta/Weber도 유지한다.
++6. `rainFilmPoolAvailable.hlsl`을 donor flux와 field resolve가 공유한다.
++   둘 다 같은 event를 읽고 head에 넘긴 물을 먼저 차감하여 이중 수송을 막는다.
++7. corrected head meta/source 총계/field/optics/tick을 기존 publication 경로에서
++   함께 확정한다.13개 shader 지점 중 하나가 pending이면 모든 read bank와 시계는
++   이전 값이다. dispose/reset은 후보/이벤트/field의 상호 texture 참조도 해제한다.
++
++고임의 과거 운동량은 기존 field에 저장되어 있지 않다. 복귀한 head는
++**정지 속도에서 시작**하고 다음 step부터 기존 P1 힘/관성/고착을 적용한다.
++이는 이번 bounded closure의 한계다. 수치적으로 과대한 준정상 속도를
++초기 속도로 복사하지 않으며 운동량 보존까지 주장하지 않는다.
++
++## 4. 원장과 진단
++
++P2 reserve는 누계다. 따라서 film→head 복귀를 head에만 더하면 P2 잔고가
++틀어진다. 기존 extra-total spare W에 `poolReturned`를 Kahan 누적한다.
++추가 budget canvas는 필요 없다.
++
++```text
++P2:
++input + cumulativePoolReturn = grossFilmReserve + microReserve + bounce
++    + capacityReserve + exit + currentDrops + headEvap
++
++P3:
++input = currentFilm + currentMicro + currentDrops + bounce + exit
++    + headEvap + fieldEvap + runoff
++```
++
++P3의 `poolReturned`는 내부 이력이며 외부 공급/손실로 더하거나 빼지 않는다.
++manual16-float snapshot의 기존 spare 채널을 사용한다.
++P4 current-field Courant 진단은 **pool debit을 비활성화**한 별도 values를 사용한다.
++이미 복귀를 차감한 field를 또 차감하거나, 다음 step의 speculative event를
++섞어 속도를 과소평가하지 않는다.
++
++optics texture의 R/G는 기존 물리 film/micro µm 그대로다. 비어 있던 B에
++마지막 step의 복귀량을 높이로 환산해 기록한다. 일반 광학은 R/G만 사용한다.
++view4에도 기존 native occlusion을 적용한다. 초기 디버그 분기의 FXC X4000은
++분기 내 early-return을 없애 해결했고 최종 full shader가 /WX를 통과했다.
++
++## 5. 비용
++
++- 추가 steady pass **1개**: `RealVisor/P4b pool candidates`.
++- candidate1024×1 RGBA32F =16KiB.
++- event 추가1행 =16×slotCount bytes.4096슬롯이면64KiB.
++- 합계 payload **16KiB +16×slotCount bytes**,4096슬롯에서80KiB.
++- 기존 P2 event 출력 픽셀25% 증가, flux/resolve/optics에 event 조회/배정 계산 추가.
++- CPU 방울 loop, steady GPU readback, draw call, 물리 field 해상도 증가는 없다.
++- payload는 driver allocation/캐시/컴파일 비용을 포함하지 않는다. 실제 GPU ms는
++  아직 측정하지 않았으며 FPS 개선을 보증하는 수치가 아니다.
++
++후보 탐색은262144셀의 field/metric 읽기와 region별 이웃 검사로 고정한다.
++P4b OFF에서는 후보 canvas/pass가 없고 event도 기존4행이다.
++
++## 6. 로컬 검증
++
++모든 GPU 실행은 FXC ps_5_0 **/Ges /WX**, D3D11 WARP다.
++
++| 도구 | 확인 |
++|---|---|
++| `tools/check_s86_pool_gpu.py` | 실제 source→P1 state/meta→P3 descriptor/paired meta→flux/field/optics→P2/P3 budget의8개 gate. 비가 없는 복귀·rain source 위치 독립·generation·슬롯1..4096·분류·OFF 동등·8회 연속 보존 |
++| `tools/check_s86_pool_binding.py` | 실제 Lua/main의13개 pending 지점+예외, 이전 field만 참조, tick 일치, 수동 진단 격리, 두 로그의 내부 원장, resize, stale callback,40회 토글. live bank P4=17/P4b=18/reset=0 |
++| `tools/check_s86_pool_realmesh.py` | 실제 메쉬/마스크/area, 제공된 두 peak 셀의 물량을 넣은 **합성 field**에서2개 head 복귀. 실제 게임의 주변 분포를 복원한 시험은 아님 |
++| `tools/check_s86_birth_off.py` | sparse/rain/overflow/occupied/micro/wet/normal의8개 P4b OFF event가 a23527e와 bit-identical |
++| `tools/check_s86_pool_lens.py` | 전체 렌더 shader 경고 없음. 물리 굴절·empty/native/depth 기존 gate, view4 표시, marker가 정상 optics를 바꾸지 않음 |
++| `tools/check_s86_pool_regression.py` | 기존 P3 GPU13/P4 GPU9 수치 회귀 gate 통과. source composer를 생산 Lua와 같은 새 header 연결로 갱신 |
++
++새 내부 전환을 포함한 no-rain 첫 원장 잔차는 P2=0/P3≈−2.66e−7mm³,
++rain film 동시 입력은 약−1.72e−5/−1.79e−5mm³다.
++8회 닫힌 연속 step의 절대 잔차는 약2.93e−7mm³ 이하다.
++단기간 fixture 결과이며 장시간 float32 누계 gate를 대신하지 않는다.
++`diagnostics/2026-10-15/s86/`에 결과와 source.diff/해시를 보존한다.
++
++## 7. 게임 검토와 남은 범위
++
++**이번 빌드는 보존적 전환의 검토용이다. P4 수송 시간 gate는 아직 열려 있다.**
++넓은 고임·연결된 리뷸릿·부분 셀은 분류 조건상 film에 남고, 슬롯 부족이나
++높은 이웃 background 때문에 복귀가 제한될 수 있다. 이 경우에도 기존 CFL
++제한은 유지된다. 별도의 압력/관성 수송 개선은 그 잔여 분포를 보고 결정한다.
++
++같은 낮60% 조건에서 충분히 누적시킨 뒤, 정차와137km/h 각각 한 번의
++`Log P3 actual water budget` 쌍으로 다음을 확인한다.
++
++- `transport=P4b`와 증가하는 `poolReturned`, 원장 residual;
++- 제한 film 질량 비중/속도 보존율과 과도한 최대 두께의 변화;
++- 고임에서 나온 head의 위치/크기/흐름, head–trail 연결의 갑작스러운 튐;
++- 같은 리플레이/누적 시간에서 P4b OFF/ON FPS·Memory.
++
++view4의 순간 marker가 항상 유지될 필요는 없다. 누계가0이면 방울 수를 강제로
++늘리거나 물리 직경을 변경하지 말고 분류/슬롯 제약을 우선 확인한다.
++이번에 사용자의 기존 빗방울 크기·display 계수·Smear/legacy local film 정책은 바꾸지 않았다.
+--- a23527e/docs/README.md
++++ s86/docs/README.md
+@@ -17,8 +17,9 @@
+       incident/trail water, paired head loss, evaporation/runoff and physical-height optics;
+       supplied 60% water budgets and 3-minute/40-toggle memory observations pass;
+       opt-in P4a conserves water with observed comparable FPS, but high Courant fails
+-      transport time accuracy; s85 confirms localized millimetre columns outside the
+-      P4a quasi-steady regime and tests an offline conserved pool-to-head prototype.
++      transport time accuracy; s85 diagnoses localized millimetre columns outside
++      P4a's regime; s86 integrates opt-in P4b conserved pool-to-P1 return with
++      production GPU/Lua/optics gates passed and game cost/classification pending.
+ - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
+   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
+   in-scene stage. The stage is `main.smoke` by user setting
+@@ -61,7 +62,8 @@
+ |---|---|---|
+ | `README.md` | ACTIVE | this index and the working rules |
+ | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
+-| `RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md` | ACTIVE | same-frame data confirms 45–49% film inventory is CFL-limited; full-coverage/coated peak cells and valid SI units; offline /WX WARP conserved localized-pool-to-head prototype, P4b handoff design/cost; game runtime unchanged |
++| `RAINFX_S86_P4B_POOL_RETURN.md` | ACTIVE | opt-in P4b localized pool→P1 return, preserved rain centre, internal ledger, paired donor/field debit and atomic publication; +1 pass/+80KiB at4096, view4; production GPU/Lua/optics/regression gates passed, game validation pending |
++| `RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md` | REFERENCE | same-frame data confirms 45–49% film inventory is CFL-limited; full-coverage/coated peak cells and valid SI units; offline /WX WARP conserved localized-pool-to-head prototype, handoff design/cost; runtime integration follows in s86 |
+ | `RAINFX_S84_P4_GAME_REVIEW.md` | REFERENCE | supplied P4 water budgets pass and FPS observed comparable; high-C transport-time gate fails; real-mesh unit probes, media review, same-frame16-float thickness/limited-mass/metric diagnostics; physical transport unchanged |
+ | `RAINFX_S83_P4_FILM_TRANSPORT.md` | REFERENCE | opt-in P4a four-neighbour conserved film transport/runoff, P1 world forces/downward air, manual limiter stats, compensated snapshot sum; +4MiB/one pass; game findings and expanded diagnostics follow in s84 |
+ | `RAINFX_S82_P3_GAME_REVIEW.md` | REFERENCE | supplied P3 conservation passes (interval error ≤2.043e-5); 3-minute/40-toggle game memory shows no sustained accumulation, 100 reset fixtures; long float32 precision/trail quality remain open, first P4 transport follows in s83 |
+--- a23527e/docs/tools/check_s79_birth_gpu.py
++++ s86/docs/tools/check_s79_birth_gpu.py
+@@ -12,9 +12,10 @@
+     'gRainObjectToWorld':'float4x4','gRainAcceleration':'float3','gRainAirVelocityWorld':'float3',
+     'gRainSiInertiaWorld':'float3','gRainSiAirWorld':'float3','gRainStateSingleDropPosition':'float2',
+     'gRainWetPathTexel':'float2'})
++env['types']['gFilmGrid']='float2'
+ source=(ROOT/'realvisor.lua').read_text(encoding='utf-8-sig')
+ metric=(ROOT/'shaders/rainSurfaceMetric.hlsl').read_text();core=(ROOT/'shaders/rainPhysicsSI.hlsl').read_text()
+-def code(name):return (ROOT/f'shaders/{name}.hlsl').read_text()
++from rain_shader_source import source as code
+ def helpers(text,key):return re.sub(r'SamplerState\s+\w+\s*\{.*?\};','',inline(text,key),flags=re.S).split('        float4 main(PS_IN pin) {')[0]
+ stateCode=metric+core+helpers(source,'local rainStateUpdateParams =')+code('rainStateEntry')
+ metaCode=metric+core+helpers(source,'local rainStateMetaUpdateParams =')+code('rainMetaEntry')
+--- a23527e/docs/tools/check_s81_film_gpu.py
++++ s86/docs/tools/check_s81_film_gpu.py
+@@ -8,7 +8,7 @@
+ exec(base[:base.index('report=[]')],env);env['OUT']=OUT;render=env['render'];inline=env['inline']
+ env['types'].update({n:'float2' for n in ('gFilmGrid','gFilmPaddedSize','gFilmReductionSize','gTile','gDynamicDropP3Grid')})
+ env['types'].update({n:'float3' for n in ('gRainObjectToWorld','gBirthAirWorld')})
+-def code(name):return (ROOT/f'shaders/{name}.hlsl').read_text()
++from rain_shader_source import source as code
+ source=(ROOT/'realvisor.lua').read_text(encoding='utf-8-sig')
+ metric=code('rainSurfaceMetric');core=code('rainPhysicsSI')
+ common=metric+core
+--- /dev/null
++++ s86/docs/tools/check_s86_birth_off.py
+@@ -0,0 +1,26 @@
++"""Nonempty-rain P4b-OFF event equivalence against user stamp a23527e."""
++from pathlib import Path
++import sys,json
++import numpy as np
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-15/s86'
++e={'__file__':str(ROOT/'docs/tools/check_s86_pool_gpu.py')}
++exec((ROOT/'docs/tools/check_s86_pool_gpu.py').read_text().split('\nreports=[]\n',1)[0],e)
++render=e['render'];old=e['metric']+e['core']+(OUT/'baseline/shaders/rainBirthEvent.hlsl').read_text()
++density=e['b']['values']['gBirthNumberDensity'];cases=[]
++for label,factor,busy,extra in [('sparse',.03,False,{}),('rain',1,False,{}),('overflow',2.5,False,{}),
++    ('occupied',1,True,{}),('occupied_overflow',2.5,True,{}),
++    ('microscopic',1,False,{'gBirthMinPersistentMM':1}),
++    ('wet_override',1,False,{'gBirthWetOverride':1}),
++    ('reversed_normal',1,False,{'gBirthNormalSign':-1})]:
++    meta=e['meta'].copy()
++    if busy:meta[:,:,:]=(.001,1,1,29)
++    values={**e['v'],'gPoolOn':0,'gBirthNumberDensity':density*factor,**extra}
++    tx={**e['sourceTx'],'txRainState':e['state'],'txRainStateMeta':meta}
++    a=render(label+'_current',e['eventCode'],tx,values,(128,4))
++    b=render(label+'_stamp',old,tx,values,(128,4))
++    assert np.array_equal(a,b),(label,float(np.max(abs(a-b))))
++    cases.append(label)
++(OUT/'birth_off_checks.json').write_text(json.dumps(dict(compiler='FXC /Ges /WX, D3D11 WARP',
++    bitIdenticalTo='a23527e',cases=cases),indent=2))
++print('s86 P4b OFF:',len(cases),'nonempty rain/capacity/overflow/material cases bit-identical')
+--- /dev/null
++++ s86/docs/tools/check_s86_pool_binding.py
+@@ -0,0 +1,90 @@
++"""Production Lua factories/main: P4b pending, bank ownership, counters and resets."""
++from pathlib import Path
++import sys
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parents[2]
++binding=(ROOT/'docs/tools/check_s83_flow_binding.py').read_text()
++scope={'__file__':str(ROOT/'docs/tools/check_s83_flow_binding.py')}
++exec(binding.split('exec(compile(text,',1)[0],scope)
++text=scope['text'].replace("OUT=ROOT/'docs/diagnostics/2026-10-15/s83'","OUT=ROOT/'docs/diagnostics/2026-10-15/s86'")
++anchor='report=dict(wholeLuaSyntax=True';assert text.count(anchor)==1
++extra='''    lua.execute("""
++        runtime.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW=true
++        runtime.RAIN_PHYSICS_P4_POOL_PREVIEW=true;actualReset();assert(liveBanks==0)
++        rainStateA=bank('state A');rainStateB=bank('state B');rainStateMetaA=bank('meta A');rainStateMetaB=bank('meta B')
++        sim.frame=1000;assert(framePublish(sim));assert(liveBanks==18)
++        assert(b.poolMode and f.poolMode and b.events.size.y==5 and b.poolCandidates.size.x==1024)
++        assert(b.eventParams.values.gPoolOn==1 and f.values.gPoolOn==1)
++        assert(b.eventParams.values.gPoolHasField==0 and b.poolParams.textures.txFilmPrevious==false)
++        local firstField=f.read;local allocated=allocations
++        sim.frame=1001;assert(framePublish(sim));assert(liveBanks==18 and allocations==allocated)
++        assert(b.eventParams.values.gPoolHasField==1 and b.poolParams.textures.txFilmPrevious==firstField)
++        assert(f.values.gPoolTick==b.tick-1 and b.eventParams.values.gPoolTick==b.tick-1)
++        assert(f.flowParams.textures.txFilmBirthEvent==b.events and f.resolveParams.textures.txFilmBirthEvent==b.events)
++        assert(f.opticsParams.textures.txFilmBirthEvent==b.events)
++        local field=f.read;local optics=f.optics;local budget=b.read;local tick=b.tick;local clock=f.publishedSeconds
++        local metaA=rainStateMetaA;local metaB=rainStateMetaB;local readFlag=rainStateReadIsA
++        sim.frame=1002
++        for _,name in ipairs({'P4b pool candidates','P2 birth events','State transport','State lifecycle',
++            'P3 descriptors','P3 paired meta','P3 sparse tiles','P3 sparse summary','P4 face flux',
++            'P3 field deposition','P3 physical height','P2 budget blocks','P2 budget totals'}) do
++            failPass=name;assert(not framePublish(sim))
++            assert(f.read==field and f.optics==optics and b.read==budget and b.tick==tick)
++            assert(f.publishedSeconds==clock and b.publishedSeconds==clock and f.frame==1001)
++            assert(rainStateMetaA==metaA and rainStateMetaB==metaB and rainStateReadIsA==readFlag)
++            assert(liveBanks==18 and allocations==allocated)
++            assert(b.poolParams.textures.txFilmPrevious==field)
++        end
++        failPass=nil;throwPass='P4b pool candidates';assert(not framePublish(sim))
++        assert(rainDynamicSceneCopyState.physicsBirthError and b.tick==tick and f.read==field)
++        throwPass=nil
++        -- A manual current-field estimate must ignore speculative source events
++        -- as well as returns already included in the published field.
++        assert(f:logFlow());assert(f.values.gPoolOn==1 and f.flowBlocksParams.values.gPoolOn==0)
++        local staleFlow=pendingCallback
++        assert(f.flowBlocksParams.textures.txFilmBirthEvent==false)
++        assert(framePublish(sim));assert(b.tick==tick+1 and liveBanks==21)
++        assert(f:logBudget());local fcb=pendingCallback
++        fcb(nil,{floatValue=function(s,i,y)
++            local v={2,1,.5,.25,2,0,0,0,10,3,1,2,.25,.7,.8,5};return v[i+1]
++        end,dispose=function() dataDisposed=dataDisposed+1 end})
++        assert(string.find(logMessages[#logMessages],'transport=P4b poolReturned=2.000000',1,true))
++        assert(string.find(logMessages[#logMessages],'residual=0.000000',1,true))
++        assert(b:logBudget());local bcb=pendingCallback
++        local messageStart=#logMessages
++        bcb(nil,{floatValue=function(s,i,y)
++            local v={10,4,1,1,1,1,3,5,1,.7,0,2};return v[i+1]
++        end,dispose=function() dataDisposed=dataDisposed+1 end})
++        assert(string.find(logMessages[messageStart+1],'residual=0.000000',1,true))
++        assert(string.find(logMessages[messageStart+2],'poolReturned=2.000000',1,true))
++        -- Resizing cannot consume the old field in a newly reset source epoch.
++        count=256;sim.frame=1003;assert(framePublish(sim))
++        assert(b.eventParams.values.gPoolHasField==0 and b.poolParams.textures.txFilmPrevious==false)
++        assert(b.events.size.x==256 and b.events.size.y==5 and f.count==256)
++        rainStateSingleDropDirty=true;actualReset();assert(liveBanks==0)
++        local n=dataDisposed;staleFlow(nil,{dispose=function() dataDisposed=dataDisposed+1 end})
++        assert(dataDisposed==n+1)
++        assert(b.poolParams.textures.txFilmPrevious==false and b.eventParams.textures.txPoolCandidates==false)
++        assert(f.resolveParams.textures.txFilmBirthEvent==false and f.flowParams.textures.txFilmBirthEvent==false)
++        count=128
++        for cycle=1,40 do
++            runtime.RAIN_PHYSICS_P4_POOL_PREVIEW=cycle%2==1;actualReset();assert(liveBanks==0)
++            rainStateA=bank('state A');rainStateB=bank('state B');rainStateMetaA=bank('meta A');rainStateMetaB=bank('meta B')
++            sim.frame=1100+cycle;assert(framePublish(sim))
++            assert(liveBanks==(runtime.RAIN_PHYSICS_P4_POOL_PREVIEW and 18 or 17))
++            assert(b.events.size.y==(runtime.RAIN_PHYSICS_P4_POOL_PREVIEW and 5 or 4))
++            assert(not runtime.RAIN_PHYSICS_P4_POOL_PREVIEW or b.eventParams.values.gPoolHasField==0)
++        end
++        rainStateSingleDropDirty=true;actualReset();assert(liveBanks==0)
++    """)
++    (OUT/'pool_binding_checks.json').write_text(json.dumps(dict(actualProductionFactoriesAndMain=True,
++        pendingAndExceptionAtomicPublication=True,pendingPasses=13,previousFieldOnly=True,
++        poolEventBankTickMatchesField=True,diagnosticNeverDebitsSpeculativeOrPublishedEvent=True,
++        sourceAndFieldLogsInternalReturn=True,countChangeStartsWithoutOldField=True,
++        staleCallbackRetirement=True,clearsAllPoolTextureReferences=True,toggleCycles=40,
++        liveBanksP4=17,liveBanksP4b=18,resetLiveBanks=0),indent=2))
++'''
++text=text.replace(anchor,extra+anchor)
++sys.path.insert(0,str(ROOT/'docs/tools'))
++exec(compile(text,str(ROOT/'docs/tools/check_s81_film_binding.py'),'exec'),{'__file__':str(ROOT/'docs/tools/check_s81_film_binding.py')})
++print('s86 Lua: P4b 13 pending points, atomic banks, return logs, resize, stale callbacks and 40 toggles passed')
+--- /dev/null
++++ s86/docs/tools/check_s86_pool_gpu.py
+@@ -0,0 +1,213 @@
++"""Actual P4b source/state/meta/field/optics/budgets: FXC /Ges /WX, D3D11 WARP."""
++from pathlib import Path
++import sys,json,math
++import numpy as np
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-15/s86'
++
++def code(name):
++    s=(ROOT/f'shaders/{name}.hlsl').read_text()
++    if name=='rainBirthEvent':s=code('rainFilmPoolAddress')+s
++    if name in ('rainFilmResolve','rainFilmFlow','rainFilmOptics'):
++        s=code('rainFilmPoolAddress')+code('rainFilmPoolAvailable')+s
++    return s
++
++prefix=(ROOT/'docs/tools/check_s81_film_gpu.py').read_text().split('reports=[]',1)[0]
++prefix=prefix.replace("def code(name):return (ROOT/f'shaders/{name}.hlsl').read_text()",'')
++e={'__file__':str(ROOT/'docs/tools/check_s81_film_gpu.py'),'code':code};exec(prefix,e)
++e['env']['OUT']=OUT;render=e['render'];metric=e['metric'];core=e['core']
++birthPrefix=(ROOT/'docs/tools/check_s79_birth_gpu.py').read_text().split('reports=[]',1)[0]
++birthPrefix=birthPrefix.replace("def code(name):return (ROOT/f'shaders/{name}.hlsl').read_text()",'')
++b={'__file__':str(ROOT/'docs/tools/check_s79_birth_gpu.py'),'code':code};exec(birthPrefix,b)
++e['env']['types'].update(b['env']['types'])
++e['env']['types'].update(gFilmObjectToWorld='float4x4',gFilmAccelerationWorld='float3',gFilmAirWorld='float3')
++W,H,P,N=64,32,16,128;size=(W+2*P,H+2*P);tiles=W*H//256
++v={**e['values'],**b['values'],**b['motion'],'gFilmGrid':(W,H),'gFilmPaddedSize':size,
++   'gFilmReductionSize':(size[0]//16,size[1]//16),'gTilesY':size[1]//16,
++   'gFilmCount':N,'gCount':N,'gBirthCount':N,'gBirthFilmOn':1,'gBirthBlocks':2,
++   'gWords':2,'gMaskW':12,'gSummaryWords':1,'gSummaryW':6,
++   'gPoolOn':1,'gPoolCount':N,'gPoolTick':1,'gPoolHasField':1,'gPoolTheta':90,'gPoolMinDMM':.25,
++   'gBirthNumberDensity':0,'gFilmFlowOn':1,'gFilmObjectToWorld':np.eye(4).ravel(),
++   'gFilmAccelerationWorld':(0,-9.80665,0),'gFilmAirWorld':(0,0,0),'gFilmAirRho':1.2,
++   'gFilmFlowCf':.005,'gFilmFlowCFL':.8,'gFilmAirDownward':0,'gFilmAirDownwardGain':1,
++   'gFilmDt':.01,'gFilmMotionDt':.01}
++cells=np.zeros((H,W,4),np.float32);cells[:,:,:]=(.25,1,0,1)
++initial=np.zeros((size[1],size[0],4),np.float32);initial[P:P+H,P:P+W,0]=.00025
++initial[P+8,P+8,0]=4.3942978;initial[P+24,P+40,0]=1.9266605
++geoU=np.zeros((H*2,W*2,4),np.float32);geoU[:,:,:]=(.032,0,0,100)
++geoV=np.zeros_like(geoU);geoV[:,:,:]=(0,.016,0,0)
++geo={'txRainDu':geoU,'txRainDv':geoV,'txRainBoundaryMask':np.ones_like(geoU)}
++state=np.tile(np.array([.5,-.5,0,0],np.float32),(1,N,1))
++meta=np.zeros_like(state);meta[:,:,3]=28
++sites=b['sites'].copy();sites[:,:,:2]=(.75,.25)
++sourceTx={**b['textures'],**geo,'txBirthSites':sites}
++candidateCode=core+code('rainFilmPoolAddress')+code('rainFilmPoolCandidate')
++eventCode=metric+core+code('rainBirthEvent')
++descriptorCode=metric+core+code('rainFilmDescriptor')
++flowCode=metric+core+code('rainFilmFlow')
++reports=[]
++
++def candidates(label,field,values=v,c=cells):
++    return render(label,candidateCode,{'txFilmPrevious':field,'txFilmCells':c},values,(tiles,1))
++
++def events(label,candidate,oldState=state,oldMeta=meta,values=v,impact=None):
++    textures={**sourceTx,'txRainState':oldState,'txRainStateMeta':oldMeta,'txPoolCandidates':candidate}
++    if impact is not None:textures['txBirthImpact']=impact
++    count=int(values['gBirthCount'])
++    return render(label,eventCode,textures,values,(count,5 if values['gPoolOn'] else 4))
++
++def source_commit(label,ev,oldState=state,oldMeta=meta,values=v):
++    tx={**geo,'txRainState':oldState,'txRainStateMeta':oldMeta,'txRainBirthEvent':ev}
++    ns=render(label+'_state',b['stateCode'],tx,values,(int(values['gBirthCount']),1))
++    nm=render(label+'_meta',b['metaCode'],tx,values,(int(values['gBirthCount']),1))
++    return ns,nm
++
++def field_commit(label,ev,ns,nm,old=initial,os=state,om=meta,values=v):
++    tx={**geo,'txFilmNewState':ns,'txFilmNewMeta':nm,'txFilmOldState':os,'txFilmOldMeta':om,'txFilmBirthEvent':ev}
++    desc=render(label+'_desc',descriptorCode,tx,values,(int(values['gBirthCount']),5))
++    corrected=render(label+'_paired_meta',core+code('rainFilmMeta'),{'txFilmNewMeta':nm,'txFilmDescriptors':desc},values,(int(values['gBirthCount']),1))
++    bins=render(label+'_bins',code('rainFilmBin'),{'txFilmDescriptors':desc},values,(int(values['gMaskW']),int(values['gTilesY'])))
++    summary=render(label+'_summary',e['inline'](e['source'],'rainDynamicSceneCopyState.gpuHeadsSummaryPass ='),
++                   {'txMask':bins},values,(int(values['gSummaryW']),int(values['gTilesY'])))
++    tx={'txFilmPrevious':old,'txFilmCells':cells,'txFilmBirthEvent':ev}
++    q=render(label+'_flux',flowCode+code('rainFilmFlowPass'),{**geo,**tx},values,(W,H))
++    field=render(label+'_resolve',e['resolve'],{**tx,'txFilmDescriptors':desc,'txMask':bins,'txSummary':summary,
++                 'txFilmFlux':q},values,size)
++    optics=render(label+'_optics',code('rainFilmOptics'),{**tx,'txFilmCurrent':field},values,(W,H))
++    return field,corrected,desc,optics,q
++
++def budget(label,ev,corrected,desc,field,previous,values=v):
++    blocks=render(label+'_birth_blocks',code('rainBirthBlocks'),{'txBirthEvent':ev,'txRainNewMeta':corrected,'txBirthTransfers':desc},
++                  values,(int(values['gBirthBlocks']),3))
++    totals=render(label+'_birth_totals',code('rainBirthTotals'),{'txBirthBlocks':blocks,'txBirthPreviousTotals':previous},values,(1,6))
++    x=totals[:2,0].ravel();extra=totals[4,0]
++    p2=float(x[0]-sum(x[1:7],np.float64(0))-extra[0]+extra[3])
++    fb=render(label+'_field_blocks',code('rainFilmBlocks'),{'txFilmCurrent':field},values,
++              (int(values['gFilmReductionSize'][0]),int(values['gFilmReductionSize'][1])))
++    ft=render(label+'_field_totals',code('rainFilmTotals'),{'txFilmBlocks':fb,'txFilmBirthTotals':totals},values,(1,4))
++    fs=render(label+'_field_stats',code('rainFilmStats'),{'txFilmTotals':ft},values,(16,1))[0,:,0]
++    p3=float(fs[8]-sum(fs[9:13],np.float64(0))-sum(fs[:4],np.float64(0)))
++    assert abs(p2)<1e-4 and abs(p3)<1e-4,(label,p2,p3,fs)
++    assert abs(float(fs[4])-float(extra[3]))<1e-6
++    return totals,p2,p3
++
++c=candidates('actual_candidate',initial);ev=events('rain_off_pool_birth',c)
++assert np.count_nonzero(ev[4,:,2])==2
++accepted=ev[4,:,2]>0
++assert np.array_equal(ev[0,accepted,2],ev[4,accepted,2]) and np.all(ev[0,accepted,3]==9)
++assert np.max(abs(ev[1,accepted,:2]))==0 and np.max(abs(ev[2]))==0
++ns,nm=source_commit('actual_pool_commit',ev)
++assert np.array_equal(nm[0,accepted,1],ev[4,accepted,2])
++assert np.allclose(ns[0,accepted,:2],ev[0,accepted,:2],atol=1e-7)
++assert np.all(nm[0,accepted,3]==33)
++field,cm,desc,optics,q=field_commit('pool_return',ev,ns,nm)
++assert field.min()>=0 and q.min()>=0
++transferred=float(ev[4,:,2].sum(dtype=np.float64))
++assert abs(float(field.sum(dtype=np.float64)+cm[:,:,1].sum(dtype=np.float64)-initial.sum(dtype=np.float64)))<1e-5
++assert np.count_nonzero(optics[:,:,2])==2
++assert abs(float((optics[:,:,2]*cells[:,:,0]*.001).sum(dtype=np.float64))-transferred)<1e-5
++assert desc[1,:,0].max()==0 # newly born heads cannot leave a false swept trail
++previous=np.zeros((6,1,4),np.float32);previous[0,0,:2]=initial[:,:,0].sum(dtype=np.float64)
++totals,p2err,p3err=budget('returned_budget',ev,cm,desc,field,previous)
++reports.append(dict(case='actual no-rain pool source -> generation-matched P1 state/meta -> paired field/flux/optics/P2/P3',
++    returnedMM3=transferred,p2ResidualMM3=p2err,p3ResidualMM3=p3err))
++
++zero=candidates('no_published_field',initial,{**v,'gPoolHasField':0});assert np.max(abs(zero))==0
++for label,options in [('busy',{'oldMeta':np.tile(np.array([.001,1,1,29],np.float32),(1,N,1))}),
++                      ('retired',{'oldMeta':np.tile(np.array([0,0,0,30],np.float32),(1,N,1))}),
++                      ('rain_priority',{'values':{**v,'gBirthNumberDensity':b['values']['gBirthNumberDensity']}})]:
++    out=events(label,c,**options);assert np.max(abs(out[4,:,2]))==0,label
++reports.append(dict(case='empty/reset field, busy/retired slots and same-frame rain attached priority do not return water'))
++
++# Same-frame rain film arrives elsewhere while head is born from this pool.
++# Row 4 must preserve the rain centre; beta/Weber describe the rain incident.
++filmOnly=np.tile(np.array([0,.6,.2,.2],np.float32),(4,32,1))
++rainV={**v,'gBirthNumberDensity':b['values']['gBirthNumberDensity']}
++re=events('pool_and_rain_film',c,values=rainV,impact=filmOnly)
++assert np.count_nonzero(re[4,:,2])==2 and np.all(re[4,:,:2]==np.array([.75,-.75],np.float32))
++rs,rm=source_commit('rain_plus_pool',re,values=rainV)
++rf,rcm,rd,ro,rq=field_commit('rain_plus_pool',re,rs,rm,values=rainV)
++incident=np.array([.75,-.75+1])*[W,H]+P-.5
++assert np.allclose(rd[2,:,:2],incident,atol=1e-5)
++assert np.any(abs(rd[2,accepted,:2]-np.column_stack((re[0,accepted,0]*W+P-.5,(re[0,accepted,1]+1)*H+P-.5)))>1)
++_,p2err,p3err=budget('rain_plus_pool_budget',re,rcm,rd,rf,previous,rainV)
++reports.append(dict(case='independent incident/rain centre remains correct when head uses another pool position; both budgets close',
++                    p2ResidualMM3=p2err,p3ResidualMM3=p3err))
++
++# Generation handshake: an event cannot replay after its generation retires.
++retired=nm.copy();retired[:,:,0:3]=0;retired[:,:,3]=np.floor(retired[:,:,3]/4)*4
++_,stale=source_commit('generation_cannot_replay',ev,oldMeta=retired)
++assert not np.any(stale[:,:,1])
++reports.append(dict(case='pool birth uses the existing generation tag; stale events cannot replay'))
++
++# Uniform sheet, connected ridge, shallow trail and unsupported geometry.
++for label in ('sheet','ridge','thin','partial'):
++    f=np.zeros_like(initial);cc=cells.copy()
++    if label=='sheet':f[P:P+H,P:P+W,0]=.5
++    elif label=='ridge':f[P:P+H,P+8,0]=4
++    elif label=='thin':f[P+8,P+8,0]=.001
++    else:f=initial.copy();cc[8,8,:2]=(.0625,.25);cc[24,40,:2]=(.0625,.25)
++    assert np.max(abs(candidates(label,f,c=cc)))==0
++reports.append(dict(case='uniform sheets/ridges/thin trail/partial boundary are not reclassified'))
++
++# Capacity and partial final groups: actual production event, not a mirror of it.
++allPeaks=np.zeros_like(initial)
++for tile in range(tiles):allPeaks[P+(tile//4)*16+8,P+(tile%4)*16+8,0]=2
++ac=candidates('all_regions',allPeaks)
++for count in (1,7,8,9,1024,4096):
++    for tick in (0,1,math.ceil(count/tiles)-1):
++        vals={**v,'gBirthCount':count,'gPoolCount':count,'gPoolTick':tick}
++        os=np.tile(state[:,:1],(1,count,1));om=np.tile(meta[:,:1],(1,count,1))
++        result=events(f'capacity_{count}_{tick}',ac,os,om,vals)
++        group=tick%math.ceil(count/tiles)
++        rotation=(tick//math.ceil(count/tiles))%tiles
++        owners={group*tiles+(t+tiles-rotation)%tiles for t in range(tiles)}
++        expected={i for i in owners if i<count}
++        assert set(np.where(result[4,:,2]>0)[0])==expected
++        born=result[0,result[4,:,2]>0,:2]
++        assert len(np.unique(born,axis=0))==len(born)
++fairness=[]
++for slot in (0,1024,2048,4095):
++    visited={(slot%1024+tick//4)%1024 for tick in range(4096) if tick%4==slot//1024}
++    aliased={(slot%1024+tick)%1024 for tick in range(4096) if tick%4==slot//1024}
++    assert len(visited)==1024 and len(aliased)==256
++    fairness.append(dict(slot=slot,regions=len(visited),oldAliasedRegions=len(aliased)))
++reports.append(dict(case='actual source unique ownership at 1/7/8/9/1024/4096 slots; fixed group/region aliasing',
++                    fairness=fairness))
++
++# P4b OFF: actual event/state/field must match delivered s85 byte for byte.
++offV={**v,'gPoolOn':0};off=events('P4b_off',c,values=offV)
++oldEvent=metric+core+(OUT/'baseline/shaders/rainBirthEvent.hlsl').read_text()
++oldEv=render('s85_event_reference',oldEvent,{**sourceTx,'txRainState':state,'txRainStateMeta':meta},offV,(N,4))
++assert np.array_equal(off,oldEv)
++os,om=source_commit('off_commit',off,values=offV)
++of,oc,od,oo,oq=field_commit('off_field',off,os,om,values=offV)
++oldFlow=metric+core+(OUT/'baseline/shaders/rainFilmFlow.hlsl').read_text()+code('rainFilmFlowPass')
++oldQ=render('s85_flux_reference',oldFlow,{**geo,'txFilmPrevious':initial,'txFilmCells':cells},offV,(W,H))
++assert np.array_equal(oq,oldQ)
++# No descriptor source exists in this OFF fixture; use the same binned empty atlas.
++bins=render('off_reference_bins',code('rainFilmBin'),{'txFilmDescriptors':od},offV,(12,4))
++summary=render('off_reference_summary',e['inline'](e['source'],'rainDynamicSceneCopyState.gpuHeadsSummaryPass ='),
++               {'txMask':bins},offV,(6,4))
++oldResolve=(OUT/'baseline/shaders/rainFilmResolve.hlsl').read_text()+e['traversal']
++oldField=render('s85_field_reference',oldResolve,{'txFilmPrevious':initial,'txFilmCells':cells,'txFilmDescriptors':od,
++    'txFilmFlux':oldQ,'txMask':bins,'txSummary':summary},offV,size)
++assert np.array_equal(of,oldField)
++reports.append(dict(case='P4b OFF birth events, flux and field are bit-identical to a23527e'))
++
++# Closed repeated actual commits, including source generation/evap/loss totals.
++oldField=initial;oldState=state;oldMeta=meta;oldTotals=previous
++errors=[]
++for j in range(8):
++    vv={**v,'gPoolTick':j,'gBirthTick':j,'gFilmEvapUMS':.1}
++    c=candidates('closed_candidate_'+str(j),oldField,vv)
++    ev=events('closed_event_'+str(j),c,oldState,oldMeta,vv)
++    ns,nm=source_commit('closed_commit_'+str(j),ev,oldState,oldMeta,vv)
++    nf,cm,desc,optics,q=field_commit('closed_field_'+str(j),ev,ns,nm,oldField,oldState,oldMeta,vv)
++    nt,e2,e3=budget('closed_budget_'+str(j),ev,cm,desc,nf,oldTotals,vv)
++    assert nf.min()>=0 and cm[:,:,1].min()>=0
++    errors.append([e2,e3]);oldField,oldState,oldMeta,oldTotals=nf,ns,cm,nt
++reports.append(dict(case='8 real source/head/film/evap/flux publications with internal-return counter and no external rain',
++                    residualsMM3=errors))
++(OUT/'pool_gpu_checks.json').write_text(json.dumps(dict(compiler='FXC ps_5_0 /Ges /WX, D3D11 WARP',checks=reports),indent=2))
++print('s86 GPU:',len(reports),'production P4b gates passed')
+--- /dev/null
++++ s86/docs/tools/check_s86_pool_lens.py
+@@ -0,0 +1,26 @@
++"""Full production shader /WX: returned-pool marker and existing optics/depth gates."""
++from pathlib import Path
++import sys
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parents[2]
++path=ROOT/'docs/tools/check_s81_film_lens.py';text=path.read_text()
++text=text.replace("OUT=ROOT/'docs/diagnostics/2026-10-15/s81'","OUT=ROOT/'docs/diagnostics/2026-10-15/s86'")
++# The staged s85 shader already has the same P3 uniforms, unlike pre-P3 s80.
++text=text.replace("old=header+metric+",'old=header+newUniforms+metric+')
++anchor="Image.fromarray((np.clip(a[:,:,:3],0,1)*255).astype(np.uint8)).save(OUT/'physical_film_lens.png')"
++assert text.count(anchor)==1
++extra='''
++marker=height.copy();marker[:,:,2]=0;marker[28:34,120:132,2]=500
++marked=full_render('pool_return_debug',full,{**tx,'txDynamicWaterTrail':marker},
++                   {**values,'gDynamicDropP3Debug':4},(W,H))
++assert marked[28:34,120:132,0].min()>.5
++assert np.max(marked[:20,:,:3])==0
++ordinary=full_render('pool_marker_not_inventory',full,{**tx,'txDynamicWaterTrail':marker},values,(W,H))
++assert np.array_equal(ordinary,a)
++hiddenMarker=full_render('native_occludes_pool_debug',full,{**tx,'txDynamicWaterTrail':marker,'txDynamicOcclusion':depth},
++    {**values,'gDynamicDropP3Debug':4,'gDynamicDropOcclusionOn':1},(W,H))
++assert np.max(abs(hiddenMarker))==0
++'''
++text=text.replace(anchor,extra+'\n'+anchor)
++text=text.replace('transparentFilmWritesNoOpaqueDepth=True)','transparentFilmWritesNoOpaqueDepth=True,\n            poolDebugVisible=True,poolDebugDoesNotAffectOptics=True,nativeAlsoOccludesPoolDebug=True)')
++exec(compile(text,str(path),'exec'),{'__file__':str(path)})
+--- /dev/null
++++ s86/docs/tools/check_s86_pool_realmesh.py
+@@ -0,0 +1,43 @@
++"""Production P4b on actual geometry, using supplied peak masses in a SYNTHETIC field."""
++from pathlib import Path
++import sys,json
++import numpy as np
++from PIL import Image
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-15/s86'
++env={'__file__':str(ROOT/'docs/tools/check_s86_pool_gpu.py')}
++exec((ROOT/'docs/tools/check_s86_pool_gpu.py').read_text().split('\nreports=[]\n',1)[0],env)
++render=env['render'];code=env['code'];metric=env['metric'];core=env['core']
++def asset(name):return np.frombuffer((ROOT/f'texture/RAIN_GEOMETRY/{name}.dds').read_bytes(),'<f4',offset=148).reshape(512,2048,4)
++cells=np.frombuffer((ROOT/'texture/RAIN_FILM/cells.dds').read_bytes(),'<f4',offset=148).reshape(256,1024,4)
++mask=np.asarray(Image.open(ROOT/'texture/RAINFX_ObjNormal_BoundaryMask.dds').convert('RGBA'),np.float32)/255
++geo={'txRainDu':asset('du'),'txRainDv':asset('dv'),'txRainBoundaryMask':mask}
++field=np.zeros((288,1056,4),np.float32);field[16:272,16:1040,0]=cells[:,:,0]*.001
++review=json.loads((ROOT/'docs/diagnostics/2026-10-15/s85/regime_review.json').read_text())
++points=[]
++for row in review['evidence']:
++    x,y=row['staticCell']['x'],row['staticCell']['y'];points.append((x,y))
++    field[16+y,16+x,0]=row['derived']['worstCellVolumeMM3']
++values={**env['v'],'gFilmGrid':(1024,256),'gFilmPaddedSize':(1056,288),
++        'gPoolCount':4096,'gBirthCount':4096,'gFilmCount':4096,'gPoolTick':0}
++c=render('real_mesh_pool_candidates',env['candidateCode'],{'txFilmPrevious':field,'txFilmCells':cells},values,(1024,1))
++chosen=c[0,c[0,:,3]>0]
++assert len(chosen)==2 and set(map(tuple,chosen[:,:2].astype(int)))==set(points),chosen
++meta=np.zeros((1,4096,4),np.float32);meta[:,:,3]=28
++state=np.tile(np.array([.5,-.5,0,0],np.float32),(1,4096,1))
++tx={**env['sourceTx'],**geo,'txRainState':state,'txRainStateMeta':meta,'txPoolCandidates':c}
++ev=render('real_mesh_pool_events',env['eventCode'],tx,values,(4096,5))
++assert np.count_nonzero(ev[4,:,2])==2
++spawn=ev[0,ev[4,:,2]>0];positions=np.floor((spawn[:,:2]+[0,1])*[1024,256]).astype(int)
++assert set(map(tuple,positions))==set(points)
++# Same real geometry/field with display-only coefficients present does not
++# alter event output; these values do not occur in the pool/source shader.
++display=render('display_coefficients_independent',env['eventCode'],tx,
++    {**values,'gDynamicDropP2DisplayScale':.05,'gRainDisplayDiameterGain':2},(4096,5))
++assert np.array_equal(ev,display)
++(OUT/'realmesh_checks.json').write_text(json.dumps(dict(
++    compiler='FXC ps_5_0 /Ges /WX, D3D11 WARP',actualGeometryAndMask=True,
++    field='Synthetic: 1um background and two provided cell masses; not reconstructed game spatial field.',
++    cells=points,acceptedHeads=2,returnedMM3=float(ev[4,:,2].sum(dtype=np.float64)),
++    displayCoefficientsIndependent=True),indent=2))
++print('s86 actual mesh: both supplied peak-cell synthetic pools return to heads; display coefficients independent')
+--- /dev/null
++++ s86/docs/tools/check_s86_pool_regression.py
+@@ -0,0 +1,24 @@
++"""P3/P4 numerical gates with current shader composition; isolate s86 output."""
++from pathlib import Path
++import sys,shutil
++sys.dont_write_bytecode=True
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-15/s86'
++for stage,name in [('s81','check_s81_film_gpu.py'),('s83','check_s83_flow_gpu.py')]:
++    path=ROOT/'docs/tools'/name;text=path.read_text()
++    original=f"OUT=ROOT/'docs/diagnostics/2026-10-15/{stage}'"
++    assert original in text;text=text.replace(original,"OUT=ROOT/'docs/diagnostics/2026-10-15/s86'")
++    if stage=='s81':
++        # The baseline is the user stamp with P4a. This test's old shader is
++        # referenced only by other stages, not these P3 numerical fixtures.
++        pass
++    else:
++        # These historical comparisons intentionally target pre-P4 and pre-Kahan
++        # shaders; preserve their exact old references rather than s85 versions.
++        anchor="baseline=(OUT/'baseline/shaders/rainFilmResolve.hlsl').read_text()"
++        assert text.count(anchor)==1
++        text=text.replace(anchor,"baseline=(ROOT/'docs/diagnostics/2026-10-15/s83/baseline/shaders/rainFilmResolve.hlsl').read_text()")
++        anchor="(OUT/'baseline/shaders/rainFilmBlocks.hlsl').read_text()";assert text.count(anchor)==1
++        text=text.replace(anchor,"(ROOT/'docs/diagnostics/2026-10-15/s83/baseline/shaders/rainFilmBlocks.hlsl').read_text()")
++    exec(compile(text,str(path),'exec'),{'__file__':str(path)})
++    shutil.copy2(OUT/'gpu_checks.json',OUT/f'{stage}_gpu_regression.json')
++print('s86 regression: production P3/P4 numerical fixtures passed')
+--- /dev/null
++++ s86/docs/tools/finalize_s86.py
+@@ -0,0 +1,62 @@
++"""S86 tuning/source/assets/tests/install audit. Never commits or pushes."""
++from pathlib import Path
++import difflib,hashlib,json,re,subprocess,sys
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-15/s86';BASE=OUT/'baseline'
++sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
++old=(BASE/'realvisor.lua').read_text(encoding='utf-8-sig');new=(ROOT/'realvisor.lua').read_text(encoding='utf-8-sig')
++pattern=r'^\s*(RAIN_\w+)\s*=\s*(true|false|[-+\d.eE]+)\s*,'
++oldCfg=dict(re.findall(pattern,old,re.M));newCfg=dict(re.findall(pattern,new,re.M))
++assert newCfg.pop('RAIN_PHYSICS_P4_POOL_PREVIEW')=='false';assert oldCfg==newCfg
++expected={'realvisor.lua','rain_birth_gpu.lua','rain_film.lua','shaders/rainBirthEvent.hlsl',
++    'shaders/rainBirthBlocks.hlsl','shaders/rainFilmDescriptor.hlsl','shaders/rainFilmFlow.hlsl',
++    'shaders/rainFilmResolve.hlsl','shaders/rainFilmOptics.hlsl','shaders/rainFilmTotals.hlsl','shaders/rainVisorDynamicDrop.hlsl'}
++baseline=json.loads((OUT/'baseline_hashes.json').read_text());changed=[];runtimeUnchanged={}
++for name,data in baseline.items():
++    same=sha(ROOT/name)==data['sha256']
++    if not same:changed.append(name)
++    if name.endswith(('.hlsl','.lua')) and name not in expected:runtimeUnchanged[name]=same;assert same,name
++assert set(name for name in changed if name.endswith(('.lua','.hlsl')))==expected
++for name in ('settings.ini','settings_mats.ini'):
++    assert not subprocess.run(['git','diff','--',name],capture_output=True,text=True,check=True).stdout
++assetManifest=json.loads((ROOT/'texture/RAIN_FILM/assets.json').read_text())
++assert all(sha(ROOT/name)==value for name,value in assetManifest['sha256'].items())
++reports=['pool_gpu_checks.json','pool_binding_checks.json','realmesh_checks.json','birth_off_checks.json',
++         'lens_checks.json','s81_gpu_regression.json','s83_gpu_regression.json']
++data={name:json.loads((OUT/name).read_text()) for name in reports}
++assert len(data['pool_gpu_checks.json']['checks'])==8
++assert data['pool_binding_checks.json']['resetLiveBanks']==0
++assert data['lens_checks.json']['poolDebugDoesNotAffectOptics']
++assert data['realmesh_checks.json']['acceptedHeads']==2
++assert len(data['birth_off_checks.json']['cases'])==8
++assert len(data['s81_gpu_regression.json']['checks'])==13 and len(data['s83_gpu_regression.json']['checks'])==9
++newRuntime=['shaders/rainFilmPoolAddress.hlsl','shaders/rainFilmPoolAvailable.hlsl','shaders/rainFilmPoolCandidate.hlsl']
++newDocs=['docs/RAINFX_S86_P4B_POOL_RETURN.md','docs/tools/rain_shader_source.py',
++    *[p.relative_to(ROOT).as_posix() for p in (ROOT/'docs/tools').glob('*s86*.py')]]
++changedTools=['docs/tools/check_s79_birth_gpu.py','docs/tools/check_s81_film_gpu.py']
++diff=[]
++for name in sorted(set(changed+newRuntime+newDocs+changedTools)):
++    p=ROOT/name;before=BASE/name
++    if name in changedTools:before=OUT/'before_test_headers'/p.name
++    oldText=before.read_text(encoding='utf-8-sig') if before.exists() else ''
++    diff.extend(difflib.unified_diff(oldText.splitlines(True),p.read_text(encoding='utf-8-sig').splitlines(True),
++        fromfile='a23527e/'+name if oldText else '/dev/null',tofile='s86/'+name))
++(OUT/'source.diff').write_text(''.join(diff),encoding='utf-8')
++game=Path('D:/Games/Assetto Corsa/apps/lua/realvisor');sources={}
++for name in sorted(expected|set(newRuntime)):
++    match=(game/name).exists() and sha(game/name)==sha(ROOT/name)
++    if '--installed' in sys.argv:assert match,name
++    sources[name]=dict(sha256=sha(ROOT/name),installedMatch=match)
++branch=subprocess.run(['git','branch','--show-current'],capture_output=True,text=True,check=True).stdout.strip()
++head=subprocess.run(['git','rev-parse','HEAD'],capture_output=True,text=True,check=True).stdout.strip()
++assert head.startswith('a23527e') and branch=='codex/rainfx-physics-weather'
++record=dict(step='s86',date='2026-10-15',branch=branch,base=head,preservedExistingTuning=True,
++    newDefaultOffFlag='RAIN_PHYSICS_P4_POOL_PREVIEW',physicalGeometryAssetsUnchanged=True,
++    unchangedOtherRuntime=runtimeUnchanged,sourceFiles=sources,changedDocuments=[n for n in changed if n.endswith('.md')],
++    newDocument='docs/RAINFX_S86_P4B_POOL_RETURN.md',reports=reports,
++    extraSteadyPasses=1,extraPayloadBytesAt4096=81920,steadyReadbacksAdded=0,drawPassesAdded=0,
++    actualGameCost='unmeasured',gameGate='pending: classification, source/field ledger, limiter change, look and cost',
++    open='Broad film pressure/inertia transport, field momentum closure and long float32 accuracy',
++    committedOrPushed=False)
++(OUT/'delivery.json').write_text(json.dumps(record,indent=2))
++print('s86 audit: existing tuning/geometry and',len(runtimeUnchanged),'other runtime files preserved.')
++print('GPU/Lua/full-shader/regression reports verified. Installed',sum(x['installedMatch'] for x in sources.values()),'/',len(sources))
+--- /dev/null
++++ s86/docs/tools/rain_shader_source.py
+@@ -0,0 +1,10 @@
++"""Test-side composition matching the production Lua shader factories."""
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[2]
++
++def source(name):
++    text=(ROOT/f'shaders/{name}.hlsl').read_text()
++    if name=='rainBirthEvent':text=source('rainFilmPoolAddress')+text
++    if name in ('rainFilmResolve','rainFilmFlow','rainFilmOptics'):
++        text=source('rainFilmPoolAddress')+source('rainFilmPoolAvailable')+text
++    return text
+--- a23527e/rain_birth_gpu.lua
++++ s86/rain_birth_gpu.lua
+@@ -5,7 +5,8 @@
+         local f=assert(io.open(d.folder..'/shaders/'..name..'.hlsl','rb'));local s=f:read('*a');f:close()
+         return '#line 1 "RealVisor/'..name..'.hlsl"\n'..s
+     end
+-    st.eventCode=d.surface.shader..d.core..code('rainBirthEvent')
++    st.eventCode=d.surface.shader..d.core..code('rainFilmPoolAddress')..code('rainBirthEvent')
++    st.poolCode=d.core..code('rainFilmPoolAddress')..code('rainFilmPoolCandidate')
+     st.blockCode=code('rainBirthBlocks');st.totalCode=code('rainBirthTotals');st.statsCode=code('rainBirthStats')
+     local folder=d.folder..'/texture/RAIN_BIRTH/'
+     local geometry=assert(loadfile(folder..'geometry.lua'))()
+@@ -30,13 +31,17 @@
+         gBirthObjectToWorld=mat4x4.identity(),gBirthNormalSign=1,gBirthExposure=1,
+         gBirthIncidentAirFraction=1,gBirthTangentFraction=0,gBirthWetOverride=0,gBirthMinPersistentMM=.25,
+         gBirthRhoWater=998.2,gBirthMu=.001002,gBirthGamma=.0728,gBirthTheta=90,
+-        gBirthAdvanceBare=100,gBirthAdvanceCoat=92,gBirthWetOn=0,gBirthWetHeightUM=20},textures={
++        gBirthAdvanceBare=100,gBirthAdvanceCoat=92,gBirthWetOn=0,gBirthWetHeightUM=20,
++        gPoolOn=0,gPoolCount=1,gPoolTick=0,gPoolHasField=0,gPoolTheta=90,gPoolMinDMM=.25,
++        gFilmGrid=vec2(1024,256),gFilmPad=16,gFilmScale2=1},textures={
+         txBirthDsd=folder..'dsd.dds',txBirthImpact=folder..'impact_estimated.dds',
+         txBirthSites=folder..'sites.dds',
+-        txRainState=false,txRainStateMeta=false,txBirthWetHeight=false}}
++        txRainState=false,txRainStateMeta=false,txBirthWetHeight=false,txPoolCandidates=false}}
++    st.poolParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.poolCode,
++        values=st.eventParams.values,textures={txFilmPrevious=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'}}
+     d.surface:bind(st.eventParams)
+     st.blockParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.blockCode,
+-        values={gBirthCount=1,gBirthBlocks=1,gBirthFilmOn=0},textures={txBirthEvent=false,txRainNewMeta=false,txBirthTransfers=false}}
++        values={gBirthCount=1,gBirthBlocks=1,gBirthFilmOn=0,gPoolOn=0},textures={txBirthEvent=false,txRainNewMeta=false,txBirthTransfers=false}}
+     st.totalParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.totalCode,
+         values={gBirthBlocks=1,gBirthFilmOn=0},textures={txBirthBlocks=false,txBirthPreviousTotals=false}}
+     st.statsParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.statsCode,
+@@ -47,20 +52,21 @@
+     end
+     function st:dispose()
+         self.epoch=self.epoch+1
+-        for _,name in ipairs({'events','blocks','totalsA','totalsB','stats'}) do
++        for _,name in ipairs({'events','blocks','totalsA','totalsB','stats','poolCandidates'}) do
+             if self[name] then self[name]:dispose();self[name]=nil end
+         end
+-        self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil;self.write=nil;self.filmMode=nil
++        self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil;self.write=nil;self.filmMode=nil;self.poolMode=nil
+         self.pending=false;self.logPending=false;self.logValues=nil;self.budgetFrame=nil;self.frame=nil
+         self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
+         self.eventParams.textures.txRainState=false;self.eventParams.textures.txRainStateMeta=false
+         self.eventParams.textures.txBirthWetHeight=false
++        self.eventParams.textures.txPoolCandidates=false;self.poolParams.textures.txFilmPrevious=false
+         self.blockParams.textures.txBirthEvent=false;self.blockParams.textures.txRainNewMeta=false
+         self.blockParams.textures.txBirthTransfers=false
+         self.totalParams.textures.txBirthBlocks=false;self.totalParams.textures.txBirthPreviousTotals=false
+         self.statsParams.textures.txBirthTotals=false
+     end
+-    function st:prepare(state,meta,count,sim,transform,model,wetHeight)
++    function st:prepare(state,meta,count,sim,transform,model,wetHeight,poolField)
+         self.preparedFrame=nil
+         self.budgetFrame=nil
+         if self.frame==sim.frame then return false end
+@@ -70,13 +76,16 @@
+         end
+         self.error=nil
+         local filmMode=r.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+-        if self.count~=count or self.filmMode~=filmMode then
++        local poolMode=filmMode and r.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true and r.RAIN_PHYSICS_P4_POOL_PREVIEW==true
++        if self.count~=count or self.filmMode~=filmMode or self.poolMode~=poolMode then
++            poolField=nil -- A resized/reset source cannot consume a different field epoch.
+             self:dispose();self.blockCount=math.ceil(count/64)
+-            self.events=canvas(count,4,render.TextureFormat.R32G32B32A32.Float,'P2 immutable birth events')
++            self.events=canvas(count,poolMode and 5 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 immutable birth events')
++            if poolMode then self.poolCandidates=canvas(1024,1,render.TextureFormat.R32G32B32A32.Float,'P4b localized pool candidates') end
+             self.blocks=canvas(self.blockCount,filmMode and 3 or 2,render.TextureFormat.R32G32B32A32.Float,'P2 budget reduction')
+             self.totalsA=canvas(1,filmMode and 6 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 budget A')
+             self.totalsB=canvas(1,filmMode and 6 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 budget B')
+-            self.read=self.totalsA;self.count=count;self.filmMode=filmMode
++            self.read=self.totalsA;self.count=count;self.filmMode=filmMode;self.poolMode=poolMode
+         end
+         local p=self.eventParams;local v=p.values
+         v.gBirthCount=count;v.gBirthTick=self.tick;v.gBirthDt=math.max(sim.dt or 0,0)
+@@ -90,6 +99,14 @@
+         v.gBirthWetOn=wetHeight and 1 or 0;v.gBirthWetHeightUM=r.RAIN_FILM_WET_HEIGHT_UM or 20
+         p.textures.txBirthWetHeight=wetHeight or false
+         v.gBirthTheta=r.RAIN_PHYSICS_CONTACT_ANGLE_DEG
++        v.gPoolOn=poolMode and 1 or 0;v.gPoolCount=count;v.gPoolTick=self.tick
++        v.gPoolTheta=v.gBirthTheta;v.gPoolMinDMM=r.RAIN_BIRTH_MIN_PERSISTENT_MM
++        v.gFilmScale2=d.surface.scale^2;v.gPoolHasField=poolField and 1 or 0
++        self.poolParams.textures.txFilmPrevious=poolField or false
++        p.textures.txPoolCandidates=self.poolCandidates or false
++        if poolMode and d.measure('P4b pool candidates',self.poolCandidates.updateWithShader,self.poolCandidates,self.poolParams)==false then
++            self.pending=true;return false
++        end
+         v.gBirthAdvanceBare=math.min(179.9,math.max(.1,v.gBirthTheta+r.RAIN_PHYSICS_STATIC_SPAN_BARE_DEG*.5))
+         v.gBirthAdvanceCoat=math.min(179.9,math.max(.1,v.gBirthTheta+r.RAIN_PHYSICS_STATIC_SPAN_COAT_DEG*.5))
+         p.textures.txRainState=state;p.textures.txRainStateMeta=meta;d.surface:bind(p)
+@@ -102,6 +119,7 @@
+         p.textures.txBirthEvent=self.events;p.textures.txRainNewMeta=newMeta
+         if self.filmMode and not transfers then return false end
+         p.textures.txBirthTransfers=transfers or false;p.values.gBirthFilmOn=self.filmMode and 1 or 0
++        p.values.gPoolOn=self.poolMode and 1 or 0
+         if d.measure('P2 budget blocks',self.blocks.updateWithShader,self.blocks,p)==false then self.pending=true;return false end
+         local p=self.totalParams;p.values.gBirthBlocks=self.blockCount;p.values.gBirthFilmOn=self.filmMode and 1 or 0
+         p.textures.txBirthBlocks=self.blocks;p.textures.txBirthPreviousTotals=self.read
+@@ -134,7 +152,7 @@
+             if err or not data then if data then data:dispose() end;d.log('P2 budget readback failed: '..tostring(err));return end
+             local v=self.logValues or {};for i=1,statsCount do v[i]=data:floatValue(i-1,0) end
+             data:dispose();self.logValues=v
+-            local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]-(statsCount>8 and v[9] or 0)
++            local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]-(statsCount>8 and v[9] or 0)+(statsCount>8 and v[12] or 0)
+             local previous=self.previousLog
+             local elapsed=seconds-(previous and previous.seconds or 0)
+             local inputDelta=v[1]-(previous and previous.input or 0)
+@@ -146,7 +164,7 @@
+                 tostring(frame),v[1],v[2],v[3],v[4],v[5],v[6],v[7],residual,v[8],area,
+                 seconds,steps,elapsed,inputRate,arrivalRate,residualDelta))
+             self.previousLog={seconds=seconds,input=v[1],arrivals=v[8],residual=residual}
+-            if statsCount>8 then d.log(string.format('Rain P2 P3 transfers: headEvap=%.6f trail=%.6f kernelCappedTotal=%.0f',v[9],v[10],v[11])) end
++            if statsCount>8 then d.log(string.format('Rain P2 P3 transfers: headEvap=%.6f trail=%.6f kernelCappedTotal=%.0f poolReturned=%.6f',v[9],v[10],v[11],v[12])) end
+         end)
+         return true
+     end
+--- a23527e/rain_film.lua
++++ s86/rain_film.lua
+@@ -32,6 +32,7 @@
+         gFilmMu=.001002,gFilmGamma=.0728,gFilmAirMS=0,gFilmEvapUMS=0,gFilmMicroJoinUM=20,
+         gFilmDepositBare=.35,gFilmDepositCoat=.05,gFilmMinSpeedMS=.001,gFilmWiden=.5,
+         gFilmFlowOn=0,gFilmFlowCf=.005,gFilmFlowCFL=.8,gFilmFlowReduce=0,
++        gPoolOn=0,gPoolCount=1,gPoolTick=0,
+         gFilmObjectToWorld=mat4x4.identity(),gFilmAccelerationWorld=vec3(0,-9.80665,0),
+         gFilmAirWorld=vec3(),gFilmAirRho=1.2,gFilmAirDownward=0,gFilmAirDownwardGain=1,
+         gCount=1,gTile=vec2(32,32),gTilesX=33,gTilesY=9,gWords=1,gMaskW=33,
+@@ -44,20 +45,25 @@
+     d.surface:bind(st.descriptorParams);d.surface:bind(st.metaParams)
+     st.binParams=params(code('rainFilmBin'),{txFilmDescriptors=false})
+     st.summaryParams=params(d.summary,{txMask=false})
+-    st.resolveParams=params(code('rainFilmResolve')..traversal,{txFilmDescriptors=false,txMask=false,txSummary=false,
+-        txFilmPrevious=false,txFilmFlux=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+-    local flowCode=d.surface.shader..d.core..code('rainFilmFlow')
++    local poolCode=code('rainFilmPoolAddress')..code('rainFilmPoolAvailable')
++    st.resolveParams=params(poolCode..code('rainFilmResolve')..traversal,{txFilmDescriptors=false,txMask=false,txSummary=false,
++        txFilmPrevious=false,txFilmFlux=false,txFilmBirthEvent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    local flowCode=d.surface.shader..d.core..poolCode..code('rainFilmFlow')
+     st.flowParams=params(flowCode..code('rainFilmFlowPass'),{
+-        txFilmPrevious=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++        txFilmPrevious=false,txFilmBirthEvent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+     st.flowBlocksParams=params(flowCode..code('rainFilmFlowBlocks'),{
+-        txFilmPrevious=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++        txFilmPrevious=false,txFilmBirthEvent=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    -- Manual diagnostics inspect the published field, never a speculative event
++    -- or an already-debited transfer from the preceding simulation step.
++    local manualFlowValues={};for key,value in pairs(values) do manualFlowValues[key]=value end
++    manualFlowValues.gPoolOn=0;st.flowBlocksParams.values=manualFlowValues
+     d.surface:bind(st.flowParams);d.surface:bind(st.flowBlocksParams)
+     st.flowCoarseParams=params(flowCode..code('rainFilmFlowBlocks'),{
+-        txFilmPrevious=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++        txFilmPrevious=false,txFilmBirthEvent=false,txFilmFlowBlocks=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+     d.surface:bind(st.flowCoarseParams)
+     local flowValues={};for key,value in pairs(values) do flowValues[key]=value end
+     flowValues.gFilmReductionSize=vec2(5,2);flowValues.gFilmPaddedSize=vec2(66,18)
+-    flowValues.gFilmFlowReduce=1;st.flowCoarseParams.values=flowValues
++    flowValues.gFilmFlowReduce=1;flowValues.gPoolOn=0;st.flowCoarseParams.values=flowValues
+     st.flowStatsParams=params(code('rainFilmFlowStats'),{txFilmFlowBlocks=false})
+     st.blocksParams=params(code('rainFilmBlocks'),{txFilmCurrent=false})
+     st.blocksSecondParams=params(code('rainFilmBlocks'),{txFilmCurrent=false})
+@@ -67,7 +73,8 @@
+     st.totalsParams=params(code('rainFilmTotals'),{txFilmBlocks=false,txFilmBirthTotals=false})
+     local totalValues={};for key,value in pairs(values) do totalValues[key]=value end
+     totalValues.gFilmReductionSize=vec2(5,2);st.totalsParams.values=totalValues
+-    st.opticsParams=params(code('rainFilmOptics'),{txFilmCurrent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
++    st.opticsParams=params(poolCode..code('rainFilmOptics'),{txFilmCurrent=false,txFilmPrevious=false,
++        txFilmBirthEvent=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'})
+     st.statsParams=params(code('rainFilmStats'),{txFilmTotals=false})
+     local function canvas(w,h,format,name)
+         local c=ui.ExtraCanvas(vec2(w,h),1,render.AntialiasingMode.None,format)
+@@ -81,7 +88,7 @@
+         end
+         self.count=nil;self.ready=false;self.pending=false;self.read=nil;self.optics=nil;self.birthRead=nil
+         self.write=nil;self.opticsWrite=nil;self.pendingBirthTotals=nil
+-        self.frame=nil;self.preparedFrame=nil;self.budgetFrame=nil;self.logPending=false;self.flowLogPending=false;self.flowMode=nil
++        self.frame=nil;self.preparedFrame=nil;self.budgetFrame=nil;self.logPending=false;self.flowLogPending=false;self.flowMode=nil;self.poolMode=nil
+         self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
+         for _,p in ipairs({self.descriptorParams,self.metaParams,self.binParams,self.summaryParams,self.resolveParams,
+             self.blocksParams,self.blocksSecondParams,self.totalsParams,self.opticsParams,self.statsParams,
+@@ -89,13 +96,14 @@
+             for key in pairs(p.textures) do if type(p.textures[key])~='string' then p.textures[key]=false end end
+         end
+     end
+-    function st:prepare(oldState,oldMeta,newState,newMeta,events,count,sim,inputs,motionDt,motion)
++    function st:prepare(oldState,oldMeta,newState,newMeta,events,count,sim,inputs,motionDt,motion,poolTick)
+         self.preparedFrame=nil;self.budgetFrame=nil
+         if self.assetPending or self.assetError then self.pending=true;return false end
+         if self.frame==sim.frame or count<1 or count>4096 or count~=math.floor(count) then return false end
+         local flowMode=r.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
++        local poolMode=flowMode and r.RAIN_PHYSICS_P4_POOL_PREVIEW==true
+         assert(not flowMode or geometry.flowConnectedUV==true,'P4 requires the connected-UV film bake: rebuild film cells')
+-        if self.count~=count or self.flowMode~=flowMode then
++        if self.count~=count or self.flowMode~=flowMode or self.poolMode~=poolMode then
+             self:dispose();local words=math.ceil(count/96)
+             local v=self.values;v.gWords=words;v.gMaskW=33*words;v.gSummaryWords=math.ceil(words/96);v.gSummaryW=33*v.gSummaryWords
+             self.descriptors=canvas(count,5,render.TextureFormat.R32G32B32A32.Float,'P3 conservative descriptors')
+@@ -107,7 +115,7 @@
+             self.opticsA=canvas(1024,256,render.TextureFormat.R16G16B16A16.Float,'P3 physical height A')
+             self.opticsB=canvas(1024,256,render.TextureFormat.R16G16B16A16.Float,'P3 physical height B');self.optics=self.opticsA
+             if flowMode then self.flux=canvas(1024,256,render.TextureFormat.R32G32B32A32.Float,'P4 donor face flux') end
+-            self.count=count;self.flowMode=flowMode
++            self.count=count;self.flowMode=flowMode;self.poolMode=poolMode
+         end
+         local v=self.values;v.gFilmCount=count;v.gCount=count
+         v.gFilmScale2=d.surface.scale^2;v.gFilmDt=math.max(sim.dt or 0,0);v.gFilmMotionDt=math.max(motionDt or 0,0)
+@@ -122,6 +130,7 @@
+         v.gFilmEvapUMS=r.RAIN_FILM_EVAP_DRY_UM_S*(1-rh)*thermal*(1+.5*math.sqrt(v.gFilmAirMS))
+         self.evapUMS=v.gFilmEvapUMS
+         v.gFilmFlowOn=flowMode and 1 or 0
++        v.gPoolOn=poolMode and 1 or 0;v.gPoolCount=count;v.gPoolTick=poolTick or 0
+         if flowMode then
+             assert(motion and motion.gRainObjectToWorld,'P4 requires the P1 world transform/force inputs')
+             v.gFilmObjectToWorld=motion.gRainObjectToWorld
+@@ -138,6 +147,7 @@
+             v.gFilmAirDownwardGain=motion.gRainAirflowDownwardGain or 1
+             d.surface:bind(self.flowParams)
+             self.flowParams.textures.txFilmPrevious=self.read
++            self.flowParams.textures.txFilmBirthEvent=events
+         end
+         d.surface:bind(self.descriptorParams);d.surface:bind(self.metaParams)
+         local tx=self.descriptorParams.textures
+@@ -147,10 +157,11 @@
+         self.summaryParams.textures.txMask=self.mask
+         local tx=self.resolveParams.textures
+         tx.txFilmDescriptors=self.descriptors;tx.txMask=self.mask;tx.txSummary=self.summary;tx.txFilmPrevious=self.read
+-        tx.txFilmFlux=self.flux or false
++        tx.txFilmFlux=self.flux or false;tx.txFilmBirthEvent=events
+         self.write=self.read==self.a and self.b or self.a
+         self.opticsWrite=self.optics==self.opticsA and self.opticsB or self.opticsA
+         self.opticsParams.textures.txFilmCurrent=self.write
++        self.opticsParams.textures.txFilmBirthEvent=events;self.opticsParams.textures.txFilmPrevious=self.read
+         if not self:step('P3 descriptors',self.descriptors,self.descriptorParams) then return false end
+         if not self:step('P3 paired meta',self.metaScratch,self.metaParams) then return false end
+         if not self:step('P3 sparse tiles',self.mask,self.binParams) then return false end
+@@ -171,6 +182,8 @@
+             self.flowCoarse=canvas(5,8,render.TextureFormat.R32G32B32A32.Float,'P4 manual Courant coarse')
+             self.flowStats=canvas(16,1,render.TextureFormat.R32.Float,'P4 manual Courant readback')
+         end
++        for key,value in pairs(self.values) do self.flowBlocksParams.values[key]=value end
++        self.flowBlocksParams.values.gPoolOn=0
+         d.surface:bind(self.flowBlocksParams)
+         self.flowBlocksParams.textures.txFilmPrevious=self.read
+         self.flowCoarseParams.textures.txFilmFlowBlocks=self.flowBlocks
+@@ -227,7 +240,7 @@
+         self.statsParams.textures.txFilmTotals=self.totals
+         if self.stats:updateWithShader(self.statsParams)==false then return false end
+         self.logPending=true;local epoch=self.epoch;local frame=self.frame
+-        local seconds=self.publishedSeconds;local steps=self.publishedSteps;local transport=self.flowMode and 'P4' or 'P3'
++        local seconds=self.publishedSeconds;local steps=self.publishedSteps;local transport=self.poolMode and 'P4b' or self.flowMode and 'P4' or 'P3'
+         self.stats:accessData(function(err,data)
+             if epoch~=self.epoch then if data then data:dispose() end;return end
+             self.logPending=false
+@@ -237,9 +250,9 @@
+             local prev=self.previousLog;local interval=seconds-(prev and prev.seconds or 0)
+             local inputRate=interval>0 and (v[9]-(prev and prev.input or 0))/interval or 0
+             local residualDelta=residual-(prev and prev.residual or 0)
+-            d.log(string.format('Rain P3 frame=%s mm3 input=%.6f film=%.6f micro=%.6f drops=%.6f bounce=%.6f exit=%.6f headEvap=%.6f fieldEvap=%.6f runoff=%.6f trailTransferred=%.6f residual=%.6f arrivals=%.0f publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s residualDelta=%.6f mm3 transport=%s',
++            d.log(string.format('Rain P3 frame=%s mm3 input=%.6f film=%.6f micro=%.6f drops=%.6f bounce=%.6f exit=%.6f headEvap=%.6f fieldEvap=%.6f runoff=%.6f trailTransferred=%.6f residual=%.6f arrivals=%.0f publishedSeconds=%.6f steps=%d intervalSeconds=%.6f inputRate=%.6f mm3/s residualDelta=%.6f mm3 transport=%s poolReturned=%.6f',
+                 tostring(frame),v[9],v[1],v[2],v[12],v[10],v[11],v[13],v[3],v[4],v[14],residual,v[16],
+-                seconds,steps,interval,inputRate,residualDelta,transport))
++                seconds,steps,interval,inputRate,residualDelta,transport,v[5]))
+             self.previousLog={seconds=seconds,input=v[9],residual=residual}
+         end)
+         return true
+--- a23527e/realvisor.lua
++++ s86/realvisor.lua
+@@ -426,6 +426,7 @@
+         RAIN_BIRTH_NORMAL_REVERSED = false,
+         RAIN_PHYSICS_P3_FILM_PREVIEW = false,
+         RAIN_PHYSICS_P4_TRANSPORT_PREVIEW = false,
++        RAIN_PHYSICS_P4_POOL_PREVIEW = false,
+         RAIN_FILM_FLOW_CF = 0.005, -- estimated local surface air skin-friction coefficient
+         RAIN_FILM_DEPOSIT_BARE = 0.35, -- estimated finite-drop coating coefficient
+         RAIN_FILM_DEPOSIT_COAT = 0.05,
+@@ -6620,6 +6621,7 @@
+ rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
+ rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+ rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
++rainDynamicSceneCopyState.poolConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW==true
+ rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,transform)
+     local st=rainDynamicSceneCopyState
+     if not st.physicsBirth then st.physicsInputsUpdate() end
+@@ -6635,7 +6637,10 @@
+     st.physicsBirthError=nil
+     local wet=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and st.physicalFilmGPU
+         and st.physicalFilmGPU.ready and st.physicalFilmGPU.optics or nil
+-    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth,wet)
++    local field=st.physicalFilmGPU
++    local pool=cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW and field and field.ready
++        and field.poolMode and field.count==count and field.read or nil
++    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth,wet,pool)
+     if not ok then st.physicsBirthError=tostring(ready);return false end
+     st.physicsBirthError=st.physicalBirthGPU.assetError or st.physicalBirthGPU.error
+     return ready
+@@ -6653,7 +6658,7 @@
+         st.physicalFilmGPU=result
+     end
+     local ok,ready=pcall(st.physicalFilmGPU.prepare,st.physicalFilmGPU,oldState,oldMeta,newState,newMeta,
+-        events,count,sim,st.physicsInputs,motionDt,rainStateUpdateParams.values)
++        events,count,sim,st.physicsInputs,motionDt,rainStateUpdateParams.values,st.physicalBirthGPU.tick)
+     if not ok then st.physicsFilmError=tostring(ready);return false end
+     st.physicsFilmError=st.physicalFilmGPU.assetError
+     return ready
+@@ -7045,6 +7050,7 @@
+         or rainDynamicSceneCopyState.birthConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true)
+         or rainDynamicSceneCopyState.filmConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true)
+         or rainDynamicSceneCopyState.flowConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true)
++        or rainDynamicSceneCopyState.poolConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW==true)
+     if siChanged then
+         rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
+         rainDynamicStateReadbackReady=false
+@@ -7053,6 +7059,7 @@
+         rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
+         rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
+         rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
++        rainDynamicSceneCopyState.poolConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW==true
+         rainDynamicSceneCopyState.gpuHeadsActive=false
+         rainDynamicStateHasSnapshot=false
+         if rainDynamicSceneCopyState.newTrail then rainDynamicSceneCopyState.newTrail:dispose() end
+@@ -17570,13 +17577,19 @@
+         else st.siUIError='P3 requires P1/P2 previews, GPU heads and lifecycle mode 3 or 6' end
+     end
+     if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then
+-        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. No Smear/local impact film. P4 adds film transport; head reabsorption remains deferred.')
++        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. P4 adds film transport; P4b can return localized excess pools to P1 heads.')
+         if ui.checkbox('Enable P4 conservative transport preview (resets water)',cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW) then
+             cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW
+         end
+         if cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW then
+             st.rainUISlider('Estimated film air skin friction Cf','RAIN_FILM_FLOW_CF',0,.03,'%.4f')
+-            ui.textWrapped('P4 moves film only. Four-neighbour donor flux is limited at Courant 0.8; high speeds can be numerically slowed. Check limiter log. No pressure/contact-line solver or head reabsorption.')
++            ui.textWrapped('P4 donor flux is limited at Courant 0.8; high speeds can be numerically slowed. Check limiter log. Broad film pressure/inertia transport remains unresolved.')
++            if ui.checkbox('Enable P4b localized pool return (resets water)',cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW) then
++                cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW
++            end
++            if cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW then
++                ui.textWrapped('P4b transfers isolated full-coverage peaks into free P1 slots. Uniform sheets/ridges remain film. Returned pools start at rest. View 4 marks returns in the last published step; poolReturned logs cumulative internal mm3.')
++            end
+             if st.physicalFilmGPU and ui.button('Log P4 transport limiter') then st.physicalFilmGPU:logFlow() end
+         end
+         st.rainUISlider('Estimated trail coefficient: bare','RAIN_FILM_DEPOSIT_BARE',0,1,'%.3f')
+@@ -17589,7 +17602,7 @@
+         st.rainUISlider('Film optical gain (render only)','RAIN_FILM_OPTICAL_GAIN',0,3,'%.2f')
+         st.rainUISlider('Film displacement limit (screen px)','RAIN_FILM_OPTICAL_MAX_PX',0,64,'%.1f')
+         st.rainUISlider('Micro scattering mip (render only)','RAIN_FILM_MICRO_MIP',0,5,'%.2f')
+-        st.rainUISlider('P3 view: 0 optics, 1 film um, 2 micro um, 3 coverage','RAIN_FILM_DEBUG',0,3,'%.0f')
++        st.rainUISlider('P3 view: 0 optics, 1 film um, 2 micro um, 3 coverage, 4 pool return','RAIN_FILM_DEBUG',0,4,'%.0f')
+         if st.physicsFilmError then ui.textWrapped(st.physicsFilmError) end
+         if st.physicalFilmGPU then
+             ui.text(string.format('P3 1024x256 + runoff halo; ready=%s pending=%s; estimated evap %.5f um/s',
+--- a23527e/shaders/rainBirthBlocks.hlsl
++++ s86/shaders/rainBirthBlocks.hlsl
+@@ -12,7 +12,8 @@
+                 float4 transfer=txBirthTransfers.Load(int3(i,1,0));
+                 if(row==0u)event.y+=transfer.x;
+                 if(row==2u)event=float4(transfer.w,transfer.x,
+-                    txBirthTransfers.Load(int3(i,3,0)).z,0);
++                    txBirthTransfers.Load(int3(i,3,0)).z,
++                    gPoolOn>.5 ? txBirthEvent.Load(int3(i,4,0)).z : 0);
+             }
+             if(row==1u) {
+                 float4 meta=txRainNewMeta.Load(int3(i,0,0));
+--- a23527e/shaders/rainBirthEvent.hlsl
++++ s86/shaders/rainBirthEvent.hlsl
+@@ -26,16 +26,18 @@
+ }
+ float4 main(PS_IN pin) {
+     uint count=(uint)max(gBirthCount,1),index=min((uint)(pin.Tex.x*count),count-1u);
+-    uint row=min((uint)(pin.Tex.y*4),3u),tick=(uint)gBirthTick;
++    uint rows=gPoolOn>.5 ? 5u : 4u;
++    uint row=min((uint)(pin.Tex.y*rows),rows-1u),tick=(uint)gBirthTick;
+     float4 oldMeta=txRainStateMeta.Load(int3(index,0,0));float4 oldState=txRainState.Load(int3(index,0,0));
+     float generation=floor(oldMeta.a*.25),status=oldMeta.a-4*generation;
+     float exitVolume=status>.5 && status<1.5 && rainValid(oldState.rg)<.5 ? max(oldMeta.g,0) : 0;
+-    float4 spawn=0,motion=0,allocation=0,ledger=float4(0,exitVolume,0,0);
++    float4 spawn=0,motion=0,allocation=0,ledger=float4(0,exitVolume,0,0),pool=0;
+     [branch] if(gBirthNumberDensity>0 && gBirthDt>0 && gBirthExposure>0) {
+     uint seed=index*131u+tick*8191u+(uint)generation*104729u;
+     uint width=1u,height=1u;txBirthSites.GetDimensions(width,height);
+     uint site=rbHash(seed+3u)%max(width,1u);
+     float4 location=txBirthSites.Load(int3(site,0,0));float2 p=float2(location.x,location.y-1);
++    pool.xy=p; // Preserve the original incident centre if head birth uses a pool.
+     float4 descriptor=rbDsd(rbRandom(seed+23u));
+     float3 du,dv;rainMetric(p,du,dv);
+     float3 uw=mul(du,(float3x3)gBirthObjectToWorld),vw=mul(dv,(float3x3)gBirthObjectToWorld);
+@@ -85,6 +87,19 @@
+         }
+     }
+     }
+-    float4 result=row==0u ? spawn : row==1u ? motion : row==2u ? allocation : ledger;
++    [branch] if(gPoolOn>.5 && status==0 && oldMeta.g<=0 && spawn.z<=0) {
++        uint tiles=poolTileCount(),tile=(index%tiles+poolRotation())%tiles;
++        if(poolOwner(tile)==index) {
++            float4 candidate=txPoolCandidates.Load(int3(tile,0,0));
++            float2 p=(candidate.xy+.5)/gFilmGrid;p.y-=1;
++            if(candidate.w>.5 && candidate.z>0 && rainValid(p)>.5) {
++                spawn=float4(p,candidate.z,fmod(generation+1,4096)+1);
++                // No field momentum is stored. Reconstituted unresolved pool
++                // starts at rest; P1 applies forces from the following step.
++                motion.xy=0;pool.z=candidate.z;
++            }
++        }
++    }
++    float4 result=row==0u ? spawn : row==1u ? motion : row==2u ? allocation : row==3u ? ledger : pool;
+     return result;
+ }
+--- a23527e/shaders/rainFilmDescriptor.hlsl
++++ s86/shaders/rainFilmDescriptor.hlsl
+@@ -53,7 +53,7 @@
+     float4 allocation=txFilmBirthEvent.Load(int3(i,2,0)),ledger=txFilmBirthEvent.Load(int3(i,3,0));
+     float film=max(allocation.y,0)+max(ledger.x,0),micro=max(allocation.z,0);
+     if(film+micro>0) {
+-        float2 p=source.xy;
++        float2 p=gPoolOn>.5 ? txFilmBirthEvent.Load(int3(i,4,0)).xy : source.xy;
+         incident=float4(float2(p.x,p.y+1)*gFilmGrid+gFilmPad-.5,film,micro);
+         float beta=max(txFilmBirthEvent.Load(int3(i,1,0)).z,1);
+         float radiusMM=rainSiContactRadiusMM(max(allocation.x,0),gFilmTheta)*beta;
+--- a23527e/shaders/rainFilmFlow.hlsl
++++ s86/shaders/rainFilmFlow.hlsl
+@@ -5,7 +5,7 @@
+     FilmFlow result;result.flux=0;result.courant=0;
+     int2 inner=p-(int)gFilmPad;
+     if(any(inner<0)||any(inner>=(int2)gFilmGrid))return result;
+-    float volume=max(txFilmPrevious.Load(int3(p,0)).r,0);
++    float volume=poolAvailable(p);
+     float area=txFilmCells.Load(int3(inner,0)).r*gFilmScale2;
+     if(volume<=0||area<=0||gFilmDt<=0)return result;
+     float2 uv=(inner+.5)/gFilmGrid;
+--- a23527e/shaders/rainFilmOptics.hlsl
++++ s86/shaders/rainFilmOptics.hlsl
+@@ -6,5 +6,7 @@
+     float2 heightUM=area>0 ? water/area*1000 : 0;
+     // The half-float optical texture is a bounded read-only representation.
+     // Inventory remains uncapped float32 mm3 in the physical field.
+-    return float4(min(heightUM,60000),0,0);
++    float returnedUM=area>0 ? poolTransfer(inner+(int)gFilmPad)/area*1000 : 0;
++    // B is a display-only last-published-step return marker, never inventory.
++    return float4(min(heightUM,60000),min(returnedUM,60000),0);
+ }
+--- /dev/null
++++ s86/shaders/rainFilmPoolAddress.hlsl
+@@ -0,0 +1,14 @@
++// P4b bounded, unique region -> slot ownership. Counts and tick are integers.
++uint poolTilesX() {return ((uint)gFilmGrid.x+15u)/16u;}
++uint poolTileCount() {return poolTilesX()*(((uint)gFilmGrid.y+15u)/16u);}
++uint poolRotation() {
++    uint groups=((uint)max(gPoolCount,1)+poolTileCount()-1u)/poolTileCount();
++    // Advance region rotation after a complete slot-group cycle. Using tick
++    // directly aliases groups/regions at common counts such as 4096 slots.
++    return ((uint)gPoolTick/groups)%poolTileCount();
++}
++uint poolOwner(uint tile) {
++    uint tiles=poolTileCount(),count=(uint)max(gPoolCount,1),tick=(uint)gPoolTick;
++    uint group=tick%((count+tiles-1u)/tiles);
++    return group*tiles+(tile+tiles-poolRotation())%tiles;
++}
+--- /dev/null
++++ s86/shaders/rainFilmPoolAvailable.hlsl
+@@ -0,0 +1,16 @@
++// Same immutable P2 event used by head birth, donor flux, field debit and optics.
++float poolTransfer(int2 padded) {
++    if(gPoolOn<.5)return 0;
++    int2 p=padded-(int)gFilmPad;
++    if(any(p<0)||any(p>=(int2)gFilmGrid))return 0;
++    uint tile=(uint)p.y/16u*poolTilesX()+(uint)p.x/16u,owner=poolOwner(tile);
++    if(owner>=(uint)gPoolCount)return 0;
++    float transferred=txFilmBirthEvent.Load(int3(owner,4,0)).z;
++    if(transferred<=0)return 0;
++    float2 born=txFilmBirthEvent.Load(int3(owner,0,0)).xy;
++    int2 source=(int2)floor(float2(born.x,born.y+1)*gFilmGrid);
++    return all(source==p) ? transferred : 0;
++}
++float poolAvailable(int2 p) {
++    return max(txFilmPrevious.Load(int3(p,0)).r,0)-poolTransfer(p);
++}
+--- /dev/null
++++ s86/shaders/rainFilmPoolCandidate.hlsl
+@@ -0,0 +1,31 @@
++// One conservative localized excess per region. Uniform sheets/ridges stay film.
++float poolHeight(int2 p) {
++    if(any(p<0)||any(p>=(int2)gFilmGrid))return -1;
++    float4 cell=txFilmCells.Load(int3(p,0));
++    if(cell.r<=0||cell.g<1)return -1;
++    return max(txFilmPrevious.Load(int3(p+(int)gFilmPad,0)).r,0)/(cell.r*gFilmScale2);
++}
++float4 main(PS_IN pin) {
++    if(gPoolHasField<.5)return 0;
++    uint tile=min((uint)(pin.Tex.x*poolTileCount()),poolTileCount()-1u);
++    uint2 start=uint2(tile%poolTilesX(),tile/poolTilesX())*16u;
++    float highest=0;int2 peak=-1;
++    [loop] for(uint y=0u;y<16u;++y) [loop] for(uint x=0u;x<16u;++x) {
++        int2 p=(int2)(start+uint2(x,y));float h=poolHeight(p);
++        if(h>highest) {highest=h;peak=p;}
++    }
++    if(highest<=0)return 0;
++    float4 neighbours=float4(poolHeight(peak+int2(-1,0)),poolHeight(peak+int2(1,0)),
++                             poolHeight(peak+int2(0,-1)),poolHeight(peak+int2(0,1)));
++    if(any(neighbours<0))return 0;
++    float background=max(max(neighbours.x,neighbours.y),max(neighbours.z,neighbours.w));
++    float area=txFilmCells.Load(int3(peak,0)).r*gFilmScale2;
++    float volume=max(txFilmPrevious.Load(int3(peak+(int)gFilmPad,0)).r,0);
++    precise float remaining=volume-min(volume,max(highest-background,0)*area);
++    precise float actual=volume-remaining;
++    if(actual<=0||rainSiEquivalentDiameterMM(actual)<gPoolMinDMM)return 0;
++    float radius=rainSiContactRadiusMM(actual,gPoolTheta);
++    if(highest-background<=rainSiCapHeightMM(radius,gPoolTheta)
++        ||3.141592653589793*radius*radius<=area)return 0;
++    return float4(peak,actual,1);
++}
+--- a23527e/shaders/rainFilmResolve.hlsl
++++ s86/shaders/rainFilmResolve.hlsl
+@@ -43,6 +43,7 @@
+ float4 pfResolve(float2 cell,float4 fresh) {
+     int2 p=(int2)cell,inner=p-(int)gFilmPad;
+     float4 old=txFilmPrevious.Load(int3(p,0));
++    old.r=poolAvailable(p); // The head owns this water before donor transport.
+     if(gFilmFlowOn>.5) {
+         float4 outgoing=pfTransportFlux(inner);
+         precise float remainX=old.r-(outgoing.x+outgoing.y);
+--- a23527e/shaders/rainFilmTotals.hlsl
++++ s86/shaders/rainFilmTotals.hlsl
+@@ -9,6 +9,8 @@
+     } else if(row==3u) {
+         float4 a=txFilmBirthTotals.Load(int3(0,4,0)),b=txFilmBirthTotals.Load(int3(0,1,0));
+         result=float4(a.xy,b.x,b.w);
++    } else if(row==1u) {
++        result.x=txFilmBirthTotals.Load(int3(0,4,0)).w; // Cumulative internal return.
+     } else {
+     float4 delta=0,compensation=0;
+     [loop]for(uint y=0u;y<(uint)gFilmReductionSize.y;++y)
+--- a23527e/shaders/rainVisorDynamicDrop.hlsl
++++ s86/shaders/rainVisorDynamicDrop.hlsl
+@@ -1256,14 +1256,15 @@
+ float4 rainPhysicalFilm(PS_IN pin) {
+     float2 uv=saturate(float2(pin.Tex.x+4,pin.Tex.y+1));
+     float2 dx=ddx(uv),dy=ddy(uv),texel=1/gDynamicDropP3Grid;
+-    float2 heights=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0).rg;
++    float4 waterHeight=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0);
++    float2 heights=waterHeight.rg;
+     float filmCover=1-exp(-max(heights.x,0)/2);
+     float microCover=.6*(1-exp(-max(heights.y,0)/8));
+     float alpha=1-(1-filmCover)*(1-microCover);
+     if(gDynamicDropP3Debug>.5) {
+-        float h=gDynamicDropP3Debug<1.5 ? heights.x : heights.y;
++        float h=gDynamicDropP3Debug>3.5 ? waterHeight.b : gDynamicDropP3Debug<1.5 ? heights.x : heights.y;
+         float k=saturate(log2(1+max(h,0))/log2(1001));
+-        return gDynamicDropP3Debug>2.5 ? float4(filmCover,microCover,0,.85)
++        return gDynamicDropP3Debug>3.5 ? float4(k,.2*k,k,.85) : gDynamicDropP3Debug>2.5 ? float4(filmCover,microCover,0,.85)
+             : float4(k,k*k,1-k,.85);
+     }
+     if(alpha<1e-5)return 0;

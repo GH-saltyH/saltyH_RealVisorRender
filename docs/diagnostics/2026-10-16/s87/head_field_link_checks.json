@@ -1,0 +1,56 @@
+{
+  "compiler": "FXC ps_5_0 /Ges /WX, D3D11 WARP",
+  "fixture": "Scripted 0.5mm head movement at30mm/s on flat metric; no incident source, shape lobes off. Not the game video.",
+  "physicalEquivalentDiameterMM": 2,
+  "segmentCells": [
+    46.5,
+    31.5,
+    47.5,
+    31.5
+  ],
+  "transferredMM3": 0.0030808448791503906,
+  "sameStepSourceFieldMassErrorMM3": -8.640199666842818e-11,
+  "noSameStepFreshTrailAdvection": true,
+  "measurements": [
+    {
+      "displayGain": 0.4,
+      "headCentreUV": [
+        0.5,
+        0.5
+      ],
+      "displaySupportWidthMM": 1.0,
+      "trailCentreUV": [
+        0.4921874860490444,
+        0.49999998597754836
+      ],
+      "trailTransferredMM3": 0.0030808448791503906
+    },
+    {
+      "displayGain": 1,
+      "headCentreUV": [
+        0.5,
+        0.5
+      ],
+      "displaySupportWidthMM": 2.5,
+      "trailCentreUV": [
+        0.4921874860490444,
+        0.49999998597754836
+      ],
+      "trailTransferredMM3": 0.0030808448791503906
+    },
+    {
+      "displayGain": 2,
+      "headCentreUV": [
+        0.5,
+        0.5
+      ],
+      "displaySupportWidthMM": 5.0,
+      "trailCentreUV": [
+        0.4921874860490444,
+        0.49999998597754836
+      ],
+      "trailTransferredMM3": 0.0030808448791503906
+    }
+  ],
+  "conclusion": "Current production contracts share positions/segments/time; head appearance gain changes footprint only, not the physical trail. This does not certify game visual continuity or film/head constitutive equivalence."
+}

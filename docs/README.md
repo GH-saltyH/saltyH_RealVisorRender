@@ -1,4 +1,4 @@
-# RealVisor RainFX — docs index and working rules (2026-10-15)
+# RealVisor RainFX — docs index and working rules (2026-10-16)
 
 Start here. This file lists every document in `docs/` with its state, the
 current architecture in one screen, and the rules for working on the
@@ -17,8 +17,17 @@ project.
       incident/trail water, paired head loss, evaporation/runoff and physical-height optics;
       supplied 60% water budgets and 3-minute/40-toggle memory observations pass;
       opt-in P4a conserves water with observed comparable FPS, but high Courant fails
-      transport time accuracy; s85 confirms localized millimetre columns outside the
-      P4a quasi-steady regime and tests an offline conserved pool-to-head prototype.
+      transport time accuracy; s85 diagnoses localized millimetre columns outside
+      P4a's regime; s86 integrates opt-in P4b conserved pool-to-P1 return with
+      production GPU/Lua/optics gates passed; s87 supplied game water/cost data
+      pass with no >1mm columns. Film time accuracy and unified head/field
+      motion/optics remain open; view5 compares both in the same UV.
+      s88 evaluates offline inertial and long-travel candidates; neither meets
+      adoption gates yet. Production remains s87.
+      s89 adds view6 to isolate debug channels from scene transmission and a
+      positive source-local overlap prototype; physical runtime is still s87.
+      s90 generates intervals from frozen velocity, clips connected supports and
+      admits ordered maps on GPU; dry-front closure blocks runtime adoption.
 - **Rain rendering.** `shaders/rainVisorDynamicDrop.hlsl` draws the visor
   rain surface mesh (built from `GLASS_RAINFX`) with `render.mesh` in an
   in-scene stage. The stage is `main.smoke` by user setting
@@ -61,7 +70,12 @@ States:
 |---|---|---|
 | `README.md` | ACTIVE | this index and the working rules |
 | `RAINFX_ROADMAP.md` | ACTIVE | R1 (pre-laid GPU drops), R2 (visor scene stack and glass optics), closed list |
-| `RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md` | ACTIVE | same-frame data confirms 45–49% film inventory is CFL-limited; full-coverage/coated peak cells and valid SI units; offline /WX WARP conserved localized-pool-to-head prototype, P4b handoff design/cost; game runtime unchanged |
+| `RAINFX_S90_CHARACTERISTICS_AND_CURVED_TRANSPORT.md` | ACTIVE | offline SI predictor→characteristics→component-clipped positive remap; limited linear reconstruction, GPU axis admission, real-mesh volume/momentum+wall and prescribed-time gates; dry-front closure and app transaction pending, runtime unchanged |
+| `RAINFX_S89_VIDEO_AND_POSITIVE_REMAP.md` | ACTIVE | film video direction reaction is expected in current preview; view6 blocks debug scene transmission, normal output unchanged; positive source-local overlap GPU arithmetic passes, trajectory/curved support/worst cost/runtime integration pending |
+| `RAINFX_S88_FILM_TRANSPORT_CANDIDATES.md` | ACTIVE | offline finite-inertia/momentum and tiled-prefix long-travel GPU candidates: useful numerical gates pass, warm CFL / arbitrary-flow positivity / thin-stock translation fail adoption; no runtime changes |
+| `RAINFX_S87_P4B_GAME_REVIEW.md` | ACTIVE | supplied P4b water conservation/internal return and67/67FPS observations pass; no >1mm columns, remaining time/visual gates; actual same-head GPU link proof, same-UV head/film/micro view5, user fabric material preserved |
+| `RAINFX_S86_P4B_POOL_RETURN.md` | REFERENCE | opt-in P4b localized pool→P1 return, preserved rain centre, internal ledger, paired donor/field debit and atomic publication; +1 pass/+80KiB at4096, view4; production GPU/Lua/optics/regression gates passed; actual game review follows in s87 |
+| `RAINFX_S85_P4_REGIME_AND_POOL_TRANSFER.md` | REFERENCE | same-frame data confirms 45–49% film inventory is CFL-limited; full-coverage/coated peak cells and valid SI units; offline /WX WARP conserved localized-pool-to-head prototype, handoff design/cost; runtime integration follows in s86 |
 | `RAINFX_S84_P4_GAME_REVIEW.md` | REFERENCE | supplied P4 water budgets pass and FPS observed comparable; high-C transport-time gate fails; real-mesh unit probes, media review, same-frame16-float thickness/limited-mass/metric diagnostics; physical transport unchanged |
 | `RAINFX_S83_P4_FILM_TRANSPORT.md` | REFERENCE | opt-in P4a four-neighbour conserved film transport/runoff, P1 world forces/downward air, manual limiter stats, compensated snapshot sum; +4MiB/one pass; game findings and expanded diagnostics follow in s84 |
 | `RAINFX_S82_P3_GAME_REVIEW.md` | REFERENCE | supplied P3 conservation passes (interval error ≤2.043e-5); 3-minute/40-toggle game memory shows no sustained accumulation, 100 reset fixtures; long float32 precision/trail quality remain open, first P4 transport follows in s83 |

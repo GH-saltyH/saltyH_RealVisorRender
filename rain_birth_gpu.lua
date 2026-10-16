@@ -5,7 +5,8 @@ return function(d)
         local f=assert(io.open(d.folder..'/shaders/'..name..'.hlsl','rb'));local s=f:read('*a');f:close()
         return '#line 1 "RealVisor/'..name..'.hlsl"\n'..s
     end
-    st.eventCode=d.surface.shader..d.core..code('rainBirthEvent')
+    st.eventCode=d.surface.shader..d.core..code('rainFilmPoolAddress')..code('rainBirthEvent')
+    st.poolCode=d.core..code('rainFilmPoolAddress')..code('rainFilmPoolCandidate')
     st.blockCode=code('rainBirthBlocks');st.totalCode=code('rainBirthTotals');st.statsCode=code('rainBirthStats')
     local folder=d.folder..'/texture/RAIN_BIRTH/'
     local geometry=assert(loadfile(folder..'geometry.lua'))()
@@ -30,13 +31,17 @@ return function(d)
         gBirthObjectToWorld=mat4x4.identity(),gBirthNormalSign=1,gBirthExposure=1,
         gBirthIncidentAirFraction=1,gBirthTangentFraction=0,gBirthWetOverride=0,gBirthMinPersistentMM=.25,
         gBirthRhoWater=998.2,gBirthMu=.001002,gBirthGamma=.0728,gBirthTheta=90,
-        gBirthAdvanceBare=100,gBirthAdvanceCoat=92,gBirthWetOn=0,gBirthWetHeightUM=20},textures={
+        gBirthAdvanceBare=100,gBirthAdvanceCoat=92,gBirthWetOn=0,gBirthWetHeightUM=20,
+        gPoolOn=0,gPoolCount=1,gPoolTick=0,gPoolHasField=0,gPoolTheta=90,gPoolMinDMM=.25,
+        gFilmGrid=vec2(1024,256),gFilmPad=16,gFilmScale2=1},textures={
         txBirthDsd=folder..'dsd.dds',txBirthImpact=folder..'impact_estimated.dds',
         txBirthSites=folder..'sites.dds',
-        txRainState=false,txRainStateMeta=false,txBirthWetHeight=false}}
+        txRainState=false,txRainStateMeta=false,txBirthWetHeight=false,txPoolCandidates=false}}
+    st.poolParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.poolCode,
+        values=st.eventParams.values,textures={txFilmPrevious=false,txFilmCells=d.folder..'/texture/RAIN_FILM/cells.dds'}}
     d.surface:bind(st.eventParams)
     st.blockParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.blockCode,
-        values={gBirthCount=1,gBirthBlocks=1,gBirthFilmOn=0},textures={txBirthEvent=false,txRainNewMeta=false,txBirthTransfers=false}}
+        values={gBirthCount=1,gBirthBlocks=1,gBirthFilmOn=0,gPoolOn=0},textures={txBirthEvent=false,txRainNewMeta=false,txBirthTransfers=false}}
     st.totalParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.totalCode,
         values={gBirthBlocks=1,gBirthFilmOn=0},textures={txBirthBlocks=false,txBirthPreviousTotals=false}}
     st.statsParams={async=true,blendMode=render.BlendMode.Opaque,shader=st.statsCode,
@@ -47,20 +52,21 @@ return function(d)
     end
     function st:dispose()
         self.epoch=self.epoch+1
-        for _,name in ipairs({'events','blocks','totalsA','totalsB','stats'}) do
+        for _,name in ipairs({'events','blocks','totalsA','totalsB','stats','poolCandidates'}) do
             if self[name] then self[name]:dispose();self[name]=nil end
         end
-        self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil;self.write=nil;self.filmMode=nil
+        self.count=nil;self.tick=0;self.ready=false;self.preparedFrame=nil;self.read=nil;self.write=nil;self.filmMode=nil;self.poolMode=nil
         self.pending=false;self.logPending=false;self.logValues=nil;self.budgetFrame=nil;self.frame=nil
         self.publishedSeconds=0;self.publishedSteps=0;self.previousLog=nil
         self.eventParams.textures.txRainState=false;self.eventParams.textures.txRainStateMeta=false
         self.eventParams.textures.txBirthWetHeight=false
+        self.eventParams.textures.txPoolCandidates=false;self.poolParams.textures.txFilmPrevious=false
         self.blockParams.textures.txBirthEvent=false;self.blockParams.textures.txRainNewMeta=false
         self.blockParams.textures.txBirthTransfers=false
         self.totalParams.textures.txBirthBlocks=false;self.totalParams.textures.txBirthPreviousTotals=false
         self.statsParams.textures.txBirthTotals=false
     end
-    function st:prepare(state,meta,count,sim,transform,model,wetHeight)
+    function st:prepare(state,meta,count,sim,transform,model,wetHeight,poolField)
         self.preparedFrame=nil
         self.budgetFrame=nil
         if self.frame==sim.frame then return false end
@@ -70,13 +76,16 @@ return function(d)
         end
         self.error=nil
         local filmMode=r.RAIN_PHYSICS_P3_FILM_PREVIEW==true
-        if self.count~=count or self.filmMode~=filmMode then
+        local poolMode=filmMode and r.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true and r.RAIN_PHYSICS_P4_POOL_PREVIEW==true
+        if self.count~=count or self.filmMode~=filmMode or self.poolMode~=poolMode then
+            poolField=nil -- A resized/reset source cannot consume a different field epoch.
             self:dispose();self.blockCount=math.ceil(count/64)
-            self.events=canvas(count,4,render.TextureFormat.R32G32B32A32.Float,'P2 immutable birth events')
+            self.events=canvas(count,poolMode and 5 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 immutable birth events')
+            if poolMode then self.poolCandidates=canvas(1024,1,render.TextureFormat.R32G32B32A32.Float,'P4b localized pool candidates') end
             self.blocks=canvas(self.blockCount,filmMode and 3 or 2,render.TextureFormat.R32G32B32A32.Float,'P2 budget reduction')
             self.totalsA=canvas(1,filmMode and 6 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 budget A')
             self.totalsB=canvas(1,filmMode and 6 or 4,render.TextureFormat.R32G32B32A32.Float,'P2 budget B')
-            self.read=self.totalsA;self.count=count;self.filmMode=filmMode
+            self.read=self.totalsA;self.count=count;self.filmMode=filmMode;self.poolMode=poolMode
         end
         local p=self.eventParams;local v=p.values
         v.gBirthCount=count;v.gBirthTick=self.tick;v.gBirthDt=math.max(sim.dt or 0,0)
@@ -90,6 +99,14 @@ return function(d)
         v.gBirthWetOn=wetHeight and 1 or 0;v.gBirthWetHeightUM=r.RAIN_FILM_WET_HEIGHT_UM or 20
         p.textures.txBirthWetHeight=wetHeight or false
         v.gBirthTheta=r.RAIN_PHYSICS_CONTACT_ANGLE_DEG
+        v.gPoolOn=poolMode and 1 or 0;v.gPoolCount=count;v.gPoolTick=self.tick
+        v.gPoolTheta=v.gBirthTheta;v.gPoolMinDMM=r.RAIN_BIRTH_MIN_PERSISTENT_MM
+        v.gFilmScale2=d.surface.scale^2;v.gPoolHasField=poolField and 1 or 0
+        self.poolParams.textures.txFilmPrevious=poolField or false
+        p.textures.txPoolCandidates=self.poolCandidates or false
+        if poolMode and d.measure('P4b pool candidates',self.poolCandidates.updateWithShader,self.poolCandidates,self.poolParams)==false then
+            self.pending=true;return false
+        end
         v.gBirthAdvanceBare=math.min(179.9,math.max(.1,v.gBirthTheta+r.RAIN_PHYSICS_STATIC_SPAN_BARE_DEG*.5))
         v.gBirthAdvanceCoat=math.min(179.9,math.max(.1,v.gBirthTheta+r.RAIN_PHYSICS_STATIC_SPAN_COAT_DEG*.5))
         p.textures.txRainState=state;p.textures.txRainStateMeta=meta;d.surface:bind(p)
@@ -102,6 +119,7 @@ return function(d)
         p.textures.txBirthEvent=self.events;p.textures.txRainNewMeta=newMeta
         if self.filmMode and not transfers then return false end
         p.textures.txBirthTransfers=transfers or false;p.values.gBirthFilmOn=self.filmMode and 1 or 0
+        p.values.gPoolOn=self.poolMode and 1 or 0
         if d.measure('P2 budget blocks',self.blocks.updateWithShader,self.blocks,p)==false then self.pending=true;return false end
         local p=self.totalParams;p.values.gBirthBlocks=self.blockCount;p.values.gBirthFilmOn=self.filmMode and 1 or 0
         p.textures.txBirthBlocks=self.blocks;p.textures.txBirthPreviousTotals=self.read
@@ -134,7 +152,7 @@ return function(d)
             if err or not data then if data then data:dispose() end;d.log('P2 budget readback failed: '..tostring(err));return end
             local v=self.logValues or {};for i=1,statsCount do v[i]=data:floatValue(i-1,0) end
             data:dispose();self.logValues=v
-            local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]-(statsCount>8 and v[9] or 0)
+            local residual=v[1]-v[2]-v[3]-v[4]-v[5]-v[6]-v[7]-(statsCount>8 and v[9] or 0)+(statsCount>8 and v[12] or 0)
             local previous=self.previousLog
             local elapsed=seconds-(previous and previous.seconds or 0)
             local inputDelta=v[1]-(previous and previous.input or 0)
@@ -146,7 +164,7 @@ return function(d)
                 tostring(frame),v[1],v[2],v[3],v[4],v[5],v[6],v[7],residual,v[8],area,
                 seconds,steps,elapsed,inputRate,arrivalRate,residualDelta))
             self.previousLog={seconds=seconds,input=v[1],arrivals=v[8],residual=residual}
-            if statsCount>8 then d.log(string.format('Rain P2 P3 transfers: headEvap=%.6f trail=%.6f kernelCappedTotal=%.0f',v[9],v[10],v[11])) end
+            if statsCount>8 then d.log(string.format('Rain P2 P3 transfers: headEvap=%.6f trail=%.6f kernelCappedTotal=%.0f poolReturned=%.6f',v[9],v[10],v[11],v[12])) end
         end)
         return true
     end

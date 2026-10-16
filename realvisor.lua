@@ -426,6 +426,7 @@ local cfg = scriptSettings:mapConfig({
         RAIN_BIRTH_NORMAL_REVERSED = false,
         RAIN_PHYSICS_P3_FILM_PREVIEW = false,
         RAIN_PHYSICS_P4_TRANSPORT_PREVIEW = false,
+        RAIN_PHYSICS_P4_POOL_PREVIEW = false,
         RAIN_FILM_FLOW_CF = 0.005, -- estimated local surface air skin-friction coefficient
         RAIN_FILM_DEPOSIT_BARE = 0.35, -- estimated finite-drop coating coefficient
         RAIN_FILM_DEPOSIT_COAT = 0.05,
@@ -5067,7 +5068,33 @@ local PARAMS_KS_PERPIXEL_ALPHA = {
 
             visible = true,
         },
-        
+
+                
+        {
+            id = 'KN5FABRIC',
+
+            meshName = 
+                'BODY_FABRIC_CULL',
+
+            materialName = 
+                'mtBODY_FABRIC',
+
+            targetMesh = nil,
+            materialQueryRef = nil,
+
+            parameters = 
+                PARAMS_KS_PERPIXEL_MULTIMAP,
+
+            values = {},
+
+            inputBuffers = {},
+            
+            loaded = false,
+            lastError = nil,
+
+            visible = true,
+        },
+
         {
             id = 'KN5BODY',
 
@@ -6620,6 +6647,7 @@ rainDynamicSceneCopyState.siConfigured=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
 rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
 rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
 rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
+rainDynamicSceneCopyState.poolConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW==true
 rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,transform)
     local st=rainDynamicSceneCopyState
     if not st.physicsBirth then st.physicsInputsUpdate() end
@@ -6635,7 +6663,10 @@ rainDynamicSceneCopyState.preparePhysicsBirth=function(state,meta,count,sim,tran
     st.physicsBirthError=nil
     local wet=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and st.physicalFilmGPU
         and st.physicalFilmGPU.ready and st.physicalFilmGPU.optics or nil
-    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth,wet)
+    local field=st.physicalFilmGPU
+    local pool=cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW and field and field.ready
+        and field.poolMode and field.count==count and field.read or nil
+    local ok,ready=pcall(st.physicalBirthGPU.prepare,st.physicalBirthGPU,state,meta,count,sim,transform,st.physicsBirth,wet,pool)
     if not ok then st.physicsBirthError=tostring(ready);return false end
     st.physicsBirthError=st.physicalBirthGPU.assetError or st.physicalBirthGPU.error
     return ready
@@ -6653,7 +6684,7 @@ rainDynamicSceneCopyState.preparePhysicsFilm=function(oldState,oldMeta,newState,
         st.physicalFilmGPU=result
     end
     local ok,ready=pcall(st.physicalFilmGPU.prepare,st.physicalFilmGPU,oldState,oldMeta,newState,newMeta,
-        events,count,sim,st.physicsInputs,motionDt,rainStateUpdateParams.values)
+        events,count,sim,st.physicsInputs,motionDt,rainStateUpdateParams.values,st.physicalBirthGPU.tick)
     if not ok then st.physicsFilmError=tostring(ready);return false end
     st.physicsFilmError=st.physicalFilmGPU.assetError
     return ready
@@ -7045,6 +7076,7 @@ local function updateRainGPUState(sim)
         or rainDynamicSceneCopyState.birthConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true)
         or rainDynamicSceneCopyState.filmConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true)
         or rainDynamicSceneCopyState.flowConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true)
+        or rainDynamicSceneCopyState.poolConfigured~=(cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW==true)
     if siChanged then
         rainDynamicSceneCopyState.siEpoch=(rainDynamicSceneCopyState.siEpoch or 0)+1
         rainDynamicStateReadbackReady=false
@@ -7053,6 +7085,7 @@ local function updateRainGPUState(sim)
         rainDynamicSceneCopyState.birthConfigured=cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW==true
         rainDynamicSceneCopyState.filmConfigured=cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW==true
         rainDynamicSceneCopyState.flowConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW==true
+        rainDynamicSceneCopyState.poolConfigured=cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW==true
         rainDynamicSceneCopyState.gpuHeadsActive=false
         rainDynamicStateHasSnapshot=false
         if rainDynamicSceneCopyState.newTrail then rainDynamicSceneCopyState.newTrail:dispose() end
@@ -17570,13 +17603,19 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
         else st.siUIError='P3 requires P1/P2 previews, GPU heads and lifecycle mode 3 or 6' end
     end
     if cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW then
-        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. No Smear/local impact film. P4 adds film transport; head reabsorption remains deferred.')
+        ui.textWrapped('P3 resets water. Spatial incident film/micro and same-frame trail use actual mm3. P4 adds film transport; P4b can return localized excess pools to P1 heads.')
         if ui.checkbox('Enable P4 conservative transport preview (resets water)',cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW) then
             cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW
         end
         if cfg.RUNTIME.RAIN_PHYSICS_P4_TRANSPORT_PREVIEW then
             st.rainUISlider('Estimated film air skin friction Cf','RAIN_FILM_FLOW_CF',0,.03,'%.4f')
-            ui.textWrapped('P4 moves film only. Four-neighbour donor flux is limited at Courant 0.8; high speeds can be numerically slowed. Check limiter log. No pressure/contact-line solver or head reabsorption.')
+            ui.textWrapped('P4 donor flux is limited at Courant 0.8; high speeds can be numerically slowed. Check limiter log. Broad film pressure/inertia transport remains unresolved.')
+            if ui.checkbox('Enable P4b localized pool return (resets water)',cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW) then
+                cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW=not cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW
+            end
+            if cfg.RUNTIME.RAIN_PHYSICS_P4_POOL_PREVIEW then
+                ui.textWrapped('P4b transfers isolated full-coverage peaks into free P1 slots. Uniform sheets/ridges remain film. Returned pools start at rest. View 4 marks returns in the last published step; poolReturned logs cumulative internal mm3.')
+            end
             if st.physicalFilmGPU and ui.button('Log P4 transport limiter') then st.physicalFilmGPU:logFlow() end
         end
         st.rainUISlider('Estimated trail coefficient: bare','RAIN_FILM_DEPOSIT_BARE',0,1,'%.3f')
@@ -17589,7 +17628,10 @@ rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
         st.rainUISlider('Film optical gain (render only)','RAIN_FILM_OPTICAL_GAIN',0,3,'%.2f')
         st.rainUISlider('Film displacement limit (screen px)','RAIN_FILM_OPTICAL_MAX_PX',0,64,'%.1f')
         st.rainUISlider('Micro scattering mip (render only)','RAIN_FILM_MICRO_MIP',0,5,'%.2f')
-        st.rainUISlider('P3 view: 0 optics, 1 film um, 2 micro um, 3 coverage','RAIN_FILM_DEBUG',0,3,'%.0f')
+        st.rainUISlider('P3 view: 0 optics, 1 film um, 2 micro um, 3 coverage, 4 return, 5 mixed, 6 isolated','RAIN_FILM_DEBUG',0,6,'%.0f')
+        if cfg.RUNTIME.RAIN_FILM_DEBUG>4.5 then
+            ui.textWrapped('Views 5/6: red = film height, green = displayed drops, blue = micro water. Red/blue use log2(1 + um) / log2(1001). Purple combines film and micro; it is not film alone. View 5 transmits 15% of the scene even at zero water. View 6 blocks scene transmission in this pass; later visor optics still apply. Drop display scale changes green size only. Normal optics: set P3 view and WF debug to 0.')
+        end
         if st.physicsFilmError then ui.textWrapped(st.physicsFilmError) end
         if st.physicalFilmGPU then
             ui.text(string.format('P3 1024x256 + runoff halo; ready=%s pending=%s; estimated evap %.5f um/s',

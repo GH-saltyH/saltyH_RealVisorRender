@@ -8,7 +8,7 @@ base=(ROOT/'docs/tools/check_s63_gpu.py').read_text();env={'__file__':str(ROOT/'
 exec(base[:base.index('report=[]')],env);env['OUT']=OUT;render=env['render'];inline=env['inline']
 env['types'].update({n:'float2' for n in ('gFilmGrid','gFilmPaddedSize','gFilmReductionSize','gTile','gDynamicDropP3Grid')})
 env['types'].update({n:'float3' for n in ('gRainObjectToWorld','gBirthAirWorld')})
-def code(name):return (ROOT/f'shaders/{name}.hlsl').read_text()
+from rain_shader_source import source as code
 source=(ROOT/'realvisor.lua').read_text(encoding='utf-8-sig')
 metric=code('rainSurfaceMetric');core=code('rainPhysicsSI')
 common=metric+core
