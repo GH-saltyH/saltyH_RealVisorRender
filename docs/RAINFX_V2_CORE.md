@@ -673,3 +673,128 @@ rev17 변경:
 3. metrics CSV에 외형 저장값 7열 추가(apertureMM, refractK, contourAmp, bevelMM, filmRefract, filmVeil, scatterK) → 판정 때 설정 확인.
 
 다음: Reset 후 같은 4 프로필 T3/T4 재녹화 → B 방울 외형(크기·밝기)과 B 전역 비율, A 표면 서명 확인.
+
+## 25. 다음 단계: Water Field 렌즈 이식 계획 (2026-10-26)
+
+rev17 리뷰에서 사용자가 legacy Water Field 물방울 외형을 기준으로 삼기로 했다. 분석·이식 안·예비 비용: [RAINFX_V2_WF_LENS_PLAN.md](RAINFX_V2_WF_LENS_PLAN.md).
+요지: v2 시뮬레이션은 유지하고 `visor.hlsl`의 방울 평가를 WF 규칙(포물면 커널 메타볼 합집합, 기울기 ≈ 1.3 at rim, 굴절 0.69, mip 3 + 1.5|s|/1.5,
+림 손실 0.75, 글린트 0.45, 하늘 보정, 톤 창 없음)으로 해석적으로 바꾼다. 예상 draw 비용은 rev17과 같거나 낮음.
+
+## 26. 디포커스 분석 (rev18 착수 전, 2026-10-26)
+
+사용자: 디포커스는 거리 기반이어야 하고(레퍼런스: 렌즈 바로 앞 오른쪽은 흐리고 왼쪽은 선명), rev17 aperture는 물 모양을 바꾸고 굴절을 없앤다.
+분석·제안: [RAINFX_V2_DEFOCUS_PLAN.md](RAINFX_V2_DEFOCUS_PLAN.md). 요지: rev5의 "footprint 덮임 + 평균 광선"은 모양(각도 의존 겹침 → 프로펠러)과
+굴절(반대 기울기 상쇄)을 망가뜨린다. 디포커스는 선명하게 계산한 렌즈 결과 **색**에만 적용해야 한다. CoC는 얇은 렌즈 식(A, zf, z = length(PosC))으로 거리 기반.
+제안 rev18 = WF 렌즈 + D-C 해석 근사(추가 샘플 0) + 거리 기반 CoC, 필요 시 근접 구역에만 D-A 확률적 색 수집.
+
+## 27. 사용자 검토: 디포커스 목표와 굴절 소스 (2026-10-26)
+
+- 디포커스 목표는 오프라인 ② 행(방울 색 층을 거리 기반 CoC로 블러). kn5 배치상 왼쪽이 실제로 더 멀어(CSP 클리핑으로 확인) 거리 보정 불필요.
+  구현 순서 D-B → D-A → D-C(임시): [RAINFX_V2_DEFOCUS_PLAN.md §6](RAINFX_V2_DEFOCUS_PLAN.md).
+- v2 굴절 소스는 `main.smoke` 시점의 실제 프레임 HDR이라 legacy(LDR GeometryShot)용 하늘·톤 보정이 필요 없다. 남는 과제: 화면 밖 샘플(거울 반사 UV),
+  HDR 밝기 확인: [RAINFX_V2_WF_LENS_PLAN.md §6](RAINFX_V2_WF_LENS_PLAN.md).
+
+## 28. rev18 — Water Field 렌즈 + 거리 기반 디포커스(D-C) + 오프스크린 실험 (2026-10-26)
+
+구현(`visor.hlsl`, `init.lua`; 계획: [WF 렌즈](RAINFX_V2_WF_LENS_PLAN.md), [디포커스](RAINFX_V2_DEFOCUS_PLAN.md)):
+
+1. **방울 렌즈 = WF 규칙(해석적):** 5×5 후보마다 돔 커널 h = 1 − (d/1.24R)², 메타볼 합집합 U = 1 − Π(1 − h)(점화식으로 ∇U 동시 계산),
+   R > 0.5 mm는 시드 로브 1–2개(거리 0.55R, 0.45–0.55R), 프레임 이동 방향으로 늘임 0.35, 최소 그리기 반지름 0.2 mm.
+   실루엣 U = 0.35를 px 부호 거리로 AA. 기울기 s = ∇U·R(가장자리 ≈ 1.3), 오프셋 = s·0.69·(H/W, 1), mip = 2 + 1.5|s|/1.5 + 1.5·largeW
+   (WF scene mip 3은 전해상도 shot 기준 → 반해상도 소스에서 2). 림 손실 0.75(0.7–1.3), 글린트 0.45·facing⁴.
+   **삭제:** CSP bevel 프로파일, 윤곽 사인 노이즈, 동공 평균 광선(rev5), 톤 창(rev16), `dropVeil`(rev16). 하늘·톤 보정 없음.
+2. **화면 밖 샘플:** 거울 반사 UV + 넘친 거리만큼 mip 증가.
+3. **디포커스 D-C:** z = |월드(PosL) − 카메라|(그리는 시점의 메쉬 행렬·카메라 위치), CoC_mm = A·|zf − z|/zf, CoC_px = CoC_mm / (mm/px).
+   실루엣 폭 = max(1.5, CoC_px)(바깥으로 ¼ CoC 이동), 덮임 × (R/(R + CoC/2))², 굴절 상 mip += ½·log2(1 + 0.35·CoC_px·렌즈 축소율).
+   기본 A 1.2 mm, zf 0.12 m. 렌즈 모양·굴절 방향은 CoC로 바꾸지 않는다.
+4. **UI:** Drop lens refraction(0.69), Drop image blur(scene mip 2), Drop lobes, Defocus aperture, Defocus focus distance, CoC 요약 줄,
+   `Reset look to defaults` 갱신. Debug 6 = R 카메라 거리(0–15 cm), G CoC px(0–40), B 방울 덮임.
+5. **D-B 실험 버튼:** `Test: draw visor mesh into an offscreen canvas` → 다음 색 패스에서 `ExtraCanvas:update(function() render.mesh(...) end)`로
+   메쉬 UV를 512×288 캔버스에 그리고 readback으로 덮인 샘플 수를 센다. 결과 문자열과 미리보기 이미지가 패널에 나온다(D-B 가능/불가 판정).
+6. CSV 외형 열: apertureMM, focusM, wfRefraction, wfSceneMip, filmRefract, filmVeil, scatterK.
+7. 검사: `check_rainfx2_shaders.py --dxc <dxc>` 옵션 추가(리눅스 DXC ps_6_0로 문법·의미 검사). 9개 패스 DXC OK. 게임 전 FXC 검사는 그대로 필수.
+
+**버그 수정(중요):** `visor.hlsl`의 이동 해제가 rev8 패킹 변경(1/62.5 셀)을 따라가지 않고 1/250을 쓰고 있었다 → **Debug 4 속도가 4배 작게 표시**됐다.
+§17의 해석을 바로잡는다: 중력만일 때 2.2 mm 띠의 주황(표시 0.3–0.6 m/s)은 실제 1.2–2.4 m/s로 수직면 계산(1.23–1.4 m/s)과 맞는다(접선 중력 0.43 g 가설은 불필요).
+자홍(step 한계 0.97 m/s @107 fps)도 표시가 4배 낮아 보이지 않았던 것이며, 실제로는 가장 큰 띠가 한계에 걸렸을 수 있다 → rev18 Debug 4로 재확인.
+이번 수정은 Debug 4 표시와 방울 늘임 방향 크기에만 영향(물리·field는 common.hlsl의 올바른 해제를 사용).
+
+확인 순서:
+1. FXC 9개 OK.
+2. Debug 6: 화면 오른쪽(렌즈 가까움)이 빨강 약·초록 강(CoC 큼), 왼쪽은 초록이 거의 없어야 한다. 반대면 z 계산(PosL·행렬) 문제.
+3. Debug 1: 방울 모양이 aperture/focus를 바꿔도 **형태는 유지**되고 경계만 부드러워지는지(rev17의 프로펠러 소멸).
+4. Debug 0: 오른쪽 부드러운 원판, 왼쪽 선명한 반전 렌즈. WF 렌즈가 크롬처럼 보이면 Drop image blur 2 → 3, refraction 0.69 → 0.5.
+5. Debug 4: 속도 색 재확인(중력만 ladder), 자홍 여부.
+6. 오프스크린 실험 버튼 결과 문자열.
+7. 비용: draw(rev17 0.36 ms 기준)와 frame preparation.
+
+## 29. rev19 — rev18 검토 반영: 디포커스 불투명도, D-A, 방울 외형 다양화, 미끄럼 속도 (2026-10-26)
+
+rev18 게임 확인(사용자, `docs/videos/rev18_GAME_REVIEW/`): FXC 9 OK, Debug 6 정상(오른쪽 초록 = 근접, 왼쪽 빨강),
+Debug 1 모양 유지 통과, 오프스크린 실험 `render.mesh returned true, covered samples 0 / 9216` → **D-B 불가**,
+비용 T4 최대 구간 frame preparation 0.40 ms, transparent 0.35 ms(rev17 0.36). 문제 3가지:
+
+1. **디포커스된 방울이 투명해진다**(aperture 0 vs 0.8): 덮임 × (R/(R + c/2))²가 원인. R 1 mm, CoC 0.6 mm면 59 %만 가린다.
+   광학적으로 원판(반지름 R) ⊗ CoC 원판(반지름 rb = c/2)의 중심값은 **min(1, (R/rb)²)** 이다 — 블러보다 큰 방울은 끝까지 불투명하다.
+   **수정(D-C):** 덮임 = smoothstep(부호거리/CoC_px + ½) × min(1, (R/rb)²). 경계 폭은 CoC 지름에 중심 정렬(rev18의 ¼ CoC 바깥 이동 제거).
+2. **모든 방울이 같은 모양**(균일한 방향, 양옆 반달 음영 — legacy WF는 위치·형태마다 어두운 구역이 다름). 원인 분석:
+   - 기울기 크기를 화면 px 기울기 × R_px로 계산 → 바이저가 화면에서 한 축으로 눌린 곳에서 그 축 양끝만 |s| > 0.7 → **양옆 반달**(림 손실이 링이 아니라 좌우만).
+   - 이동 늘임이 대칭 타원 + `saturate(이동/r)`이라 미끄러지는 모든 방울이 같은 방향·같은 비율(1.35)로 늘어남.
+   - 시드가 16개뿐이고 로브는 R > 0.5 mm만. 스크린샷 조건은 refraction 0.14, lobes 꺼짐(기본값 0.69, 켜짐) — 굴절이 약하면 방울 안 상이 주변과 같아 림 패턴만 남는다.
+   **수정:** (a) 기울기 크기 = |∇U|_mm × R(표면 기준, 등방) — 화면 방향만 ∇U의 화면 투영에서 취한다.
+   (b) 접촉선 고정 타원: 시드로 1–1.22배, 임의 방향. (c) 이동은 **뒤쪽 절반만** 늘인다(눈물방울: 앞은 둥글고 뒤가 가늘어짐), 비율 = 0.35·saturate(v / vMax).
+   (d) 로브 R > 0.35 mm, 1/3은 로브 없음, 거리·크기 시드 변동. (e) WF large-drop warp(방울 크기 0.6배 셀 값 노이즈, 4 px × largeW)로 큰 방울 내부 상을 불규칙하게.
+   모양 변환(I − u uᵀ s, 대칭)의 야코비안을 기울기에 적용(수치 미분 대조 상대오차 3.5e-10).
+3. **Debug 4 자홍(1× 시간에서 오른쪽 ⅓):** 수정된 표시로 보니 중력만으로 2.2 mm가 1.4 m/s — 모세관수 Ca = μv/γ = 0.019로
+   미끄러지는 방울의 pearling(꼬리 분열) 전이 Ca ≈ 0.005–0.01(Podgorski·Flesselles·Limat 2001, Le Grand·Daerr·Limat 2005)보다 크다. 물리적으로 너무 빠르다.
+   접촉선 소산 F ≈ (3μ ln(L/a)/θ)·4r·v ≈ (0.1–0.15)·r·v. **수정:** friction 0.06 → 0.15, vMax 1.5 → 0.5 m/s(Ca ≈ 0.007),
+   vShed 3.0 → 1.2(셰딩 판정은 상한 전 속도를 쓰므로 같은 힘에서 같은 판정 — 고속 기류 셰딩 불변). 중력만: 1.2 mm 0.09, 1.6 mm 0.25, 2.2 mm 0.5 m/s.
+   60 fps·4 substep의 step 한계 0.54 m/s > 0.5 → 자홍이 나오지 않아야 한다(mock: step limit 0.54).
+
+**D-A 구현(기본 켬, D-B 불가 판정에 따른 사용자 순서 D-B → D-A → D-C):** CoC > 1 px인 픽셀만 Vogel 원판 4점(픽셀·프레임 회전)에서
+선명한 WF 렌즈를 계산해 premultiplied 평균(= ② 색 층 블러). 25개 상태 Load는 한 번만 하고 후보마다 4개 탭 누적기(P, ∇U, R)를 정적 배열로 갱신,
+장면 샘플은 탭당 1개(4개). 탭 오프셋 px → mm는 화면-표면 야코비안(pxU, pxV)으로 변환. 굴절 상 mip의 CoC 항은 ½만 남긴다(나머지는 탭 분산이 담당).
+CoC ≤ 1 px(왼쪽)는 기존 1탭 경로. UI `Defocus: D-A colour gather` 끄면 D-C. 노이즈는 TAA/DLSS가 정리한다는 가정 — 정지 화면 비교로 확인.
+
+D-B 판정 기록: preview728에서 `ExtraCanvas:update` 콜백 안 `render.mesh`는 true를 반환하지만 캔버스에 아무것도 그리지 않는다
+(2D 캔버스 갱신에는 장면 카메라·깊이 상태가 없음). 방울 층을 별도 타깃에 그리는 경로가 없으므로 D-B는 보류한다.
+
+UI/CSV: `Defocus: D-A colour gather` 체크(Reset에 포함), CSV에 defocusDA·lobes 열 추가. 검사: DXC 9 OK, mock OK.
+
+확인 순서:
+1. FXC 9개 OK.
+2. **Reset look to defaults** 후(refraction 0.69, lobes 켬) Debug 0: 방울마다 모양·어두운 구역이 다른지, 양옆 반달이 사라졌는지. 크롬처럼 보이면 scene mip 2 → 3.
+3. aperture 0 vs 1.2(D-A 켬/끔 각각): 큰 방울이 디포커스에서도 뒤 장면을 가리는지(작은 방울만 희미해져야 정상). D-A 노이즈가 DLSS/TAA 후 보이는지.
+4. Debug 4 중력만 1×: 자홍 없음, 큰 방울 주황–빨강(0.3–0.5 m/s), 1.2 mm 근처 초록.
+5. 비용: transparent(D-A 켬/끔), frame preparation.
+
+## 30. rev20 — 크래시 방어, 컴파일 시간, 접촉각 림, 기류 흔들림, 로브 제거 (2026-10-27)
+
+1. **크래시 방어(원인 추정, 로그 미확인):** 영상(`rev19_appcrash.mp4`)에서 파란 AI 차량이 카메라를 통과해 카메라가 그 차 안/위에 놓인 직후 화면이 멈춘다.
+   그 차의 실내·창 효과가 켜지면 CSP가 **다른 렌더 타깃 크기**의 추가 뷰(미러, 다른 차 윈드스크린 패스)를 그 프레임의 메인 뷰 전에 그릴 수 있다.
+   기존 `renderViewKey`는 메인 뷰 추적 전의 뷰를 'untracked'로 통과시켰고, 이때 glass `fallbackSource`(전해상도 HDR + mip)와 RainFX2 `source` 캔버스가
+   크기가 바뀔 때마다 dispose/재생성된다 → 한 프레임에 여러 번, 아직 바인딩된 텍스처를 해제할 수 있다. 방어:
+   - `realvisor.lua renderViewKey`: untracked 뷰라도 마지막 메인 뷰와 크기가 다르면 건너뜀.
+   - `R2:draw`: 확립된 메인 크기에만 그림. 새 크기는 30번 연속 그것만 나올 때 채택(창 크기 변경).
+   원인 확정에는 CSP 크래시 리포트(`Documents\Assetto Corsa\logs`의 `custom_shaders_patch.log`, crash 폴더의 덤프/리포트)와
+   **RainFX v2를 끈 상태에서 같은 장면 재현 여부**가 필요하다.
+2. **컴파일 시간:** rev19는 5×5를 펼치고 그 안에 D-A 4탭 × (본체 + 로브 2) → 커널 본문 수백 개. 5×5를 `[loop]`로, 4탭만 펼침(정적 배열 유지). 로브 제거로 추가 감소.
+3. **로브 제거:** 돔 커널 h = 1 − (d/Rk)²는 경계에서 기울기가 0이 아니다(C0). 큰 커널 안쪽에 놓인 로브 경계에서 합집합 기울기가 꺾여 방울 안에 또 하나의 테두리가 생긴다
+   (사용자: "다른 방울이 융합되지 않고 따로 그려짐"). 모양 변화는 시드 타원·눈물방울·흔들림이 담당한다.
+4. **접촉각 림(전체 테두리 현실성):** 림의 어둠은 가장자리 기울기(전반사·굴절 이탈)에서 나온다. 구면 캡에서 가장자리 기울기 = tan θ.
+   WF 포물면은 θ와 무관하게 가장자리 1.3, 반경의 54 %부터 손실 → **모든 방울에 넓은 링**. 실제는:
+   - 충돌로 퍼진 뒤 수축해 남은 방울은 **후퇴 접촉각** 근처에 머문다(폴리카보네이트·하드코트 정적 ~75–85°, 후퇴 ~50–60°로 가정 — 측정값 아님).
+   - 미끄러지는 방울의 뒤쪽은 더 후퇴(이력), 이미 젖은 표면(수막·미세 haze) 위 방울은 접촉각이 크게 낮아 경계가 표면에 녹는다(레퍼런스 A).
+   구현: ρ = |∇U|R/1.3(반경 비율)을 구면 캡 기울기 s = ρ sinθ / √(1 − ρ² sin²θ)로 바꾼다. θ = 55° ± 12°(시드), 뒤쪽 −20°×늘임 비율,
+   × (1 − 0.5·saturate(film + 2·haze)). 링 시작: 90° ρ 0.57, 55° ρ 0.70, ≤ 35° 링 없음. UI `Drop contact angle`.
+5. **기류 흔들림(사용자 아이디어):** 날아가지 않은 부착 방울이 강한 기류에서 요동. 진폭 = 0.12 × smoothstep(0.1, 0.8, Fa/Fpin), Fa/Fpin = C·r·u²
+   (C = 0.25ρC_dπ/(2γΔcos), 표면 접선 공기속도 u = 기류 × airSurface). 공기 방향 축으로 늘었다 줄었다(8 Hz × 0.8–1.2, 1.73배 배음) + 0.3R 흔들림 이동.
+   방향은 화면-표면 야코비안과 ddx/ddy(posW)로 바이저 mm 좌표의 공기 방향을 구한다. mm 방울의 실제 고유진동(수십 Hz)은 60 fps에서 보이지 않으므로
+   보이는 대역(돌풍·스틱슬립)으로 둔 양식화다. 정지(시뮬 일시정지) 시 멈춤. UI `Drop wobble in airflow`.
+
+검사: DXC 9 OK(전체 2.5 s), mock OK. 확인 순서:
+1. FXC 시간과 게임 첫 생성 시간이 rev19보다 크게 줄었는지.
+2. 크래시 장면 재현(4회): 크래시가 사라지는지. 남으면 RainFX v2 끈 상태로 같은 장면 + CSP 로그.
+3. Debug 0: 링이 방울마다 다른지(작고 둥근 방울 얇은 링, 젖은 곳 링 없음), 로브 이중 테두리 소멸. 접촉각 70–90 / 35–45 비교.
+4. 고속 주행(T3/T4): 부착 방울 흔들림이 보이는지, 과한지(0.05–0.2).
+5. 비용: transparent(D-A 켬/끔), frame preparation.

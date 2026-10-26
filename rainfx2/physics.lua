@@ -16,14 +16,21 @@ P.DEFAULTS = {
   pinNoiseMin = 0.6, pinNoiseMax = 1.4,   -- per-cell heterogeneity (stick-slip)
   pinKinetic = 0.6,         -- hysteresis of a moving drop / static (rev8, no permanent traps)
   -- motion: quasi-steady sliding, v = (F - Fpin) / (friction * r)
-  friction = 0.06,          -- N s/m^2 = c * viscosity (c ~ 20..60 for sliding caps)
+  -- rev19 (rev18 Debug 4: the right third ran into the solver limit at 1x): 0.06 slid a 2.2 mm
+  -- drop at 1.4 m/s under gravity alone, i.e. capillary number Ca = mu v / gamma = 0.019, above
+  -- the pearling/rivulet transition of sliding drops (Ca ~ 0.005-0.01, Podgorski, Flesselles &
+  -- Limat 2001; Le Grand, Daerr & Limat 2005). Contact-line dissipation for a ~90 deg cap is
+  -- F ~ (3 mu ln(L/a) / theta) * 4r * v ~ 0.1..0.15 * r * v (ln ~ 10..15).
+  friction = 0.15,          -- N s/m^2 (gravity only: 1.2 mm 0.09, 1.6 mm 0.25, 2.2 mm 0.5 m/s)
   dragCd = 1.0, rhoAir = 1.2,
   -- rev13: 0.35 streamed every drop >= 0.2 mm off the visor at 250 km/h (drop cover 1.5 %
   -- in all T3/T4 runs); reference B shows mostly static soft drops at speed (helmet behind
   -- screen/halo). 0.15: <= 0.3 mm stay, 0.5 mm creep, >= 1 mm stream/shed.
   airSurface = 0.15,        -- tangential air speed at the visor / free-stream relative air
-  vMax = 1.5,               -- m/s, cap of the quasi-steady speed
-  vShed = 3.0,              -- m/s, faster drops leave the surface (shed) instead of moving
+  vMax = 0.5,               -- m/s, rev19: Ca ~ 0.007, upper end of an intact sliding drop (was 1.5)
+  -- shed test uses the UNCAPPED quasi-steady speed: 3.0 at friction 0.06 = 1.2 at 0.15 (same force,
+  -- airflow shedding at speed unchanged)
+  vShed = 1.2,              -- m/s, faster drops leave the surface (shed) instead of moving
   -- losses
   -- rev9: 0.02 removed ~2%/mm from a 0.5 mm drop (half its volume across the visor),
   -- drops shrank below the kinetic threshold and stopped mid-way. Hydrophobic coat: ~0.25.

@@ -48,16 +48,25 @@ local DEFAULTS = {
   -- sheetDrain rev14 0.5 -> 0.1: drainage dominated the film balance (eq ~ supply), now edge
   -- outflow does (eq ~ supply^(1/2..1/3)), compressing light..heavy into the cover window.
   traceDecay = 0.6, traceAmount = 0.6, sweepWidth = 0.9, sheetDrain = 0.1,
-  -- drop shape (CSP rain-map model, rev4): contour noise, fixed-width rim bevel, weak dome
-  contourAmp = 0.25, bevelMM = 1.5, aspect = 0.5, maxHeightMM = 1.2, domeK = 0.25, slopeMax = 1.5,
-  -- optics (rev5): pupil defocus + physical deflection (n-1)*slope, housing-free source
-  apertureMM = 1.2,        -- entrance pupil of the reference camera = blur disc on the visor
-  refraction = 1.0,        -- gain on the physical deflection
-  dropVeil = 0.2,          -- rev16: drop colour toward the veil (reference B/C soft bright discs)
+  -- drop lens (rev18): legacy Water Field rule, docs/RAINFX_V2_WF_LENS_PLAN.md
+  kernelScale = 1.24, threshold = 0.35,     -- dome 1-(d/1.24R)^2, silhouette at U = 0.35 (= R)
+  -- rev20 drop surface: contact angle of an impact-deposited drop (~ receding angle on polycarbonate
+  -- / hard coat), per-drop spread, extra recession at the sliding rear, flattening on a wet surface.
+  contactDeg = 55, contactSpread = 12, hysteresisDeg = 20, wetFlatten = 0.5,
+  -- rev20 wobble of pinned drops in airflow (amplitude ~ drag/pinning), visible-rate tones
+  wobbleAmp = 0.12, wobbleHz = 8.0,
+  motionStretch = 0.35,                     -- WF MOTION_STRETCH
+  minDrawMM = 0.2,                          -- smaller drops are drawn at this radius
+  wfRefraction = 0.69,                      -- WF REFRACTION (screen heights at slope 1)
+  wfSceneMip = 2.0, wfSlopeMip = 1.5,       -- WF SCENE_MIP 3 on a full-res shot = 2 on the half-res source
+  largeStartPx = 8, largeFullPx = 30, largeBlurMip = 1.5, largeWarpPx = 4,   -- WF LARGE_WARP_PIXELS (rev19)
+  -- defocus (rev18, D-C): thin-lens circle of confusion, docs/RAINFX_V2_DEFOCUS_PLAN.md
+  apertureMM = 1.2,        -- entrance pupil A
+  focusM = 0.12,           -- focus distance zf (left visor ~ in focus, near-lens right blurred)
+  defocusDA = true,        -- rev19: D-A stochastic colour gather (4 taps where CoC > 1 px); off = D-C
   housingM = 0.20,         -- frame pixels closer than this (linear m) are helmet housing
   sourceScale = 0.5,       -- refraction source resolution (fraction of the frame)
-  dropMip = 0.5, edgeLoss = 0.20, lossStart = 1.00, lossEnd = 1.60,   -- rev16 edgeLoss 0.5 -> 0.2
-  glint = 0.45, toneMin = 0.85, toneMax = 1.45, toneFloor = 0.25,     -- rev16 toneMin 0.55 -> 0.85
+  edgeLoss = 0.75, lossStart = 0.70, lossEnd = 1.30, glint = 0.45,   -- WF rim (rev18)
   -- water film optics (rev11)
   filmMinMM = 0.05, filmFullMM = 0.15, filmRefract = 12.0, filmAbsorb = 0.8, filmMip = 4.5, filmVeil = 0.25,
   -- forward scattering veil of the VISOR SURFACE only (rev17, docs/RAINFX_V2_EVAL.md section 11):
@@ -70,11 +79,12 @@ local DEFAULTS = {
 }
 
 -- Persisted user controls (subset of DEFAULTS + enable switch).
-local STORED = { enabled = true, exposure = DEFAULTS.exposure, refractK = DEFAULTS.refraction,
+local STORED = { enabled = true, exposure = DEFAULTS.exposure, wfRefraction = DEFAULTS.wfRefraction,
+  wfSceneMip = DEFAULTS.wfSceneMip, focusM = DEFAULTS.focusM, defocusDA = DEFAULTS.defocusDA,
+  contactDeg = DEFAULTS.contactDeg, wobbleAmp = DEFAULTS.wobbleAmp,
   apertureMM = DEFAULTS.apertureMM, hazeK = DEFAULTS.hazeK, substeps = DEFAULTS.substeps, freezeRain = false, windK = 1.0, metrics = false,
   filmK = DEFAULTS.filmK, sprayK = DEFAULTS.sprayK, filmRefract = DEFAULTS.filmRefract, filmVeil = DEFAULTS.filmVeil,
   scatterK = DEFAULTS.scatterK,
-  contourAmp = DEFAULTS.contourAmp, bevelMM = DEFAULTS.bevelMM,
   debug = DEFAULTS.debug, invertSide = false }
 
 
@@ -265,8 +275,10 @@ function R2:simulate(sim)
   self.simFrame = sim.frame
   local s = self.store
   local p = self.p
-  p.exposure, p.refraction, p.apertureMM, p.hazeK, p.debug = s.exposure, s.refractK, s.apertureMM, s.hazeK, s.debug
-  p.contourAmp, p.bevelMM = s.contourAmp, s.bevelMM
+  p.exposure, p.apertureMM, p.hazeK, p.debug = s.exposure, s.apertureMM, s.hazeK, s.debug
+  p.wfRefraction, p.wfSceneMip, p.focusM = s.wfRefraction, s.wfSceneMip, s.focusM
+  p.contactDeg, p.wobbleAmp = s.contactDeg, s.wobbleAmp
+  p.defocusDA = s.defocusDA
   local userSub = math.max(1, math.min(4, math.floor(s.substeps + 0.5)))
   p.filmK, p.sprayK, p.filmRefract, p.filmVeil = s.filmK, s.sprayK, s.filmRefract, s.filmVeil
   p.scatterK = s.scatterK
@@ -277,6 +289,7 @@ function R2:simulate(sim)
   local dt = sim.dt or 0
   if dt <= 0 then self.status = 'paused'; return end
   dt = math.min(dt, 1 / 20) * (self.timeScale or 1)   -- rev9: slow motion for physics review
+  self.wobbleT = ((self.wobbleT or 0) + dt) % 600
   self:updateInputs(sim)
   -- Substeps: enough that the fastest expected drop (2 mm, forces aligned) stays in the
   -- gather window; faster than that it is speed-limited (r2Predict), not deleted.
@@ -351,22 +364,46 @@ function R2:drawParams(depth)
   v.gR2ShapeK = p.shapeK
   v.gR2ApertureMM = p.apertureMM
   v.gR2FovK = 0.5 / math.tan(math.rad(math.max(ac.getSim().cameraFOV or 60, 1)) * 0.5)
-  v.gR2ContourAmp = p.contourAmp
-  v.gR2BevelMM = p.bevelMM
-  v.gR2Aspect = p.aspect
-  v.gR2MaxHeightMM = p.maxHeightMM
-  v.gR2DomeK = p.domeK
-  v.gR2SlopeMax = p.slopeMax
-  v.gR2Refraction = p.refraction
-  v.gR2DropMip = p.dropMip
+  v.gR2FocusM = p.focusM
+  -- Camera and visor transform at DRAW time (camera scripts may move both after onSceneReady).
+  local simNow = ac.getSim()
+  self.camPos = self.camPos or vec3()
+  self.camPos:set(simNow.cameraPosition)
+  v.gR2CamPos = self.camPos
+  if self.mesh then self.drawToWorld = self.mesh:getWorldTransformationRaw():clone() end   -- PosL is in this mesh's space
+  v.gR2ObjToWorld = self.drawToWorld or self.objToWorld
+  local function coc(z) return p.apertureMM * math.abs(p.focusM - z) / math.max(p.focusM, 1e-3) end
+  self.cocInfo = string.format('CoC on the visor: %.2f mm @3 cm, %.2f mm @6 cm, %.2f mm @12 cm (Debug 6 = distance / CoC px)',
+    coc(0.03), coc(0.06), coc(0.12))
+  v.gR2KernelScale = p.kernelScale
+  v.gR2Threshold = p.threshold
+  v.gR2ContactDeg = p.contactDeg
+  v.gR2ContactSpread = p.contactSpread
+  v.gR2Hysteresis = p.hysteresisDeg
+  v.gR2WetFlatten = p.wetFlatten
+  v.gR2WobbleAmp = p.wobbleAmp
+  v.gR2WobbleHz = p.wobbleHz
+  -- Fa/Fpin = (0.25 rho Cd pi / (2 gamma dcos_coat)) * r * u^2, r in mm -> * 1e-3
+  v.gR2WobbleC = 0.25 * p.rhoAir * p.dragCd * math.pi / (2 * p.surfaceTension * p.pinCoat) * 1e-3
+  v.gR2AirW = self.airW or vec3()
+  v.gR2AirSurface = p.airSurface
+  v.gR2Time = self.wobbleT or 0
+  v.gR2MotionStretch = p.motionStretch
+  v.gR2MinDrawMM = p.minDrawMM
+  v.gR2WFRefraction = p.wfRefraction
+  v.gR2WFSceneMip = p.wfSceneMip
+  v.gR2WFSlopeMip = p.wfSlopeMip
+  v.gR2LargeStartPx = p.largeStartPx
+  v.gR2LargeFullPx = p.largeFullPx
+  v.gR2LargeBlurMip = p.largeBlurMip
+  v.gR2LargeWarpPx = p.largeWarpPx
+  v.gR2DefocusMode = p.defocusDA and 1 or 0
+  self.drawCount = ((self.drawCount or 0) + 1) % 4096
+  v.gR2FrameNoise = self.drawCount                -- D-A tap rotation (TAA/DLSS resolves it)
   v.gR2EdgeLoss = p.edgeLoss
-  v.gR2DropVeil = p.dropVeil
   v.gR2LossStart = p.lossStart
   v.gR2LossEnd = p.lossEnd
   v.gR2Glint = p.glint
-  v.gR2ToneMin = p.toneMin
-  v.gR2ToneMax = p.toneMax
-  v.gR2ToneFloor = p.toneFloor
   v.gR2ScreenUp = self.screenUp or vec2(0, -1)
   v.gR2HazeK = p.hazeK
   v.gR2TraceHaze = p.traceHaze
@@ -435,6 +472,22 @@ end
 -- src: HDR frame copy with mips taken before the glass stack (fallbackSource). Returns true if drawn.
 function R2:draw(src, viewKey, depth)
   if not self:enabled() or not self.opticsReady or not self.mesh or not src then return false end
+  -- rev20 crash guard (rev19 review: camera passing through an AI car, then its interior in view
+  -- -> 4/4 game crashes). Extra views with another render-target size (car mirrors / windscreen
+  -- passes) reached this draw before the frame's main view was tracked, and prepareSource then
+  -- disposed and re-created the full-res HDR canvas with mips several times per frame while the
+  -- previous one could still be bound. Draw only into the established main size; adopt a new size
+  -- only after it has been the only one seen for 30 consecutive draws (window resize).
+  local rt = render.getRenderTargetSize()
+  local rw, rh = math.floor(rt.x), math.floor(rt.y)
+  if rw ~= self.drawW or rh ~= self.drawH then
+    local key = rw * 65536 + rh
+    if self.sizeKey == key then self.sizeVotes = self.sizeVotes + 1 else self.sizeKey, self.sizeVotes = key, 1 end
+    if self.drawW and self.sizeVotes < 30 then self.skipReason = string.format('skipped %dx%d view', rw, rh); return false end
+    self.drawW, self.drawH = rw, rh
+  else
+    self.sizeKey, self.sizeVotes = nil, 0
+  end
   local memo = depth and 'depthViewKey' or 'colourViewKey'
   if viewKey and self[memo] == viewKey then return false end
   local t = self:drawParams(depth)
@@ -445,6 +498,7 @@ function R2:draw(src, viewKey, depth)
     self.sceneTex = res or src
   end
   t.textures.txR2Scene = self.sceneTex or src
+  if not depth and self.offscreenTest == 'pending' then self:offscreenTestRun() end
   t.textures.txR2State = self.S[self.si]
   t.textures.txR2Field = self.F[self.fi]
   render.setCullMode(render.CullMode.None)
@@ -459,24 +513,72 @@ function R2:draw(src, viewKey, depth)
   return res ~= false
 end
 
+-- rev18 experiment for defocus D-B (docs/RAINFX_V2_DEFOCUS_PLAN.md section 6): can the visor
+-- copy be drawn with render.mesh into an ExtraCanvas from inside the render event? The test
+-- draws the mesh UVs into a 512x288 canvas and reads it back; the result decides D-B vs D-A.
+function R2:offscreenTestRun()
+  self.offscreenTest = 'running'
+  local ok, err = pcall(function()
+    if not self.testCanvas then
+      self.testCanvas = ui.ExtraCanvas(vec2(512, 288), 1, render.AntialiasingMode.None, render.TextureFormat.R8G8B8A8.UNorm)
+      self.testCanvas:setName('RainFX2 offscreen mesh test')
+    end
+    self.testCanvas:clear(rgbm(0, 0, 0, 0))
+    local drawn = nil
+    self.mesh:setVisible(true, false)
+    self.testCanvas:update(function()
+      drawn = render.mesh({ mesh = self.mesh, transform = 'original', textures = {}, values = {},
+        shader = 'float4 main(PS_IN pin) { return float4(frac(pin.Tex.x * 8), frac(pin.Tex.y * 8), 1, 1); }' })
+    end)
+    self.mesh:setVisible(false, false)
+    self.testCanvas:accessData(function(e2, data)
+      if e2 or not data then self.offscreenTest = 'readback failed: ' .. tostring(e2); return end
+      local n, c = 0, rgbm()
+      for y = 0, 287, 4 do for x = 0, 511, 4 do
+        data:colorTo(c, x, y)
+        if c.mult > 0.5 then n = n + 1 end
+      end end
+      data:dispose()
+      self.offscreenTest = string.format('render.mesh returned %s, covered samples %d / %d -> %s',
+        tostring(drawn), n, 128 * 72, n > 0 and 'D-B possible' or 'D-B NOT possible (use D-A)')
+    end)
+  end)
+  if not ok then self.offscreenTest = 'error: ' .. tostring(err) end
+end
+
+function R2:offscreenTestUI()
+  if ui.button('Test: draw visor mesh into an offscreen canvas (defocus D-B)') then self.offscreenTest = 'pending' end
+  if self.offscreenTest then
+    ui.text('Offscreen test: ' .. self.offscreenTest)
+    if self.testCanvas and self.offscreenTest:find('covered') then ui.image(self.testCanvas, vec2(256, 144)) end
+  end
+end
+
 function R2:ui()
   local s = self.store
   ui.text('RainFX v2 (cell-gather): ' .. (self.err or self.status))
   if ui.checkbox('Enable RainFX v2 (turns legacy RainFX off)', s.enabled) then s.enabled = not s.enabled end
   if not s.enabled then return end
   s.exposure = ui.slider('##rfx2exp', s.exposure, 0, 1, 'Rain exposure: %.2f')
-  if ui.button('Reset look to defaults (aperture, refraction, contour, bevel, film, scatter)') then
-    s.apertureMM, s.refractK, s.contourAmp, s.bevelMM = DEFAULTS.apertureMM, DEFAULTS.refraction, DEFAULTS.contourAmp, DEFAULTS.bevelMM
+  if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
+    s.apertureMM, s.focusM, s.wfRefraction, s.wfSceneMip = DEFAULTS.apertureMM, DEFAULTS.focusM, DEFAULTS.wfRefraction, DEFAULTS.wfSceneMip
+    s.contactDeg, s.wobbleAmp = DEFAULTS.contactDeg, DEFAULTS.wobbleAmp
+    s.defocusDA = DEFAULTS.defocusDA
     s.filmRefract, s.filmVeil, s.scatterK = DEFAULTS.filmRefract, DEFAULTS.filmVeil, DEFAULTS.scatterK
   end
-  s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Defocus: camera aperture %.2f mm (0 = sharp)')
-  s.refractK = ui.slider('##rfx2ref', s.refractK, 0, 2, 'Refraction: %.2f x physical (n-1)')
-  s.contourAmp = ui.slider('##rfx2cont', s.contourAmp, 0, 0.4, 'Contour irregularity: %.2f')
-  s.bevelMM = ui.slider('##rfx2bev', s.bevelMM, 0.05, 1.5, 'Rim bevel width: %.2f mm')
+  s.wfRefraction = ui.slider('##rfx2ref', s.wfRefraction, 0, 1.5, 'Drop lens refraction (WF): %.2f')
+  s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Drop image blur (scene mip): %.1f')
+  s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Drop contact angle: %.0f deg (rim darkness; wet surface flattens)')
+  s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Drop wobble in airflow: %.2f')
+  s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Defocus: aperture %.2f mm (0 = sharp)')
+  s.focusM = ui.slider('##rfx2fz', s.focusM, 0.03, 1.0, 'Defocus: focus distance %.3f m')
+  if ui.checkbox('Defocus: D-A colour gather (4 taps near the lens; off = D-C analytic)', s.defocusDA) then s.defocusDA = not s.defocusDA end
+  if self.cocInfo then ui.text(self.cocInfo) end
+  self:offscreenTestUI()
   s.hazeK = ui.slider('##rfx2haze', s.hazeK, 0, 2, 'Haze strength: %.2f')
   s.substeps = ui.slider('##rfx2sub', s.substeps, 1, 4, 'Min substeps: %.0f (auto up to 4)', true)
   if ui.checkbox('Invert exposure side (auto: side facing away from the eye)', s.invertSide) then s.invertSide = not s.invertSide end
-  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 5, 'Debug: 1 water, 2 exposure, 3 refr. source, 4 physics, 5 film: %.0f', true)
+  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 6, 'Debug: 1 water, 2 exposure, 3 refr. source, 4 physics, 5 film, 6 defocus: %.0f', true)
   self:filmUI()
   self:physicsUI()
   local st = self.stats
@@ -489,7 +591,7 @@ function R2:ui()
 end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
-local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,refractK,contourAmp,bevelMM,filmRefract,filmVeil,scatterK\n'
+local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK\n'
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -524,11 +626,12 @@ end
 
 function R2:metricsWrite(sim)
   local s, st, si, m, d = ac.getSim(), self.stats, self.sprayInfo or {}, self.metrics, self.diag or {}
-  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%.2f,%.2f,%.1f,%.2f,%.2f\n',
+  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f\n',
     os.clock(), s.weatherType or -1, s.rainIntensity or 0, s.rainWetness or 0, s.rainWater or 0,
     s.windSpeedKmh or 0, (st.carSpeed or 0) * 3.6, st.fluxMMs or 0, st.spray or 0, si.cars or 0, si.nearestM or -1,
     st.filmRate or 0, d.filmEqMM or 0, m.film, m.drops, m.haze, self.p.substeps or 0,
-    self.store.apertureMM, self.store.refractK, self.store.contourAmp, self.store.bevelMM,
+    self.store.apertureMM, self.store.focusM, self.store.defocusDA and 1 or 0, self.store.contactDeg,
+    self.store.wfRefraction, self.store.wfSceneMip,
     self.store.filmRefract, self.store.filmVeil, self.store.scatterK)
   local ok = pcall(function()
     local f = io.open(self.recordPath, 'a')
@@ -605,6 +708,7 @@ function R2:dispose()
   if self.mesh then self.mesh:dispose() end
   if self.source then self.source:dispose() end
   if self.C then self.C:dispose() end
+  if self.testCanvas then self.testCanvas:dispose(); self.testCanvas = nil end
   if self.Mc then self.Mc:dispose(); self.Mc = nil end
   self.source, self.sceneTex, self.C = nil, nil, nil
   self.S, self.F, self.mesh, self.ready, self.opticsReady = nil, nil, nil, false, false

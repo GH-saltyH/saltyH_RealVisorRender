@@ -106,6 +106,12 @@ local appFolder =
             end
             st.viewSkipReason=nil;return st.mainViewKey
         end
+        -- RainFX v2 rev20 crash guard: a view rendered before this frame's main view (car mirrors,
+        -- another car's windscreen pass) with a different target size must not re-create the
+        -- full-res glass source canvases (dispose/re-create churn while still bound).
+        if st.mainViewW and (w~=st.mainViewW or h~=st.mainViewH) then
+            st.viewSkipReason='Untracked view with another target size: '..w..'x'..h;return nil
+        end
         return table.concat({sim.frame,'untracked',w,h},':')
     end
     render.on('main.track.opaque',rainDynamicSceneCopyState.beginMainView)

@@ -21,7 +21,7 @@ SRC = os.path.join(ROOT, 'rainfx2', 'shaders')
 OUT = os.path.join(ROOT, 'tmp', 'rainfx2_shaders')
 
 FLOAT2 = {'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
-FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor'}
+FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos'}
 MATRIX = {'gR2ObjToWorld'}
 
 SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2Du', 'txR2Dv', 'txR2Mask']
@@ -100,10 +100,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--fxc')
     ap.add_argument('--emit-only', action='store_true')
+    ap.add_argument('--dxc', help='use DXC (ps_6_0) instead of FXC, e.g. on Linux: syntax/semantics check only')
     a = ap.parse_args()
     tpl = load_templates()
     os.makedirs(OUT, exist_ok=True)
-    fxc = None if a.emit_only else find_fxc(a.fxc)
+    fxc = None if a.emit_only else (a.dxc or find_fxc(a.fxc))
     failed = 0
     for name, template, files, textures, defines in PASSES:
         path = os.path.join(OUT, name + '.hlsl')
@@ -111,8 +112,9 @@ def main():
         if not fxc:
             print('emitted', path)
             continue
-        r = subprocess.run([fxc, '/nologo', '/T', 'ps_5_0', '/E', 'entryPoint', '/O3', '/Fo', path[:-5] + '.cso', path],
-                           capture_output=True, text=True)
+        cmd = ([a.dxc, '-T', 'ps_6_0', '-E', 'entryPoint', '-HV', '2018', '-Wno-effects-syntax', '-Fo', path[:-5] + '.dxil', path]
+               if a.dxc else [fxc, '/nologo', '/T', 'ps_5_0', '/E', 'entryPoint', '/O3', '/Fo', path[:-5] + '.cso', path])
+        r = subprocess.run(cmd, capture_output=True, text=True)
         ok = r.returncode == 0
         failed += not ok
         log = (r.stdout or '') + (r.stderr or '')

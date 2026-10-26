@@ -25,4 +25,9 @@ core.store.metrics=true
 core:simulate({frame=5,dt=1/60,focusedCar=0,rainIntensity=0.08,rainWater=0.5,rainWetness=1,carsCount=3,windVelocityKmh=vec2(3,4),fogColor=rgb(.6,.65,.7),lightColor=rgb(2,2,2),cameraUp=vec3(0,1,0),cameraSide=vec3(1,0,0)})
 assert(core.metrics and math.abs(core.metrics.film-0.5)<1e-6, 'metrics readback')
 print(string.format('metrics film %.2f drops %.2f haze %.2f', core.metrics.film, core.metrics.drops, core.metrics.haze))
+core.offscreenTest='pending'; core.colourViewKey=nil
+core:draw({name='src'},'k9',false)
+print('offscreen test: '..tostring(core.offscreenTest))
+assert(core.camPos and core.camPos.x==1, 'camera position at draw time')
+core:ui()
 core:dispose(); print('ok')
