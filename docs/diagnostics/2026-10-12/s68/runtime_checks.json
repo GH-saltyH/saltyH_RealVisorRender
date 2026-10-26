@@ -1,6 +1,0 @@
-[
-  "Reproduced old same-frame suppression; new main-view epoch permits another view/redraw, excludes owned captures and mismatched targets",
-  "Production stack retries pending EXT/native mask; successful INT/COAT are not doubled; completion is published only on success per view",
-  "Native render-state UI uses the actual callback contract; expanded/collapsed nodes work without treePop or material mutation",
-  "Settings, New Trail and physical surface transport unchanged for this bug-fix step"
-]

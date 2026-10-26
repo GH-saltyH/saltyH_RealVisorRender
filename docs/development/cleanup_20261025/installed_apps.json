@@ -1,0 +1,97 @@
+{
+  "archive": "C:\\source\\LocalProjects\\saltyH_RealVisorRender\\archive\\2026-10-25_installed_probe_apps.zip",
+  "archiveSHA256": "7b6c0922b8541d2046d4b0c7b07bf5dbb0698eb04d2accccecdf3e162eb4e073",
+  "apps": [
+    {
+      "name": "realvisor_s126_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s126_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s126_probe",
+      "symlink": false,
+      "files": 4
+    },
+    {
+      "name": "realvisor_s127_trace",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s127_trace",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s127_trace",
+      "symlink": false,
+      "files": 5
+    },
+    {
+      "name": "realvisor_s128_reader",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s128_reader",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s128_reader",
+      "symlink": false,
+      "files": 4
+    },
+    {
+      "name": "realvisor_s129_abi",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s129_abi",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s129_abi",
+      "symlink": false,
+      "files": 5
+    },
+    {
+      "name": "realvisor_s130_axis",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s130_axis",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s130_axis",
+      "symlink": false,
+      "files": 6
+    },
+    {
+      "name": "realvisor_s130_axis_v2",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s130_axis_v2",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s130_axis_v2",
+      "symlink": false,
+      "files": 6
+    },
+    {
+      "name": "realvisor_s131_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s131_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s131_probe",
+      "symlink": false,
+      "files": 8
+    },
+    {
+      "name": "realvisor_s132_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s132_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s132_probe",
+      "symlink": false,
+      "files": 8
+    },
+    {
+      "name": "realvisor_s133_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s133_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s133_probe",
+      "symlink": false,
+      "files": 10
+    },
+    {
+      "name": "realvisor_s137_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s137_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s137_probe",
+      "symlink": false,
+      "files": 6
+    },
+    {
+      "name": "realvisor_s139v2_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s139v2_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s139v2_probe",
+      "symlink": false,
+      "files": 6
+    },
+    {
+      "name": "realvisor_s139_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s139_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s139_probe",
+      "symlink": false,
+      "files": 6
+    },
+    {
+      "name": "realvisor_s151_probe",
+      "path": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s151_probe",
+      "resolved": "D:\\Games\\Assetto Corsa\\apps\\lua\\realvisor_s151_probe",
+      "symlink": false,
+      "files": 7
+    }
+  ]
+}

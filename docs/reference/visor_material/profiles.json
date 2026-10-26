@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "status": "offline hypotheses only, not game settings or measured visor constants",
+  "commonWater": {"rhoKgM3": 998.2, "gammaNM": 0.0728, "muPaS": 0.001002},
+  "commonDisplay": {"diameterGain": 0.31748021039363994, "uvDiameterPerMM": 0.00146484375},
+  "invariants": ["Same source volume and incident distribution in comparisons", "Display gain never enters force, mass or deposition", "No automatic car-glass versus visor preset inferred from substrate name", "No weather-driven material switching"],
+  "profiles": [
+    {"id": "runtime_baseline", "label": "Current baseline", "thetaEqDeg": 90, "thetaAdvStaticDeg": 100, "thetaRecStaticDeg": 80, "thetaAdvDynamicDeg": 93, "thetaRecDynamicDeg": 87, "confidence": "matches code defaults, not a measured sample", "depositionCoefficient": null},
+    {"id": "wetting_comparator", "label": "Wetting comparator", "thetaEqDeg": 65, "thetaAdvStaticDeg": 75, "thetaRecStaticDeg": 55, "thetaAdvDynamicDeg": 68, "thetaRecDynamicDeg": 62, "confidence": "illustrative counterfactual, not generic car glass", "depositionCoefficient": null},
+    {"id": "beading_same_hysteresis", "label": "Beading, same hysteresis", "thetaEqDeg": 105, "thetaAdvStaticDeg": 115, "thetaRecStaticDeg": 95, "thetaAdvDynamicDeg": 108, "thetaRecDynamicDeg": 102, "confidence": "unmeasured exterior visor hypothesis", "depositionCoefficient": null},
+    {"id": "beading_low_pinning", "label": "Beading, low pinning", "thetaEqDeg": 105, "thetaAdvStaticDeg": 109, "thetaRecStaticDeg": 101, "thetaAdvDynamicDeg": 106.5, "thetaRecDynamicDeg": 103.5, "confidence": "unmeasured exterior visor hypothesis", "pinningReference": "Lower than uniform bare20deg baseline; not necessarily lower than captured coated4deg region", "depositionCoefficient": null},
+    {"id": "beading_high_pinning", "label": "Beading, high pinning", "thetaEqDeg": 105, "thetaAdvStaticDeg": 120, "thetaRecStaticDeg": 90, "thetaAdvDynamicDeg": 111, "thetaRecDynamicDeg": 99, "confidence": "unmeasured high-pinning control", "depositionCoefficient": null}
+  ],
+  "calibrationRanges": {
+    "status": "bounded engineering search around hypotheses, not published universal visor ranges",
+    "externalBeadingThetaEqDeg": [90, 115],
+    "staticHysteresisDeg": [4, 30],
+    "dynamicHysteresisDeg": [2, 12],
+    "filmDepositCoefficientAxis": [0.05, 0.15, 0.35],
+    "localAirFractionAxis": [0.1, 0.15, 0.25],
+    "opticalDistanceMMTestAxis": [50, 100, 200]
+  },
+  "roleSeparation": {
+    "exterior": "rain impact, pinning, movement, residue and local coating mask",
+    "interior": "condensation or absorbing insert requires surface temperature/moisture model; not simulated by exterior rain supply",
+    "optics": "actual camera distance, mesh metric/normal, substrate layers, water surface; no bulk-polymer multiplier on water volume",
+    "presentation": "shared head/trail footprint contract, pixel filtering and optical sampling cap; separate from physical state"
+  }
+}

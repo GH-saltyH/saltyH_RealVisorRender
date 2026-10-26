@@ -1,0 +1,27 @@
+{
+  "scope": "visual_target_acceptance_not_runtime_delivery",
+  "recordedUTC": "2026-10-24T17:03:49.112834+00:00",
+  "files": {
+    "docs/development/work_ledger.json": "4c072d301e694219f640158753ac45d16ba3587ee1240a97f3fbcdb4434a20d8",
+    "docs/diagnostics/2026-10-25/target_scenes/media.json": "3c688c3b67d4c818decab49c5b057d60f05b5373a712565b281004bcb3029e68",
+    "docs/RAINFX_TARGET_SCENES.md": "7be5826535e1ca435822efb5ef42a99ea41087bbd47786920c7864bb39258041",
+    "docs/RAINFX_PRODUCT_REFOCUS_2026-10-25.md": "c91b6a1dc455fac775f22f50bbc4e11916bf15af5a5e9c8f5da2e9acebaf924d",
+    "docs/RAINFX_PREVIEW_VISUAL_CONTRACT.md": "864d26e31a7647b80532089d11b0a487b6ce2619f17d1b086676c5f914f11b3b",
+    "docs/RAINFX_ROADMAP.md": "ccb7cbd7365adcfd58a7387f75c8b6f3b41166b02e637eac118d2f721e792823",
+    "docs/diagnostics/2026-10-25/target_scenes/video1_00.jpg": "55086b0ab9b4a89185ac502c54776197f956506b498270865a1ab837cfacee54",
+    "docs/diagnostics/2026-10-25/target_scenes/video1_05.jpg": "5a791e9024c236d570384a5ff00e5cdca1b2ee5f5da01ae20c316e1843c08c2c",
+    "docs/diagnostics/2026-10-25/target_scenes/video1_10.jpg": "f0bf49034a3e3ea4f351ef26ab9a18326a2940f78b37feeba645963da6a9d0c1",
+    "docs/diagnostics/2026-10-25/target_scenes/video1_15.jpg": "0d8dd9d65e9cbca796063d381e5427fc7c1505756287c2b49c5c3ae0d860e2fe",
+    "docs/diagnostics/2026-10-25/target_scenes/video1_contact.jpg": "e46110e3530c5d6d24fa04ea59beb0ff9ed6d2971d4348e765dc744bbeb309ef",
+    "docs/diagnostics/2026-10-25/target_scenes/video2_00.jpg": "db01c27b350ed51be7f2266efc75cd95e62b62adb4be583c26cb3e0e0e0b5e59",
+    "docs/diagnostics/2026-10-25/target_scenes/video2_05.jpg": "59e45e4af89537d7291abb24e5705a22f1a48a905feb7179a6b32037a797ff37",
+    "docs/diagnostics/2026-10-25/target_scenes/video2_10.jpg": "927eebdbef0a4731bca848374b16691c545851df90c04058a90bdd1c71947e6c",
+    "docs/diagnostics/2026-10-25/target_scenes/video2_15.jpg": "4a7b368b1074b071b75ce4d224929f5eb0a5282b07602f096d9f3d62466d9fee",
+    "docs/diagnostics/2026-10-25/target_scenes/video2_contact.jpg": "2343730a65fe9364846b4359159168821206fd3cb59914fb6ecaefc347faa43e",
+    "docs/diagnostics/2026-10-25/target_scenes/video3_00.jpg": "604ba686fe3a6f1974d7be2cdce680b0ca9d628cd0c081f3fabc99e230fb6f83",
+    "docs/diagnostics/2026-10-25/target_scenes/video3_05.jpg": "bc569581ee3c9d186d987a4109e968d1d41806dc1c58be1369f966e4e375d34b",
+    "docs/diagnostics/2026-10-25/target_scenes/video3_10.jpg": "8cb0c90a954c40f2f07baf1806235076192fee0c31c41d46743b55c21f6e5d61",
+    "docs/diagnostics/2026-10-25/target_scenes/video3_15.jpg": "6c28ca7c920834b7dddf38be7d4681e87fa3d1001b9e5f16b5bebaaa02ecf665",
+    "docs/diagnostics/2026-10-25/target_scenes/video3_contact.jpg": "216c71fda37fe2219cfd6a4d2b52f919df0a6208e24494b85edac98e43184fcf"
+  }
+}

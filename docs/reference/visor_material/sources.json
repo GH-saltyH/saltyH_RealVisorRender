@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "accessedLocalDate": "2026-10-25",
+  "scope": "Primary-source findings and original project notes; no full paper copies or model training",
+  "sources": [
+    {
+      "id": "wetting_friction",
+      "title": "Droplet slipperiness despite surface heterogeneity at molecular scale",
+      "url": "https://www.nature.com/articles/s41557-023-01346-3",
+      "doi": "10.1038/s41557-023-01346-3",
+      "kind": "primary experimental research",
+      "readScope": "Publisher full text, abstract and contact-line friction equation",
+      "finding": "Contact angle and contact-line friction must be distinguished; both hydrophilic and hydrophobic tested SAM surfaces can have low friction.",
+      "modelUse": "Separate equilibrium shape, advancing/receding angles and dynamic resistance.",
+      "notEstablished": "Does not measure our visor or give universal polycarbonate material constants."
+    },
+    {
+      "id": "pc_wetting",
+      "title": "Solution Crystallization of Polycarbonate Surfaces for Hydrophobic State: Water Droplet Dynamics and Life Cycle Assessment towards Self-Cleaning Applications",
+      "url": "https://www.mdpi.com/2073-4360/13/9/1449",
+      "doi": "10.3390/polym13091449",
+      "kind": "primary experimental research",
+      "readScope": "Publisher indexed abstract, discussion and Table1; direct page429 and PMC browser challenge",
+      "finding": "The tested untreated PC and two crystallized PC surfaces differed in contact angle and hysteresis; high apparent contact angle did not eliminate pinning.",
+      "exampleOnly": {"untreated": {"contactDeg": 85, "hysteresisDeg": 45}, "treated6min": {"contactDeg": 144, "hysteresisDeg": 28}},
+      "modelUse": "A substrate name alone cannot prescribe coating behaviour; retain high-pinning controls.",
+      "notEstablished": "These solvent-textured PV samples are not racing helmet visor measurements or a coating recommendation."
+    },
+    {
+      "id": "impact_spreading",
+      "title": "Maximal deformation of an impacting drop",
+      "url": "https://researchportal.ip-paris.fr/fr/publications/maximal-deformation-of-an-impacting-drop/",
+      "doi": "10.1017/S0022112004000904",
+      "kind": "primary research, author institution record",
+      "readScope": "Institution-hosted abstract and bibliographic record",
+      "finding": "Reports low-viscosity impact spreading scaling with Weber number to the one-quarter power in the investigated regimes.",
+      "modelUse": "Use normal impact speed, size and liquid properties for bounded spread estimates, separately from subsequent wetting/retention.",
+      "notEstablished": "Not a universal splash, rebound or deposited-film fraction law at arbitrary high-speed grazing visor impact."
+    },
+    {
+      "id": "dewetting",
+      "title": "Hydrodynamic Theory of Forced Dewetting",
+      "url": "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.93.094502",
+      "doi": "10.1103/PhysRevLett.93.094502",
+      "kind": "primary theoretical research",
+      "readScope": "Publisher abstract, full text subscription gated",
+      "finding": "A bath-withdrawal contact line has a critical-speed transition to film deposition.",
+      "modelUse": "Treat film deposition as regime dependent; capillary-number scaling is an approximation.",
+      "notEstablished": "Does not establish that every moving finite droplet on a visor leaves a Landau-Levich film or determine our coefficient."
+    },
+    {
+      "id": "inner_antifog",
+      "title": "Pinlock anti-fog technology",
+      "url": "https://pinlock.com/",
+      "kind": "manufacturer technical description",
+      "readScope": "Official technology explanation",
+      "finding": "The insert uses moisture absorption and a sealed thermal barrier.",
+      "modelUse": "Keep interior condensation/insert behaviour separate from exterior rain wetting.",
+      "notEstablished": "Does not identify the coating or temperature of our target visor, or imply exterior water repellency."
+    },
+    {
+      "id": "water_optics",
+      "title": "IAPWS R9-97: Release on the Refractive Index of Ordinary Water Substance",
+      "url": "https://iapws.org/documents/release/Rindex.download",
+      "kind": "primary scientific formulation",
+      "readScope": "Release formulation, wavelength/temperature/density scope and verification table",
+      "finding": "Water refractive index depends on wavelength, temperature and density.",
+      "modelUse": "Keep water optics distinct from substrate and camera geometry; fixed visible-water approximation is an explicit gameplay simplification.",
+      "notEstablished": "Not justification for changing water index simply because the substrate changes from a windscreen to a visor."
+    },
+    {
+      "id": "csp728_local",
+      "title": "Local CSP728 RainFX DXBC inspection",
+      "path": "docs/CSP728_RAINFX_STATIC_ANALYSIS.md",
+      "kind": "direct local binary evidence",
+      "finding": "Named velocity/map movement/fade/trace filtering/finalization passes exist.",
+      "modelUse": "Study the separation of physical state and efficient presentation maps.",
+      "notEstablished": "Recovered shader constants are not SI material parameters, and CPU timing/bindings remain unknown."
+    }
+  ]
+}

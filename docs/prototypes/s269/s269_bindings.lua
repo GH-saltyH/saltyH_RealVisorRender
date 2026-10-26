@@ -1,0 +1,22 @@
+return {
+["2691001"]={shaderSha256="321c041a16c9f34b1a384ce04b4fd3b8f1b2745936a0125628a51505c5c14fa4",active={"txAreas","txRawCells","txAreaHeader","txExpectedHeader","txSourceHeader"}},
+["2691002"]={shaderSha256="595d38209139f42c5a13608b86e98a7c31c40971c361d8b9291ddc73c3508650",active={"txAreas","txReceipt","txRawCells"}},
+["2691003"]={shaderSha256="8a3709503e4d0b05c16cc3ffedcb3b1525bc7042938d76b4cacc667f0babe4cf",active={"txOriginalHeads","txFilmBirthEvent","txImpact","txHeads","txSourceGuard","txSourceHeader"}},
+["2691004"]={shaderSha256="5811fc7730c445803bee0f01421ffebe480e372b91aa499e197714494b37c505",active={"txSources"}},
+["2691005"]={shaderSha256="f173b6b71b8928b8dda3efa99d48aefcbbd72d932d98fc288a813611b0a6eb97",active={"txMask"}},
+["2691006"]={shaderSha256="a35bf17d9b5c2e005859195a068cb0b99ea7f1a910ce647599ac01b42d9c6d74",active={"txMask","txSummary","txSources"}},
+["2691007"]={shaderSha256="30c8a321f9a242dc9e1dd19b12fe34e28c5573985dfee2266b6e1bc89619e672",active={"txFilmBirthEvent","txSourceHeader","txOriginalFilm","txRaster","txOriginalMicro","txSources","txSourceGuard","txCells"}},
+["2691008"]={shaderSha256="ecbd915f09053db561abe0a4ccdc99e70be9113020deaf5922490b478632bc7a",active={"txStatus"}},
+["2691009"]={shaderSha256="ecbd915f09053db561abe0a4ccdc99e70be9113020deaf5922490b478632bc7a",active={"txStatus"}},
+["2691010"]={shaderSha256="d80e42b46147fcf0821ec3fdc38b35677199aab40585594c799c73e19cc23611",active={"txOriginalHeads","txFilmBirthEvent","txSourceHeader","txOriginalFilm","txRaster","txOriginalMicro","txHeads","txSources","txSourceGuard","txCells","txImpact"}},
+["2691011"]={shaderSha256="8ac58a95110691d9d663d8b5c419c3342e80371146797cf53afddbdde87ccd42",active={"txTotals"}},
+["2691012"]={shaderSha256="8ac58a95110691d9d663d8b5c419c3342e80371146797cf53afddbdde87ccd42",active={"txTotals"}},
+["2691013"]={shaderSha256="9218ca600bde69479e1308a56205bb51ab647523482227b8727cd22dbbea4566",active={"txTotals","txSourceGuard","txStatus","txPreviousLedger"}},
+["2691014"]={shaderSha256="ba0e8f9c2af774918d47ce81413f7534b7c4e216ac4590a03774f8e7340402b4",active={"txPublished","txOriginalHeads","txTotals","txFilmBirthEvent","txSourceGuard","txDecision","txCells","txRaster","txSourceHeader","txHeads","txHeadHeader","txOriginalFilm","txOriginalMicro","txPreviousLedger"}},
+["2691015"]={shaderSha256="ba0e8f9c2af774918d47ce81413f7534b7c4e216ac4590a03774f8e7340402b4",active={"txPublished","txOriginalHeads","txTotals","txFilmBirthEvent","txSourceGuard","txDecision","txCells","txRaster","txSourceHeader","txHeads","txHeadHeader","txOriginalFilm","txOriginalMicro","txPreviousLedger"}},
+["2691016"]={shaderSha256="ba0e8f9c2af774918d47ce81413f7534b7c4e216ac4590a03774f8e7340402b4",active={"txPublished","txOriginalHeads","txTotals","txFilmBirthEvent","txSourceGuard","txDecision","txCells","txRaster","txSourceHeader","txHeads","txHeadHeader","txOriginalFilm","txOriginalMicro","txPreviousLedger"}},
+["2691017"]={shaderSha256="ba0e8f9c2af774918d47ce81413f7534b7c4e216ac4590a03774f8e7340402b4",active={"txPublished","txOriginalHeads","txTotals","txFilmBirthEvent","txSourceGuard","txDecision","txCells","txRaster","txSourceHeader","txHeads","txHeadHeader","txOriginalFilm","txOriginalMicro","txPreviousLedger"}},
+["2691018"]={shaderSha256="ba0e8f9c2af774918d47ce81413f7534b7c4e216ac4590a03774f8e7340402b4",active={"txPublished","txOriginalHeads","txTotals","txFilmBirthEvent","txSourceGuard","txDecision","txCells","txRaster","txSourceHeader","txHeads","txHeadHeader","txOriginalFilm","txOriginalMicro","txPreviousLedger"}},
+["2691019"]={shaderSha256="ba0e8f9c2af774918d47ce81413f7534b7c4e216ac4590a03774f8e7340402b4",active={"txPublished","txOriginalHeads","txTotals","txFilmBirthEvent","txSourceGuard","txDecision","txCells","txRaster","txSourceHeader","txHeads","txHeadHeader","txOriginalFilm","txOriginalMicro","txPreviousLedger"}},
+["2691999"]={shaderSha256="00854d27aafbc424dffd9651d76001ad20d96d97ae8b8ca6ca92b0f30a3dc650",active={"txPublished","txSourceHeader","txHeadReceipt","txHeadHeader"}}
+}

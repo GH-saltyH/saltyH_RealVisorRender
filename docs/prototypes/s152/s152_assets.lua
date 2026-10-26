@@ -1,0 +1,22 @@
+-- Generated from existing verified physical bake manifests; no texture rebuild.
+return {modelHash="2596f63e20a02bc0608bfc11270f892d500f45b499a1b2331045b361d83031b9",maskHash="08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",width=1024,height=256,localAreaM2=0.04028860095237055,files={
+ ["docs/probes/s151/s151_engine_inputs.lua"]="6ba801f785b5efc8c32bc0ab97b3bda7e9a6e4ce9219bf94cc2f4d16125ab5ac",
+ ["docs/probes/s151/s151_header_packet.lua"]="c77848007f7142b6242e8757797f0b1f1bf3411d4cd1f345c15fc98bd9a244d0",
+ ["rain_birth_model.lua"]="1dfd57fe47feebfb4a9f4b5dcb1d25217723bc07222f0539d341218556795014",
+ ["rain_environment.lua"]="37d451332168226f7dedd1f7ad0de1d5228632321f928013dd601891c609ba4a",
+ ["texture/GLASS/FX/atlas.verify"]="7a6c982670015d055810c02359d9cd32197fb95df88b14833b08af376900231c",
+ ["texture/RAINFX_ObjNormal_BoundaryMask.dds"]="08bf1ede69d7bdd3dccbb586d87e78db0f0ff6416e6639fbae09e77da17ee7a5",
+ ["texture/RAIN_BIRTH/dsd.dds"]="da764340556ab31a5c66ff4923dcea0fa6a7a7a9c74bdc544d1c4fc779b0795e",
+ ["texture/RAIN_BIRTH/geometry.lua"]="76abb3e12e50e3c91dd897d28f347336f405cc7d7e4ff76087f5645c4acfbb85",
+ ["texture/RAIN_BIRTH/impact_estimated.dds"]="2f61040bd7f505dc49283993b1a2ca5566e924a60277e2f7f6f2e2aa0addd21e",
+ ["texture/RAIN_BIRTH/sites.dds"]="c1dd518db0bc202c326c717dc2ff5025fbcca4b426f58711b66b7c1ccbd7f052",
+ ["texture/RAIN_FILM/cells.dds"]="60924e0299d0d95a4643ce6109edfdc897a781d046f55222ce4908cb1a3f4af2",
+ ["texture/RAIN_FILM/geometry.lua"]="26c65a0bfc4e735ebd3f1127406920ae94d47058f1f36b2754bf442efca98f9f",
+ ["texture/RAIN_GEOMETRY/du.dds"]="143afb1939afd16f10fa3c0277058e1a8254966b25a85629a36d8812f99a583e",
+ ["texture/RAIN_GEOMETRY/dv.dds"]="cace1302aa31b2028711f7db31cf2fd5ddd3328cb62be51e842be9a11c6b45cd",
+ ["texture/RAIN_GEOMETRY/normal.dds"]="37106242e5df4b7fcb81a56574e3ebecca3d7c98207e4ab6a6284ae8ec9c2e79",
+ ["texture/RAIN_GEOMETRY/position.dds"]="c77c56b7bbbf4f1bf65c3dc0897e3f295d9e07b3db3c0d549d14ab26bc82eb7a",
+ ["texture/RAIN_GEOMETRY/spawn.verify"]="b6d0e44a9f7658857e13b4ba635f5e12d634171245ea38d468271596133cae26",
+ ["texture/RAIN_GEOMETRY/spawn_sites.dds"]="60c5c1eeffa3ef4154b31472a8f74730331a054e933f68b18ac812cd6076e165",
+ ["texture/RAIN_GEOMETRY/surface.verify"]="1a99533d310e85ac23e89c57d62431ab3bf191a273744e38c833dc07b1348086",
+}}

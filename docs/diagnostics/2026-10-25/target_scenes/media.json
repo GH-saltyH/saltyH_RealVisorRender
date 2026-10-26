@@ -1,0 +1,57 @@
+{
+  "scope": "target_reference_video_review_only",
+  "dateLocal": "2026-10-25",
+  "recordedUTC": "2026-10-24T17:03:49.112834+00:00",
+  "videos": [
+    {
+      "id": "A",
+      "path": "E:\\_db_Media\\Rec_Encoded\\OBS_SOURCES_QHD\\RainFX구현목표_고속주행다량의물보라_높은표면젖음과다수의빗방울충돌과강한굴절.mp4",
+      "bytes": 8544122,
+      "sha256": "2af412726c642da46eb1326a74940e63e9e179b161bba07d044885a370d4be33",
+      "durationSecondsFromMediaFoundation": 22.567,
+      "decodedSampleSize": [
+        1280,
+        720
+      ],
+      "samples": 16,
+      "actualSampleTimestamps": "Burned into contact sheet; not all video frames reviewed",
+      "contactSheet": "video1_contact.jpg",
+      "fullResolutionSampleIndexViewed": 5
+    },
+    {
+      "id": "B",
+      "path": "E:\\_db_Media\\Rec_Encoded\\OBS_SOURCES_QHD\\RainFX구현목표_고속주행중중간비_haze및건조하게닦임.mp4",
+      "bytes": 13884633,
+      "sha256": "c112b438d720d1ad82ee19f7d4edb98c6e63ffbea3c3d7262b71efe554eefa2d",
+      "durationSecondsFromMediaFoundation": 37.084,
+      "decodedSampleSize": [
+        1280,
+        720
+      ],
+      "samples": 16,
+      "actualSampleTimestamps": "Burned into contact sheet; not all video frames reviewed",
+      "contactSheet": "video2_contact.jpg",
+      "fullResolutionSampleIndexViewed": 5
+    },
+    {
+      "id": "C",
+      "path": "E:\\_db_Media\\Rec_Encoded\\OBS_SOURCES_QHD\\RainFX구현목표_약한비_대부분건조하게달라붙고이동됨_수막거의없음.mp4",
+      "bytes": 14399476,
+      "sha256": "552e9dd4664dd314de3eb5cc9cbaa15a856a0bdab6ac156437986f861d237d6e",
+      "durationSecondsFromMediaFoundation": 39.167,
+      "decodedSampleSize": [
+        1280,
+        720
+      ],
+      "samples": 16,
+      "actualSampleTimestamps": "Burned into contact sheet; not all video frames reviewed",
+      "contactSheet": "video3_contact.jpg",
+      "fullResolutionSampleIndexViewed": 5
+    }
+  ],
+  "observedSampleCount": 48,
+  "runtimeChanged": false,
+  "actualWeatherNotMeasured": true,
+  "originalVideosUnmodified": true,
+  "newGameRunsRequested": 0
+}

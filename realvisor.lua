@@ -1,4 +1,4 @@
-------------------------------------------------------------
+﻿------------------------------------------------------------
 -- Real Visor Overlay
 local strDisplayName = 'Real Visor Overlay'
 local strAppNameInternal = 'RealVisor'
@@ -9484,6 +9484,34 @@ render.onSceneReady(function()
         or not cfg.RUNTIME.RAIN_ENABLED then return end
     local sim = ac.getSim()
     if not sim then return end
+    local st=rainDynamicSceneCopyState
+    if st.productPreview and st.productPreview:isEnabled() and ((st.offscreenCaptureActive or 0)>0 or (st.nativeCaptureActive or 0)>0) then return end
+    st.productOptics=nil
+    if st.productPreview and (st.offscreenCaptureActive or 0)==0 and (st.nativeCaptureActive or 0)==0 then
+        local ok,view=pcall(st.productPreview.tick,st.productPreview,sim)
+        if not ok then st.productError=tostring(view) end
+        if ok and view then
+            local ready,why=pcall(function()
+                local size=math.max(128,math.floor(cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_SIZE))
+                if not st.productBirth then
+                    st.productBirth=ui.ExtraCanvas(vec2(size,math.max(1,math.floor(size/4))),1,
+                        render.AntialiasingMode.None,render.TextureFormat.R16G16B16A16.Float)
+                    st.productBirth:setName('RainFX physical product heads');st.productBirthSize=size
+                end
+                assert(size==st.productBirthSize,'Reload before changing product mask resolution')
+                if not st.gpuHeadsRun(st.productBirth,size,sim,view) then return false end
+                st.birthMaskRead=st.productBirth;st.birthMaskSize=size;st.birthMaskReady=true;st.birthMaskFrame=sim.frame
+                st.trailMaskRead=nil;st.waterTrailRead=nil;st.waterTrailReady=false;st.waterTrailComposite=nil;st.newTrailActive=false
+                st.productOptics=view.film;st.gpuHeadsActive=true;st.stateReadyFrame=sim.frame
+                if not initializeRainDynamicSurfaceTest() then st.productOptics=nil;return false end
+                st.preparedFrame=sim.frame;return true
+            end)
+            if not ready then st.productError=tostring(why) end
+            -- While the new state is live, never mix it with legacy water.
+            if ready and why then st.productError=nil end
+            return
+        end
+    end
     rainDynamicSceneCopyState.measure('Physics total',updateRainGPUState,sim)
     if cfg.RUNTIME.RAIN_GPU_STATE_MODE > 0
         and not rainStateInitialized then return end
@@ -11309,12 +11337,13 @@ float4 main(PS_IN pin)
     return acc;
 }
 ]]
-rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
+rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim, product)
     local st = rainDynamicSceneCopyState
     local r = cfg.RUNTIME
     local state = rainStateReadIsA and rainStateA or rainStateB
     local meta = rainStateReadIsA and rainStateMetaA or rainStateMetaB
     local count = rainDynamicStateReadbackCount or 0
+    if product then state,meta,count=product.state,product.meta,product.count end
     if not state or not meta or count <= 0 then return false end
     local tile = math.max(16, math.floor(r.RAIN_GPU_HEADS_TILE))
     -- At 4:1 this remains square in backing pixels; finer bins reduce
@@ -11353,7 +11382,7 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
     end
     -- No CPU splash writer runs with WF disabled: discard its previous body
     -- suppression rather than hiding heads/trails indefinitely in wipe-only mode.
-    if not r.RAIN_DYNAMIC_WATER_FIELD_ENABLED then
+    if product or not r.RAIN_DYNAMIC_WATER_FIELD_ENABLED then
         st.gpuOverride:clear(rgbm.colors.transparent)
         st.gpuOverrides={};st.gpuOverrideCount=0
     end
@@ -11384,13 +11413,14 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
     values.gHeadDisplayGain=r.RAIN_PHYSICS_SI_PREVIEW and r.RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN
         *(r.RAIN_PHYSICS_P2_BIRTH_PREVIEW and r.RAIN_GPU_STATE_LIFECYCLE
             and (r.RAIN_GPU_STATE_MODE==3 or r.RAIN_GPU_STATE_MODE==6) and r.RAIN_BIRTH_DISPLAY_SCALE or 1) or 1
+    if product then values.gHeadDisplayGain=r.RAIN_PHYSICS_DISPLAY_DIAMETER_GAIN*r.RAIN_BIRTH_DISPLAY_SCALE end
     values.gKs = math.max(1.0, r.RAIN_DYNAMIC_WATER_FIELD_KERNEL_SCALE)
     values.gMaxRadii = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_MAX_RADII
     values.gLookback = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_LOOKBACK_SECONDS
     values.gBodyStretch = r.RAIN_DYNAMIC_BIRTH_MASK_BODY_STRETCH and 1.0 or 0.0
     values.gShapeOn = r.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_VARIATION and 1.0 or 0.0
     values.gShapeStrength = math.max(0.0, math.min(1.5, r.RAIN_DYNAMIC_BIRTH_MASK_SHAPE_STRENGTH))
-    values.gPuddleOn = r.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED and 1.0 or 0.0
+    values.gPuddleOn = not product and r.RAIN_DYNAMIC_BIRTH_PUDDLE_ENABLED and 1.0 or 0.0
     values.gPuddleMinMM = r.RAIN_DYNAMIC_BIRTH_PUDDLE_MIN_MM
     values.gPuddleShare = r.RAIN_DYNAMIC_BIRTH_PUDDLE_SHARE
     values.gPuddleReach = r.RAIN_DYNAMIC_BIRTH_PUDDLE_REACH
@@ -11399,7 +11429,7 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
     values.gLobesOn = r.RAIN_DYNAMIC_WATER_FIELD_LOBES and 1.0 or 0.0
     values.gFlipY = r.RAIN_GPU_HEADS_FLIP_Y and 1.0 or 0.0
     values.gDebug = r.RAIN_GPU_HEADS_DEBUG or 0
-    values.gSweepEnabled=not r.RAIN_PHYSICS_SI_PREVIEW and not st.newTrailActive and r.RAIN_DYNAMIC_TRAIL_MASK_ENABLED and 1 or 0
+    values.gSweepEnabled=not product and not r.RAIN_PHYSICS_SI_PREVIEW and not st.newTrailActive and r.RAIN_DYNAMIC_TRAIL_MASK_ENABLED and 1 or 0
     values.gSweepWidthScale=r.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_SCALE
     values.gSweepWidthOffset=r.RAIN_DYNAMIC_TRAIL_MASK_WIPE_WIDTH_OFFSET_MM*r.RAIN_GPU_STATE_PHYSICAL_DIAMETER_UV_PER_MM*size*.5
     values.gSweepMinRadius=math.max(.25,r.RAIN_DYNAMIC_TRAIL_MASK_MIN_WIDTH_TEXELS)*size/math.max(r.RAIN_DYNAMIC_TRAIL_MASK_SIZE,1)*.5
@@ -11411,8 +11441,8 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
     if st.measure('Head bounds',st.gpuBounds.updateWithShader,st.gpuBounds,{async=true,
         blendMode=render.BlendMode.Opaque,values=values,
         textures={txRainState=state,txRainStateMeta=meta,txRainDropMetric=st.gpuMetric,
-            txRainPreviousState=rainStateReadIsA and rainStateB or rainStateA,
-            txRainPreviousMeta=rainStateReadIsA and rainStateMetaB or rainStateMetaA},
+            txRainPreviousState=product and state or (rainStateReadIsA and rainStateB or rainStateA),
+            txRainPreviousMeta=product and meta or (rainStateReadIsA and rainStateMetaB or rainStateMetaA)},
         shader=st.gpuBoundsShader})==false then return false end
     local okA, errA = pcall(function()
         local updated=st.measure('Head tiles',st.gpuMask.updateWithShader,st.gpuMask,{async=true,
@@ -11447,7 +11477,7 @@ rainDynamicSceneCopyState.gpuHeadsRun = function(target, size, sim)
         if updated==false then error('head shader pending') end
     end)
     if not okB then st.gpuHeadsErr = 'pass B: ' .. tostring(errB); return false end
-    if st.newTrailActive then
+    if not product and st.newTrailActive then
         if not st.newTrail:prepare({state=state,meta=meta,
             previousState=rainStateReadIsA and rainStateB or rainStateA,
             previousMeta=rainStateReadIsA and rainStateMetaB or rainStateMetaA,
@@ -14636,7 +14666,12 @@ rainDynamicSceneCopyState.glassFallback = function()
                 vl.fallbackSourceFrame=sim.frame;vl.fallbackSourceViewKey=viewKey
             end
             if st.visorLayer.preViewKey~=viewKey then st.visorSceneStack('pre') end
+            -- RainFX v2: water between glass 'pre' (housing, COAT) and 'post' (EXT band, INT).
+            local rfx2=st.rainfx2 or nil
+            if rfx2 then render.measure('RainFX2 draw',rfx2.draw,rfx2,vl.fallbackSource,viewKey,false) end
             st.visorSceneStack('post')
+            -- Depth after 'post' so the same-surface EXT is not rejected; later car glass cannot blend over water.
+            if rfx2 then rfx2:draw(vl.fallbackSource,viewKey,true) end
         end)
         if not ok then st.visorLayer.err='Glass fallback: '..tostring(err) end
     end
@@ -14644,6 +14679,47 @@ rainDynamicSceneCopyState.glassFallback = function()
         st.e1SurfaceDraw('slot');st.e1SurfaceDraw('final')
     end
 end
+
+-- RainFX v2 core (docs/RAINFX_V2_CORE.md). GPU cell-gather visor rain; replaces the
+-- legacy RainFX path while enabled (legacy RAIN_ENABLED is held off and restored).
+rainDynamicSceneCopyState.rainfx2Get=function()
+    local st=rainDynamicSceneCopyState
+    if st.rainfx2==nil then
+        local ok,core=pcall(dofile,appFolder..'/rainfx2/init.lua')
+        if ok and type(core)=='function' then
+            ok,core=pcall(core,{folder=appFolder,targetMesh=function() return rainTargetMesh end,
+                surface=st.surface,maskPath=textureRainBoundaryMask,
+                surfaceOffset=cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M or 0})
+        end
+        if ok and type(core)=='table' then st.rainfx2=core
+        else
+            st.rainfx2=false;st.rainfx2Error=tostring(core)
+            ac.warn(appNameDebug..' RainFX v2 load failed: '..tostring(core))
+        end
+    end
+    return st.rainfx2 or nil
+end
+rainDynamicSceneCopyState.rainfx2Arbitrate=function()
+    local st=rainDynamicSceneCopyState;local r=cfg.RUNTIME
+    local core=st.rainfx2Get()
+    if core and core:enabled() then
+        if r.RAIN_ENABLED then st.rainfx2LegacyWasOn=true;r.RAIN_ENABLED=false end
+    elseif st.rainfx2LegacyWasOn then
+        st.rainfx2LegacyWasOn=nil;r.RAIN_ENABLED=true
+    end
+end
+render.onSceneReady(function()
+    local st=rainDynamicSceneCopyState
+    if (st.offscreenCaptureActive or 0)>0 or (st.nativeCaptureActive or 0)>0 then return end
+    if not initialized or not visor or activeEnableMode~=1 then return end
+    local core=st.rainfx2Get();local sim=ac.getSim()
+    if not core or not sim or not core:enabled() then return end
+    local ok,err=pcall(render.measure,'RainFX2 sim',core.simulate,core,sim)
+    if not ok then core.err='Simulate: '..tostring(err) end
+end)
+ac.onRelease(function()
+    if rainDynamicSceneCopyState.rainfx2 then rainDynamicSceneCopyState.rainfx2:dispose() end
+end)
 render.on(cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_SMOKE_DEBUG and 'main.smoke'
     or (cfg.RUNTIME.RAIN_DYNAMIC_DROP_DRAW_AT_TRACK and 'main.track.transparent' or 'main.root.transparent'),
     function() -- registered before rain; on a prepared rain frame the normal stack owns ordering
@@ -15303,7 +15379,7 @@ float4 main(PS_IN pin)
             txDynamicBirthMask =
                 rainDynamicSceneCopyState.birthMaskRead or false,
             txDynamicWaterTrail =
-                (cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
+                rainDynamicSceneCopyState.productOptics or (cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
                     and rainDynamicSceneCopyState.physicalFilmGPU.ready and rainDynamicSceneCopyState.physicalFilmGPU.optics)
                 or rainDynamicSceneCopyState.waterTrailComposite
                 or rainDynamicSceneCopyState.waterTrailRead or false,
@@ -15329,12 +15405,12 @@ float4 main(PS_IN pin)
             ),
 
             gDynamicDropMicroPatternEnabled =
-                not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
+                not rainDynamicSceneCopyState.productOptics and not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED
                 and rainDynamicSceneCopyState.microPatternReady
                 and 1.0 or 0.0,
             gDynamicDropMicroDebug =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_DEBUG and 1.0 or 0.0,
-            gDynamicDropMicroRain = (not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED and 1 or 0)*math.max(0.0, math.min(1.0,
+            gDynamicDropMicroRain = (not rainDynamicSceneCopyState.productOptics and not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_ENABLED and cfg.RUNTIME.RAIN_DYNAMIC_MICRO_PATTERN_ENABLED and 1 or 0)*math.max(0.0, math.min(1.0,
                 cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE >= 0.0
                     and cfg.RUNTIME.RAIN_GPU_STATE_RAIN_OVERRIDE
                     or sim.rainIntensity or 0.0))
@@ -15401,7 +15477,7 @@ float4 main(PS_IN pin)
             gDynamicDropMicroOpacity =
                 cfg.RUNTIME.RAIN_DYNAMIC_MICRO_LAYER_OPACITY,
             gDynamicDropWaterField =
-                cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
+                rainDynamicSceneCopyState.productOptics and 1 or cfg.RUNTIME.RAIN_DYNAMIC_BIRTH_MASK_ENABLED
                 and cfg.RUNTIME.RAIN_DYNAMIC_WATER_FIELD_ENABLED
                 and rainDynamicSceneCopyState.birthMaskRead
                 and 1.0 or 0.0,
@@ -15467,9 +15543,9 @@ float4 main(PS_IN pin)
             gDynamicDropLargeWarpPx = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_WARP_PIXELS,
             gDynamicDropLargeWarpCells = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_WARP_CELLS,
             gDynamicDropLargeEdgeSoft = cfg.RUNTIME.RAIN_DYNAMIC_WATER_LARGE_EDGE_SOFT,
-            gDynamicDropSmearIntensity = rainDynamicSceneCopyState.smearUpdate(
+            gDynamicDropSmearIntensity = rainDynamicSceneCopyState.productOptics and 0 or rainDynamicSceneCopyState.smearUpdate(
                 rainDynamicSceneCopyState, sim),
-            gDynamicDropSmear = (not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
+            gDynamicDropSmear = (not rainDynamicSceneCopyState.productOptics and not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_ENABLED
                 and ((rainDynamicSceneCopyState.smearLevel or 0.0) > 0.001
                     or cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG > 0))
                 and 1.0 or 0.0,
@@ -15478,7 +15554,7 @@ float4 main(PS_IN pin)
                 and rainDynamicSceneCopyState.smearTexturePath)
                 and 1.0 or 0.0,
             gDynamicDropSmearBaked = rainDynamicSceneCopyState.smearBakeReady and 1.0 or 0.0,
-            gDynamicDropSmearDebug = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG,
+            gDynamicDropSmearDebug = rainDynamicSceneCopyState.productOptics and 0 or cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_DEBUG,
             gDynamicDropSmearNoseEnabled = cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_NOSE_EXCLUDE
                 and 1.0 or 0.0,
             gDynamicDropSmearNose = vec4(cfg.RUNTIME.RAIN_DYNAMIC_SMEAR_NOSE_U,
@@ -15545,7 +15621,7 @@ float4 main(PS_IN pin)
             gDynamicDropWaterToneRatioMax = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_RATIO_MAX,
             gDynamicDropWaterToneBgMip = cfg.RUNTIME.RAIN_DYNAMIC_WATER_TONE_BG_MIP,
             gDynamicDropHazeEnabled =
-                not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED and 1.0 or 0.0,
+                not rainDynamicSceneCopyState.productOptics and not cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ENABLED and 1.0 or 0.0,
             gDynamicDropHazeMistCells = cfg.RUNTIME.RAIN_DYNAMIC_HAZE_MIST_CELLS,
             gDynamicDropHazeOrderCells =
                 cfg.RUNTIME.RAIN_DYNAMIC_HAZE_ORDER_CELLS,
@@ -15587,7 +15663,7 @@ float4 main(PS_IN pin)
             gDynamicDropCameraForward = sim.cameraLook,
             gDynamicDropDepthOnly = 0.0,
             gDynamicDropNewTrail=rainDynamicSceneCopyState.newTrailActive and 1 or 0,
-            gDynamicDropP3On=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
+            gDynamicDropP3On=rainDynamicSceneCopyState.productOptics and 1 or cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW and cfg.RUNTIME.RAIN_PHYSICS_P2_BIRTH_PREVIEW
                 and cfg.RUNTIME.RAIN_PHYSICS_P3_FILM_PREVIEW and rainDynamicSceneCopyState.physicalFilmGPU
                 and rainDynamicSceneCopyState.physicalFilmGPU.ready and 1 or 0,
             gDynamicDropP3Grid=vec2(1024,256),
@@ -16956,6 +17032,7 @@ function script.update(dt)
     if rainDynamicSurfaceMesh then rainDynamicSurfaceMesh:setVisible(false,false);rainDynamicSurfaceMesh:setShadows(false) end
     rainDynamicSceneCopyState.materialSettings:flush()
     rainDynamicSceneCopyState.physicsInputsUpdate()
+    rainDynamicSceneCopyState.rainfx2Arbitrate()
 
     --------------------------------------------------------
     -- Initialize
@@ -17470,8 +17547,24 @@ end
 
 -- RainFX UI: callbacks keep local variables isolated and only draw open panels.
 rainDynamicSceneCopyState.rainUIPanels = {}
+-- Product entry uses the existing docs symlink; no missing root module deployment.
+rainDynamicSceneCopyState.s282ProductUI=function()
+    local st=rainDynamicSceneCopyState
+    if not st.productPreview and not st.productError then
+        local ok,result=pcall(function()
+            return dofile(appFolder..'/docs/runtime/s282/rain_product_host.lua')({folder=appFolder,
+                live=function()return {runtime=cfg.RUNTIME,surface=st.surface,mesh=rainTargetMesh,
+                    count=rainStateCountForMode(),configuredScale=activeScale,appliedScale=lastScale}end})
+        end)
+        if ok then st.productPreview=result else st.productError=tostring(result) end
+    end
+    if st.productPreview then st.productPreview:ui() end
+    if st.productError then ui.textWrapped('Physical RainFX: '..st.productError) end
+    ui.separator()
+end
 rainDynamicSceneCopyState.rainUIPanels['physics_inputs']=function()
     local st=rainDynamicSceneCopyState
+    st.s282ProductUI()
     st.physicsInputsUpdate()
     if st.physicsInputsError then ui.textWrapped(st.physicsInputsError);return end
     local p,u=st.physicsInputs,st.physicsUnits
@@ -19978,6 +20071,9 @@ function windowMain(dt)
 
         ui.tabItem('RainFX', 0, function()
 
+    local rfx2=rainDynamicSceneCopyState.rainfx2Get()
+    if rfx2 then rfx2:ui() else ui.text('RainFX v2 failed to load: '..tostring(rainDynamicSceneCopyState.rainfx2Error)) end
+    ui.separator()
     rainDynamicSceneCopyState.rainUIUpdateProfile()
     ui.text('RainFX tuning')
     ui.text('Choose a group to open its settings. Values remain live when the popup is closed.')

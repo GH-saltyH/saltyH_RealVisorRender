@@ -1,9 +1,0 @@
-{
-  "moving_frames": 360,
-  "maximum_motion_m": 0.02,
-  "fx_submissions_during_motion": 1080,
-  "native_captures_in_main_stage": 0,
-  "settled_frames_reused": 50,
-  "pending_retry": true,
-  "actual_game_gforce_visibility_verified": false
-}

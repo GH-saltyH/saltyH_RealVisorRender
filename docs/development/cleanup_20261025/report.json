@@ -1,0 +1,42 @@
+{
+  "createdUTC": "2026-10-25T07:11:05.312128+00:00",
+  "removedDiagnosticMenus": 38,
+  "removedMainLines": 1330,
+  "runtimeLuaFiles": 73,
+  "retainedTools": [
+    "bake_rain_surface.py",
+    "build_e1_housing_bvh.py",
+    "build_s79_birth_assets.py",
+    "build_s81_film_cells.py",
+    "build_visor_optics_assets.py",
+    "check_installation.py",
+    "check_project.py",
+    "inspect_visor_video.py",
+    "kn5_assets.py",
+    "lua_runtime.py"
+  ],
+  "removeFiles": 46579,
+  "removedBytes": 16440657448,
+  "archiveFiles": 31879,
+  "archiveInputBytes": 816352368,
+  "completedUTC": "2026-10-25T07:25:32.708684+00:00",
+  "archive": "archive\\2026-10-25_legacy_research.zip",
+  "archiveBytes": 279846566,
+  "archiveSHA256": "e01633be98bbb4dc132892ae9250ff50a312bd15213ae4167024e0bf58ef50f4",
+  "crcVerified": true,
+  "beforeGuideBackups": 7,
+  "installedProbeAppsRemoved": 13,
+  "cleanupScriptsArchived": 3,
+  "verification": {
+    "luaSyntaxCompiled": 73,
+    "missingRuntimeFiles": 0,
+    "criticalFilesChecked": 62,
+    "assetHashesVerified": 20,
+    "gameRunPerformed": false
+  },
+  "installedMainSameFile": true,
+  "finalizedUTC": "2026-10-25T07:41:59.717435+00:00",
+  "additionalUnplannedToolsLeftUntouched": [
+    "docs/tools/dxbc_disasm.py (created during cleanup; not in original deletion plan)"
+  ]
+}

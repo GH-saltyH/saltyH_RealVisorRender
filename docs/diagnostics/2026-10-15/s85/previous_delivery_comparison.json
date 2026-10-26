@@ -1,6 +1,0 @@
-{
-  "realvisor.lua": true,
-  "rain_film.lua": true,
-  "shaders/rainFilmFlowBlocks.hlsl": true,
-  "shaders/rainFilmFlowStats.hlsl": true
-}

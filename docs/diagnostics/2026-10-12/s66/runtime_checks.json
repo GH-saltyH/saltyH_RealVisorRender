@@ -1,8 +1,0 @@
-[
-  "Nested/offscreen captures restore scope on false/errors; missing dependencies report once",
-  "One async KN5 request/8 nodes across 300 pending frames; success, failure and stale callback isolated",
-  "Rain-off and failed-stack E1 diagnostic renders independently; offscreen skipped; successful frame not duplicated",
-  "Pending GPU head builds return before CPU stamping; retry success clears pending",
-  "Shared GPU mesh skips obsolete UV lookup and full lookup remains available in the legacy diagnostic mode",
-  "Settings, surface transport and physical GPU laws byte-identical to s66 baseline; generated Rain shadows disabled"
-]

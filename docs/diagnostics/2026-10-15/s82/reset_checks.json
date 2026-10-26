@@ -1,9 +1,0 @@
-{
-  "cycles": 100,
-  "productionModuleAndMainReset": true,
-  "steadyP3LiveBanks": 16,
-  "steadyP2LiveBanks": 8,
-  "resetLiveBanks": 0,
-  "staleReadbacksDisposed": true,
-  "limitation": "mocked CSP canvas handles; does not measure SDK/driver caches or Lua post-GC heap"
-}

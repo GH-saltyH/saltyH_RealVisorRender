@@ -1256,7 +1256,8 @@ float4 rainDropMain(PS_IN pin)
 float4 rainPhysicalFilm(PS_IN pin) {
     float4 result=0; // Single exit avoids FXC X4000 after inlining debug branches.
     float2 uv=saturate(float2(pin.Tex.x+4,pin.Tex.y+1));
-    float2 dx=ddx(uv),dy=ddy(uv),texel=1/gDynamicDropP3Grid;
+    uint filmW=1,filmH=1;txDynamicWaterTrail.GetDimensions(filmW,filmH);
+    float2 dx=ddx(uv),dy=ddy(uv),texel=1/float2(filmW,filmH);
     float4 waterHeight=txDynamicWaterTrail.SampleLevel(samLinearClamp,uv,0);
     float2 heights=waterHeight.rg;
     float filmCover=1-exp(-max(heights.x,0)/2);

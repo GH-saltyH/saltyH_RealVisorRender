@@ -1,4 +1,0 @@
-compilation object save succeeded; see C:\source\LocalProjects\saltyH_RealVisorRender\docs\diagnostics\2026-10-11\native-body-frame\body_pbr.cso
-C:\source\LocalProjects\saltyH_RealVisorRender\acc-shaders-master\recreated\include_new\base\_flags.fx(6,24): warning X1519: 'ALLOW_CLEARCOAT' : macro redefinition
-C:\source\LocalProjects\saltyH_RealVisorRender\acc-shaders-master\recreated\include_new\base\_flags.fx(85,32): warning X1519: 'ALLOW_PBR_EXTRAS_BASE' : macro redefinition
-

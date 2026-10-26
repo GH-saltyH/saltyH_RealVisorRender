@@ -4,8 +4,9 @@ import sys,struct,hashlib,json,tempfile
 sys.dont_write_bytecode=True
 import numpy as np
 from PIL import Image
-from check_s75_inputs import load_lua
-ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'docs/diagnostics/2026-10-14/s79'
+from lua_runtime import load_lua
+ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'tmp/asset_build'
+OUT.mkdir(parents=True,exist_ok=True)
 ASSET=ROOT/'texture/RAIN_BIRTH';ASSET.mkdir(exist_ok=True)
 def dds(name,a):
     h,w,_=a.shape

@@ -1,6 +1,0 @@
-{
-  "realvisor.lua": "a6974360e584a78229abfc235438c9792949808c1761e7867762341a86e71711",
-  "rain_trails.lua": "942a6d68d6318b1822ddd68b5faedf057b997a5216b4d95213c9186db4355122",
-  "shaders/rainTrailDescriptor.hlsl": "7ff6d7bd5807afb4236cd3e88736bccf644612450ad350af278c6b69110c11ba",
-  "shaders/rainTrailResolve.hlsl": "0fce1f9ba95716260bb99e4439cb96bf04400c8e6bffcf144c11af0cb9fb3b8a"
-}
