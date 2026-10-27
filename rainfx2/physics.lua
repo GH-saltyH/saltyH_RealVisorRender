@@ -45,7 +45,9 @@ P.DEFAULTS = {
   sprayFluxMMs = 0.5,       -- film supply (mm/s) at spray estimate 1 (following closely, flooded)
   sprayDiamMM = 0.25,       -- spray droplet diameter (many small splashes)
   -- rev14 (rev13 review): 0.35 left Heavy Rain at 250 km/h with no film (eq 0.068 mm < 0.05-0.15 window)
-  filmRainK = 0.8,          -- rev15: 0.7 left Heavy Rain/Hurricane T3 at 43-48 % (target > 50 %)
+  -- rev21: 0.8 x 0.59 / 0.88 -- the R-size rule leaves more rain unresolved at speed (Heavy Rain
+  -- T3: 0.88 vs 0.59 of the volume), so the share is rescaled to keep the rev15 film calibration.
+  filmRainK = 0.54,         -- rev15: 0.8 (0.7 left Heavy Rain/Hurricane T3 at 43-48 %, target > 50 %)
                             -- share of non-sticking rain that joins the film (rest: micro haze)
   sprayHaze = 0.4,          -- micro haze rate (1/s) at spray estimate 1
   -- solver

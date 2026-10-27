@@ -20,7 +20,7 @@ function M4:transformPoint(v) return vec3(v.x,v.y,v.z) end
 calls={}
 local Canvas={} Canvas.__index=Canvas
 ui={ExtraCanvas=function(res,mips,aa,fmt) assert(res.x and mips and fmt,'bad canvas args') return setmetatable({res=res,mips=mips},Canvas) end,
-  text=function() end, separator=function() end, button=function() return true end, checkbox=function() return false end, image=function() end, slider=function(_,v) return v end}
+  text=function() end, separator=function() end, button=function() return true end, checkbox=function() return false end, image=function() end, sameLine=function() end, textColored=function() end, slider=function(_,v) return v, false end}
 function Canvas:setName(n) self.name=n return self end
 function Canvas:clear() return self end
 function Canvas:updateWithShader(p)

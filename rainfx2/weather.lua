@@ -38,9 +38,14 @@ function W.compute(input, out)
   out.meanDiamMM = D
   out.fluxMMs = flux * 1000
   out.impactRate = meanVolM3 > 0 and flux / meanVolM3 * p.impactScale or 0
-  -- Faster impacts splash more: less of each drop stays as a resolved drop.
-  local k = math.min(math.max((speedRel - 10) / 60, 0), 1)
-  out.stickFrac = p.stickSlow + (p.stickFast - p.stickSlow) * k
+  -- rev21 R-size: splash parameter K = We^1/2 Re^1/4 of the mean drop at the relative speed;
+  -- resolved fraction stick * min(1, K0/K)^a (cells.hlsl evaluates it per sampled drop).
+  -- Used here for the film share of the non-resolved rain (and the UI).
+  local v = math.max(speedRel, 0.5)
+  out.splashK = math.sqrt(13.8889 * v * v * D) * (1000 * v * D) ^ 0.25
+  local kr = math.min(1, (p.splashK0 or 58) / math.max(out.splashK, 1e-3))
+  out.stickFrac = p.stickSlow * kr ^ (p.resA or 0.5)
+  out.fragDiamMM = D * kr ^ (p.resB or 0.3)
   -- Unresolved micro droplets (haze) grow with flux and impact speed (splash).
   out.microRate = p.microK * out.fluxMMs * math.min(math.max(speedRel / 30, 0.2), 3)
   return out

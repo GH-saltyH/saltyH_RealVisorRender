@@ -30,4 +30,20 @@ core:draw({name='src'},'k9',false)
 print('offscreen test: '..tostring(core.offscreenTest))
 assert(core.camPos and core.camPos.x==1, 'camera position at draw time')
 core:ui()
+-- rev23 look lab: static set, works while paused, no physics passes
+core.lookLab=true; core.labSeeded=false; calls={}
+core:simulate({frame=6,dt=0,focusedCar=0,rainIntensity=0.08,rainWater=0.5,rainWetness=1,carsCount=3,windVelocityKmh=vec2(3,4),fogColor=rgb(.6,.65,.7),lightColor=rgb(2,2,2),cameraUp=vec3(0,1,0),cameraSide=vec3(1,0,0)})
+assert(#calls>=1 and core.labSeeded and core.status:find('look lab'), 'look lab seed: '..table.concat(calls,','))
+core.colourViewKey=nil
+assert(core:draw({name='src'},'k10',false), 'look lab draw')
+core:ui()
+print('look lab: '..core.status)
+-- rev37: every gR2 value the visor shader uses must be set (CSP declares only non-nil values;
+-- rev35 lost smallFullPx/smallEndPx inside a comment -> undeclared identifier in game)
+do
+  local f=io.open(root..'/rainfx2/shaders/visor.hlsl'); local src=f:read('*a'); f:close()
+  local vals=core.paramsColour.values
+  for name in src:gmatch('gR2%w+') do assert(vals[name]~=nil, 'visor value not set: '..name) end
+end
+core.err='Draw: test'; core:ui(); assert(core.err==nil, 'retry button clears the error')
 core:dispose(); print('ok')

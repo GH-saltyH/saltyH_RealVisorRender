@@ -30,8 +30,24 @@ float4 main(PS_IN pin) {
     float2 p = accV > 0 ? accP / accV : float2(0.5, 0.5);
     float2 disp = accV > 0 ? accD / accV : float2(0, 0);
 
-    // Birth: Poisson impacts on this cell, exponential DSD, partial sticking.
     float2 t = (float2(c) + 0.5) / gR2Cells;
+    // rev22 impact clearing (rev21 review: pinned fragments filled every cell -> a regular lattice
+    // of dots at speed). A splashing impact (K > K0) spreads a lamella of diameter ~ beta D,
+    // beta ~ 0.87 Re^1/5, that atomises / sweeps the small drops it runs over. A drop of
+    // r < clearMax is removed at rate impactRate * area(lamella); larger drops keep merging.
+    // Equilibrium occupancy = birth / (birth + clear) -> sparse, random, renewing.
+    if (accV > 0 && gR2ImpactRate > 0 && r2RadiusMM(accV) < gR2ClearMaxMM) {
+        float expC = r2Exposure(t);
+        float vI = max(gR2SpeedRel * expC, 0.5);
+        float D = gR2MeanDiamMM;
+        float Kc = sqrt(13.8889 * vI * vI * D) * pow(max(1000.0 * vI * D, 1e-3), 0.25);
+        float Rs = 0.5 * D * 0.87 * pow(max(1000.0 * vI * D, 1e-3), 0.2) * 1e-3;   // m
+        float lamC = gR2ImpactRate * expC * gR2Exposure * R2_PI * Rs * Rs * gR2Dt
+                   * saturate((Kc - gR2SplashK0) / gR2SplashK0) * gR2ClearK;
+        uint seedC = (uint)gR2Frame * 8u + (uint)gR2Sub + 4242u;
+        if (r2Rand(uint3((uint)c.x, (uint)c.y, seedC)) < lamC) { accV = 0; accP = float2(0, 0); }
+    }
+    // Birth: Poisson impacts on this cell, exponential DSD, partial sticking.
     if (gR2ImpactRate > 0 && r2Valid(t) > 0.5) {
         float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
         float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
@@ -42,12 +58,55 @@ float4 main(PS_IN pin) {
         if (r2Rand(uint3((uint)c.x, (uint)c.y, seed0)) < lambda) {
             float u1 = r2Rand(uint3((uint)c.y, (uint)c.x, seed0 + 101u));
             float d = clamp(-log(max(1.0 - u1, 1e-6)) * gR2MeanDiamMM, 0.1, 3.5);
-            float bv = 0.5235988 * d * d * d * gR2StickFrac;
-            float2 bp = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 202u)),
-                               r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 303u)));
-            p = (p * accV + bp * bv) / (accV + bv);
-            if (bv > accV) seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 404u)) * 16.0);
-            accV += bv;
+            // rev21 R-size (docs/RAINFX_V2_DROP_SIZE_RESEARCH.md section 3): impact splash
+            // parameter K = We^1/2 Re^1/4 at the normal impact speed. Above K0 ~ 58 the drop
+            // fragments: resolved fraction fRes = stick * (K0/K)^a in fragments of
+            // dRes = d (K0/K)^b; one fragment per cell, the rest is micro haze / film.
+            float vImp = max(gR2SpeedRel * exposure, 0.5);
+            float K = sqrt(13.8889 * vImp * vImp * d) * pow(max(1000.0 * vImp * d, 1e-3), 0.25);
+            float kr = min(1.0, gR2SplashK0 / max(K, 1e-3));
+            float fRes = gR2StickSlow * pow(max(kr, 1e-6), gR2ResA);
+            float dRes = d * pow(max(kr, 1e-6), gR2ResB);
+            float nFrag = fRes * pow(d / max(dRes, 1e-3), 3.0);
+            if (r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 505u)) < nFrag) {
+                float bv = 0.5235988 * dRes * dRes * dRes;
+                float2 bp = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 202u)),
+                                   r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 303u)));
+                p = (p * accV + bp * bv) / (accV + bv);
+                if (bv > accV) seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 404u)) * 16.0);
+                accV += bv;
+            }
+        }
+    }
+    // rev21: visible drops also GROW out of the unresolved water (research section 3.2):
+    //  - dense micro haze condenses into a small drop (it then collects the haze, field pass);
+    //  - the leading edge of a moving film throws a head drop (reference A, red circles).
+    if (accV <= 0 && r2Valid(t) > 0.5) {
+        float4 F = txR2Field.SampleLevel(samLinearClamp, t, 0);
+        uint seed1 = (uint)gR2Frame * 8u + (uint)gR2Sub + 7777u;
+        float nuc = gR2NucRate * max(F.g - gR2NucM, 0.0) * gR2Dt;
+        float bornD = 0;
+        if (r2Rand(uint3((uint)c.x, (uint)c.y, seed1)) < nuc)
+            bornD = lerp(0.3, 0.6, r2Rand(uint3((uint)c.y, (uint)c.x, seed1 + 1u)));
+        float hMM = F.b * gR2FilmMaxMM;
+        if (bornD <= 0 && hMM > gR2HeadMinMM) {
+            float2 vf = r2FilmVelocity(t, hMM);
+            float2 tx = 1.0 / gR2FieldSize;
+            float2 gW = float2(txR2Field.SampleLevel(samLinearClamp, t + float2(tx.x, 0), 0).b
+                             - txR2Field.SampleLevel(samLinearClamp, t - float2(tx.x, 0), 0).b,
+                               txR2Field.SampleLevel(samLinearClamp, t + float2(0, tx.y), 0).b
+                             - txR2Field.SampleLevel(samLinearClamp, t - float2(0, tx.y), 0).b);
+            float vl = length(vf), gl = length(gW);
+            float front = (vl > 1e-6 && gl > 1e-4) ? saturate(-dot(vf / vl, gW / gl)) : 0.0;
+            float head = gR2HeadRate * front * saturate(gl * 4.0) * gR2Dt;
+            if (r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 2u)) < head)
+                bornD = clamp(hMM * 8.0, 0.6, 2.4) * lerp(0.8, 1.2, r2Rand(uint3((uint)c.y, (uint)c.x, seed1 + 3u)));
+        }
+        if (bornD > 0) {
+            accV = 0.5235988 * bornD * bornD * bornD;
+            p = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 4u)), r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 5u)));
+            seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 6u)) * 16.0);
+            disp = float2(0, 0);
         }
     }
     // Excess beyond the largest stable cap runs off (keeps one-drop-per-cell bounded).

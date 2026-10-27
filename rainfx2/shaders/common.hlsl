@@ -131,6 +131,34 @@ float2 r2FilmVelocity(float2 t, float hMM) {
     return float2(c * pu - b * pv, a * pv - b * pu) / det;
 }
 
+// rev21 path heterogeneity (CSP windscreen rule, docs/RAINFX_V2_DROP_SIZE_RESEARCH.md section 4):
+// a fixed surface value noise gives sparse lateral kicks (pinning defects -> zig-zag paths), and
+// a moving drop steers toward the wetter side of earlier traces ahead (rivulets form). Speed is
+// kept; only the direction turns. Depends on position only -> identical in every gathering cell.
+float r2Hash21(float2 p) { return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
+float r2VNoise(float2 p) {
+    float2 i = floor(p), f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(r2Hash21(i), r2Hash21(i + float2(1, 0)), f.x),
+                lerp(r2Hash21(i + float2(0, 1)), r2Hash21(i + float2(1, 1)), f.x), f.y);
+}
+float2 r2Steer(float2 t, float2 vt) {
+    float2 texMM = gR2CellSizeMM * gR2Cells;
+    float2 vm = vt * texMM;                                   // mm/s on the visor
+    float sp = length(vm);
+    if (sp < 1e-3 || (gR2Meander <= 0 && gR2TrailFollow <= 0)) return vt;
+    float2 dir = vm / sp;
+    float2 side = float2(-dir.y, dir.x);
+    float nz = r2VNoise(t * gR2MeanderScale) * 2.0 - 1.0;
+    float kick = sign(nz) * saturate(abs(nz) * 2.0 - 0.5);
+    float2 ahead = t + dir * (1.5 / texMM);
+    float tl = txR2Field.SampleLevel(samLinearClamp, ahead + side * (1.0 / texMM), 0).r;
+    float tr = txR2Field.SampleLevel(samLinearClamp, ahead - side * (1.0 / texMM), 0).r;
+    float lat = gR2Meander * kick + gR2TrailFollow * (tl - tr);
+    vm = normalize(dir + side * lat) * sp;
+    return vm / texMM;
+}
+
 // One drop step. Every gathering cell evaluates this identically for a source.
 struct R2Move {
     float2 dest;   // absolute cell coordinates after the step
@@ -155,6 +183,7 @@ R2Move r2Predict(int2 cell, float4 s) {
     if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
     float speed;
     float2 vt = r2DropVelocity(t, rmm, pinNoise, speed);
+    vt = r2Steer(t, vt);
     float2 dc = vt * gR2Dt * gR2Cells;
     if (speed > gR2VShed) return o;                          // shed: leaves the surface
     // rev7: a fast drop is LIMITED to the gather window instead of being deleted

@@ -39,12 +39,20 @@ local DEFAULTS = {
   substeps = 2,
   -- supply (weather.lua)
   terminalSpeed = 6.0, diamScale = 1.0, impactScale = 1.0, sprayFlux = 2e-5,
-  stickSlow = 0.8, stickFast = 0.4, microK = 7.0,
+  stickSlow = 0.8, microK = 7.0,   -- rev21: stickFast replaced by the splash rule (splashK0/resA/resB)
   exposure = 0.5, exposureFloor = 0.0, normalSign = 1.0,
   -- drop physics: rainfx2/physics.lua (P.DEFAULTS, merged below)
   ladderMinMM = 0.3, ladderMaxMM = 2.2,   -- physics test drop ladder
   -- field
-  microEvap = 0.05, microShear = 0.02, microCollect = 0.9,
+  -- rev21: moving drops wipe the haze clean and leave only a faint trace (user observation of real
+  -- visors, research section 3.3): collect 0.9 -> 0.95, trace haze 0.15 -> 0.05 (below)
+  microEvap = 0.05, microShear = 0.02, microCollect = 0.95,
+  -- rev21 R-size (docs/RAINFX_V2_DROP_SIZE_RESEARCH.md section 3): impact fragmentation
+  splashK0 = 58, resA = 0.5, resB = 0.3,
+  -- rev21 growth of visible drops from unresolved water: haze condensation, film head drops
+  nucM = 0.35, nucRate = 0.6, headMinMM = 0.08, headRate = 3.0, filmCollect = 0.3,
+  -- rev21 CSP adoption: lateral kicks from surface noise (6 mm features), trail following
+  meander = 0.35, meanderMM = 6.0, trailFollow = 1.5,
   -- sheetDrain rev14 0.5 -> 0.1: drainage dominated the film balance (eq ~ supply), now edge
   -- outflow does (eq ~ supply^(1/2..1/3)), compressing light..heavy into the cover window.
   traceDecay = 0.6, traceAmount = 0.6, sweepWidth = 0.9, sheetDrain = 0.1,
@@ -52,21 +60,53 @@ local DEFAULTS = {
   kernelScale = 1.24, threshold = 0.35,     -- dome 1-(d/1.24R)^2, silhouette at U = 0.35 (= R)
   -- rev20 drop surface: contact angle of an impact-deposited drop (~ receding angle on polycarbonate
   -- / hard coat), per-drop spread, extra recession at the sliding rear, flattening on a wet surface.
-  contactDeg = 55, contactSpread = 12, hysteresisDeg = 20, wetFlatten = 0.5,
+  -- rev25: 75 -> 55. The TIR band starts at r/R = sin(48.6 deg)/sin(theta): 75 deg -> outer 22 % of the
+  -- radius dark (thick rim on close drops), 55 deg -> 8 % (thin rim like the reference)
+  contactDeg = 60, contactSpread = 8,   -- rev35: 60 (user: stronger curl looked better; normal 40-60)
+  hysteresisDeg = 20, wetFlatten = 0.5,
   -- rev20 wobble of pinned drops in airflow (amplitude ~ drag/pinning), visible-rate tones
-  wobbleAmp = 0.12, wobbleHz = 8.0,
+  wobbleAmp = 0.08, wobbleHz = 8.0,   -- rev21: 0.12 -> 0.08 (user: 0.07-0.09 best at speed)
   motionStretch = 0.35,                     -- WF MOTION_STRETCH
-  minDrawMM = 0.2,                          -- smaller drops are drawn at this radius
-  wfRefraction = 0.69,                      -- WF REFRACTION (screen heights at slope 1)
+  minDrawMM = 0.12,                         -- smaller drops are drawn at this radius (rev21: 0.2 -> 0.12, R-size fragments)
+  wfRefraction = 0.14,                      -- near lens (rev22 default = user choice 0.14; WF 0.69 -> chrome). Far rim: farRefraction
   wfSceneMip = 2.0, wfSlopeMip = 1.5,       -- WF SCENE_MIP 3 on a full-res shot = 2 on the half-res source
   largeStartPx = 8, largeFullPx = 30, largeBlurMip = 1.5, largeWarpPx = 4,   -- WF LARGE_WARP_PIXELS (rev19)
   -- defocus (rev18, D-C): thin-lens circle of confusion, docs/RAINFX_V2_DEFOCUS_PLAN.md
-  apertureMM = 1.2,        -- entrance pupil A
+  apertureMM = 0.0,        -- entrance pupil A (rev23: 0 until the final whole-visor defocus step)
   focusM = 0.12,           -- focus distance zf (left visor ~ in focus, near-lens right blurred)
   defocusDA = true,        -- rev19: D-A stochastic colour gather (4 taps where CoC > 1 px); off = D-C
-  housingM = 0.20,         -- frame pixels closer than this (linear m) are helmet housing
+  housingM = 0.20,         -- frame pixels closer than this (linear m) are helmet housing (rev27: UI slider)
   sourceScale = 0.5,       -- refraction source resolution (fraction of the frame)
-  edgeLoss = 0.75, lossStart = 0.70, lossEnd = 1.30, glint = 0.45,   -- WF rim (rev18)
+  -- rev22: symmetric rim loss 0.75 -> 0.35; the one-sided rim shading now comes from the far lens
+  -- rev23 (look lab, offline match to the reference): one-sided rim from a directional environment
+  -- rev31: WF values again (lens mode 0 = legacy Water Field rule is the default)
+  -- rev33: symmetric rim loss 0 (user: a rim carries its own view direction, it cannot be a black ring)
+  edgeLoss = 0.0, lossStart = 0.70, lossEnd = 1.30, glint = 0.45,
+  -- rev32 two-zone WF lens: rim / small drops at the legacy strength, interior at the user's
+  wfRimRefraction = 0.69, rimMip = 1.0, smallFullPx = 6, smallEndPx = 16,
+  rimSharp = 4.0,     -- rev36: side views tilt only the outer 1/rimSharp of the radius
+  -- rev24 physical plano-convex lens (visor.hlsl r2DropLens): deflection gain (1 = physical, n 1.333),
+  -- environment for rays leaving the screen (ground fraction of the sky colour), TIR interior,
+  -- gravity sag of pinned drops (thick toward gravity, thin tail above)
+  lensK = 0.35, envGround = 0.12, envInterior = 0.35, sagK = 0.25,
+  rimMinPx = 1.5,     -- rev27: rim band at least this many px (small drops keep an outline)
+  -- rev28 CSP windscreen drop shading (docs/RAINFX_V2_CSP_DROP_SHADING.md)
+  rimBand = 0.25,     -- outer fraction of the radius shaded from the cubemap (CSP steep-normal zone)
+  cspRefract = 0.30,  -- screen refraction of the flat interior (uv per unit normal tilt; CSP 0.25-0.5)
+  rimEnvK = 0.7, rimCubeMip = 1.0, reflK = 1.0,
+  -- rev29 full CSP windscreen port (docs/RAINFX_V2_CSP_DROP_SHADING.md section 5)
+  cspMode = false,    -- rev31: not adopted (user rev30 review); kept for comparison
+  lensMode = 0,       -- rev31: 0 legacy WF lens (default), 1 rev28 CSP cell shading
+  depthTest = true,   -- rev32: back on (user: needed so the helmet housing hides the water; no effect on the pattern)
+  wmU = 1024, wmV = 256,                -- water map texel ~0.59 x 0.57 mm (CSP windscreen 2048 map ~0.7 mm)
+  wmMinMM = 0.15, wmSplit = 0.5, wmSkirt = 0.2, wmNoise = 1.0, wmStretch = 0.6,
+  wmDecay = 2.0,      -- /s, traces fade (rev30: 0.5 read sticky/oily; CSP keeps them until a wiper)
+  wmScale = 0.5,      -- rev30: drawn size of the water stamps vs the physical drop (visor scale tuning)
+  wmStepMM = 0.7, wmBlurMip = 1.75,     -- CSP: 1 texel step at LOD 1.5 of a ~0.7 mm map
+  wmNormalK = 2.2, wmCovK = 2.0,
+  clearMaxMM = 0.3, clearK = 1.0,                     -- rev22 impact clearing of small pinned drops
+  -- rev23 look lab: occupancy per cell, radius range (pdf ~ r^-1.88 = reference size histogram)
+  labOcc = 0.3, labRMinMM = 0.12, labRMaxMM = 2.0,
   -- water film optics (rev11)
   filmMinMM = 0.05, filmFullMM = 0.15, filmRefract = 12.0, filmAbsorb = 0.8, filmMip = 4.5, filmVeil = 0.25,
   -- forward scattering veil of the VISOR SURFACE only (rev17, docs/RAINFX_V2_EVAL.md section 11):
@@ -74,14 +114,14 @@ local DEFAULTS = {
   scatterK = 1.0, scatterM = 0.35, scatterM0 = 0.04, scatterFilm = 0.3, scatterSpray = 0.0,
   scatterMax = 0.35, scatterMip = 6.5, scatterSky = 0.3, scatterGain = 1.1,
   filmK = 1.0, sprayK = 1.0,
-  hazeK = 0.8, traceHaze = 0.15, hazeMip = 4.0, veilMix = 0.25, veilBright = 1.0,
+  hazeK = 0.8, traceHaze = 0.05, hazeMip = 4.0, veilMix = 0.25, veilBright = 1.0,
   depthCoverage = 0.35, debug = 0, debugBright = 1.0,
 }
 
 -- Persisted user controls (subset of DEFAULTS + enable switch).
 local STORED = { enabled = true, exposure = DEFAULTS.exposure, wfRefraction = DEFAULTS.wfRefraction,
   wfSceneMip = DEFAULTS.wfSceneMip, focusM = DEFAULTS.focusM, defocusDA = DEFAULTS.defocusDA,
-  contactDeg = DEFAULTS.contactDeg, wobbleAmp = DEFAULTS.wobbleAmp,
+  contactDeg = DEFAULTS.contactDeg, wobbleAmp = DEFAULTS.wobbleAmp, lensK = DEFAULTS.lensK,
   apertureMM = DEFAULTS.apertureMM, hazeK = DEFAULTS.hazeK, substeps = DEFAULTS.substeps, freezeRain = false, windK = 1.0, metrics = false,
   filmK = DEFAULTS.filmK, sprayK = DEFAULTS.sprayK, filmRefract = DEFAULTS.filmRefract, filmVeil = DEFAULTS.filmVeil,
   scatterK = DEFAULTS.scatterK,
@@ -105,6 +145,22 @@ local function sceneValues(self, v)
   v.gR2ImpactRate = self.store.freezeRain and 0 or (st.impactRate or 0)
   v.gR2MeanDiamMM = st.meanDiamMM or 0.3
   v.gR2StickFrac = st.stickFrac or 0.6
+  v.gR2StickSlow = p.stickSlow
+  v.gR2SpeedRel = st.speedRel or p.terminalSpeed
+  v.gR2SplashK0 = p.splashK0
+  v.gR2ResA = p.resA
+  v.gR2ResB = p.resB
+  v.gR2NucM = p.nucM
+  v.gR2NucRate = p.nucRate
+  v.gR2HeadMinMM = p.headMinMM
+  v.gR2HeadRate = p.headRate
+  v.gR2FilmCollect = p.filmCollect
+  v.gR2ClearMaxMM = p.clearMaxMM
+  v.gR2ClearK = p.clearK
+  v.gR2Meander = p.meander
+  v.gR2TrailFollow = p.trailFollow
+  if not self.meanderScale then self.meanderScale = vec2(602.0 / p.meanderMM, 146.3 / p.meanderMM) end
+  v.gR2MeanderScale = self.meanderScale
   v.gR2MicroRate = self.store.freezeRain and 0 or (st.microRate or 0)
   v.gR2Exposure = p.exposure
   v.gR2ExposureFloor = p.exposureFloor
@@ -152,7 +208,7 @@ local function newPass(self, shader)
   return {
     async = true,
     blendMode = render.BlendMode.Opaque,
-    textures = { txR2State = false, txR2Field = false, txR2Claim = false,
+    textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2WMap = false,
       txR2Du = root .. 'du.dds', txR2Dv = root .. 'dv.dds', txR2Mask = self.ctx.maskPath },
     values = sceneValues(self, {}),
     shader = shader,
@@ -178,6 +234,12 @@ function R2:ensureResources()
   self.S = { canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
   self.C = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 claims')
   self.F = { canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field A'), canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field B') }
+  -- rev29 CSP windscreen water map (wmap.hlsl), RGBA16F with mips for the blurred-height normal
+  local wmMips = math.floor(math.log(math.max(p.wmU, p.wmV)) / math.log(2)) + 1
+  self.WM = { canvas(p.wmU, p.wmV, wmMips, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 water map A'),
+              canvas(p.wmU, p.wmV, wmMips, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 water map B') }
+  self.wmi = 1
+  self.wmSize = vec2(p.wmU, p.wmV)
   self.si, self.fi = 1, 1
   self.cells = vec2(p.cellsU, p.cellsV)
   self.fieldSize = vec2(p.fieldU, p.fieldV)
@@ -189,6 +251,7 @@ function R2:ensureResources()
   self.texMM = vec2(602.0, 146.3)
   self.passCells = newPass(self, self.src.cells)
   self.passField = newPass(self, self.src.field)
+  self.passWMap = newPass(self, self.src.wmap)
   self.passClaim = newPass(self, self.src.claim)
   self.passMetrics = newPass(self, self.src.metrics)
   self.Mc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 metrics')
@@ -277,7 +340,7 @@ function R2:simulate(sim)
   local p = self.p
   p.exposure, p.apertureMM, p.hazeK, p.debug = s.exposure, s.apertureMM, s.hazeK, s.debug
   p.wfRefraction, p.wfSceneMip, p.focusM = s.wfRefraction, s.wfSceneMip, s.focusM
-  p.contactDeg, p.wobbleAmp = s.contactDeg, s.wobbleAmp
+  p.contactDeg, p.wobbleAmp, p.lensK = s.contactDeg, s.wobbleAmp, s.lensK
   p.defocusDA = s.defocusDA
   local userSub = math.max(1, math.min(4, math.floor(s.substeps + 0.5)))
   p.filmK, p.sprayK, p.filmRefract, p.filmVeil = s.filmK, s.sprayK, s.filmRefract, s.filmVeil
@@ -286,6 +349,30 @@ function R2:simulate(sim)
   p.normalSign = s.invertSide and -1 or 1
   if not self.ctx.surface:validate() then self.status = self.ctx.surface.status or 'geometry not verified'; return end
   if not self:ensureResources() or not self:ensureMesh() then return end
+  -- rev23 look lab (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md step 1): static reference-distributed
+  -- drop set, physics / births / film / haze / scatter / wobble / defocus off. Works while paused.
+  if self.lookLab then
+    if self.labRequest or not self.labSeeded then
+      self.labRequest = false
+      local ps = self.passSeed
+      if not ps then ps = newPass(self, self.src.seed); self.passSeed = ps end
+      sceneValues(self, ps.values)
+      self.labSeedN = ((self.labSeedN or 0) + 1) % 100000
+      ps.values.gR2Frame = self.labSeedN
+      ps.values.gR2SeedMode = 1
+      if self.WM then self.WM[1]:clear(rgbm(0, 0, 0, 0)); self.WM[2]:clear(rgbm(0, 0, 0, 0)) end
+      ps.values.gR2LabOcc = p.labOcc
+      ps.values.gR2LabRMinMM = p.labRMinMM
+      ps.values.gR2LabRMaxMM = p.labRMaxMM
+      if run(self.S[3 - self.si], ps) then self.si = 3 - self.si; self.labSeeded = true end
+    end
+    self.frameDt = self.frameDt or (1 / 60)
+    self:updateWaterMap(0)                       -- static set: stamps only, no decay
+    self.opticsReady = true
+    self.status = 'look lab (static drops, other effects off)'
+    return
+  end
+  self.labSeeded = false
   local dt = sim.dt or 0
   if dt <= 0 then self.status = 'paused'; return end
   dt = math.min(dt, 1 / 20) * (self.timeScale or 1)   -- rev9: slow motion for physics review
@@ -305,6 +392,7 @@ function R2:simulate(sim)
     local ps = self.passSeed
     if not ps then ps = newPass(self, self.src.seed); self.passSeed = ps end
     sceneValues(self, ps.values)
+    ps.values.gR2SeedMode = 0
     if run(self.S[3 - self.si], ps) then self.si = 3 - self.si end
   end
   -- rev13: coalescence runs FIRST (on last frame's state). The merge may leave a drop
@@ -329,6 +417,7 @@ function R2:simulate(sim)
     self.sub = i
     local pc = self.passCells
     pc.textures.txR2State = self.S[self.si]
+    pc.textures.txR2Field = self.F[self.fi]   -- rev21: haze/film births, trail following
     sceneValues(self, pc.values)
     if not run(self.S[3 - self.si], pc) then self.status = 'compiling cells'; return end
     self.si = 3 - self.si
@@ -341,9 +430,31 @@ function R2:simulate(sim)
     pf.values.gR2Dt = self.frameDt                 -- field integrates the whole frame
     if run(self.F[3 - self.fi], pf) then self.fi = 3 - self.fi end
   end
+  self:updateWaterMap(self.frameDt)
   self:metricsUpdate(sim)
   self.opticsReady = true
   self.status = 'running'
+end
+
+-- rev29: CSP water map update (stamps from the cell state + sharpen/decay of the previous map).
+function R2:updateWaterMap(dt)
+  local p = self.p
+  if not p.cspMode then return end
+  local pw = self.passWMap
+  pw.textures.txR2State = self.S[self.si]
+  pw.textures.txR2WMap = self.WM[self.wmi]
+  sceneValues(self, pw.values)
+  local v = pw.values
+  v.gR2Dt = dt
+  v.gR2WMSize = self.wmSize
+  v.gR2WMMinMM, v.gR2WMSplit, v.gR2WMSkirt = p.wmMinMM, p.wmSplit, p.wmSkirt
+  v.gR2WMNoise, v.gR2WMStretch, v.gR2WMDecay = p.wmNoise, p.wmStretch, p.wmDecay
+  v.gR2WMScale = p.wmScale
+  local dst = self.WM[3 - self.wmi]
+  if run(dst, pw) then
+    dst:mipsUpdate()
+    self.wmi = 3 - self.wmi
+  end
 end
 
 function R2:drawParams(depth)
@@ -351,7 +462,7 @@ function R2:drawParams(depth)
   local t = self[key]
   if not t then
     t = { mesh = self.mesh, transform = 'original', async = true,
-      textures = { txR2State = false, txR2Field = false, txR2Scene = false, txR2Mask = self.ctx.maskPath },
+      textures = { txR2State = false, txR2Field = false, txR2Scene = false, txR2WMap = false, txR2Mask = self.ctx.maskPath },
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
@@ -404,6 +515,30 @@ function R2:drawParams(depth)
   v.gR2LossStart = p.lossStart
   v.gR2LossEnd = p.lossEnd
   v.gR2Glint = p.glint
+  v.gR2WFRimRefraction = p.wfRimRefraction
+  v.gR2RimMip = p.rimMip
+  v.gR2RimSharp = p.rimSharp
+  v.gR2SmallFullPx = p.smallFullPx
+  v.gR2SmallEndPx = p.smallEndPx
+  v.gR2LensK = p.lensK
+  v.gR2EnvGround = p.envGround
+  v.gR2EnvInterior = p.envInterior
+  v.gR2SagK = p.sagK
+  v.gR2RimMinPx = p.rimMinPx
+  v.gR2CspMode = p.cspMode and 1 or 0
+  v.gR2LensMode = p.lensMode
+  v.gR2WMStepMM, v.gR2WMBlurMip, v.gR2WMNormalK, v.gR2WMCovK = p.wmStepMM, p.wmBlurMip, p.wmNormalK, p.wmCovK
+  v.gR2RimBand = p.rimBand
+  v.gR2CspRefract = p.cspRefract
+  v.gR2RimEnvK = p.rimEnvK
+  v.gR2RimCubeMip = p.rimCubeMip
+  v.gR2ReflK = p.reflK
+  self.camLook = self.camLook or vec3(); self.camSide = self.camSide or vec3(); self.camUp = self.camUp or vec3()
+  self.camLook:set(simNow.cameraLook or vec3(0, 0, 1))
+  self.camSide:set(simNow.cameraSide or vec3(1, 0, 0))
+  self.camUp:set(simNow.cameraUp or vec3(0, 1, 0))
+  v.gR2CamLook, v.gR2CamSide, v.gR2CamUp = self.camLook, self.camSide, self.camUp
+  v.gR2AccelW = self.accelW or vec3(0, -9.81, 0)
   v.gR2ScreenUp = self.screenUp or vec2(0, -1)
   v.gR2HazeK = p.hazeK
   v.gR2TraceHaze = p.traceHaze
@@ -431,6 +566,7 @@ function R2:drawParams(depth)
   v.gR2SimDt = self.frameDt or (1 / 60)   -- packed move = displacement of the whole frame
   v.gR2VMax = p.vMax
   v.gR2VLimit = self.diag and self.diag.vGather or 0.5   -- physical m/s (h already scaled)
+  v.gR2LookLab = self.lookLab and 1 or 0
   v.gR2Debug = p.debug
   v.gR2DebugBright = p.debugBright
   return t
@@ -501,14 +637,17 @@ function R2:draw(src, viewKey, depth)
   if not depth and self.offscreenTest == 'pending' then self:offscreenTestRun() end
   t.textures.txR2State = self.S[self.si]
   t.textures.txR2Field = self.F[self.fi]
+  t.textures.txR2WMap = self.WM and self.WM[self.wmi] or false
   render.setCullMode(render.CullMode.None)
   render.setBlendMode(render.BlendMode.AlphaBlend)
-  render.setDepthMode(depth and render.DepthMode.Normal or render.DepthMode.ReadOnly)
+  -- rev31: the drop mesh is a copy of the visor surface offset by only 0.05 mm; a depth-tested colour
+  -- pass can z-fight with anything written at that surface (oblique / close views -> dot/hatch pattern).
+  render.setDepthMode(depth and render.DepthMode.Normal or (self.p.depthTest and render.DepthMode.ReadOnly or render.DepthMode.Off))
   self.mesh:setVisible(true, false)
   local ok, res = pcall(render.mesh, t)
   self.mesh:setVisible(false, false)
   render.setDepthMode(render.DepthMode.ReadOnly)
-  if not ok then self.err = 'Draw: ' .. tostring(res); return false end
+  if not ok then self.err = 'Draw: ' .. tostring(res); ac.warn('RainFX v2 ' .. self.err); return false end
   if res ~= false then self[memo] = viewKey end
   return res ~= false
 end
@@ -556,36 +695,87 @@ end
 
 function R2:ui()
   local s = self.store
-  ui.text('RainFX v2 (cell-gather): ' .. (self.err or self.status))
+  ui.text('RainFX v2 (cell-gather): ' .. (self.err and 'ERROR' or self.status))
+  if self.err then
+    -- rev36: any v2 error turns v2 off (enabled() = false) and the legacy RainFX comes back while
+    -- the checkbox stays on. Show the error in full and allow a retry.
+    ui.textColored('v2 stopped, legacy RainFX shown. Error: ' .. tostring(self.err), rgbm(1, 0.3, 0.2, 1))
+    if ui.button('Clear the v2 error and retry') then self.err = nil; self.warned = nil end
+  end
   if ui.checkbox('Enable RainFX v2 (turns legacy RainFX off)', s.enabled) then s.enabled = not s.enabled end
   if not s.enabled then return end
   s.exposure = ui.slider('##rfx2exp', s.exposure, 0, 1, 'Rain exposure: %.2f')
+  -- rev23 look lab: judge the drop look alone (reference: 물방울형태및흐름 video)
+  if ui.checkbox('Look lab: static reference-sized drops, all other effects off', self.lookLab == true) then
+    self.lookLab = not self.lookLab
+    self.labSeeded = false
+  end
+  if self.lookLab then
+    ui.sameLine()
+    if ui.button('New drop set') then self.labRequest = true end
+    local p = self.p
+    local v1, c1 = ui.slider('##rfx2lo', p.labOcc, 0.05, 0.8, 'Lab occupancy per cell: %.2f')
+    local v2, c2 = ui.slider('##rfx2lr', p.labRMaxMM, 0.5, 3.0, 'Lab largest radius: %.2f mm')
+    p.labOcc, p.labRMaxMM = v1, v2
+    if c1 or c2 then self.labRequest = true end
+  end
   if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
+    self.p.rimSharp = DEFAULTS.rimSharp
+    self.p.wfRimRefraction, self.p.rimEnvK, self.p.envInterior, self.p.edgeLoss = DEFAULTS.wfRimRefraction, DEFAULTS.rimEnvK, DEFAULTS.envInterior, DEFAULTS.edgeLoss
+    self.p.lensMode, self.p.cspMode = DEFAULTS.lensMode, DEFAULTS.cspMode
     s.apertureMM, s.focusM, s.wfRefraction, s.wfSceneMip = DEFAULTS.apertureMM, DEFAULTS.focusM, DEFAULTS.wfRefraction, DEFAULTS.wfSceneMip
-    s.contactDeg, s.wobbleAmp = DEFAULTS.contactDeg, DEFAULTS.wobbleAmp
+    s.contactDeg, s.wobbleAmp, s.lensK = DEFAULTS.contactDeg, DEFAULTS.wobbleAmp, DEFAULTS.lensK
     s.defocusDA = DEFAULTS.defocusDA
     s.filmRefract, s.filmVeil, s.scatterK = DEFAULTS.filmRefract, DEFAULTS.filmVeil, DEFAULTS.scatterK
   end
-  s.wfRefraction = ui.slider('##rfx2ref', s.wfRefraction, 0, 1.5, 'Drop lens refraction (WF): %.2f')
-  s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Drop image blur (scene mip): %.1f')
-  s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Drop contact angle: %.0f deg (rim darkness; wet surface flattens)')
-  s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Drop wobble in airflow: %.2f')
-  s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Defocus: aperture %.2f mm (0 = sharp)')
-  s.focusM = ui.slider('##rfx2fz', s.focusM, 0.03, 1.0, 'Defocus: focus distance %.3f m')
-  if ui.checkbox('Defocus: D-A colour gather (4 taps near the lens; off = D-C analytic)', s.defocusDA) then s.defocusDA = not s.defocusDA end
+  -- rev34 UI: WF lens (main) first, then defocus, then the CSP comparison (kept, not adopted).
+  ui.separator()
+  ui.text('Drops: WF lens, surface-based (main)')
+  s.wfRefraction = ui.slider('##rfx2ref', s.wfRefraction, 0, 1.2, 'Interior refraction (large drops; 0.69 = physical): %.2f')
+  self.p.wfRimRefraction = ui.slider('##rfx2wrr', self.p.wfRimRefraction, 0.05, 1.2, 'Rim + small-drop refraction (0.69 = physical): %.2f')
+  self.p.rimSharp = ui.slider('##rfx2rs', self.p.rimSharp, 1, 8, 'Thin rim in side views (rim band = 1/x of radius): %.1f')
+  s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Contact angle: %.0f deg (rim curl; normal 40-60)')
+  s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Image blur in the drop (scene mip): %.1f')
+  self.p.rimEnvK = ui.slider('##rfx2re', self.p.rimEnvK, 0, 1.5, 'Environment brightness (rays leaving the screen): %.2f')
+  self.p.envInterior = ui.slider('##rfx2ei', self.p.envInterior, 0, 1, 'Total internal reflection brightness: %.2f')
+  self.p.edgeLoss = ui.slider('##rfx2el', self.p.edgeLoss, 0, 1, 'Extra symmetric rim darkening (default 0): %.2f')
+  s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Wobble in airflow: %.2f')
+  self.p.housingM = ui.slider('##rfx2hm', self.p.housingM, 0.05, 0.6, 'Refraction source: remove housing closer than %.2f m')
+  if ui.checkbox('Hide water behind the helmet housing (depth test)', self.p.depthTest) then self.p.depthTest = not self.p.depthTest end
+  ui.separator()
+  ui.text('Defocus (final step, off by default)')
+  s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')
+  s.focusM = ui.slider('##rfx2fz', s.focusM, 0.03, 1.0, 'Focus distance %.3f m')
+  if ui.checkbox('D-A colour gather (4 taps near the lens; off = D-C analytic)', s.defocusDA) then s.defocusDA = not s.defocusDA end
   if self.cocInfo then ui.text(self.cocInfo) end
   self:offscreenTestUI()
+  ui.separator()
+  if ui.checkbox('Comparison: CSP methods (not adopted)', self.showCsp == true) then self.showCsp = not self.showCsp end
+  if self.showCsp then
+    if ui.checkbox('Use CSP cell shading instead of the WF lens', self.p.lensMode == 1) then self.p.lensMode = self.p.lensMode == 1 and 0 or 1 end
+    s.lensK = ui.slider('##rfx2lk', s.lensK, 0, 1.5, 'CSP: interior lens strength: %.2f')
+    self.p.rimBand = ui.slider('##rfx2rb', self.p.rimBand, 0.05, 0.5, 'CSP: rim width (cubemap zone): %.2f of radius')
+    self.p.reflK = ui.slider('##rfx2rf', self.p.reflK, 0, 3, 'CSP: reflection (1.0): %.2f')
+    if ui.checkbox('CSP windscreen water map', self.p.cspMode) then self.p.cspMode = not self.p.cspMode end
+    if self.p.cspMode then
+      self.p.wmBlurMip = ui.slider('##rfx2wbm', self.p.wmBlurMip, 0, 4, 'Water map normal blur: %.2f')
+      self.p.wmNormalK = ui.slider('##rfx2wnk', self.p.wmNormalK, 0.5, 6, 'Water map normal gain (2.2): %.2f')
+      self.p.wmDecay = ui.slider('##rfx2wdc', self.p.wmDecay, 0, 6, 'Water traces fade: %.2f /s')
+      self.p.wmScale = ui.slider('##rfx2wsc', self.p.wmScale, 0.2, 1.5, 'Water drop size scale: %.2f')
+    end
+  end
+  ui.separator()
   s.hazeK = ui.slider('##rfx2haze', s.hazeK, 0, 2, 'Haze strength: %.2f')
   s.substeps = ui.slider('##rfx2sub', s.substeps, 1, 4, 'Min substeps: %.0f (auto up to 4)', true)
   if ui.checkbox('Invert exposure side (auto: side facing away from the eye)', s.invertSide) then s.invertSide = not s.invertSide end
-  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 6, 'Debug: 1 water, 2 exposure, 3 refr. source, 4 physics, 5 film, 6 defocus: %.0f', true)
+  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 8, 'Debug: 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rim, G env, B TIR/mip) 8 coverage: %.0f', true)
   self:filmUI()
   self:physicsUI()
   local st = self.stats
   ui.text(string.format('Rain %.1f mm/h  mean D %.2f mm  rel. speed %.1f m/s',
     st.rateMMh or 0, st.meanDiamMM or 0, st.speedRel or 0))
-  ui.text(string.format('Impacts %.0f /m2/s  stick %.2f  micro %.3f /s',
-    st.impactRate or 0, st.stickFrac or 0, st.microRate or 0))
+  ui.text(string.format('Impacts %.0f /m2/s  splash K %.0f  resolved %.2f in %.2f mm fragments  micro %.3f /s',
+    st.impactRate or 0, st.splashK or 0, st.stickFrac or 0, st.fragDiamMM or 0, st.microRate or 0))
   if self.sourceErr then ui.text('Refraction source: ' .. self.sourceErr) end
   ui.text('GPU/CPU cost: Render Stats -> "RainFX2 sim" / "RainFX2 draw".')
 end
@@ -730,7 +920,7 @@ return function(ctx)
   local dir = ctx.folder .. '/rainfx2/shaders/'
   local common = readFile(dir .. 'common.hlsl')
   local src = {}
-  for _, name in ipairs({ 'cells', 'field', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics' }) do
+  for _, name in ipairs({ 'cells', 'field', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -744,6 +934,7 @@ return function(ctx)
       merge = common .. '\n' .. src.merge,
       seed = common .. '\n' .. src.seed,
       metrics = common .. '\n' .. src.metrics,
+      wmap = common .. '\n' .. src.wmap,
       visor = src.visor,
       source = src.source,
       visorDepth = '#define R2_DEPTH_ONLY 1\n' .. src.visor,

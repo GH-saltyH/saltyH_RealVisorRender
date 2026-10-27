@@ -17,7 +17,7 @@ float4 main(PS_IN pin) {
     float2 pc = t * gR2Cells;
     int2 c0 = int2(floor(pc));
     int2 size = int2(gR2Cells);
-    float cover = 0;
+    float cover = 0, coverM = 0;   // coverM: moving drops only (rev22 film collect)
     [unroll] for (int y = -2; y <= 2; ++y) {
         [unroll] for (int x = -2; x <= 2; ++x) {
             int2 s = c0 + int2(x, y);
@@ -29,6 +29,7 @@ float4 main(PS_IN pin) {
             float rCells = r2RadiusMM(st.z) / gR2CellMM;          // gR2CellMM: mean cell edge
             float d = r2SegDist(pc, a, b);
             cover = max(cover, saturate(1.0 - d / max(rCells * gR2SweepWidth, 0.25)));
+            if (dot(b - a, b - a) > 4e-4) coverM = max(coverM, saturate(1.0 - d / max(rCells * gR2SweepWidth, 0.25)));
         }
     }
 
@@ -73,5 +74,7 @@ float4 main(PS_IN pin) {
         W += add * dep / gR2FilmMaxMM;
     }
     W *= exp(-gR2Dt * gR2SheetDrain);
+    // rev21: drops sweeping through the film take it with them (and wipe the haze, M above).
+    W *= 1.0 - coverM * gR2FilmCollect;   // rev22: pinned drops do not drain the film (rev21 T3 film 1 %)
     return float4(saturate(T), saturate(M), saturate(W), exposureRaw);
 }

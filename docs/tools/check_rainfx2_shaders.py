@@ -20,12 +20,12 @@ DLL = os.path.join(ROOT, 'lights-patch-v0.3.0-preview728', 'dwrite.dll')
 SRC = os.path.join(ROOT, 'rainfx2', 'shaders')
 OUT = os.path.join(ROOT, 'tmp', 'rainfx2_shaders')
 
-FLOAT2 = {'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
-FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos'}
+FLOAT2 = {'gR2WMSize', 'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
+FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos', 'gR2CamLook', 'gR2CamSide', 'gR2CamUp'}
 MATRIX = {'gR2ObjToWorld'}
 
-SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2Du', 'txR2Dv', 'txR2Mask']
-VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Scene', 'txR2Mask']
+SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2WMap', 'txR2Du', 'txR2Dv', 'txR2Mask']
+VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Scene', 'txR2WMap', 'txR2Mask']
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 
 PASSES = [  # name, template, files, textures, defines
@@ -35,6 +35,7 @@ PASSES = [  # name, template, files, textures, defines
     ('seed', 'ui.fx', ['common.hlsl', 'seed.hlsl'], SCENE_TEXTURES, ''),
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
     ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], SCENE_TEXTURES, ''),
+    ('wmap', 'ui.fx', ['common.hlsl', 'wmap.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
     ('visor', 'mesh.fx', ['visor.hlsl'], VISOR_TEXTURES, ''),
     ('visor_depth', 'mesh.fx', ['visor.hlsl'], VISOR_TEXTURES, '#define R2_DEPTH_ONLY 1\n'),
