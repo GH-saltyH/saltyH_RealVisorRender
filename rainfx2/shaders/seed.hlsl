@@ -7,7 +7,9 @@
 float4 main(PS_IN pin) {
     int2 c = int2(pin.PosH.xy);
     // rev45: right half = life cycle; static test drops are fully grown (age 10 s)
-    if (c.x >= (int)gR2Cells.x) return float4(10, 0, 0, 0);
+    bool shapeThird = c.x >= 2 * (int)gR2Cells.x;   // rev48-S1: shape third, same drop as the left third
+    if (shapeThird) c.x -= 2 * (int)gR2Cells.x;
+    else if (c.x >= (int)gR2Cells.x) return float4(10, 0, 0, 0);
     uint2 u = uint2(c);
     float2 t = (float2(c) + 0.5) / gR2Cells;
     float4 none = float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0));
@@ -28,11 +30,14 @@ float4 main(PS_IN pin) {
             float2 q = float2(r2Rand(uint3(u.x, u.y, k * 5u + 3u)), r2Rand(uint3(u.x, u.y, k * 5u + 4u))) * 0.999;
             float sd = floor(r2Rand(uint3(u.y, u.x, k * 5u + 5u)) * R2_SEEDS);
             res = float4(q, gR2ShapeK * rr * rr * rr, r2PackMove(float2(0, 0), sd));
+            if (shapeThird) res = r2ShapeBirth(u, k * 5u + 77u, rr, t);
         }
     } else if (u.x % 6u == 3u && u.y % 6u == 3u && valid) {
         float band = floor(saturate(t.x) * 8.0) / 7.0;
         float r = lerp(gR2LadderMinMM, gR2LadderMaxMM, saturate(band));
         res = float4(0.5, 0.5, gR2ShapeK * r * r * r, r2PackMove(float2(0, 0), (float)((u.y / 6u) % 64u)));
     }
+    if (shapeThird && res.z <= 0) res = float4(0, 0, r2PackHarm(0, 0), 0);
+    else if (shapeThird && gR2SeedMode < 0.5) res = float4(0, 0, r2PackHarm(0, 0), 0);   // ladder: round
     return res;
 }

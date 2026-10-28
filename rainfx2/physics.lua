@@ -96,8 +96,46 @@ function P.inputs(sim, p, out)
   end
   local accel = vec3(0, -9.81, 0) - carAcc
   out.carAccW = carAcc
+  -- rev48 wind source (rev47l / S1 reviews: in a REPLAY whose weather a controller overrides, the visor
+  -- exposure ignored the wind direction). sim.windVelocityKmh (game-space vector) is the live source; in
+  -- replays it keeps the recorded wind, while the controller override reaches the conditions set
+  -- (ac.overrideReplayConditions -> sim.weatherConditions.wind: real-world compass direction, km/h).
+  -- Compass -> game space: ac.getCompassAngle gives the track orientation; the convention offset (from /
+  -- to, handedness of the track) is CALIBRATED live from windDirectionDeg vs the game-space vector and kept
+  -- in p.windDirOffsetDeg (init.lua stores it), default 180 (meteorological 'from').
   local wk = sim.windVelocityKmh or vec2()
   local wind = vec3(wk.x, 0, wk.y) / 3.6
+  local wkLen = math.sqrt(wk.x * wk.x + wk.y * wk.y)
+  local wsKmh = sim.windSpeedKmh or 0
+  out.windSource = 'windVelocityKmh'
+  out.windCalibrated = nil
+  local compass = ac and ac.getCompassAngle
+  local function fromCompass(deg)
+    local cz = compass(vec3(0, 0, 1)) or 0
+    local cx = compass(vec3(1, 0, 0)) or 90
+    local hand = ((cx - cz) % 360) < 180 and 1 or -1
+    local d = math.rad(deg - cz)
+    return vec3(hand * math.sin(d), 0, math.cos(d))
+  end
+  local live = not sim.isReplayActive
+  if compass and live and wkLen > 2 and sim.windDirectionDeg then
+    -- calibrate: compass angle of the actual game-space wind minus the reported direction
+    local off = ((compass(vec3(wk.x, 0, wk.y)) or 0) - sim.windDirectionDeg) % 360
+    local prev = p.windDirOffsetDeg or off
+    local dd = ((off - prev + 540) % 360) - 180
+    p.windDirOffsetDeg = (prev + 0.1 * dd) % 360
+    out.windCalibrated = p.windDirOffsetDeg
+  end
+  local cond = sim.weatherConditions
+  local cw = cond and cond.wind
+  if compass and not live and cw then
+    local kmh = 0.5 * ((cw.speedFrom or 0) + (cw.speedTo or cw.speedFrom or 0))
+    wind = fromCompass((cw.direction or 0) + (p.windDirOffsetDeg or 180)) * (kmh / 3.6)
+    out.windSource = string.format('replay conditions %.0f deg %.0f km/h', cw.direction or 0, kmh)
+  elseif compass and wsKmh > 1 and wkLen < 0.2 * wsKmh then
+    wind = fromCompass((sim.windDirectionDeg or 0) + (p.windDirOffsetDeg or 180)) * (wsKmh / 3.6)
+    out.windSource = string.format('windDirectionDeg %.0f (fallback)', sim.windDirectionDeg or 0)
+  end
   local air = wind * (p.windK or 1) - carVel
   local rainVel = vec3(0, -p.terminalSpeed, 0) + air
   out.accelW, out.airW = accel, air

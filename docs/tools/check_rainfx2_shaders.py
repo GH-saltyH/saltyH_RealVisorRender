@@ -110,7 +110,7 @@ def main():
     fxc = None if a.emit_only else (a.dxc or find_fxc(a.fxc))
     failed = 0
     # rev45: FXC (effects syntax) reserves words DXC accepts (rev45 'float pass' broke field only in FXC)
-    reserved = r'pass|technique|technique10|technique11|pixelshader|vertexshader|compile|sampler_state|stateblock|string|shared'
+    reserved = r'pass|technique|technique10|technique11|pixelshader|vertexshader|compile|sampler_state|stateblock|string|shared|half|double|min16float|vector|matrix|texture|sampler'
     for f in sorted(glob.glob(os.path.join(SRC, '*.hlsl'))):
         code = re.sub(r'//[^\n]*', '', open(f, encoding='utf-8').read())
         for m in re.finditer(r'\b(?:float|half|int|uint|bool)[1-4]?(?:x[1-4])?\s+(' + reserved + r')\b', code):

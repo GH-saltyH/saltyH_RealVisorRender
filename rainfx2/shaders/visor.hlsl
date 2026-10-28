@@ -37,6 +37,10 @@ float r2VisorRadiusMM(float v) {
     return v > 0 ? exp2(log2(v / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
 }
 float r2VisorSeed(float w) { return floor(w / 262144.0); }    // = r2UnpackSeed (rev40: 64 seeds)
+float2 r2UnpackHarm(float z) {                                   // = common.hlsl (rev48-S1 shape state)
+    float hi = floor(z / 2048.0);
+    return float2(hi / 1000.0 - 0.5, (z - hi * 2048.0) / 2000.0);
+}
 float2 r2VisorMove(float w) {                                 // = r2UnpackMove
     float m = w - r2VisorSeed(w) * 262144.0;
     float qx = floor(m / 512.0);
@@ -114,9 +118,20 @@ struct R2Shape { float2 u1; float s1; float2 u2; float s2; float2 u3; float s3; 
 // rev40 P3 gravity flattening (docs/RAINFX_V2_DROP_SHAPE_RESEARCH.md): h = 1 - (1-b) x - b x^2,
 // x = d^2 / Rk^2. b = 0 is the WF dome; b > 0 flattens the top and steepens the rim (large drops,
 // Bond number (r / 2.7 mm)^2 -> 0.3-0.6), so the lens interior bends less and the rim band narrows.
-void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T,
+// rev48-S1 contour harmonics H = (a2, a3, a3 phase): the kernel radius is modulated by
+// 1 + a2 cos 2psi + a3 cos 3(psi - phase), psi measured from the drop's major axis hu (a2 > 0.2 pinches a
+// peanut waist across it, a3 > 0.1 gives a Y / triangle). No atan2: multiple-angle polynomials.
+void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H, float2 hu,
               inout float P, inout float2 G, inout float2 RW, inout float HW) {
-    float ik = 1.0 / (Rk * Rk);
+    float dR = 1.0;
+    if (abs(H.x) + H.y > 1e-3) {
+        float2 qq = q * rsqrt(max(dot(q, q), 1e-12));
+        float ca = dot(qq, hu), sa = qq.y * hu.x - qq.x * hu.y;
+        float c2 = ca * ca - sa * sa;
+        float c3 = ca * (4.0 * ca * ca - 3.0), s3 = sa * (3.0 - 4.0 * sa * sa);
+        dR = max(1.0 + H.x * c2 + H.y * (c3 * cos(H.z) + s3 * sin(H.z)), 0.3);
+    }
+    float ik = 1.0 / (Rk * Rk * dR * dR);
     float x = dot(q, q) * ik;
     float h = 1.0 - (1.0 - beta) * x - beta * x * x;
     if (h <= 0.0) return;
@@ -130,7 +145,7 @@ void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T,
     HW += h;
 }
 
-struct R2Cand { float2 q; float r; float seed; float2 m; float k; };
+struct R2Cand { float2 q; float r; float seed; float2 m; float k; float4 sh; };
 
 // Candidate drop of cell s (false = empty or out of reach). reachMM widens the test for D-A taps.
 bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
@@ -146,9 +161,12 @@ bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
     if (L.y > 0) vis *= lerp(0.55, 1.0, saturate(L.y / max(gR2FlyTime, 1e-3)));
     c.r *= vis;
     c.q = (pc - (float2(s) + st.xy)) * gR2CellSizeMM;
-    float reach = 1.3 * gR2KernelScale * c.r * (L.y > 0 ? 1.0 + gR2FlyStretch : 1.0) + reachMM;   // stretch/wobble margin
+    float shE = length(txR2State.Load(int3(s + int2(2 * size.x, 0), 0)).xy);
+    float shA = sqrt((0.5 + shE) / max(0.5 - shE, 0.05));                 // rev48-S1: aspect widens the reach
+    float reach = 1.3 * gR2KernelScale * c.r * sqrt(shA) * 1.35 * (L.y > 0 ? 1.0 + gR2FlyStretch : 1.0) + reachMM;
     if (dot(c.q, c.q) > reach * reach) return false;
     c.seed = r2VisorSeed(st.w);
+    c.sh = txR2State.Load(int3(s + int2(2 * size.x, 0), 0));   // rev48-S1 shape state
     float2 mv = r2VisorMove(st.w) * gR2CellSizeMM;            // mm in the last frame
     float ml = length(mv);
     c.m = ml > 1e-4 ? mv / ml : float2(0, 0);
@@ -172,12 +190,33 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     float h1 = frac(c.seed * 0.7548776662 + 0.31);
     float h2 = frac(c.seed * 0.6180339887 + 0.17);
     R2Shape T;
-    // Pinned contact line: seeded ellipse 1..1.22, any orientation (no two drops alike).
-    float ang = h2 * 3.14159265;
-    T.u1 = float2(cos(ang), sin(ang));
-    float e1 = 0.22 * h1;
-    T.s1 = e1 / (1.0 + e1);
-    q -= T.u1 * (dot(q, T.u1) * T.s1);
+    // rev48-S1 contact-line shape state (cells pass): area-preserving ellipse of aspect A along phi, bent
+    // across its major axis, contour harmonics in the kernel. rev20-47: seeded ellipse 1..1.22 (kept when the
+    // shape state is off).
+    float shE = length(c.sh.xy);
+    float shA = sqrt((0.5 + shE) / max(0.5 - shE, 0.05));
+    float2 hm = r2UnpackHarm(c.sh.z);
+    float sphi = 0.5 * atan2(c.sh.y, c.sh.x);
+    float rk0 = gR2KernelScale * c.r;
+    float rkS = rk0;
+    float3 H = float3(0, 0, 0);
+    if (gR2ShpOn > 0.5) {
+        T.u1 = float2(cos(sphi), sin(sphi));
+        T.s1 = 1.0 - 1.0 / shA;
+        rkS = rk0 / sqrt(shA);
+        // bend: the major-axis ends move across by bend x minor half-length (parabola along the axis)
+        float2 vv = float2(-T.u1.y, T.u1.x);
+        float aa = dot(q, T.u1) / max(rk0 * sqrt(shA), 1e-4);
+        q -= vv * (c.sh.w * rkS * aa * aa);
+        q -= T.u1 * (dot(q, T.u1) * T.s1);
+        H = float3(hm.x, hm.y, h1 * 6.2831853);
+    } else {
+        float ang = h2 * 3.14159265;
+        T.u1 = float2(cos(ang), sin(ang));
+        float e1 = 0.22 * h1;
+        T.s1 = e1 / (1.0 + e1);
+        q -= T.u1 * (dot(q, T.u1) * T.s1);
+    }
     // Sliding: the rear half stretches (teardrop), the front stays round. k grows with v/vMax.
     // rev24 gravity sag (user: the drop is thick toward the force, thin tail behind): a pinned
     // drop of Bond number ~ (r / 1.5 mm)^2 stretches against gravity; a sliding one along its motion.
@@ -205,7 +244,7 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     th *= 1.0 - wetFlat;
     float sth = sin(radians(clamp(th, 5.0, 89.0)));
     float beta = gR2FlatK * saturate((c.r - gR2FlatStartMM) / max(gR2FlatFullMM - gR2FlatStartMM, 1e-3));
-    r2Kernel(q, gR2KernelScale * c.r, float2(c.r, sth), beta, T, P, G, RW, HW);
+    r2Kernel(q, rkS, float2(rkS / gR2KernelScale, sth), beta, T, H, T.u1, P, G, RW, HW);
 }
 
 // rev47j RIVULET KERNEL (rev47i review + reference frames: a sliding large drop leaves a thin, sharp,
@@ -254,7 +293,7 @@ void r2AddTrail(R2Trail tr, float2 dq, inout float P, inout float2 G, inout floa
     float2 q = tr.q + (dq - tr.tau * dot(dq, tr.tau));
     R2Shape T;
     T.u1 = float2(1, 0); T.s1 = 0; T.u2 = float2(1, 0); T.s2 = 0; T.u3 = float2(1, 0); T.s3 = 0;
-    r2Kernel(q, gR2KernelScale * tr.hw, float2(tr.hw, tr.sth), 0.0, T, P, G, RW, HW);
+    r2Kernel(q, gR2KernelScale * tr.hw, float2(tr.hw, tr.sth), 0.0, T, float3(0, 0, 0), float2(1, 0), P, G, RW, HW);
 }
 
 // rev24 view context for the physical lens: eye ray, outward visor normal, world vectors of one mm

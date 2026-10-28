@@ -18,11 +18,15 @@ float r2Cluster(float2 t) {
 }
 
 float4 main(PS_IN pin) {
-    // rev45: the target is twice the cell width; the right half writes the life cycle L of the same
+    // rev45: the target is twice the cell width; the second third writes the life cycle L of the same
     // cell (identical gather, so L follows the drop that wins the cell).
     int2 px = int2(pin.PosH.xy);
-    bool lifeHalf = px.x >= (int)gR2Cells.x;
-    int2 c = lifeHalf ? px - int2((int)gR2Cells.x, 0) : px;
+    // rev48-S1: three cell widths [drop | life | shape], same gather for all three
+    int third = px.x >= 2 * (int)gR2Cells.x ? 2 : (px.x >= (int)gR2Cells.x ? 1 : 0);
+    bool lifeHalf = third == 1;
+    int2 c = px - int2(third * (int)gR2Cells.x, 0);
+    float4 shape = float4(0, 0, r2PackHarm(0, 0), 0);
+    bool bigMoved = false;
     int2 size = int2(gR2Cells);
     float4 life = float4(0, 0, 0, 0);
     float accV = 0;
@@ -42,7 +46,7 @@ float4 main(PS_IN pin) {
             accP += (m.dest - float2(c)) * m.vol;
             accD += (m.dest - (float2(s) + st.xy)) * m.vol;
             if (gR2Sub > 1.5) accD += r2UnpackMove(st.w) * m.vol;   // accumulate within the frame
-            if (m.vol > bigV) { bigV = m.vol; seed = r2UnpackSeed(st.w); life = m.life; }
+            if (m.vol > bigV) { bigV = m.vol; seed = r2UnpackSeed(st.w); life = m.life; shape = r2Shape(s); bigMoved = m.moved > 1e-3; }
         }
     }
     float2 p = accV > 0 ? accP / accV : float2(0.5, 0.5);
@@ -123,6 +127,7 @@ float4 main(PS_IN pin) {
             if (bestV > accV) {
                 seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 404u)) * R2_SEEDS);
                 life = float4(0, 0, 0, 0);                                         // newborn: grows in
+                shape = r2ShapeBirth(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t);
             }
             accV += bestV;
         }
@@ -167,6 +172,7 @@ float4 main(PS_IN pin) {
                 accV = vBead;
                 p = pBead;
                 seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9005u)) * R2_SEEDS);
+                shape = r2ShapeBirth(uint2(c), (uint)gR2Frame * 8u + 9100u, r2RadiusMM(vBead), t);
                 disp = float2(0, 0);
                 life = float4(0, 0, 0, 0);
             }
@@ -191,6 +197,7 @@ float4 main(PS_IN pin) {
             accV = 0.5235988 * bornD * bornD * bornD;
             p = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 4u)), r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 5u)));
             seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 6u)) * R2_SEEDS);
+            shape = r2ShapeBirth(uint2(c), seed1 + 600u, 0.5 * bornD, t);
             disp = float2(0, 0);
             life = float4(0, 0, 0, 0);
         }
@@ -202,5 +209,6 @@ float4 main(PS_IN pin) {
     // 0.1 % of its in-cell position toward the cell origin (-u, -v) -> the slow drift of resting drops
     // toward one offset that the user saw since the first v2 build (~1 mm over a few seconds).
     if (accV <= 0) life = float4(0, 0, 0, 0);
+    if (third == 2) return accV > 0 ? r2ShapeRelax(shape, r2RadiusMM(accV), bigMoved, gR2Dt) : float4(0, 0, r2PackHarm(0, 0), 0);
     return lifeHalf ? life : float4(min(saturate(p), 0.9995), accV, r2PackMove(disp, seed));
 }

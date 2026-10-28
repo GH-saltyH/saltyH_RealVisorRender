@@ -6,10 +6,12 @@
 // stable-size cap (excess runs off, same rule as P1).
 
 float4 main(PS_IN pin) {
-    // rev45: twice the cell width; the right half writes the life cycle of the winning drop.
+    // rev45: twice the cell width; the second third writes the life cycle of the winning drop.
     int2 px = int2(pin.PosH.xy);
-    bool lifeHalf = px.x >= (int)gR2Cells.x;
-    int2 c = lifeHalf ? px - int2((int)gR2Cells.x, 0) : px;
+    int third = px.x >= 2 * (int)gR2Cells.x ? 2 : (px.x >= (int)gR2Cells.x ? 1 : 0);   // rev48-S1: + shape third
+    bool lifeHalf = third == 1;
+    int2 c = px - int2(third * (int)gR2Cells.x, 0);
+    float4 shape = float4(0, 0, r2PackHarm(0, 0), 0);
     int2 size = int2(gR2Cells);
     float4 life = float4(0, 0, 0, 0);
     float4 me = txR2State.Load(int3(c, 0));
@@ -17,7 +19,7 @@ float4 main(PS_IN pin) {
     float accV = 0, bigV = 0, w = r2PackMove(float2(0, 0), 0);
     float2 accP = float2(0, 0);
     if (me.z > 0 && mc.z < 0.5) {
-        accV = me.z; accP = me.xy * me.z; bigV = me.z; w = me.w; life = r2Life(c);
+        accV = me.z; accP = me.xy * me.z; bigV = me.z; w = me.w; life = r2Life(c); shape = r2Shape(c);
     }
     [unroll] for (int y = -2; y <= 2; ++y) {
         [unroll] for (int x = -2; x <= 2; ++x) {
@@ -29,10 +31,11 @@ float4 main(PS_IN pin) {
             float4 st = txR2State.Load(int3(s, 0));
             accV += st.z;
             accP += (float2(x, y) + st.xy) * st.z;
-            if (st.z > bigV) { bigV = st.z; w = st.w; life = r2Life(s); }
+            if (st.z > bigV) { bigV = st.z; w = st.w; life = r2Life(s); shape = r2Shape(s); }
         }
     }
-    if (accV <= 0) return lifeHalf ? float4(0, 0, 0, 0) : float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0));
+    if (accV <= 0) return third == 2 ? float4(0, 0, r2PackHarm(0, 0), 0) : (lifeHalf ? float4(0, 0, 0, 0) : float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0)));
+    if (third == 2) return shape;   // S3 will compose the merged tensor
     float2 p = clamp(accP / accV, -0.75, 1.749);
     float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
     return lifeHalf ? life : float4(p, min(accV, vMax), w);

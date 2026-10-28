@@ -242,6 +242,71 @@ float4 r2Life(int2 s) {
     return txR2State.Load(int3(s + int2((int)gR2Cells.x, 0), 0));
 }
 
+// ---------- rev48-S1 SHAPE STATE (docs/RAINFX_V2_SHAPE_STATE_PLAN.md) ----------
+// The state texture is three cell widths: [drop | life | shape]. Shape texel per drop:
+//   x, y = contact-line tensor anisotropy (m1, m2) = e (cos 2phi, sin 2phi), unit-trace second moments
+//          M = I/2 + [[m1, m2], [m2, -m1]] -> aspect A = sqrt((0.5 + e) / (0.5 - e)), major axis phi (visor mm)
+//   z    = packed contour harmonics: a2 (along the major axis; > 0.2 = peanut waist), a3 (Y / triangle)
+//   w    = bend (offset of the major-axis ends across, x minor half-length; banana / S along a path)
+// One analytic kernel draws round, oval, sagging, bent, lobed drops from these 4 numbers (visor r2AddDrop).
+float4 r2Shape(int2 s) {
+    return txR2State.Load(int3(s + int2(2 * (int)gR2Cells.x, 0), 0));
+}
+float r2PackHarm(float a2, float a3) {
+    return round(clamp(a2, -0.5, 0.5) * 1000.0 + 500.0) * 2048.0 + round(clamp(a3, 0.0, 0.5) * 2000.0);
+}
+float2 r2UnpackHarm(float z) {
+    float hi = floor(z / 2048.0);
+    return float2(hi / 1000.0 - 0.5, (z - hi * 2048.0) / 2000.0);
+}
+float4 r2ShapeMake(float A, float phi, float a2, float a3, float bend) {
+    float A2 = A * A;
+    float e = min(0.5 * (A2 - 1.0) / (A2 + 1.0), 0.45);
+    return float4(e * cos(2.0 * phi), e * sin(2.0 * phi), r2PackHarm(a2, a3), bend);
+}
+// Tangential gravity direction at t in visor mm (for sagging births).
+float2 r2GravDirMM(float2 t) {
+    float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
+    float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
+    float3 n = r2Normal(t);
+    float3 g = gR2AccelW - n * dot(gR2AccelW, n);
+    float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
+    float det = max(a * c - b * b, 1e-20);
+    float2 uv = float2(c * dot(du, g) - b * dot(dv, g), a * dot(dv, g) - b * dot(du, g)) / det;
+    float2 mm = uv * gR2CellSizeMM * gR2Cells;
+    return dot(mm, mm) > 1e-12 ? normalize(mm) : float2(0, 1);
+}
+// S1 birth shape: classes sampled with the reference frequencies (SHAPE_STATE_PLAN section 6):
+// bent (banana / S) gR2ShpBendP, lobed (peanut / Y) gR2ShpLobeP, sagging (r > 0.6 mm, along gravity)
+// gR2ShpSagP, else round / weak oval (aspect 1-1.4). S2 replaces the random class by the impact physics.
+float4 r2ShapeBirth(uint2 c, uint k, float rmm, float2 t) {
+    if (gR2ShpOn < 0.5) return float4(0, 0, r2PackHarm(0, 0), 0);
+    float u = r2Rand(uint3(c.x, c.y, k + 31u)), u2 = r2Rand(uint3(c.y, c.x, k + 32u));
+    float u3 = r2Rand(uint3(c.x, c.y, k + 33u)), u4 = r2Rand(uint3(c.y, c.x, k + 34u));
+    float phi = 3.14159265 * u2;
+    float A = 1.0 + 0.4 * u3 * u3, a2 = 0.06 * u4, a3 = 0.04 * u2, bend = 0.0;
+    if (u < gR2ShpBendP) {
+        A = lerp(1.8, 3.0, u3); a2 = 0.04; a3 = 0.0;
+        bend = (u4 < 0.5 ? -1.0 : 1.0) * lerp(0.5, 1.2, u3);
+    } else if (u < gR2ShpBendP + gR2ShpLobeP) {
+        A = lerp(1.3, 2.0, u3); a2 = lerp(0.22, 0.34, u4);
+        a3 = u3 > 0.6 ? lerp(0.08, 0.18, u2) : 0.0;
+    } else if (u < gR2ShpBendP + gR2ShpLobeP + gR2ShpSagP && rmm > 0.6) {
+        float2 gd = r2GravDirMM(t);
+        phi = atan2(gd.y, gd.x);
+        A = lerp(1.25, 1.7, u3); a2 = 0.05; a3 = 0.06 * u4;
+    }
+    return r2ShapeMake(A, phi, a2, a3, bend);
+}
+// Relaxation toward round: fast while sliding or for small drops, slow for large pinned ones
+// (contact-line pinning holds a footprint). Higher contour modes relax faster (~ k).
+float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt) {
+    float tau = moving ? gR2ShpRelaxMove : 0.05 + gR2ShpRelaxStill * saturate(rmm * rmm / 0.09);
+    float k = exp(-dt / max(tau, 1e-3));
+    float2 h = r2UnpackHarm(sh.z);
+    return float4(sh.xy * k, r2PackHarm(h.x * k * k, h.y * k * k * k), sh.w * k);
+}
+
 // rev45 wetness of the surface at a field sample (rule_trail 5): micro haze + film.
 float r2Wet(float4 F) {
     return saturate(F.g * gR2WetHaze + (F.b * gR2FilmMaxMM + F.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
@@ -273,7 +338,7 @@ float r2TrailRule(float rmm, float vms, float wet, out float hw) {
     float sR = ca / max(caS, 1e-9);
     if (sR <= 1.0) return 0.0;
     hw = 0.5 * gR2TrailWidthK * rmm * sqrt(1.0 - 1.0 / sR);
-    float h = gR2TrailLL * rmm * pow(ca, 0.6667);
+    float h = gR2TrailLL * rmm * pow(max(ca, 1e-12), 0.6667);   // FXC X3571: base kept positive
     return min(h, 0.5 * hw * gR2TrailSlopeMax);
 }
 

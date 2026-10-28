@@ -1631,3 +1631,15 @@ rev34–42 렌즈는 한 방울 안에 서로 다른 세 출처를 섞었다.
   - 폭 hw = 0.25 r √(1 − Ca\*/Ca), 깊이 h0 = min(5 r Ca^(2/3), 0.225 hw).
   - 질량 손실은 (4/3) h0 hw.
 - pearling 비율 × (0.25 mm / hw): 가는 줄이 빨리 끊긴다.
+
+### 61 rev48-S1 — 방울 형상 상태
+- 상세: `docs/RAINFX_V2_SHAPE_STATE_PLAN.md` §7, 리뷰: `docs/RAINFX_V2_REV47L_REVIEW.md`.
+- state는 [방울 | life | 형상] 3구획이다. 형상 = 텐서 (m₁, m₂), 굴곡(a2, a3), 휨.
+  - 탄생 클래스 비율(휨 7 %, 합체형 5 %, 처짐 8 %)은 레퍼런스 표본에서 왔다. 이완은 크기와 이동에 따른다.
+  - visor는 면적 보존 타원 + 휨 + 굴곡 커널로 그린다.
+- 바람 노출: windVelocityKmh가 비어 있으면 windDirectionDeg와 트랙 방위로 대체한다. 패널에 출처를 표시한다.
+- FXC X3571 경고 제거. 셰이더 검사기의 예약어 목록에 half/double/vector/matrix 등을 추가했다.
+
+### 61.1 rev48-S1b — 리플레이 바람 출처
+- 리플레이에서는 `sim.weatherConditions.wind`(컨트롤러 덮어쓰기가 반영된 값)를 방위와 트랙 방향으로 변환해 쓴다. 라이브에서는 `windVelocityKmh`를 쓴다.
+- 관례 오프셋은 라이브에서 자동 보정해 저장한다(`windDirOffsetDeg`). 상세: `docs/RAINFX_V2_REV47L_REVIEW.md` §4.

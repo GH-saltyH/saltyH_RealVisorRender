@@ -130,6 +130,8 @@ local DEFAULTS = {
   trailMM = 0.10, trailV0 = 0.02, trailWidthK = 0.5, trailRMin = 0.2,   -- rev47k trailRMin 0.12 -> 0.2 (small heads leave no visible rivulet)
   -- trail water (rule_trail; rev47j width 0.35 -> 0.5 r: reference ~1/4 of the head)
   trailThetaRDeg = 28.0, trailWetK = 0.35, trailLL = 5.0,   -- rev47l trail rule (Ca vs Ca*, docs/RAINFX_V2_TRAIL_RULES.md)
+  -- rev48-S1 shape state (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 6): birth class shares, relaxation
+  shpOn = true, shpBendP = 0.07, shpLobeP = 0.05, shpSagP = 0.08, shpRelaxMove = 0.25, shpRelaxStill = 4.0,
   trailSlopeMax = 0.45,                      -- rev47k: rivulet edge slope 2 h0 / hw <= 0.45 (~24 deg; rev47j 0.8 drew glass rods)
   trailPinMM = 0.02, trailFlowK = 1.0,       -- rev47k: rivulets deeper than this run along themselves (film law x flowK)
   wetHaze = 1.5, hazeDepthMM = 0.004,        -- wetness from haze; water depth of full haze
@@ -162,7 +164,8 @@ local STORED = { enabled = true, rainExposure = DEFAULTS.exposure, wfRefraction 
   apertureMM = DEFAULTS.apertureMM, hazeK = DEFAULTS.hazeK, substeps = DEFAULTS.substeps, freezeRain = false, windK = 1.0, metrics = false,
   filmK = DEFAULTS.filmK, sprayK = DEFAULTS.sprayK, filmRefract = DEFAULTS.filmRefract, filmVeil = DEFAULTS.filmVeil,
   scatterK = DEFAULTS.scatterK,
-  debug = DEFAULTS.debug, invertSide = false }
+  debug = DEFAULTS.debug, invertSide = false,
+  windDirOffsetDeg = 180, windDirCalibrated = false }   -- rev48: compass -> game-space wind convention (calibrated live)
 
 
 -- rev40: truncated power law of the fragment size factor X, pdf ~ X^-(1+a) on [lo, hi].
@@ -289,6 +292,9 @@ local function sceneValues(self, v)
   v.gR2PearlMM = p.pearlMM
   v.gR2PearlRate = p.pearlRate
   v.gR2TrailSlopeMax = p.trailSlopeMax
+  v.gR2ShpOn = p.shpOn and 1 or 0
+  v.gR2ShpBendP, v.gR2ShpLobeP, v.gR2ShpSagP = p.shpBendP, p.shpLobeP, p.shpSagP
+  v.gR2ShpRelaxMove, v.gR2ShpRelaxStill = p.shpRelaxMove, p.shpRelaxStill
   v.gR2TrailThetaRDeg = p.trailThetaRDeg
   v.gR2TrailWetK = p.trailWetK
   v.gR2TrailLL = p.trailLL
@@ -351,7 +357,8 @@ function R2:ensureResources()
   local f32 = render.TextureFormat.R32G32B32A32.Float
   local u16 = render.TextureFormat.R16G16B16A16.UNorm
   -- rev45: twice the cell width, right half = per-drop life cycle (age, flight, fade, direction)
-  self.S = { canvas(2 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(2 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
+  -- rev48-S1: three cell widths [drop | life | shape state]
+  self.S = { canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
   self.C = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 claims')
   self.F = { canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field A'), canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field B') }
   -- rev47j trail geometry (line point / direction / half-width per field texel)
@@ -505,7 +512,15 @@ end
 
 function R2:updateInputs(sim)
   self.objToWorld = self.target:getWorldTransformationRaw():clone()
+  if self.p.windDirOffsetDeg == nil then self.p.windDirOffsetDeg = self.store.windDirOffsetDeg end
   local inp = self.physics.inputs(sim, self.p, self.inp)
+  if inp.windCalibrated then
+    self.windCalT = (self.windCalT or 0) + (sim.dt or 0)
+    if self.windCalT > 2 then                        -- persist after 2 s of live wind
+      self.store.windDirOffsetDeg, self.store.windDirCalibrated = inp.windCalibrated, true
+      self.windCalT = 0
+    end
+  end
   self.inp = inp
   local accel, air, rainVel, speedRel = inp.accelW, inp.airW, inp.rainVel, inp.speedRel
   self:filterAccel(sim, inp)
@@ -723,6 +738,7 @@ function R2:drawParams(depth)
   self.cocInfo = string.format('CoC on the visor: %.2f mm @3 cm, %.2f mm @6 cm, %.2f mm @12 cm (Debug 6 = distance / CoC px)',
     coc(0.03), coc(0.06), coc(0.12))
   v.gR2KernelScale = p.kernelScale
+  v.gR2ShpOn = p.shpOn and 1 or 0   -- rev48-S1
   v.gR2Threshold = p.threshold
   v.gR2ContactDeg = p.contactDeg
   v.gR2ContactSpread = p.contactSpread
@@ -1029,6 +1045,14 @@ function R2:ui()
   self.p.fadeTime = ui.slider('##rfx2fd', self.p.fadeTime, 0.0, 0.3, 'Swept drops fade out over %.2f s')
   self.p.growTime = ui.slider('##rfx2gt', self.p.growTime, 0.0, 0.3, 'New drops grow in over %.2f s')
   ui.separator()
+  ui.text('Drop shapes (rev48-S1 shape state; S1 = random birth classes, look lab: Reseed)')
+  if ui.checkbox('Shape state (off = rev47 seeded ellipse)', self.p.shpOn) then self.p.shpOn = not self.p.shpOn end
+  self.p.shpBendP = ui.slider('##rfx2sb', self.p.shpBendP, 0, 0.5, 'Bent (banana / S) share at birth: %.2f')
+  self.p.shpLobeP = ui.slider('##rfx2sl', self.p.shpLobeP, 0, 0.5, 'Lobed (peanut / Y) share at birth: %.2f')
+  self.p.shpSagP = ui.slider('##rfx2ss', self.p.shpSagP, 0, 0.5, 'Sagging (r > 0.6 mm, along gravity) share: %.2f')
+  self.p.shpRelaxStill = ui.slider('##rfx2sr', self.p.shpRelaxStill, 0.1, 30, 'Pinned shape relaxes over: %.1f s (r >= 0.3 mm)')
+  self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding shape relaxes over: %.2f s')
+  ui.separator()
   ui.text('Defocus (final step, off by default)')
   s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')
   s.focusM = ui.slider('##rfx2fz', s.focusM, 0.03, 1.0, 'Focus distance %.3f m')
@@ -1242,8 +1266,19 @@ function R2:physicsUI()
   end
   ui.text('Debug 4: blue pinned | green <0.1 | yellow <0.3 | orange <0.6 | red >=0.6 m/s | magenta step-limited | grey trace')
   if not i or not d then return end
-  ui.text(string.format('Car %.1f m/s  wind %.1f m/s (sim windSpeedKmh %.1f m/s)  air rel. %.1f m/s  accel %.2f g',
-    i.carSpeed, i.windSpeed, i.windSpeedSim, i.airSpeed, i.accelG))
+  ui.text(string.format('Car %.1f m/s  wind %.1f m/s (sim windSpeedKmh %.1f m/s, from %s)  air rel. %.1f m/s  accel %.2f g',
+    i.carSpeed, i.windSpeed, i.windSpeedSim, i.windSource or '?', i.airSpeed, i.accelG))
+  local rd = self.rainDirW
+  if rd then
+    ui.text(string.format('Rain direction (world, relative to the visor): x %.2f y %.2f z %.2f -> %.0f deg from vertical (Debug 2 follows this)',
+      rd.x, rd.y, rd.z, math.deg(math.acos(math.max(-1, math.min(1, -rd.y))))))
+  end
+  ui.text(string.format('Wind direction convention: offset %.0f deg (%s). Calibrates itself while a live session has wind.',
+    p.windDirOffsetDeg or s.windDirOffsetDeg or 180, s.windDirCalibrated and 'calibrated' or 'default: meteorological from'))
+  if ui.button('Flip wind convention (180 deg)') then
+    p.windDirOffsetDeg = ((p.windDirOffsetDeg or 180) + 180) % 360
+    s.windDirOffsetDeg = p.windDirOffsetDeg
+  end
   local function rc(v) return v == math.huge and 'never' or string.format('%.2f mm', v) end
   ui.text(string.format('Slides by gravity from r = %s (coat), %s (glass), keeps sliding from %s; with air (coat) %s',
     rc(d.rcGravCoat), rc(d.rcGravGlass), rc(d.rcGravCoatKin), rc(d.rcAllCoat)))
