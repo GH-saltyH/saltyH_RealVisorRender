@@ -24,13 +24,13 @@ float4 main(PS_IN pin) {
             float x = lerp(lo, hi, r2Rand(uint3(u.x, u.y, k * 5u + 2u)));
             float rr = exp2(-log2(max(x, 1e-6)) / a);
             float2 q = float2(r2Rand(uint3(u.x, u.y, k * 5u + 3u)), r2Rand(uint3(u.x, u.y, k * 5u + 4u))) * 0.999;
-            float sd = floor(r2Rand(uint3(u.y, u.x, k * 5u + 5u)) * 16.0);
+            float sd = floor(r2Rand(uint3(u.y, u.x, k * 5u + 5u)) * R2_SEEDS);
             res = float4(q, gR2ShapeK * rr * rr * rr, r2PackMove(float2(0, 0), sd));
         }
     } else if (u.x % 6u == 3u && u.y % 6u == 3u && valid) {
         float band = floor(saturate(t.x) * 8.0) / 7.0;
         float r = lerp(gR2LadderMinMM, gR2LadderMaxMM, saturate(band));
-        res = float4(0.5, 0.5, gR2ShapeK * r * r * r, r2PackMove(float2(0, 0), (float)((u.y / 6u) % 16u)));
+        res = float4(0.5, 0.5, gR2ShapeK * r * r * r, r2PackMove(float2(0, 0), (float)((u.y / 6u) % 64u)));
     }
     return res;
 }

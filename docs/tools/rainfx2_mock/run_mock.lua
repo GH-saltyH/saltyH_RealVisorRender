@@ -45,5 +45,20 @@ do
   local vals=core.paramsColour.values
   for name in src:gmatch('gR2%w+') do assert(vals[name]~=nil, 'visor value not set: '..name) end
 end
+-- rev40: the same for the simulation passes (common.hlsl + pass file use sceneValues)
+do
+  local f=io.open(root..'/rainfx2/shaders/common.hlsl'); local common=f:read('*a'); f:close()
+  for _,name in ipairs({'cells','claim','merge','field','metrics','sizes','wmap'}) do
+    local g=io.open(root..'/rainfx2/shaders/'..name..'.hlsl'); local src=common..g:read('*a'); g:close()
+    local vals=core.passCells.values
+    for v in src:gmatch('gR2%w+') do
+      if v~='gR2WMSize' and not v:find('^gR2WM') and v~='gR2SeedMode' and not v:find('^gR2Lab') and not v:find('^gR2Ladder') then
+        assert(vals[v]~=nil, name..' value not set: '..v)
+      end
+    end
+  end
+  assert(core.sizeHist and core.sizeHist.total>0, 'size histogram readback')
+  print(string.format('size hist total %d p50 %.2f ratio %.2f', core.sizeHist.total, core.sizeHist.p50, core.sizeHist.ratio))
+end
 core.err='Draw: test'; core:ui(); assert(core.err==nil, 'retry button clears the error')
 core:dispose(); print('ok')

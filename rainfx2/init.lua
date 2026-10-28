@@ -48,7 +48,9 @@ local DEFAULTS = {
   -- visors, research section 3.3): collect 0.9 -> 0.95, trace haze 0.15 -> 0.05 (below)
   microEvap = 0.05, microShear = 0.02, microCollect = 0.95,
   -- rev21 R-size (docs/RAINFX_V2_DROP_SIZE_RESEARCH.md section 3): impact fragmentation
-  splashK0 = 58, resA = 0.5, resB = 0.3,
+  -- rev41 (rev40 review: at speed far too few visible small drops): resA 0.5 -> 0.3 (resolved share at
+  -- 250 km/h 0.11 -> 0.25), resB 0.3 -> 0.4 (fragments 0.18 -> 0.12 mm)
+  splashK0 = 58, resA = 0.3, resB = 0.4,
   -- rev21 growth of visible drops from unresolved water: haze condensation, film head drops
   nucM = 0.35, nucRate = 0.6, headMinMM = 0.08, headRate = 3.0, filmCollect = 0.3,
   -- rev21 CSP adoption: lateral kicks from surface noise (6 mm features), trail following
@@ -67,7 +69,7 @@ local DEFAULTS = {
   -- rev20 wobble of pinned drops in airflow (amplitude ~ drag/pinning), visible-rate tones
   wobbleAmp = 0.08, wobbleHz = 8.0,   -- rev21: 0.12 -> 0.08 (user: 0.07-0.09 best at speed)
   motionStretch = 0.35,                     -- WF MOTION_STRETCH
-  minDrawMM = 0.12,                         -- smaller drops are drawn at this radius (rev21: 0.2 -> 0.12, R-size fragments)
+  minDrawMM = 0.06,                         -- smaller drops are drawn at this radius (rev21: 0.2 -> 0.12, rev41: 0.06)
   wfRefraction = 0.14,                      -- near lens (rev22 default = user choice 0.14; WF 0.69 -> chrome). Far rim: farRefraction
   wfSceneMip = 2.0, wfSlopeMip = 1.5,       -- WF SCENE_MIP 3 on a full-res shot = 2 on the half-res source
   largeStartPx = 8, largeFullPx = 30, largeBlurMip = 1.5, largeWarpPx = 4,   -- WF LARGE_WARP_PIXELS (rev19)
@@ -84,7 +86,11 @@ local DEFAULTS = {
   edgeLoss = 0.0, lossStart = 0.70, lossEnd = 1.30, glint = 0.45,
   -- rev32 two-zone WF lens: rim / small drops at the legacy strength, interior at the user's
   wfRimRefraction = 0.69, rimMip = 1.0, smallFullPx = 6, smallEndPx = 16,
-  rimSharp = 4.0,     -- rev36: side views tilt only the outer 1/rimSharp of the radius
+  rimSharp = 1.0,     -- rev36: side views tilt only the outer 1/rimSharp of the radius; rev42 1 = off
+                      -- (it flattened the interior: 'aluminium' drops, rev41 review, CORE section 54)
+  -- rev43 single plano-convex lens (CORE section 55): one strength, 1 = physical (n 1.333). The rev32-42
+  -- interior / rim refraction pair and the side-view band (rimSharp) are no longer used by the lens.
+  lensPhys = 1.0,
   -- rev24 physical plano-convex lens (visor.hlsl r2DropLens): deflection gain (1 = physical, n 1.333),
   -- environment for rays leaving the screen (ground fraction of the sky colour), TIR interior,
   -- gravity sag of pinned drops (thick toward gravity, thin tail above)
@@ -105,6 +111,17 @@ local DEFAULTS = {
   wmStepMM = 0.7, wmBlurMip = 1.75,     -- CSP: 1 texel step at LOD 1.5 of a ~0.7 mm map
   wmNormalK = 2.2, wmCovK = 2.0,
   clearMaxMM = 0.3, clearK = 1.0,                     -- rev22 impact clearing of small pinned drops
+  -- rev40 size mix (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md step 2): fragment / nucleation diameter =
+  -- base x X, pdf(X) ~ X^-(1+fragA) on [fragLo, fragHi] (0.88 = reference: counts x0.7 per 1.5x bin)
+  fragA = 0.88, fragLo = 0.35, fragHi = 3.0, nucDiamMM = 0.2,   -- rev41 nuc 0.4 -> 0.2
+  -- rev41: fragments of one impact spread over its lamella (cap per impact), clustered births
+  fragMax = 12, clusterK = 0.6, clusterMM = 12.0,
+  -- rev40 stagnation turbulence: tangential gusts = turbK x surface share of the relative air,
+  -- spatial scale turbMM, correlation time turbTau (s)
+  turbK = 0.6, turbMM = 8.0, turbTau = 0.2,    -- rev41 1.0 / 0.06 -> rev42 0.6 / 0.2 (rev41 recording: jerky jumps)
+  -- rev40 P3 gravity flattening of large drops (Bond number), radius ramp start -> full
+  flatK = 0.0, flatStartMM = 1.0, flatFullMM = 2.2,   -- rev41 off (rev40 review: pot-lid look, lost volume)
+  sizeBin0MM = 0.04,  -- size histogram: first bin edge (= minRadiusMM), 10 bins x1.5 (rev41)
   -- rev23 look lab: occupancy per cell, radius range (pdf ~ r^-1.88 = reference size histogram)
   labOcc = 0.3, labRMinMM = 0.12, labRMaxMM = 2.0,
   -- water film optics (rev11)
@@ -127,6 +144,19 @@ local STORED = { enabled = true, exposure = DEFAULTS.exposure, wfRefraction = DE
   scatterK = DEFAULTS.scatterK,
   debug = DEFAULTS.debug, invertSide = false }
 
+
+-- rev40: truncated power law of the fragment size factor X, pdf ~ X^-(1+a) on [lo, hi].
+-- Shader inverse CDF X = (lo^-a + u (hi^-a - lo^-a))^(-1/a); E[X^3] keeps the mass in expectation.
+local function fragLaw(p, out)
+  local a, lo, hi = math.max(p.fragA, 0.05), p.fragLo, math.max(p.fragHi, p.fragLo + 1e-3)
+  if out.a == a and out.lo == lo and out.hi == hi then return out end
+  out.a, out.lo, out.hi = a, lo, hi
+  out.loP, out.hiP, out.invA = lo ^ -a, hi ^ -a, -1 / a
+  local C = a / (lo ^ -a - hi ^ -a)
+  out.m3 = C * (hi ^ (3 - a) - lo ^ (3 - a)) / (3 - a)
+  out.m1 = math.abs(1 - a) < 1e-6 and C * math.log(hi / lo) or C * (hi ^ (1 - a) - lo ^ (1 - a)) / (1 - a)
+  return out
+end
 
 local function sceneValues(self, v)
   -- Shared constant set for P1-P3 (one cbuffer layout; unused entries are harmless).
@@ -175,6 +205,7 @@ local function sceneValues(self, v)
   v.gR2RhoAir = p.rhoAir
   v.gR2AirSurface = p.airSurface
   v.gR2VMax = p.vMax
+  v.gR2VScale = p.vScale
   v.gR2TrailLoss = p.trailLoss
   v.gR2SurfaceTension = p.surfaceTension
   v.gR2PinKinetic = p.pinKinetic
@@ -200,6 +231,37 @@ local function sceneValues(self, v)
   v.gR2FilmRate = self.store.freezeRain and 0 or (st.filmRate or 0)
   v.gR2FilmSplashMM = st.filmSplashMM or 0.1
   v.gR2FilmMinMM = p.filmMinMM
+  -- rev40 size mix, stagnation turbulence, size histogram
+  local fl = fragLaw(p, self.frag or {})
+  self.frag = fl
+  v.gR2FragLoP = fl.loP
+  v.gR2FragHiP = fl.hiP
+  v.gR2FragInvA = fl.invA
+  v.gR2FragM3 = fl.m3
+  v.gR2NucDiamMM = p.nucDiamMM
+  v.gR2Time = self.wobbleT or 0
+  v.gR2TurbK = p.turbK
+  if not self.turbScale or self.turbMM ~= p.turbMM then
+    self.turbMM = p.turbMM
+    self.turbScale = vec2(602.0 / p.turbMM, 146.3 / p.turbMM)
+  end
+  v.gR2TurbScale = self.turbScale
+  v.gR2TurbTau = p.turbTau
+  v.gR2SizeBin0MM = p.sizeBin0MM
+  v.gR2FragMax = p.fragMax
+  v.gR2ShedK = p.shedK
+  v.gR2AirDown = p.airDown
+  v.gR2ClusterK = p.clusterK
+  if not self.clusterScale or self.clusterMM ~= p.clusterMM then
+    self.clusterMM = p.clusterMM
+    self.clusterScale = vec2(602.0 / p.clusterMM, 146.3 / p.clusterMM)
+  end
+  v.gR2ClusterScale = self.clusterScale
+  if not self.pinScale or self.pinMM ~= p.pinMM then
+    self.pinMM = p.pinMM
+    self.pinScale = vec2(602.0 / p.pinMM, 146.3 / p.pinMM)
+  end
+  v.gR2PinScale = self.pinScale
   return v
 end
 
@@ -255,6 +317,8 @@ function R2:ensureResources()
   self.passClaim = newPass(self, self.src.claim)
   self.passMetrics = newPass(self, self.src.metrics)
   self.Mc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 metrics')
+  self.passSizes = newPass(self, self.src.sizes)
+  self.Hc = canvas(10, 16, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 size histogram')
   self.passMerge = newPass(self, self.src.merge)
   self.ready = true
   return true
@@ -382,6 +446,7 @@ function R2:simulate(sim)
   -- gather window; faster than that it is speed-limited (r2Predict), not deleted.
   local P = self.physics
   local vExp = P.speed(p, 2.0, self.inp.accelG * 9.81, self.inp.airSpeed, p.pinCoat)
+  if vExp == math.huge then vExp = p.vMax end          -- rev42: blown-off drops leave, no steps needed
   p.substeps = P.substeps(p, dt, self.cellMM, userSub, vExp)
   self.frameSeed = sim.frame % 1048576
   self.h = dt / p.substeps
@@ -524,6 +589,10 @@ function R2:drawParams(depth)
   v.gR2EnvGround = p.envGround
   v.gR2EnvInterior = p.envInterior
   v.gR2SagK = p.sagK
+  v.gR2LensPhys = p.lensPhys
+  v.gR2FlatK = p.flatK
+  v.gR2FlatStartMM = p.flatStartMM
+  v.gR2FlatFullMM = p.flatFullMM
   v.gR2RimMinPx = p.rimMinPx
   v.gR2CspMode = p.cspMode and 1 or 0
   v.gR2LensMode = p.lensMode
@@ -565,6 +634,7 @@ function R2:drawParams(depth)
   v.gR2Spray = self.store.freezeRain and 0 or (self.stats.spray or 0)
   v.gR2SimDt = self.frameDt or (1 / 60)   -- packed move = displacement of the whole frame
   v.gR2VMax = p.vMax
+  v.gR2VScale = p.vScale
   v.gR2VLimit = self.diag and self.diag.vGather or 0.5   -- physical m/s (h already scaled)
   v.gR2LookLab = self.lookLab and 1 or 0
   v.gR2Debug = p.debug
@@ -721,6 +791,7 @@ function R2:ui()
   end
   if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
     self.p.rimSharp = DEFAULTS.rimSharp
+    self.p.lensPhys = DEFAULTS.lensPhys
     self.p.wfRimRefraction, self.p.rimEnvK, self.p.envInterior, self.p.edgeLoss = DEFAULTS.wfRimRefraction, DEFAULTS.rimEnvK, DEFAULTS.envInterior, DEFAULTS.edgeLoss
     self.p.lensMode, self.p.cspMode = DEFAULTS.lensMode, DEFAULTS.cspMode
     s.apertureMM, s.focusM, s.wfRefraction, s.wfSceneMip = DEFAULTS.apertureMM, DEFAULTS.focusM, DEFAULTS.wfRefraction, DEFAULTS.wfSceneMip
@@ -731,17 +802,23 @@ function R2:ui()
   -- rev34 UI: WF lens (main) first, then defocus, then the CSP comparison (kept, not adopted).
   ui.separator()
   ui.text('Drops: WF lens, surface-based (main)')
-  s.wfRefraction = ui.slider('##rfx2ref', s.wfRefraction, 0, 1.2, 'Interior refraction (large drops; 0.69 = physical): %.2f')
-  self.p.wfRimRefraction = ui.slider('##rfx2wrr', self.p.wfRimRefraction, 0.05, 1.2, 'Rim + small-drop refraction (0.69 = physical): %.2f')
-  self.p.rimSharp = ui.slider('##rfx2rs', self.p.rimSharp, 1, 8, 'Thin rim in side views (rim band = 1/x of radius): %.1f')
+  self.p.lensPhys = ui.slider('##rfx2lp', self.p.lensPhys, 0, 1.5, 'Lens strength (1 = physical water cap, one image): %.2f')
   s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Contact angle: %.0f deg (rim curl; normal 40-60)')
   s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Image blur in the drop (scene mip): %.1f')
-  self.p.rimEnvK = ui.slider('##rfx2re', self.p.rimEnvK, 0, 1.5, 'Environment brightness (rays leaving the screen): %.2f')
-  self.p.envInterior = ui.slider('##rfx2ei', self.p.envInterior, 0, 1, 'Total internal reflection brightness: %.2f')
-  self.p.edgeLoss = ui.slider('##rfx2el', self.p.edgeLoss, 0, 1, 'Extra symmetric rim darkening (default 0): %.2f')
   s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Wobble in airflow: %.2f')
   self.p.housingM = ui.slider('##rfx2hm', self.p.housingM, 0.05, 0.6, 'Refraction source: remove housing closer than %.2f m')
   if ui.checkbox('Hide water behind the helmet housing (depth test)', self.p.depthTest) then self.p.depthTest = not self.p.depthTest end
+  ui.separator()
+  ui.text('Drop sizes and stagnation (step 2; check: Metrics -> drops by radius)')
+  self.p.fragA = ui.slider('##rfx2fa', self.p.fragA, 0.3, 2.0, 'Size law exponent (0.88 = reference, x0.7 per 1.5x size): %.2f')
+  self.p.fragHi = ui.slider('##rfx2fh', self.p.fragHi, 1.0, 6.0, 'Largest new drop (x typical fragment): %.1f')
+  self.p.turbK = ui.slider('##rfx2tk', self.p.turbK, 0, 1.5, 'Turbulent gusts at the visor centre: %.2f')
+  self.p.flatK = ui.slider('##rfx2fk2', self.p.flatK, 0, 1, 'Flat top of large drops (r > 1 mm, default 0): %.2f')
+  self.p.fragMax = ui.slider('##rfx2fm', self.p.fragMax, 1, 30, 'Small drops per raindrop impact (max): %.0f')
+  self.p.clusterK = ui.slider('##rfx2ck', self.p.clusterK, 0, 1, 'Drop groups (clustered births): %.2f')
+  self.p.shedK = ui.slider('##rfx2sh', self.p.shedK, 1.0, 5.0, 'Blow-off: air drag > %.1f x pinning')
+  self.p.vMax = ui.slider('##rfx2vm', self.p.vMax, 0.005, 0.2, 'Creeping drops, top speed: %.3f m/s')
+  self.p.airDown = ui.slider('##rfx2ad', self.p.airDown, 0, 1.5, 'Surface air turned downward (observed): %.2f')
   ui.separator()
   ui.text('Defocus (final step, off by default)')
   s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')
@@ -756,6 +833,7 @@ function R2:ui()
     s.lensK = ui.slider('##rfx2lk', s.lensK, 0, 1.5, 'CSP: interior lens strength: %.2f')
     self.p.rimBand = ui.slider('##rfx2rb', self.p.rimBand, 0.05, 0.5, 'CSP: rim width (cubemap zone): %.2f of radius')
     self.p.reflK = ui.slider('##rfx2rf', self.p.reflK, 0, 3, 'CSP: reflection (1.0): %.2f')
+    self.p.rimEnvK = ui.slider('##rfx2re', self.p.rimEnvK, 0, 1.5, 'CSP: environment brightness at the rim: %.2f')
     if ui.checkbox('CSP windscreen water map', self.p.cspMode) then self.p.cspMode = not self.p.cspMode end
     if self.p.cspMode then
       self.p.wmBlurMip = ui.slider('##rfx2wbm', self.p.wmBlurMip, 0, 4, 'Water map normal blur: %.2f')
@@ -768,7 +846,7 @@ function R2:ui()
   s.hazeK = ui.slider('##rfx2haze', s.hazeK, 0, 2, 'Haze strength: %.2f')
   s.substeps = ui.slider('##rfx2sub', s.substeps, 1, 4, 'Min substeps: %.0f (auto up to 4)', true)
   if ui.checkbox('Invert exposure side (auto: side facing away from the eye)', s.invertSide) then s.invertSide = not s.invertSide end
-  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 8, 'Debug: 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rim, G env, B TIR/mip) 8 coverage: %.0f', true)
+  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 9, 'Debug: 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rim, G env, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up): %.0f', true)
   self:filmUI()
   self:physicsUI()
   local st = self.stats
@@ -781,7 +859,7 @@ function R2:ui()
 end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
-local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK\n'
+local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,turbK,flatK\n'
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -812,17 +890,68 @@ function R2:metricsUpdate(sim)
     self.metrics = m
     if self.recording then self:metricsWrite(sim) end
   end)
+  self:sizesUpdate()
+end
+
+-- rev40 drop size histogram (sizes.hlsl): counts per 1.5x radius bin, percentiles, bin ratio.
+-- Reference (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md section 2): counts fall x0.7 per bin,
+-- p90/p50 ~ 3-3.5, p99/p50 >= 10 (measured on diameters in px; radius ratios are the same).
+function R2:sizesUpdate()
+  if self.sizesBusy then return end
+  local ph = self.passSizes
+  ph.textures.txR2State = self.S[self.si]
+  sceneValues(self, ph.values)
+  if not run(self.Hc, ph) then return end
+  self.sizesBusy = true
+  local tmp = rgbm()
+  local b0 = self.p.sizeBin0MM
+  self.Hc:accessData(function(err, data)
+    self.sizesBusy = false
+    if err or not data then self.metricsErr = tostring(err); return end
+    local c, total = {}, 0
+    for x = 0, 9 do
+      local n = 0
+      for y = 0, 15 do
+        data:colorTo(tmp, x, y)
+        n = n + math.floor(tmp.rgb.r * 255 + 0.5) * 256 + math.floor(tmp.rgb.g * 255 + 0.5)
+      end
+      c[x + 1], total = n, total + n
+    end
+    data:dispose()
+    local h = { counts = c, total = total }
+    local function pct(q)
+      if total <= 0 then return 0 end
+      local target, cum = q * total, 0
+      for k = 1, 10 do
+        if cum + c[k] >= target and c[k] > 0 then
+          return b0 * 1.5 ^ (k - 1 + (target - cum) / c[k])
+        end
+        cum = cum + c[k]
+      end
+      return b0 * 1.5 ^ 10
+    end
+    h.p50, h.p90, h.p99 = pct(0.5), pct(0.9), pct(0.99)
+    local ls, nr = 0, 0
+    for k = 2, 8 do
+      if c[k] > 0 and c[k + 1] > 0 then ls, nr = ls + math.log(c[k + 1] / c[k]), nr + 1 end
+    end
+    h.ratio = nr > 0 and math.exp(ls / nr) or 0
+    self.sizeHist = h
+  end)
 end
 
 function R2:metricsWrite(sim)
   local s, st, si, m, d = ac.getSim(), self.stats, self.sprayInfo or {}, self.metrics, self.diag or {}
-  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f\n',
+  local h = self.sizeHist or { total = 0, p50 = 0, p90 = 0, p99 = 0, ratio = 0 }
+  local p50 = math.max(h.p50, 1e-6)
+  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f,%d,%.3f,%.2f,%.2f,%.3f,%.2f,%.2f,%.2f,%.2f\n',
     os.clock(), s.weatherType or -1, s.rainIntensity or 0, s.rainWetness or 0, s.rainWater or 0,
     s.windSpeedKmh or 0, (st.carSpeed or 0) * 3.6, st.fluxMMs or 0, st.spray or 0, si.cars or 0, si.nearestM or -1,
     st.filmRate or 0, d.filmEqMM or 0, m.film, m.drops, m.haze, self.p.substeps or 0,
     self.store.apertureMM, self.store.focusM, self.store.defocusDA and 1 or 0, self.store.contactDeg,
     self.store.wfRefraction, self.store.wfSceneMip,
-    self.store.filmRefract, self.store.filmVeil, self.store.scatterK)
+    self.store.filmRefract, self.store.filmVeil, self.store.scatterK,
+    h.total, h.p50, h.p90 / p50, h.p99 / p50, h.ratio, self.p.fragA, self.p.fragHi, self.p.turbK, self.p.flatK)
   local ok = pcall(function()
     local f = io.open(self.recordPath, 'a')
     if f then f:write(line); f:close() end
@@ -843,6 +972,14 @@ function R2:metricsUI()
   local m = self.metrics
   if m then
     ui.text(string.format('Film cover %.1f %%  drop cover %.1f %%  haze %.3f', m.film * 100, m.drops * 100, m.haze))
+  end
+  local h = self.sizeHist
+  if h and h.total > 0 then
+    local b0, parts = self.p.sizeBin0MM, {}
+    for k = 1, 10 do parts[k] = string.format('%.2f:%d', b0 * 1.5 ^ (k - 1), h.counts[k]) end
+    ui.text('Drops by radius (mm, 1.5x bins): ' .. table.concat(parts, '  '))
+    ui.text(string.format('Radius p50 %.2f mm  p90/p50 %.1f  p99/p50 %.1f  bin ratio %.2f  (reference: 3-3.5, >= 10, 0.70)',
+      h.p50, h.p90 / math.max(h.p50, 1e-6), h.p99 / math.max(h.p50, 1e-6), h.ratio))
   end
   if self.recording then ui.text('Recording: ' .. tostring(self.recordPath)) end
   if self.metricsErr then ui.text('Metrics: ' .. self.metricsErr) end
@@ -887,6 +1024,11 @@ function R2:physicsUI()
     rc(d.rcGravCoat), rc(d.rcGravGlass), rc(d.rcGravCoatKin), rc(d.rcAllCoat)))
   ui.text(string.format('Speed (coat, forces aligned): r0.5 %.2f  r1 %.2f  r2 %.2f m/s  | cap %.1f, shed %.1f',
     d.v05, d.v10, d.v20, p.vMax, p.vShed))
+  -- rev40 stagnation turbulence: peak tangential gust and the radius it can depin on its own
+  -- (drag 0.25 rho Cd pi r^2 u^2 = pinning 2 gamma r dcos, mean heterogeneity, no gravity)
+  local gust = p.turbK * p.airSurface * (i.airSpeed or 0)
+  local rcG = gust > 0.1 and 2 * p.surfaceTension * p.pinCoat / (0.25 * p.rhoAir * p.dragCd * math.pi * gust * gust) * 1000 or math.huge
+  ui.text(string.format('Centre gusts up to %.1f m/s tangential -> depin alone from r = %s (coat)', gust, rc(rcG)))
   ui.text(string.format('Substeps %d -> step limit %.2f m/s (faster drops are speed-limited)',
     p.substeps or 0, d.vGather))
 end
@@ -900,6 +1042,7 @@ function R2:dispose()
   if self.C then self.C:dispose() end
   if self.testCanvas then self.testCanvas:dispose(); self.testCanvas = nil end
   if self.Mc then self.Mc:dispose(); self.Mc = nil end
+  if self.Hc then self.Hc:dispose(); self.Hc = nil end
   self.source, self.sceneTex, self.C = nil, nil, nil
   self.S, self.F, self.mesh, self.ready, self.opticsReady = nil, nil, nil, false, false
 end
@@ -920,7 +1063,7 @@ return function(ctx)
   local dir = ctx.folder .. '/rainfx2/shaders/'
   local common = readFile(dir .. 'common.hlsl')
   local src = {}
-  for _, name in ipairs({ 'cells', 'field', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap' }) do
+  for _, name in ipairs({ 'cells', 'field', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap', 'sizes' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -934,6 +1077,7 @@ return function(ctx)
       merge = common .. '\n' .. src.merge,
       seed = common .. '\n' .. src.seed,
       metrics = common .. '\n' .. src.metrics,
+      sizes = common .. '\n' .. src.sizes,
       wmap = common .. '\n' .. src.wmap,
       visor = src.visor,
       source = src.source,

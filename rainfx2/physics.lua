@@ -2,6 +2,8 @@
 -- separate from optics/appearance so the physics can be reviewed and tested on its own.
 -- The GPU side is r2DropVelocity / r2Predict in shaders/common.hlsl; every formula
 -- here mirrors it 1:1 (keep in sync). Units: SI unless the name says MM.
+-- rev40: the GPU adds random stagnation gusts (common.hlsl r2TurbAir) to the air; not mirrored here
+-- (random by design), init.lua physicsUI shows their peak speed and the radius they depin alone.
 -- Review and sources: docs/RAINFX_V2_CORE.md section 14.
 
 local P = {}
@@ -27,14 +29,25 @@ P.DEFAULTS = {
   -- in all T3/T4 runs); reference B shows mostly static soft drops at speed (helmet behind
   -- screen/halo). 0.15: <= 0.3 mm stay, 0.5 mm creep, >= 1 mm stream/shed.
   airSurface = 0.15,        -- tangential air speed at the visor / free-stream relative air
-  vMax = 0.5,               -- m/s, rev19: Ca ~ 0.007, upper end of an intact sliding drop (was 1.5)
+  -- rev41 (rev40 review: drops crossed the visor in 'lightning' paths at 100-300 km/h;
+  -- docs/tools/rainfx2_airflow_sim.py): 0.5 / 1.2 let 0.4-1.5 mm drops slide 0.2-0.7 m over 2 s.
+  -- With 0.30 / 0.45 they creep or are blown off within 0.01-0.3 s after 1-30 mm (short trails).
+  -- rev42 (rev41 recording): 1 mm on the visor is ~30 px, 0.3 m/s ~150 px per frame -> jumps. Moving
+  -- drops now creep (speed saturates smoothly at vMax); drops whose AIR drag exceeds shedK x pinning are
+  -- blown off at once (no visible run across the visor).
+  vMax = 0.08,              -- m/s, rev19 0.5, rev41 0.30, rev42 0.03 tanh, rev43 0.08 graded:
+  vScale = 0.25,            -- v = vMax (1 - exp(-vq / vScale)), vq = quasi-steady speed
+  shedK = 2.0,              -- blown off when air drag > shedK x pinning force
+  airDown = 0.8,            -- share of the surface air turned downhill (observed flow, CORE 54; rev43 0.5 -> 0.8)
   -- shed test uses the UNCAPPED quasi-steady speed: 3.0 at friction 0.06 = 1.2 at 0.15 (same force,
   -- airflow shedding at speed unchanged)
-  vShed = 1.2,              -- m/s, faster drops leave the surface (shed) instead of moving
+  vShed = 1.0,              -- m/s, rev42: only the shed sentinel (speed 1e3) is above it
   -- losses
   -- rev9: 0.02 removed ~2%/mm from a 0.5 mm drop (half its volume across the visor),
   -- drops shrank below the kinetic threshold and stopped mid-way. Hydrophobic coat: ~0.25.
-  trailLoss = 0.005, evap = 1e-4, minRadiusMM = 0.08, maxRadiusMM = 2.2,
+  trailLoss = 0.005, evap = 1e-4,
+  minRadiusMM = 0.04, maxRadiusMM = 1.5,   -- rev41: 0.08 / 2.2 (rev40 review: many more small drops, max much smaller)
+  pinMM = 4.0,              -- rev41: pinning heterogeneity feature size (smooth field, was white noise per cell)
   coalesceK = 1.0,
   windK = 1.0,              -- ambient wind reaching the visor (CSP wind ignores pits/cockpit shelter)
   -- water film W (rev11): lubrication-theory film, see P.filmVelocity
@@ -99,7 +112,9 @@ function P.speed(p, rMM, gTan, airTan, pinCos)
   local Fg, Fa, Fpin = P.forces(p, rMM, gTan, airTan, pinCos)
   local F = Fg + Fa
   if F <= Fpin then return 0 end
-  return math.min((F - Fpin) / (p.friction * rMM * 1e-3), p.vMax)
+  if Fa > (p.shedK or 1e9) * Fpin then return math.huge end   -- rev42: blown off
+  local vq = (F - Fpin) / (p.friction * rMM * 1e-3)
+  return p.vMax * (1 - math.exp(-vq / p.vScale))
 end
 
 -- Smallest radius (mm) that moves, by bisection on F(r) - Fpin(r) (monotone in r).

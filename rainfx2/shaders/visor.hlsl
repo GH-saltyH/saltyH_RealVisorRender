@@ -36,11 +36,11 @@ float4 r2VisorTap(Texture2D tx, float2 t) {
 float r2VisorRadiusMM(float v) {
     return v > 0 ? exp2(log2(v / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
 }
-float r2VisorSeed(float w) { return floor(w / 1048576.0); }   // = r2UnpackSeed
+float r2VisorSeed(float w) { return floor(w / 262144.0); }    // = r2UnpackSeed (rev40: 64 seeds)
 float2 r2VisorMove(float w) {                                 // = r2UnpackMove
-    float m = w - r2VisorSeed(w) * 1048576.0;
-    float qx = floor(m / 1024.0);
-    return (float2(qx, m - qx * 1024.0) - 500.0) / 62.5;   // rev18 fix (rev8 packing)
+    float m = w - r2VisorSeed(w) * 262144.0;
+    float qx = floor(m / 512.0);
+    return (float2(qx, m - qx * 512.0) - 250.0) / 31.25;   // rev40 packing (common.hlsl r2PackMove)
 }
 // Cubic B-spline reconstruction of the film thickness (field B) with its gradient
 // (per texel). 16 Loads, no filtering artefacts at texel edges.
@@ -110,12 +110,16 @@ float r2Noise(float2 p) {
 // order 1, 2, 3, so the gradient w.r.t. the true position is A1 A2 A3 grad'(q').
 // RW accumulates h * (radius, sin(contact angle)) for the h-weighted drop properties.
 struct R2Shape { float2 u1; float s1; float2 u2; float s2; float2 u3; float s3; };
-void r2Kernel(float2 q, float Rk, float2 props, R2Shape T,
+// rev40 P3 gravity flattening (docs/RAINFX_V2_DROP_SHAPE_RESEARCH.md): h = 1 - (1-b) x - b x^2,
+// x = d^2 / Rk^2. b = 0 is the WF dome; b > 0 flattens the top and steepens the rim (large drops,
+// Bond number (r / 2.7 mm)^2 -> 0.3-0.6), so the lens interior bends less and the rim band narrows.
+void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T,
               inout float P, inout float2 G, inout float2 RW, inout float HW) {
     float ik = 1.0 / (Rk * Rk);
-    float h = 1.0 - dot(q, q) * ik;
+    float x = dot(q, q) * ik;
+    float h = 1.0 - (1.0 - beta) * x - beta * x * x;
     if (h <= 0.0) return;
-    float2 g = (-2.0 * ik) * q;
+    float2 g = (-2.0 * ik * (1.0 - beta + 2.0 * beta * x)) * q;
     g -= T.u3 * (dot(T.u3, g) * T.s3);
     g -= T.u2 * (dot(T.u2, g) * T.s2);
     g -= T.u1 * (dot(T.u1, g) * T.s1);
@@ -189,7 +193,8 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     th -= gR2Hysteresis * (a < 0.0 ? saturate(c.k / max(gR2MotionStretch, 1e-3)) : 0.0);
     th *= 1.0 - wetFlat;
     float sth = sin(radians(clamp(th, 5.0, 89.0)));
-    r2Kernel(q, gR2KernelScale * c.r, float2(c.r, sth), T, P, G, RW, HW);
+    float beta = gR2FlatK * saturate((c.r - gR2FlatStartMM) / max(gR2FlatFullMM - gR2FlatStartMM, 1e-3));
+    r2Kernel(q, gR2KernelScale * c.r, float2(c.r, sth), beta, T, P, G, RW, HW);
 }
 
 // rev24 view context for the physical lens: eye ray, outward visor normal, world vectors of one mm
@@ -239,18 +244,19 @@ float3 r2DropLens(float U, float2 G, float Rmm, float sth, float2 pxU, float2 px
         //   interior x (wfRefraction / wfRimRefraction), rim + small drops x 1 (physical).
         // Rays that leave the screen or turn back read the environment cubemap in their direction;
         // total internal reflection reads the dim car interior (exits through the contact face).
+        // rev43 PLANO-CONVEX LENS, one image (user rev42 review + recording rev42_2중상...: the drop showed
+        // a small inverted image in the centre laid over a large blurred background image and an
+        // environment cubemap at the rim -- three sources that never belong to the same scene).
+        // Now every point of the drop is ONE physical ray: enter the flat contact face (visor side),
+        // leave through the spherical cap (contact angle theta, n = 1.333), and read the scene where
+        // that exit direction points (scene at infinity, the housing-free refraction source). The rim
+        // bends hard and the centre spreads gently by the refraction law alone; one strength slider
+        // (gR2LensPhys, 1 = physical). Directions outside the frame are compressed CONTINUOUSLY toward
+        // the frame edge (same image, no second source); total internal reflection dims that same
+        // image (light comes back from the car interior). docs/RAINFX_V2_CORE.md section 55.
         float rho = saturate(length(G) * Rmm * (1.24 * 1.24 / 2.0));   // radial fraction d / R
-        // rev36 oblique (side) views. Grazing rays enter the water within ~1-2 deg of the critical
-        // angle, so ANY cap tilt away from them is total internal reflection. rev35 sharpened the
-        // profile (rho^p): at rho 0.5, p 4.5 the tilt is still ~2 deg -> TIR anyway, the slider had no
-        // visible effect (user). Now the tilt is confined to an outer band of 1/rimSharp of the radius
-        // (rimSharp 4 -> outer 25 %), the inside is flat (exactly no TIR: from air the water angle is
-        // always below critical). Blended in by obliqueness only; front views unchanged.
-        float rhoRaw = rho;
-        float obl = smoothstep(0.1, 0.5, 1.0 - abs(dot(w.V, w.n)));   // rev39: 0.2..0.7 -> 0.1..0.5 (side drops got only ~40 %)
-        float bw = 1.0 / max(gR2RimSharp, 1.0);
-        float rhoBand = saturate((rho - (1.0 - bw)) / bw);
-        rho = lerp(rho, rhoBand, obl);
+        // rev44: the optional low-poly cap (rev42-43) is removed (user: the angular look came from the
+        // drop resolution itself; seeded polygons read artificial).
         float rs = rho * sth;
         float capS = min(rs / sqrt(max(1.0 - rs * rs, 0.02)), 7.0);     // tan of the cap surface angle
         float3 dUp = G.x * w.Tu + G.y * w.Tv;                          // toward the centre (world)
@@ -262,45 +268,32 @@ float3 r2DropLens(float U, float2 G, float Rmm, float sth, float2 pxU, float2 px
         float kd = 1.0 - 1.333 * 1.333 * (1.0 - ci * ci);
         float3 Vp = normalize(1.333 * Vw + (sqrt(max(kd, 0.0)) - 1.333 * ci) * N);
         float tir = smoothstep(0.04, -0.04, kd);
-        float smallK = 1.0 - smoothstep(gR2SmallFullPx, gR2SmallEndPx, Rpx);
-        float rimK = max(smoothstep(0.45, 1.15, capS), smallK);
-        // rev35 fix: k was lerp(interior, rim, rimK) / rim -> the rim parameter cancelled itself (k = 1
-        // whenever rimK = 1: small drops ignored BOTH sliders, user rev34 recording). Normalised to the
-        // legacy WF strength 0.69 = physical deflection.
-        float k = lerp(gR2WFRefraction, gR2WFRimRefraction, rimK) / 0.69;
-        float3 Vo = normalize(lerp(w.V, Vp, k));
-        float lo = dot(Vo, w.look);
+        float3 Vo = normalize(lerp(w.V, Vp, gR2LensPhys));
+        // exit direction -> screen position of that direction (relative to this pixel's own direction)
         float2 dpx = (r2Proj(Vo, w) - r2Proj(w.V, w)) * w.sgn * gR2FovK;   // screen heights
-        float dl = length(dpx);
-        // rev39: 'behind the camera' was an ABSOLUTE test (look . Vo < 0.45). Near the screen edges of a
-        // wide, close camera V itself has look . V ~ 0.5, so a slight outward deflection already switched
-        // the side drops to the environment cubemap -> the large dark lens halves in side views. Now
-        // only rays that really turn away (relative to V) or leave the screen use the environment.
-        float lv = dot(w.V, w.look);
-        float envK = max(smoothstep(0.25, 0.05, lo / max(lv, 1e-3)), smoothstep(0.7, 1.1, dl));
-        dpx *= min(1.0, 1.1 / max(dl, 1e-6));
-        float largeWW = smoothstep(gR2LargeStartPx, max(gR2LargeFullPx, gR2LargeStartPx + 0.5), Rpx);
-        float2 uvW = spT + offF + dpx * float2(aspect, 1.0) + warp * (2.0 * gR2LargeWarpPx * largeWW) * gR2InvRT;
+        float lo = dot(Vo, w.look);
+        float2 uvA = spT + offF + dpx * float2(aspect, 1.0) - 0.5;      // centred screen coords
+        if (lo < 0.05) uvA = (spT - 0.5) + normalize(dpx * float2(aspect, 1.0) + 1e-6) * 4.0;   // turned back
+        // continuous soft compression into the frame: identity in the middle, asymptote 0.49
+        float2 xa = abs(uvA) / 0.49;
+        float2 cmp = uvA / sqrt(sqrt(1.0 + xa * xa * xa * xa));
+        float squeeze = saturate(1.0 - length(cmp) / max(length(uvA), 1e-6));
+        float2 uvW = cmp + 0.5;
         float2 fxW = ddx_fine(uvW) / gR2InvRT, fyW = ddy_fine(uvW) / gR2InvRT;
-        float mipFW = 0.5 * log2(max(max(dot(fxW, fxW), dot(fyW, fyW)), 1.0)) - 1.0;
-        float overW;
-        float2 suvW = r2Mirror(uvW, overW);
-        float mipW = gR2WFSceneMip + lerp(0.0, gR2RimMip, rimK) + gR2LargeBlurMip * largeWW
-                   + cocMipK * 0.5 * log2(1.0 + 0.35 * cocPx * 0.9 / max(Rpx * gR2InvRT.y, 1e-6));
-        mipW = clamp(max(mipW, gR2WFSceneMip + mipFW), minMip, 9.0);
-        float3 cW = r2Scene(suvW, mipW);
-        envK = saturate(max(envK, overW * 6.0));
-        float3 cEnv = txReflectionCubemap.SampleLevel(samLinearSimple, float3(-Vo.x, Vo.y, Vo.z), gR2RimCubeMip).rgb * gR2RimEnvK;
-        cW = lerp(cW, cEnv, envK);
-        float3 inner = r2Scene(spT, gR2WFSceneMip + 3.0) * gR2EnvInterior;
-        cW = lerp(cW, inner, tir);
-        // rev39: on the RADIUS (rev34 used cap slope 1..2.5, which a 55-60 deg cap (rim tan 1.4-1.7) barely
-        // reaches -> the slider did nothing). Legacy band: outer 30 % of the radius.
-        cW *= 1.0 - gR2EdgeLoss * smoothstep(0.7, 1.0, rhoRaw);       // optional symmetric loss (default 0)
-        // sky glint on the rim facing world-up (world direction, not screen)
+        float mipFW = 0.5 * log2(max(max(dot(fxW, fxW), dot(fyW, fyW)), 1.0));
+        float mipW = clamp(gR2WFSceneMip + max(mipFW - 1.0, 0.0)
+                     + cocMipK * 0.5 * log2(1.0 + 0.35 * cocPx * 0.9 / max(Rpx * gR2InvRT.y, 1e-6)), minMip, 7.0);
+        float3 cW = r2Scene(saturate(uvW), mipW);
+        cW *= lerp(1.0, 0.35, tir);       // TIR: same image, dimmed (rev44: fixed, the slider had no visible effect)
+        // Fresnel sky highlight on the part of the cap facing world-up (reflection, not a second image)
         float up = saturate(dot(-dUp, float3(0, 1, 0)));
         cW += gR2VeilColor * (gR2Glint * up * up * up * up * smoothstep(0.8, 2.0, capS) * (1.0 - tir));
-        if (gR2Debug > 6.5) cW = float3(rimK, envK, max(tir, saturate(mipW / 9.0) * 0.5));
+        if (gR2Debug > 8.5) {
+            // Debug 9: where each lens point looks. R = deflected DOWN, G = deflected UP (world).
+            // A real drop is an inverting lens: its upper part looks down (red top, green bottom).
+            float dv = dot(Vo - w.V, float3(0, 1, 0));
+            cW = float3(saturate(-dv * 6.0), saturate(dv * 6.0), tir);
+        } else if (gR2Debug > 6.5) cW = float3(rho, squeeze * 4.0, max(tir, saturate(mipW / 7.0) * 0.5));
         cRes = cW;
     } else {
     // rev28 = CSP windscreen drop shading (decoded from preview728 main_fx/ksWindscreenFX_new_ps,
@@ -564,7 +557,10 @@ float4 main(PS_IN pin) {
     float aOut = a + scat - a * scat;
     col = (col * a * (1.0 - scat) + amb * scat) / max(aOut, 1e-4);
     a = aOut;
-    if (gR2Debug > 7.5) {
+    if (gR2Debug > 8.5) {
+        col = cDrop;                          // Debug 9 (drops only): lens direction, see r2DropLens
+        a = max(cov, 0.0);
+    } else if (gR2Debug > 7.5) {
         col = float3(cov, cov, cov);       // Debug 8: drop coverage only (is a pattern in the outline itself?)
         a = 1.0;
     } else if (gR2Debug > 6.5) {

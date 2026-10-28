@@ -262,13 +262,13 @@ local cfg = scriptSettings:mapConfig({
     --------------------------------------------------------
 
     PROFILE_2 = {
-        PITCH = -0.2200,
-        YAW   = -19.2700,
-        ROLL  = -6.3800,
+        PITCH = -4.65,
+        YAW   = -20.55,
+        ROLL  = 0.000,
 
-        OFFSET_X = 0.1089,
-        OFFSET_Y = -0.0040,
-        OFFSET_Z = -0.0594,
+        OFFSET_X = 0.1077,
+        OFFSET_Y = 0.0326,
+        OFFSET_Z = -0.0351,
 
         SCALE = 1.0000,
 
@@ -1420,19 +1420,18 @@ local DEFAULT_PROFILE1 = {
 
 
 local DEFAULT_PROFILE2 = {
-    
-    PITCH = -0.2200,
-    YAW   = -19.2700,
-    ROLL  = -6.3800,
+    PITCH = -4.65,
+    YAW   = -20.55,
+    ROLL  = 0.000,
 
-    OFFSET_X = 0.1089,
-    OFFSET_Y = -0.0040,
-    OFFSET_Z = -0.0594,
+    OFFSET_X = 0.1077,
+    OFFSET_Y = 0.0326,
+    OFFSET_Z = -0.0351,
 
     SCALE = 1.0000,
 
     NEARCLIP = 0.0081,
-
+    
     ENABLE_MOTION   = 1,
     
     MOTION_GAIN_X   = 0.00009,

@@ -46,22 +46,25 @@ float3 r2Normal(float2 t) {
     return n * rsqrt(max(dot(n, n), 1e-12));
 }
 
-// w = shape seed (0..15) * 2^20 + displacement (cells, |d|<8) quantised below 2^20.
+// w = shape seed * 2^18 + displacement (cells, |d|<8) quantised below 2^18.
 // rev8: the displacement is accumulated over the substeps of one frame (P2 field and
-// the physics view run once per frame), 1/62.5 cell resolution.
-// The whole value stays an integer below 2^24, exact in fp32.
+// the physics view run once per frame).
+// rev40 (P0, docs/RAINFX_V2_DROP_SHAPE_RESEARCH.md): 16 -> 64 shape seeds; the displacement
+// resolution 1/62.5 -> 1/31.25 cell (0.037 mm, only drives the motion stretch).
+// The whole value stays an integer below 2^24, exact in fp32 (max 16 771 572).
+#define R2_SEEDS 64.0
 float r2PackMove(float2 d, float seed) {
-    float2 q = round(clamp(d, -8.0, 8.0) * 62.5 + 500.0);    // 0..1000
-    return clamp(floor(seed), 0.0, 15.0) * 1048576.0 + q.x * 1024.0 + q.y;
+    float2 q = round(clamp(d, -8.0, 8.0) * 31.25 + 250.0);   // 0..500
+    return clamp(floor(seed), 0.0, R2_SEEDS - 1.0) * 262144.0 + q.x * 512.0 + q.y;
 }
 float r2UnpackSeed(float w) {
-    return floor(w / 1048576.0);
+    return floor(w / 262144.0);
 }
 float2 r2UnpackMove(float w) {
-    float m = w - r2UnpackSeed(w) * 1048576.0;
-    float qx = floor(m / 1024.0);
-    float qy = m - qx * 1024.0;
-    return (float2(qx, qy) - 500.0) / 62.5;
+    float m = w - r2UnpackSeed(w) * 262144.0;
+    float qx = floor(m / 512.0);
+    float qy = m - qx * 512.0;
+    return (float2(qx, qy) - 250.0) / 31.25;
 }
 
 // Drop radius (mm) from volume (mm^3). gR2ShapeK = V / r^3 for the contact angle.
@@ -81,11 +84,46 @@ float r2AirTangent(float3 n) {
     return length(a) * gR2AirSurface;
 }
 
+float r2Hash21(float2 p) { return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
+float r2VNoise(float2 p) {
+    float2 i = floor(p), f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(r2Hash21(i), r2Hash21(i + float2(1, 0)), f.x),
+                lerp(r2Hash21(i + float2(0, 1)), r2Hash21(i + float2(1, 1)), f.x), f.y);
+}
+
+// rev40 stagnation turbulence (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md step 2). Driving straight,
+// the air meets the visor centre along the normal: the mean tangential air is ~0 there and small
+// drops would stay pinned and pile up forever. The real helmet sits in turbulent flow whose
+// tangential gusts rock and occasionally move them. Random tangential air (world vector): value
+// noise over gR2TurbScale (cells of turbMM) blended between time slices of gR2TurbTau, magnitude
+// turbK x the surface share of the relative air. Position + time only -> identical in every
+// gathering cell (the gather stays consistent).
+float3 r2TurbAir(float2 t, float3 du, float3 dv) {
+    float ts = gR2Time / max(gR2TurbTau, 1e-3);
+    float i = floor(ts), f = ts - i;
+    f = f * f * (3.0 - 2.0 * f);
+    float2 p = t * gR2TurbScale;
+    float2 o0 = float2(fmod(i, 251.0) * 7.31, fmod(i, 241.0) * 3.17);
+    float2 o1 = float2(fmod(i + 1.0, 251.0) * 7.31, fmod(i + 1.0, 241.0) * 3.17);
+    float2 n0 = float2(r2VNoise(p + o0), r2VNoise(p + o0 + 91.7));
+    float2 n1 = float2(r2VNoise(p + o1), r2VNoise(p + o1 + 91.7));
+    float2 g = lerp(n0, n1, f) * 2.0 - 1.0;
+    float3 eu = du * rsqrt(max(dot(du, du), 1e-20));
+    float3 ev = dv - eu * dot(dv, eu);
+    ev *= rsqrt(max(dot(ev, ev), 1e-20));
+    return (eu * g.x + ev * g.y) * (max(gR2TurbK, 0.0) * gR2AirSurface * length(gR2AirW));   // single exit (FXC)
+}
+
 // Drop velocity in tex-uv per second. Memoryless terminal-velocity model:
 // gravity+inertia and air drag against contact-angle hysteresis (pinning).
 // Mirrored 1:1 by rainfx2/physics.lua (P.forces / P.speed) for review and diagnostics.
-float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed) {
+// rev41: drive = Fpin / |F| of a moving drop (1 = just depinned, -> 0 = driven far above pinning);
+// the path heterogeneity (r2Steer) scales with it: weakly driven drops meander, strongly driven
+// drops follow the force in nearly straight lines.
+float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed, out float drive) {
     speed = 0;
+    drive = 1;
     float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
     float4 dvA = r2Tap(txR2Dv, t);
     float3 dv = r2ToWorld(dvA.xyz);
@@ -93,16 +131,31 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed)
     float r = radiusMM * 1e-3;
     float mass = 1e-6 * gR2ShapeK * radiusMM * radiusMM * radiusMM;     // kg (mm^3 * 1e-9 * 1000)
     float3 g = gR2AccelW - n * dot(gR2AccelW, n);
-    float3 air = (gR2AirW - n * dot(gR2AirW, n)) * gR2AirSurface;
+    float3 airM = (gR2AirW - n * dot(gR2AirW, n)) * gR2AirSurface;
+    // rev42 observed downward flow (user, real onboard video: once the wind hits, drops run DOWN;
+    // DROP_PIPELINE_PLAN section 5). The helmet/cockpit flow cannot be modelled; a share gR2AirDown
+    // of the mean surface air is turned along the visor's downhill direction.
+    float gl = length(g);
+    float3 air = airM + (gl > 1e-4 ? g * (gR2AirDown * length(airM) / gl) : float3(0, 0, 0))
+               + r2TurbAir(t, du, dv);
     float airLen = length(air);
-    float3 F = mass * g + (0.25 * gR2RhoAir * gR2DragCd * R2_PI * r * r * airLen) * air;
+    float3 Fa = (0.25 * gR2RhoAir * gR2DragCd * R2_PI * r * r * airLen) * air;
+    float3 F = mass * g + Fa;
     float Fm = length(F);
     float pinCos = lerp(gR2PinGlass, gR2PinCoat, saturate(dvA.a));
     float Fpin = gR2SurfaceTension * 2.0 * r * pinCos * pinNoise;
     if (Fm <= Fpin) return float2(0, 0);
-    speed = (Fm - Fpin) / (gR2Friction * max(r, 1e-5));
+    drive = Fpin / max(Fm, 1e-12);
+    // rev42 (rev41 recording): the visor is ~5 cm from the eye, 1 mm ~ 30 px, so 0.3 m/s is ~150 px per
+    // frame -- every moving drop read as a jump / flash. Two regimes now:
+    //  * blown off: the AIR drag alone exceeds gR2ShedK x pinning -> the drop is torn off at once
+    //    (speed sentinel above gR2VShed, the caller removes it);
+    //  * creeping: quasi-steady speed, saturated smoothly at gR2VMax (tanh, a few cm/s).
+    float vq = (Fm - Fpin) / (gR2Friction * max(r, 1e-5));
+    // rev43 (rev42 sprint recording: every moving drop crept at the same capped speed, a 'conveyor'):
+    // graded saturation v = vMax (1 - exp(-vq / vScale)) keeps big / strongly driven drops faster.
+    speed = length(Fa) > gR2ShedK * Fpin ? 1e3 : gR2VMax * (1.0 - exp(-vq / max(gR2VScale, 1e-4)));
     if (speed > gR2VShed) return float2(0, 0);               // shed (caller checks speed)
-    speed = min(speed, gR2VMax);
     float3 v = F * (speed / Fm);
     float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
     float det = max(a * c - b * b, 1e-20);
@@ -132,31 +185,28 @@ float2 r2FilmVelocity(float2 t, float hMM) {
 }
 
 // rev21 path heterogeneity (CSP windscreen rule, docs/RAINFX_V2_DROP_SIZE_RESEARCH.md section 4):
-// a fixed surface value noise gives sparse lateral kicks (pinning defects -> zig-zag paths), and
-// a moving drop steers toward the wetter side of earlier traces ahead (rivulets form). Speed is
-// kept; only the direction turns. Depends on position only -> identical in every gathering cell.
-float r2Hash21(float2 p) { return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
-float r2VNoise(float2 p) {
-    float2 i = floor(p), f = p - i;
-    f = f * f * (3.0 - 2.0 * f);
-    return lerp(lerp(r2Hash21(i), r2Hash21(i + float2(1, 0)), f.x),
-                lerp(r2Hash21(i + float2(0, 1)), r2Hash21(i + float2(1, 1)), f.x), f.y);
-}
-float2 r2Steer(float2 t, float2 vt) {
+// surface value noise turns the path (pinning defects), and a moving drop steers toward the wetter
+// side of earlier traces ahead (rivulets form). Speed is kept; only the direction turns.
+// Depends on position only -> identical in every gathering cell.
+// rev41 (rev40 review: "lightning" zig-zag at 100-300 km/h): the turn is SMOOTH noise (rev21 used
+// sign kicks -> abrupt +-19 deg switches every few mm), both terms scale with drive = Fpin/|F|
+// (strongly driven drops run straight), and the total turn is capped at 0.5 (27 deg).
+float2 r2Steer(float2 t, float2 vt, float drive) {
     float2 texMM = gR2CellSizeMM * gR2Cells;
     float2 vm = vt * texMM;                                   // mm/s on the visor
     float sp = length(vm);
-    if (sp < 1e-3 || (gR2Meander <= 0 && gR2TrailFollow <= 0)) return vt;
-    float2 dir = vm / sp;
-    float2 side = float2(-dir.y, dir.x);
-    float nz = r2VNoise(t * gR2MeanderScale) * 2.0 - 1.0;
-    float kick = sign(nz) * saturate(abs(nz) * 2.0 - 0.5);
-    float2 ahead = t + dir * (1.5 / texMM);
-    float tl = txR2Field.SampleLevel(samLinearClamp, ahead + side * (1.0 / texMM), 0).r;
-    float tr = txR2Field.SampleLevel(samLinearClamp, ahead - side * (1.0 / texMM), 0).r;
-    float lat = gR2Meander * kick + gR2TrailFollow * (tl - tr);
-    vm = normalize(dir + side * lat) * sp;
-    return vm / texMM;
+    float2 res = vt;
+    if (sp > 1e-3 && (gR2Meander > 0 || gR2TrailFollow > 0)) {
+        float2 dir = vm / sp;
+        float2 side = float2(-dir.y, dir.x);
+        float nz = r2VNoise(t * gR2MeanderScale) * 2.0 - 1.0;
+        float2 ahead = t + dir * (1.5 / texMM);
+        float tl = txR2Field.SampleLevel(samLinearClamp, ahead + side * (1.0 / texMM), 0).r;
+        float tr = txR2Field.SampleLevel(samLinearClamp, ahead - side * (1.0 / texMM), 0).r;
+        float lat = clamp((gR2Meander * nz + gR2TrailFollow * (tl - tr)) * saturate(drive), -0.5, 0.5);
+        res = normalize(dir + side * lat) * sp / texMM;
+    }
+    return res;
 }
 
 // One drop step. Every gathering cell evaluates this identically for a source.
@@ -175,15 +225,19 @@ R2Move r2Predict(int2 cell, float4 s) {
     if (s.z <= 0) return o;
     float2 t = (float2(cell) + s.xy) / gR2Cells;
     float rmm = r2RadiusMM(s.z);
-    float pinNoise = lerp(gR2PinNoiseMin, gR2PinNoiseMax, r2Rand(uint3((uint)cell.x, (uint)cell.y, 911u)));
+    // rev41: pinning heterogeneity is a smooth surface field (gR2PinScale, ~4 mm features) instead of
+    // white noise per 1.2 mm cell, which made a drop near its threshold stop and start at every cell
+    // edge (jerky "lightning" motion, rev40 review). Position only -> same in every gathering cell.
+    float pinNoise = lerp(gR2PinNoiseMin, gR2PinNoiseMax, r2VNoise(t * gR2PinScale + 53.1));
     // rev8: kinetic hysteresis. A drop that moved in the last step/frame is held by the
     // (smaller) receding/advancing hysteresis of a moving contact line: once depinned it
     // keeps sliding instead of stopping at the first strong cell (rev7 permanent traps).
     float2 lastMove = r2UnpackMove(s.w);
     if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
     float speed;
-    float2 vt = r2DropVelocity(t, rmm, pinNoise, speed);
-    vt = r2Steer(t, vt);
+    float drive;
+    float2 vt = r2DropVelocity(t, rmm, pinNoise, speed, drive);
+    vt = r2Steer(t, vt, drive);
     float2 dc = vt * gR2Dt * gR2Cells;
     if (speed > gR2VShed) return o;                          // shed: leaves the surface
     // rev7: a fast drop is LIMITED to the gather window instead of being deleted

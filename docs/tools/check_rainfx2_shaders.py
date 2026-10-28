@@ -36,6 +36,7 @@ PASSES = [  # name, template, files, textures, defines
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
     ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], SCENE_TEXTURES, ''),
     ('wmap', 'ui.fx', ['common.hlsl', 'wmap.hlsl'], SCENE_TEXTURES, ''),
+    ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
     ('visor', 'mesh.fx', ['visor.hlsl'], VISOR_TEXTURES, ''),
     ('visor_depth', 'mesh.fx', ['visor.hlsl'], VISOR_TEXTURES, '#define R2_DEPTH_ONLY 1\n'),
