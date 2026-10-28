@@ -48,7 +48,7 @@ end
 -- rev40: the same for the simulation passes (common.hlsl + pass file use sceneValues)
 do
   local f=io.open(root..'/rainfx2/shaders/common.hlsl'); local common=f:read('*a'); f:close()
-  for _,name in ipairs({'cells','claim','merge','field','metrics','sizes','wmap'}) do
+  for _,name in ipairs({'cells','claim','merge','field','trail','metrics','sizes','wmap'}) do
     local g=io.open(root..'/rainfx2/shaders/'..name..'.hlsl'); local src=common..g:read('*a'); g:close()
     local vals=core.passCells.values
     for v in src:gmatch('gR2%w+') do

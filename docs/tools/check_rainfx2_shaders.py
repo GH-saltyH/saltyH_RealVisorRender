@@ -24,8 +24,8 @@ FLOAT2 = {'gR2WMSize', 'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSi
 FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos', 'gR2CamLook', 'gR2CamSide', 'gR2CamUp'}
 MATRIX = {'gR2ObjToWorld'}
 
-SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2WMap', 'txR2Du', 'txR2Dv', 'txR2Mask']
-VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Scene', 'txR2WMap', 'txR2Mask']
+SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2WMap', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask']
+VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Trail', 'txR2Scene', 'txR2WMap', 'txR2Mask']
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 
 PASSES = [  # name, template, files, textures, defines
@@ -35,6 +35,7 @@ PASSES = [  # name, template, files, textures, defines
     ('seed', 'ui.fx', ['common.hlsl', 'seed.hlsl'], SCENE_TEXTURES, ''),
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
     ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], SCENE_TEXTURES, ''),
+    ('trail', 'ui.fx', ['common.hlsl', 'trail.hlsl'], SCENE_TEXTURES, ''),
     ('wmap', 'ui.fx', ['common.hlsl', 'wmap.hlsl'], SCENE_TEXTURES, ''),
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
@@ -108,6 +109,13 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     fxc = None if a.emit_only else (a.dxc or find_fxc(a.fxc))
     failed = 0
+    # rev45: FXC (effects syntax) reserves words DXC accepts (rev45 'float pass' broke field only in FXC)
+    reserved = r'pass|technique|technique10|technique11|pixelshader|vertexshader|compile|sampler_state|stateblock|string|shared'
+    for f in sorted(glob.glob(os.path.join(SRC, '*.hlsl'))):
+        code = re.sub(r'//[^\n]*', '', open(f, encoding='utf-8').read())
+        for m in re.finditer(r'\b(?:float|half|int|uint|bool)[1-4]?(?:x[1-4])?\s+(' + reserved + r')\b', code):
+            print('%-12s FAILED  reserved FXC identifier %r in %s' % ('names', m.group(1), os.path.basename(f)))
+            failed += 1
     for name, template, files, textures, defines in PASSES:
         path = os.path.join(OUT, name + '.hlsl')
         open(path, 'w', encoding='utf-8').write(assemble(tpl, template, files, textures, defines))

@@ -6,6 +6,8 @@
 
 float4 main(PS_IN pin) {
     int2 c = int2(pin.PosH.xy);
+    // rev45: right half = life cycle; static test drops are fully grown (age 10 s)
+    if (c.x >= (int)gR2Cells.x) return float4(10, 0, 0, 0);
     uint2 u = uint2(c);
     float2 t = (float2(c) + 0.5) / gR2Cells;
     float4 none = float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0));

@@ -290,6 +290,40 @@ local cfg = scriptSettings:mapConfig({
         HIDE_DRIVER_HELMET = 1,
     },
     
+
+    --------------------------------------------------------
+    -- Profile 3
+    --  Onboard cam Driver helmet view    
+    --------------------------------------------------------
+
+    PROFILE_3 = {
+        PITCH = -3.15,
+        YAW   = 180.0000,
+        ROLL  = 0.0000,
+
+        OFFSET_X = 0.0000,
+        OFFSET_Y = 0.1123,
+        OFFSET_Z = 0.4150,
+
+        SCALE = 1.0000,
+
+        NEARCLIP = 0.0081,
+
+        ENABLE_MOTION   = 1,
+        
+        MOTION_GAIN_X   = 0.00009,
+        MOTION_GAIN_Y   = 0.00006,
+        MOTION_GAIN_Z   = 0.00007,
+        
+        MOTION_SMOOTHING = 30.0,
+        MOTION_SHARPNESS = 1.11,
+        
+        MOTION_LIMIT_X  = 0.025,
+        MOTION_LIMIT_Y  = 0.020,
+        MOTION_LIMIT_Z  = 0.020,
+
+        HIDE_DRIVER_HELMET = 1,
+    },
     
     --------------------------------------------------------
     -- Runtime / development settings
@@ -1395,12 +1429,12 @@ local DEFAULT_PROFILE1 = {
     ROLL  = 0.0000,
 
     OFFSET_X = 0.0000,
-    OFFSET_Y = 0.0000,
-    OFFSET_Z = -0.1033,
+    OFFSET_Y = 0.0397,
+    OFFSET_Z = -0.0832,
 
     SCALE = 1.0000,
 
-    NEARCLIP = 0.0181,
+    NEARCLIP = 0.0050,
 
     ENABLE_MOTION   = 1,
     
@@ -1431,6 +1465,36 @@ local DEFAULT_PROFILE2 = {
     SCALE = 1.0000,
 
     NEARCLIP = 0.0081,
+    
+    ENABLE_MOTION   = 1,
+    
+    MOTION_GAIN_X   = 0.00009,
+    MOTION_GAIN_Y   = 0.00006,
+    MOTION_GAIN_Z   = 0.00007,
+    
+    MOTION_SMOOTHING = 30.0,
+    MOTION_SHARPNESS = 1.11,
+    
+    MOTION_LIMIT_X  = 0.025,
+    MOTION_LIMIT_Y  = 0.020,
+    MOTION_LIMIT_Z  = 0.020,
+
+    HIDE_DRIVER_HELMET = 1,
+}
+
+
+local DEFAULT_PROFILE3 = {
+    PITCH = -3.15,
+    YAW   = 180.0000,
+    ROLL  = 0.0000,
+
+    OFFSET_X = 0.0000,
+    OFFSET_Y = 0.1123,
+    OFFSET_Z = 0.4150,
+
+    SCALE = 1.0000,
+
+    NEARCLIP = 0.0050,
     
     ENABLE_MOTION   = 1,
     
@@ -2974,6 +3038,10 @@ local function getProfile(profileIndex)
 
     if profileIndex == 2 then
         return cfg.PROFILE_2
+        
+    elseif profileIndex == 3 then
+        return cfg.PROFILE_3
+
     end
 
     return cfg.PROFILE_1
@@ -3027,6 +3095,7 @@ local function loadProfiles()
 
     local p1 = config:mapSection('PROFILE_1', DEFAULT_PROFILE1)
     local p2 = config:mapSection('PROFILE_2', DEFAULT_PROFILE2)
+    local p3 = config:mapSection('PROFILE_3', DEFAULT_PROFILE3)
 
 
     for key, value in pairs(p1) do
@@ -3036,6 +3105,11 @@ local function loadProfiles()
     
     for key, value in pairs(p2) do
         cfg.PROFILE_2[key] = value
+    end
+    
+
+    for key, value in pairs(p3) do
+        cfg.PROFILE_3[key] = value
     end
 
 
@@ -3056,7 +3130,7 @@ local function loadProfiles()
     activeProfile = math.clamp(
         math.floor(activePrfRaw or 1),
         1,
-        2
+        3
     )
     
     local enableModClamped = math.clamp(
@@ -3106,6 +3180,7 @@ end
 local function saveProfiles()
     local p1 = cfg.PROFILE_1
     local p2 = cfg.PROFILE_2
+    local p3 = cfg.PROFILE_3
 
     local meshVisibilityLines = {}
 
@@ -3147,6 +3222,26 @@ MOTION_LIMIT_Z=%.6f
 HIDE_DRIVER_HELMET=%d
 
 [PROFILE_2]
+PITCH=%.6f
+YAW=%.6f
+ROLL=%.6f
+OFFSET_X=%.6f
+OFFSET_Y=%.6f
+OFFSET_Z=%.6f
+SCALE=%.6f
+NEARCLIP=%.6f
+ENABLE_MOTION=%d
+MOTION_GAIN_X=%.8f
+MOTION_GAIN_Y=%.8f
+MOTION_GAIN_Z=%.8f
+MOTION_SMOOTHING=%.6f
+MOTION_SHARPNESS=%.6f
+MOTION_LIMIT_X=%.6f
+MOTION_LIMIT_Y=%.6f
+MOTION_LIMIT_Z=%.6f
+HIDE_DRIVER_HELMET=%d
+
+[PROFILE_3]
 PITCH=%.6f
 YAW=%.6f
 ROLL=%.6f
@@ -3210,6 +3305,25 @@ HIDE_DRIVER_HELMET=%d
         p2.MOTION_LIMIT_Z,
         p2.HIDE_DRIVER_HELMET,
 
+        p3.PITCH,
+        p3.YAW,
+        p3.ROLL,
+        p3.OFFSET_X,
+        p3.OFFSET_Y,
+        p3.OFFSET_Z,
+        p3.SCALE,
+        p3.NEARCLIP,
+        p3.ENABLE_MOTION,
+        p3.MOTION_GAIN_X,
+        p3.MOTION_GAIN_Y,
+        p3.MOTION_GAIN_Z,
+        p3.MOTION_SMOOTHING,
+        p3.MOTION_SHARPNESS,
+        p3.MOTION_LIMIT_X,
+        p3.MOTION_LIMIT_Y,
+        p3.MOTION_LIMIT_Z,
+        p3.HIDE_DRIVER_HELMET,
+
         meshVisibilityContent
     )
 
@@ -3272,7 +3386,7 @@ local function setActiveProfile(index)
     index = math.clamp(
         math.floor(index),
         1,
-        2
+        3
     )
 
     if activeProfile == index then
@@ -3372,9 +3486,12 @@ local function resetProfileValue(key)
     elseif activeProfile == 2 then
     
         defaultValue = DEFAULT_PROFILE2[key]
-
+        
         --ac.log('RealVisor: default_profile2_key=' .. tostring(key) .. ' value=' .. defaultValue)
-
+        
+    elseif activeProfile == 3 then
+        defaultValue = DEFAULT_PROFILE3[key]
+        
     end
 
 
@@ -3440,7 +3557,9 @@ local function profileContextMenu(label, key)
         local defaultValue = 
                 activeProfile == 1 
                 and DEFAULT_PROFILE1[key] 
-                or DEFAULT_PROFILE2[key]
+                or activeProfile == 2 
+                and DEFAULT_PROFILE2[key]
+                or DEFAULT_PROFILE3[key]
 
 
         -- ac.log(
@@ -19442,7 +19561,8 @@ function windowMain(dt)
             selectedProfile,
             {
                 'Profile 1',
-                'Profile 2'
+                'Profile 2',
+                'Profile 3'
             }
         )
 
@@ -19540,8 +19660,8 @@ function windowMain(dt)
     ui.slider(
         'Pitch',
         p.PITCH,
-        -89.0,
-        89.0,
+        -90.0,
+        90.0,
         '%.2f°'
     )
 
@@ -19558,8 +19678,8 @@ function windowMain(dt)
         ui.slider(
             'Yaw',
             p.YAW,
-            -179.0,
-            179.0,
+            -180.0,
+            180.0,
             '%.2f°'
         )
 
@@ -19576,8 +19696,8 @@ function windowMain(dt)
         ui.slider(
             'Roll',
             p.ROLL,
-            -179.0,
-            179.0,
+            -180.0,
+            180.0,
             '%.2f°'
         )
 

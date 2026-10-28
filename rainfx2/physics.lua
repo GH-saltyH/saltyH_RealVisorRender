@@ -38,7 +38,20 @@ P.DEFAULTS = {
   vMax = 0.08,              -- m/s, rev19 0.5, rev41 0.30, rev42 0.03 tanh, rev43 0.08 graded:
   vScale = 0.25,            -- v = vMax (1 - exp(-vq / vScale)), vq = quasi-steady speed
   shedK = 2.0,              -- blown off when air drag > shedK x pinning force
-  airDown = 0.8,            -- share of the surface air turned downhill (observed flow, CORE 54; rev43 0.5 -> 0.8)
+  airDown = 0.0,            -- rev42-46 observed-flow fix (0.8); rev47 0: replaced by the stagnation elevation
+  -- rev47 helmet aerodynamics (P.aeroForces): effective free stream at the helmet (cockpit / screen
+  -- shielding), helmet radius, stagnation point elevation above the visor centre (deg, + = above ->
+  -- flow over the visor runs down and out), buffeting wander of the stagnation point (deg at 250 km/h)
+  aeroKU = 0.35, helmetR = 0.13,   -- rev47c 0.6 -> 0.35 (observed persistence, REV47B_REVIEW)
+  stagElevDeg = 12.0, buffetDeg = 4.0, buffetHz = 1.5,   -- rev47b 8/3 -> 4/1.5
+  -- rev47b runback: drops blown loose slide with the air (speed runbackK x air at the drop top, between
+  -- vMax and runbackMax), lift off only above liftMM; sliding inertia slideTau; impact splash share
+  -- rev47c (REV47B_REVIEW: 0.5 m/s = ~250 px per frame at the visor scale; references show visible flow of a
+  -- few cm/s): runbackK 0.03 -> 0.003, runbackMax 0.5 -> 0.06, slideTau 0.1 -> 0.15, impactLoss 0.3 -> 0.15
+  runbackK = 0.003, runbackMax = 0.06, liftMM = 1.5, slideTau = 0.15, impactLoss = 0.15,
+  -- rev47 drop inertia (s): a drop's speed relaxes to the force-driven target over dropTau (contact-line
+  -- relaxation); acceleration low-pass of the helmet (neck), cut-off Hz and damping
+  dropTau = 0.04, neckHz = 3.0, neckZeta = 0.7, headAccK = 1.0, headAccMaxG = 2.0,
   -- shed test uses the UNCAPPED quasi-steady speed: 3.0 at friction 0.06 = 1.2 at 0.15 (same force,
   -- airflow shedding at speed unchanged)
   vShed = 1.0,              -- m/s, rev42: only the shed sentinel (speed 1e3) is above it
@@ -74,11 +87,15 @@ function P.inputs(sim, p, out)
   out = out or {}
   local car = ac.getCar(sim.focusedCar >= 0 and sim.focusedCar or 0) or ac.getCar(0)
   local carVel = car and car.velocity or vec3()
-  local accel = vec3(0, -9.81, 0)
+  -- rev47: the car part of the acceleration (m/s^2, world) is returned separately; init.lua adds the
+  -- head (visor) motion, low-pass filters it like the neck does and forms accelW = gravity - filtered.
+  local carAcc = vec3()
   if car and car.acceleration and car.side then
     local a = car.acceleration
-    accel = accel - (car.side * a.x + car.up * a.y + car.look * a.z) * 9.81
+    carAcc = (car.side * a.x + car.up * a.y + car.look * a.z) * 9.81
   end
+  local accel = vec3(0, -9.81, 0) - carAcc
+  out.carAccW = carAcc
   local wk = sim.windVelocityKmh or vec2()
   local wind = vec3(wk.x, 0, wk.y) / 3.6
   local air = wind * (p.windK or 1) - carVel
@@ -93,6 +110,41 @@ function P.inputs(sim, p, out)
   out.airSpeed = air:length()
   out.accelG = accel:length() / 9.81
   return out
+end
+
+-- rev47 helmet aerodynamics (docs/RAINFX_V2_REV46_REVIEW.md section 3, docs/tools/rainfx2_helmet_aero.py):
+-- helmet ~ sphere R_h; outer flow u_e = 1.5 kU U sin(theta) away from the stagnation point; laminar
+-- stagnation boundary layer delta = 2.4 sqrt(nu / a), a = 1.5 kU U / R_h; the drop top (0.6 r) sees
+-- u_e f(0.6 r / delta), f = x (2 - x) below 1; pressure gradient V rho u_e du_e/ds pushes outward.
+-- Mirrored by common.hlsl r2DropVelocity.
+P.NU_AIR = 1.5e-5
+function P.aeroScales(p, U)
+  local ue = 1.5 * p.aeroKU * U
+  local a = ue / math.max(p.helmetR, 0.02)
+  local delta = a > 1e-3 and 2.4 * math.sqrt(P.NU_AIR / a) * 1000 or 50
+  return ue, a, math.min(delta, 50)
+end
+function P.aeroForces(p, rMM, U, thetaRad, pinCos)
+  local r = rMM * 1e-3
+  local ue0, a, delta = P.aeroScales(p, U)
+  local ue = ue0 * math.sin(thetaRad)
+  local x = 0.6 * rMM / delta
+  local uh = ue * (x < 1 and x * (2 - x) or 1)
+  local Fd = 0.25 * p.rhoAir * p.dragCd * math.pi * r * r * uh * uh
+  local Fp = p.shapeK * rMM * rMM * rMM * 1e-9 * p.rhoAir * ue * a * math.cos(thetaRad)
+  return Fd + Fp, p.surfaceTension * 2 * r * pinCos
+end
+-- Smallest radius (mm) swept by the air alone at angle theta from the stagnation point.
+function P.aeroCritical(p, U, thetaRad, pinCos)
+  local lo, hi = 0.01, 5.0
+  local function moves(rr) local F, Fp = P.aeroForces(p, rr, U, thetaRad, pinCos); return F > (p.shedK or 2) * Fp end
+  if not moves(hi) then return math.huge end
+  if moves(lo) then return lo end
+  for _ = 1, 40 do
+    local m = 0.5 * (lo + hi)
+    if moves(m) then hi = m else lo = m end
+  end
+  return hi
 end
 
 -- Forces for one drop radius (mm) on a surface whose tangential gravity and air
@@ -112,7 +164,7 @@ function P.speed(p, rMM, gTan, airTan, pinCos)
   local Fg, Fa, Fpin = P.forces(p, rMM, gTan, airTan, pinCos)
   local F = Fg + Fa
   if F <= Fpin then return 0 end
-  if Fa > (p.shedK or 1e9) * Fpin then return math.huge end   -- rev42: blown off
+  if Fa > (p.shedK or 1e9) * Fpin then return rMM > (p.liftMM or 1e9) and math.huge or (p.runbackMax or p.vMax) end   -- rev47b runback
   local vq = (F - Fpin) / (p.friction * rMM * 1e-3)
   return p.vMax * (1 - math.exp(-vq / p.vScale))
 end

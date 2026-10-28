@@ -6,14 +6,18 @@
 // stable-size cap (excess runs off, same rule as P1).
 
 float4 main(PS_IN pin) {
-    int2 c = int2(pin.PosH.xy);
+    // rev45: twice the cell width; the right half writes the life cycle of the winning drop.
+    int2 px = int2(pin.PosH.xy);
+    bool lifeHalf = px.x >= (int)gR2Cells.x;
+    int2 c = lifeHalf ? px - int2((int)gR2Cells.x, 0) : px;
     int2 size = int2(gR2Cells);
+    float4 life = float4(0, 0, 0, 0);
     float4 me = txR2State.Load(int3(c, 0));
     float4 mc = txR2Claim.Load(int3(c, 0));
     float accV = 0, bigV = 0, w = r2PackMove(float2(0, 0), 0);
     float2 accP = float2(0, 0);
     if (me.z > 0 && mc.z < 0.5) {
-        accV = me.z; accP = me.xy * me.z; bigV = me.z; w = me.w;
+        accV = me.z; accP = me.xy * me.z; bigV = me.z; w = me.w; life = r2Life(c);
     }
     [unroll] for (int y = -2; y <= 2; ++y) {
         [unroll] for (int x = -2; x <= 2; ++x) {
@@ -25,11 +29,11 @@ float4 main(PS_IN pin) {
             float4 st = txR2State.Load(int3(s, 0));
             accV += st.z;
             accP += (float2(x, y) + st.xy) * st.z;
-            if (st.z > bigV) { bigV = st.z; w = st.w; }
+            if (st.z > bigV) { bigV = st.z; w = st.w; life = r2Life(s); }
         }
     }
-    if (accV <= 0) return float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0));
+    if (accV <= 0) return lifeHalf ? float4(0, 0, 0, 0) : float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0));
     float2 p = clamp(accP / accV, -0.75, 1.749);
     float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
-    return float4(p, min(accV, vMax), w);
+    return lifeHalf ? life : float4(p, min(accV, vMax), w);
 }

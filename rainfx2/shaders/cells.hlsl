@@ -18,8 +18,13 @@ float r2Cluster(float2 t) {
 }
 
 float4 main(PS_IN pin) {
-    int2 c = int2(pin.PosH.xy);
+    // rev45: the target is twice the cell width; the right half writes the life cycle L of the same
+    // cell (identical gather, so L follows the drop that wins the cell).
+    int2 px = int2(pin.PosH.xy);
+    bool lifeHalf = px.x >= (int)gR2Cells.x;
+    int2 c = lifeHalf ? px - int2((int)gR2Cells.x, 0) : px;
     int2 size = int2(gR2Cells);
+    float4 life = float4(0, 0, 0, 0);
     float accV = 0;
     float2 accP = float2(0, 0);
     float2 accD = float2(0, 0);
@@ -30,14 +35,14 @@ float4 main(PS_IN pin) {
             if (any(s < int2(0, 0)) || any(s >= size)) continue;
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
-            R2Move m = r2Predict(s, st);
+            R2Move m = r2Predict(s, st, r2Life(s));
             if (m.alive < 0.5) continue;
             if (any(int2(floor(m.dest)) != c)) continue;
             accV += m.vol;
             accP += (m.dest - float2(c)) * m.vol;
             accD += (m.dest - (float2(s) + st.xy)) * m.vol;
             if (gR2Sub > 1.5) accD += r2UnpackMove(st.w) * m.vol;   // accumulate within the frame
-            if (m.vol > bigV) { bigV = m.vol; seed = r2UnpackSeed(st.w); }
+            if (m.vol > bigV) { bigV = m.vol; seed = r2UnpackSeed(st.w); life = m.life; }
         }
     }
     float2 p = accV > 0 ? accP / accV : float2(0.5, 0.5);
@@ -64,6 +69,7 @@ float4 main(PS_IN pin) {
         uint seed0 = (uint)gR2Frame * 8u + (uint)gR2Sub;
         float cl = r2Cluster(t);
         float bestV = 0.0;
+        bool swept = false;
         float2 bestP = float2(0.5, 0.5);
         [loop] for (int ey = -2; ey <= 2; ++ey) {
             [loop] for (int ex = -2; ex <= 2; ++ex) {
@@ -83,7 +89,7 @@ float4 main(PS_IN pin) {
                 if (dot(dm, dm) > Rs * Rs) continue;                                // lamella misses c
                 if (K > gR2SplashK0 && accV > 0 && r2RadiusMM(accV) < gR2ClearMaxMM
                     && r2Rand(uint3(c.x, c.y, seed0 + 4242u + (uint)(ex + 2) * 5u + (uint)(ey + 2))) < gR2ClearK) {
-                    accV = 0; accP = float2(0, 0);                                   // swept into the splash
+                    swept = true;                                                    // swept by the splash
                 }
                 float ncov = max(3.14159265 * Rs * Rs / cellMM2, 1.0);
                 float pf = min(nFrag, gR2FragMax) / ncov;
@@ -91,9 +97,7 @@ float4 main(PS_IN pin) {
                 if (r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
                 float dF = min(dRes * r2FragX(r2Rand(uint3(c.y, c.x, k + 606u))), d);
                 if (0.5 * dF < gR2MinRadiusMM) continue;                             // too small: haze
-                float spB, drB;
-                r2DropVelocity(t, 0.5 * dF, 1.0, spB, drB);
-                if (spB > gR2VShed) continue;                                        // torn off: spray
+                // rev47b: no 'torn off at birth' rule -- new drops run back with the air
                 float bv = 0.5235988 * dF * dF * dF;
                 if (bv > bestV) {
                     bestV = bv;
@@ -101,10 +105,71 @@ float4 main(PS_IN pin) {
                 }
             }
         }
+        // rev45: a swept drop is replaced by the splash fragment when one lands here (one event), else
+        // it fades out over gR2FadeTime instead of vanishing (rev22-44 deleted it at once).
+        // rev47b IMPACT MERGE (rev47 review): an impact on a small drop mostly merges with it; a share
+        // gR2ImpactLoss splashes off (rev44-47 removed the whole drop -> water lost with every impact).
+        // Only a drop left below the stable size fades out.
+        if (swept) {
+            float left = accV * (1.0 - gR2ImpactLoss);
+            if (r2RadiusMM(left + bestV) < gR2MinRadiusMM) {
+                if (life.z <= 0 && life.y <= 0) life.z = gR2FadeTime;
+            } else {
+                accV = left;
+            }
+        }
         if (bestV > 0) {
             p = (p * accV + bestP * bestV) / (accV + bestV);
-            if (bestV > accV) seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 404u)) * R2_SEEDS);
+            if (bestV > accV) {
+                seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 404u)) * R2_SEEDS);
+                life = float4(0, 0, 0, 0);                                         // newborn: grows in
+            }
             accV += bestV;
+        }
+    }
+    // rev47j DEWETTING + PEARLING (docs/RAINFX_V2_REV47J_REVIEW.md, mass-conserving): once per frame
+    //  - a thin film on the partially wetting visor gathers into a bead: an event cell whose mean film depth
+    //    is >= gR2FilmBeadMM turns all of it (depth x cell area) into a drop, or feeds the drop already there;
+    //  - a rivulet section beads up (Plateau-Rayleigh): an event cell turns the rivulet section whose centre
+    //    line runs through it ((4/3) h0 hw x cell length, h0 >= gR2PearlMM) into a bead ON the line.
+    // The field pass removes exactly that water (same hash of cell and frame, same F_prev / TG_prev).
+    if (gR2Sub < 1.5 && r2Valid(t) > 0.5) {
+        float vBead = 0;
+        float2 pBead = float2(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9003u)),
+                              r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9004u)));
+        if (r2DewetEvent(c)) {
+            float hC = r2CellFilmMM(c);
+            if (hC >= gR2FilmBeadMM) vBead += hC * gR2CellSizeMM.x * gR2CellSizeMM.y;
+        }
+        // pearl event (per line: rate grows as the rivulet narrows); cheap reject at the highest rate first
+        if (r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * 6.0 * gR2SimDt) {
+            int2 k = r2FieldPerCell();
+            float best = 0, vT = 0;
+            [loop] for (int fy = -1; fy <= k.y; ++fy) {
+                [loop] for (int fx = -1; fx <= k.x; ++fx) {
+                    int2 f = c * k + int2(fx, fy);
+                    if (any(f < int2(0, 0)) || any(f >= int2(gR2FieldSize))) continue;
+                    float h0 = txR2Field.Load(int3(f, 0)).r * gR2TrailMaxMM;
+                    if (h0 < gR2PearlMM || h0 <= best) continue;
+                    float4 g = txR2Trail.Load(int3(f, 0));
+                    if (any(r2TrailCell(f, g) != c) || !r2PearlEvent(c, g.w)) continue;
+                    best = h0;
+                    vT = 1.3333 * h0 * g.w * gR2CellMM;
+                    pBead = saturate((float2(f) + 0.5) / gR2FieldSize * gR2Cells + g.xy / gR2CellSizeMM - float2(c));
+                }
+            }
+            vBead += vT;
+        }
+        if (vBead > 0) {
+            if (accV > 0) {
+                accV += vBead;
+            } else if (r2RadiusMM(vBead) >= gR2MinRadiusMM) {
+                accV = vBead;
+                p = pBead;
+                seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9005u)) * R2_SEEDS);
+                disp = float2(0, 0);
+                life = float4(0, 0, 0, 0);
+            }
         }
     }
     // rev21: visible drops also GROW out of the unresolved water (research section 3.2):
@@ -117,30 +182,17 @@ float4 main(PS_IN pin) {
         float bornD = 0;
         if (r2Rand(uint3((uint)c.x, (uint)c.y, seed1)) < nuc)
             bornD = min(gR2NucDiamMM * r2FragX(r2Rand(uint3((uint)c.y, (uint)c.x, seed1 + 1u))), 1.5);   // rev40: same size law
-        float hMM = F.b * gR2FilmMaxMM;
-        if (bornD <= 0 && hMM > gR2HeadMinMM) {
-            float2 vf = r2FilmVelocity(t, hMM);
-            float2 tx = 1.0 / gR2FieldSize;
-            float2 gW = float2(txR2Field.SampleLevel(samLinearClamp, t + float2(tx.x, 0), 0).b
-                             - txR2Field.SampleLevel(samLinearClamp, t - float2(tx.x, 0), 0).b,
-                               txR2Field.SampleLevel(samLinearClamp, t + float2(0, tx.y), 0).b
-                             - txR2Field.SampleLevel(samLinearClamp, t - float2(0, tx.y), 0).b);
-            float vl = length(vf), gl = length(gW);
-            float front = (vl > 1e-6 && gl > 1e-4) ? saturate(-dot(vf / vl, gW / gl)) : 0.0;
-            float head = gR2HeadRate * front * saturate(gl * 4.0) * gR2Dt;
-            if (r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 2u)) < head)
-                bornD = clamp(hMM * 8.0, 0.6, 2.4) * lerp(0.8, 1.2, r2Rand(uint3((uint)c.y, (uint)c.x, seed1 + 3u)));
-        }
+        // rev47j: the film head drops (rev21) and the trail pearling births (rev45) created water; both are
+        // replaced by the mass-conserving dewetting / pearling events above.
         if (bornD > 0) {                                  // rev42: no drop the air tears off at once
-            float spN, drN;
-            r2DropVelocity(t, 0.5 * bornD, 1.0, spN, drN);
-            if (spN > gR2VShed || 0.5 * bornD < gR2MinRadiusMM) bornD = 0.0;   // rev44: no one-frame drops
+            if (0.5 * bornD < gR2MinRadiusMM) bornD = 0.0;   // rev44: no one-frame drops (rev47b: runback, no torn-off rule)
         }
         if (bornD > 0) {
             accV = 0.5235988 * bornD * bornD * bornD;
             p = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 4u)), r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 5u)));
             seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 6u)) * R2_SEEDS);
             disp = float2(0, 0);
+            life = float4(0, 0, 0, 0);
         }
     }
     // Excess beyond the largest stable cap runs off (keeps one-drop-per-cell bounded).
@@ -149,5 +201,6 @@ float4 main(PS_IN pin) {
     // rev41: clamp, not scale. rev1-rev40 wrote saturate(p) * 0.999: every substep moved every drop
     // 0.1 % of its in-cell position toward the cell origin (-u, -v) -> the slow drift of resting drops
     // toward one offset that the user saw since the first v2 build (~1 mm over a few seconds).
-    return float4(min(saturate(p), 0.9995), accV, r2PackMove(disp, seed));
+    if (accV <= 0) life = float4(0, 0, 0, 0);
+    return lifeHalf ? life : float4(min(saturate(p), 0.9995), accV, r2PackMove(disp, seed));
 }

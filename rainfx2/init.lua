@@ -40,7 +40,9 @@ local DEFAULTS = {
   -- supply (weather.lua)
   terminalSpeed = 6.0, diamScale = 1.0, impactScale = 1.0, sprayFlux = 2e-5,
   stickSlow = 0.8, microK = 7.0,   -- rev21: stickFast replaced by the splash rule (splashK0/resA/resB)
-  exposure = 0.5, exposureFloor = 0.0, normalSign = 1.0,
+  -- rev47b: rain exposure 0.5 -> 1.0 (stored under a new key), rain arrives in a cone of rainSpreadDeg,
+  -- crown runoff over the visor top edge at rest (catch length crownMM into a band of crownBandMM)
+  exposure = 1.0, exposureFloor = 0.0, normalSign = 1.0, rainSpreadDeg = 18.0, crownMM = 20.0, crownBandMM = 3.0,
   -- drop physics: rainfx2/physics.lua (P.DEFAULTS, merged below)
   ladderMinMM = 0.3, ladderMaxMM = 2.2,   -- physics test drop ladder
   -- field
@@ -118,25 +120,43 @@ local DEFAULTS = {
   fragMax = 12, clusterK = 0.6, clusterMM = 12.0,
   -- rev40 stagnation turbulence: tangential gusts = turbK x surface share of the relative air,
   -- spatial scale turbMM, correlation time turbTau (s)
-  turbK = 0.6, turbMM = 8.0, turbTau = 0.2,    -- rev41 1.0 / 0.06 -> rev42 0.6 / 0.2 (rev41 recording: jerky jumps)
+  turbK = 0.0, turbMM = 8.0, turbTau = 0.2,   -- rev47 0: replaced by the stagnation buffeting (aero)
+     -- rev41 1.0 / 0.06 -> rev42 0.6 / 0.2 (rev41 recording: jerky jumps)
   -- rev40 P3 gravity flattening of large drops (Bond number), radius ramp start -> full
   flatK = 0.0, flatStartMM = 1.0, flatFullMM = 2.2,   -- rev41 off (rev40 review: pot-lid look, lost volume)
+  -- rev45 step 3 (docs/RAINFX_V2_DROP_PHYSICS_MODEL.md section 6 B): life cycle and trails
+  growTime = 0.06, fadeTime = 0.10,          -- s: newborn drops grow in, swept drops fade out
+  flyTime = 0.07, flySpeed = 0.25, flyStretch = 2.5,   -- blown-off drops fly off as a streak
+  trailMM = 0.10, trailV0 = 0.02, trailWidthK = 0.5, trailRMin = 0.2,   -- rev47k trailRMin 0.12 -> 0.2 (small heads leave no visible rivulet)
+  -- trail water (rule_trail; rev47j width 0.35 -> 0.5 r: reference ~1/4 of the head)
+  trailThetaRDeg = 28.0, trailWetK = 0.35, trailLL = 5.0,   -- rev47l trail rule (Ca vs Ca*, docs/RAINFX_V2_TRAIL_RULES.md)
+  trailSlopeMax = 0.45,                      -- rev47k: rivulet edge slope 2 h0 / hw <= 0.45 (~24 deg; rev47j 0.8 drew glass rods)
+  trailPinMM = 0.02, trailFlowK = 1.0,       -- rev47k: rivulets deeper than this run along themselves (film law x flowK)
+  wetHaze = 1.5, hazeDepthMM = 0.004,        -- wetness from haze; water depth of full haze
+  pearlMM = 0.006, pearlRate = 0.6,          -- rev47k: every rivulet section beads up, 0.6 /s per cell (rev47j 0.03 / 0.1: thin trails never broke)
+  filmBeadMM = 0.04, dewetRate = 4.0,        -- rev47j: film >= 0.04 mm in a cell gathers into a bead, 4 /s per cell
+  -- rev47 T-layer: trail water lives in field R (depth / trailMaxMM), pinned (no diffusion / advection),
+  -- evaporates at trailEvapMMs (thin trails vanish first), collected by later drops
+  trailMaxMM = 0.5, trailEvapMMs = 0.003,   -- rev47j: 0.025 -> 0.003 (reference trails stay for seconds)
   sizeBin0MM = 0.04,  -- size histogram: first bin edge (= minRadiusMM), 10 bins x1.5 (rev41)
   -- rev23 look lab: occupancy per cell, radius range (pdf ~ r^-1.88 = reference size histogram)
   labOcc = 0.3, labRMinMM = 0.12, labRMaxMM = 2.0,
   -- water film optics (rev11)
-  filmMinMM = 0.05, filmFullMM = 0.15, filmRefract = 12.0, filmAbsorb = 0.8, filmMip = 4.5, filmVeil = 0.25,
+  -- rev46: film / trail water visible from 0.03 mm (trails), sharp (base mip 0.75; rev11-45 4.5 = milky)
+  filmMinMM = 0.08, filmFullMM = 0.20,   -- rev47j: only a real sheet shows (thin film dewets into beads); trails are lens kernels
+  trailMinMM = 0.012, trailFullMM = 0.05, filmRefract = 12.0, filmAbsorb = 0.8, filmMip = 0.75, filmVeil = 0.25,
   -- forward scattering veil of the VISOR SURFACE only (rev17, docs/RAINFX_V2_EVAL.md section 11):
   -- airborne spray/mist is CSP's own particle domain and is not reproduced here (scatterSpray 0).
   scatterK = 1.0, scatterM = 0.35, scatterM0 = 0.04, scatterFilm = 0.3, scatterSpray = 0.0,
   scatterMax = 0.35, scatterMip = 6.5, scatterSky = 0.3, scatterGain = 1.1,
   filmK = 1.0, sprayK = 1.0,
-  hazeK = 0.8, traceHaze = 0.05, hazeMip = 4.0, veilMix = 0.25, veilBright = 1.0,
+  hazeK = 0.8, traceHaze = 0.0,   -- rev47: R is trail water (drawn as water), no extra haze
+  hazeMip = 4.0, veilMix = 0.25, veilBright = 1.0,
   depthCoverage = 0.35, debug = 0, debugBright = 1.0,
 }
 
 -- Persisted user controls (subset of DEFAULTS + enable switch).
-local STORED = { enabled = true, exposure = DEFAULTS.exposure, wfRefraction = DEFAULTS.wfRefraction,
+local STORED = { enabled = true, rainExposure = DEFAULTS.exposure, wfRefraction = DEFAULTS.wfRefraction,
   wfSceneMip = DEFAULTS.wfSceneMip, focusM = DEFAULTS.focusM, defocusDA = DEFAULTS.defocusDA,
   contactDeg = DEFAULTS.contactDeg, wobbleAmp = DEFAULTS.wobbleAmp, lensK = DEFAULTS.lensK,
   apertureMM = DEFAULTS.apertureMM, hazeK = DEFAULTS.hazeK, substeps = DEFAULTS.substeps, freezeRain = false, windK = 1.0, metrics = false,
@@ -194,6 +214,15 @@ local function sceneValues(self, v)
   v.gR2MicroRate = self.store.freezeRain and 0 or (st.microRate or 0)
   v.gR2Exposure = p.exposure
   v.gR2ExposureFloor = p.exposureFloor
+  v.gR2RainSpreadS = math.sin(math.rad(p.rainSpreadDeg))
+  v.gR2CrownMM = p.crownMM
+  v.gR2CrownBandMM = p.crownBandMM
+  v.gR2RainMMs = self.store.freezeRain and 0 or (self.stats.rateMMh or 0) / 3600
+  v.gR2RunbackK = p.runbackK
+  v.gR2RunbackMax = p.runbackMax
+  v.gR2LiftMM = p.liftMM
+  v.gR2SlideTau = p.slideTau
+  v.gR2ImpactLoss = p.impactLoss
   v.gR2NormalSign = p.normalSign
   v.gR2ShapeK = p.shapeK
   v.gR2PinCoat = p.pinCoat
@@ -248,7 +277,35 @@ local function sceneValues(self, v)
   v.gR2TurbScale = self.turbScale
   v.gR2TurbTau = p.turbTau
   v.gR2SizeBin0MM = p.sizeBin0MM
+  v.gR2FilmFullMM = p.filmFullMM
+  v.gR2WetHaze = p.wetHaze
+  v.gR2HazeDepthMM = p.hazeDepthMM
+  v.gR2TrailMM = p.trailMM
+  v.gR2TrailMaxMM = p.trailMaxMM
+  v.gR2TrailEvapMMs = p.trailEvapMMs
+  v.gR2TrailV0 = p.trailV0
+  v.gR2TrailWidthK = p.trailWidthK
+  v.gR2TrailRMin = p.trailRMin
+  v.gR2PearlMM = p.pearlMM
+  v.gR2PearlRate = p.pearlRate
+  v.gR2TrailSlopeMax = p.trailSlopeMax
+  v.gR2TrailThetaRDeg = p.trailThetaRDeg
+  v.gR2TrailWetK = p.trailWetK
+  v.gR2TrailLL = p.trailLL
+  v.gR2TrailPinMM = p.trailPinMM
+  v.gR2TrailFlowK = p.trailFlowK
+  v.gR2FilmBeadMM = p.filmBeadMM
+  v.gR2DewetRate = p.dewetRate
+  v.gR2FlyTime = p.flyTime
+  v.gR2FlySpeed = p.flySpeed
+  v.gR2FadeTime = p.fadeTime
   v.gR2FragMax = p.fragMax
+  v.gR2AeroDirW = self.aeroDir or vec3(0, 0, -1)
+  v.gR2AeroU = self.aeroU or 0
+  v.gR2AeroDuDs = self.aeroDuDs or 0
+  v.gR2BLDeltaMM = self.aeroDelta or 50
+  v.gR2DropTau = p.dropTau
+  v.gR2SimDt = self.frameDt or (1 / 60)
   v.gR2ShedK = p.shedK
   v.gR2AirDown = p.airDown
   v.gR2ClusterK = p.clusterK
@@ -270,7 +327,7 @@ local function newPass(self, shader)
   return {
     async = true,
     blendMode = render.BlendMode.Opaque,
-    textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2WMap = false,
+    textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2WMap = false, txR2Trail = false,
       txR2Du = root .. 'du.dds', txR2Dv = root .. 'dv.dds', txR2Mask = self.ctx.maskPath },
     values = sceneValues(self, {}),
     shader = shader,
@@ -293,9 +350,14 @@ function R2:ensureResources()
   end
   local f32 = render.TextureFormat.R32G32B32A32.Float
   local u16 = render.TextureFormat.R16G16B16A16.UNorm
-  self.S = { canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
+  -- rev45: twice the cell width, right half = per-drop life cycle (age, flight, fade, direction)
+  self.S = { canvas(2 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(2 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
   self.C = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 claims')
   self.F = { canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field A'), canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field B') }
+  -- rev47j trail geometry (line point / direction / half-width per field texel)
+  local h16 = render.TextureFormat.R16G16B16A16.Float
+  self.TG = { canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail A'), canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail B') }
+  self.ti = 1
   -- rev29 CSP windscreen water map (wmap.hlsl), RGBA16F with mips for the blurred-height normal
   local wmMips = math.floor(math.log(math.max(p.wmU, p.wmV)) / math.log(2)) + 1
   self.WM = { canvas(p.wmU, p.wmV, wmMips, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 water map A'),
@@ -313,6 +375,7 @@ function R2:ensureResources()
   self.texMM = vec2(602.0, 146.3)
   self.passCells = newPass(self, self.src.cells)
   self.passField = newPass(self, self.src.field)
+  self.passTrail = newPass(self, self.src.trail)
   self.passWMap = newPass(self, self.src.wmap)
   self.passClaim = newPass(self, self.src.claim)
   self.passMetrics = newPass(self, self.src.metrics)
@@ -353,12 +416,102 @@ end
 
 -- World-space inputs. Local->world happens in the shaders with the mesh matrix,
 -- exactly like the verified legacy solver (mul(v, (float3x3)M), CSP transposes for HLSL).
+-- rev47 JOLT (docs/RAINFX_V2_REV46_REVIEW.md sections 4, 7.1): the helmet feels the car acceleration
+-- (car.acceleration, G, car axes -> world) plus the head motion relative to the car (second difference
+-- of the visor world position minus the car part, clamped), low-pass filtered like the neck does
+-- (2nd order, neckHz / neckZeta, per world axis). Gravity is added after the filter.
+function R2:filterAccel(sim, inp)
+  local p = self.p
+  local dt = math.min(sim.dt or 0, 1 / 20) * (self.timeScale or 1)
+  local raw = inp.carAccW or vec3()
+  local pos = self.objToWorld:transformPoint(vec3(0, 0, 0))
+  local head = vec3()
+  local h = self.headHist
+  if dt > 0 and h and h.dt1 and h.dt1 > 0 and (pos - h.p1):length() < 1.0 then
+    local v1 = (pos - h.p1) / dt
+    local v0 = (h.p1 - h.p0) / h.dt1
+    head = (v1 - v0) / (0.5 * (dt + h.dt1)) - raw
+    local hl = head:length()
+    local maxA = p.headAccMaxG * 9.81
+    if hl > maxA then head = head * (maxA / hl) end
+  end
+  if dt > 0 then
+    self.headHist = { p0 = h and h.p1 or pos, p1 = pos, dt1 = dt }
+  end
+  local u = raw + head * p.headAccK
+  local f = self.accFilt
+  if not f then f = { x = vec3(u.x, u.y, u.z), v = vec3() }; self.accFilt = f end
+  if dt > 0 then
+    local w = 2 * math.pi * math.max(p.neckHz, 0.1)
+    local n = math.max(1, math.ceil(w * dt / 0.3))
+    local h2 = dt / n
+    for _ = 1, n do
+      local acc = (u - f.x) * (w * w) - f.v * (2 * p.neckZeta * w)
+      f.v = f.v + acc * h2
+      f.x = f.x + f.v * h2
+    end
+  end
+  inp.accRawG = (u:length()) / 9.81
+  inp.accFiltG = f.x:length() / 9.81
+  inp.accelW = vec3(0, -9.81, 0) - f.x
+  inp.accelG = inp.accelW:length() / 9.81
+end
+
+-- rev47 AERO: stagnation direction (relative air, tilted by the stagnation elevation about the helmet
+-- side axis (rev47g: visor transform, not the camera), plus a smooth buffeting wander), outer-flow scale and boundary-layer thickness.
+function R2:aeroInputs(sim, air)
+  local p, P = self.p, self.physics
+  local U = air:length()
+  local ah = U > 1e-3 and air / U or vec3(0, 0, -1)
+  -- rev47g: helmet axes from the VISOR world transform only (user: camera presets move independently of
+  -- the visor; the camera must not enter the force model). up = visor local +Y in world, side = up x air.
+  -- rev47i (rev47g review: drops fanned out from the bottom, no downward flow): the visor local +Y is
+  -- not the helmet up for this KN5 (axis-correction profile). The helmet-up axis is picked once from the
+  -- visor transform: the local axis (+-X, +-Y, +-Z) whose world image best matches world up while the
+  -- driver is upright (re-picked after a reset / profile change). It then rotates with the visor.
+  if not self.helmetUpLocal then
+    local best, bd = vec3(0, 1, 0), -2
+    for _, ax in ipairs({ vec3(1,0,0), vec3(-1,0,0), vec3(0,1,0), vec3(0,-1,0), vec3(0,0,1), vec3(0,0,-1) }) do
+      local w = self.objToWorld:transformVector(ax)
+      local l = w:length()
+      local dd = l > 1e-9 and w.y / l or -2
+      if dd > bd then best, bd = ax, dd end
+    end
+    self.helmetUpLocal = best
+  end
+  local up = self.objToWorld:transformVector(self.helmetUpLocal)
+  local ul = up:length()
+  up = ul > 1e-6 and up / ul or vec3(0, 1, 0)
+  local side = vec3(up.y * ah.z - up.z * ah.y, up.z * ah.x - up.x * ah.z, up.x * ah.y - up.y * ah.x)
+  local sl = side:length()
+  side = sl > 1e-6 and side / sl or vec3(1, 0, 0)
+  local t = self.wobbleT or 0
+  local amp = math.rad(p.buffetDeg) * math.min(U / 69.4, 1.5)
+  local w = 2 * math.pi * p.buffetHz
+  local yaw = amp * (0.6 * math.sin(w * t) + 0.4 * math.sin(2.31 * w * t + 1.3))
+  local pitch = amp * (0.6 * math.sin(1.37 * w * t + 0.7) + 0.4 * math.sin(2.9 * w * t + 2.1))
+  local e = math.rad(p.stagElevDeg) + pitch
+  -- stagnation normal tilted up by e  <->  oncoming air tilted down
+  local a1 = ah * math.cos(e) - up * math.sin(e)
+  a1 = a1 * math.cos(yaw) + side * math.sin(yaw)
+  local al = a1:length()
+  a1 = al > 1e-6 and a1 / al or ah
+  self.helmetUpY = up.y                         -- UI check: ~1 when the visor local +Y is the helmet up
+  if not self.aeroDir then self.aeroDir = vec3() end
+  self.aeroDir:set(a1.x, a1.y, a1.z)
+  local ue, a, delta = P.aeroScales(p, U)
+  self.aeroU, self.aeroDuDs, self.aeroDelta = ue, a, delta
+end
+
 function R2:updateInputs(sim)
   self.objToWorld = self.target:getWorldTransformationRaw():clone()
   local inp = self.physics.inputs(sim, self.p, self.inp)
   self.inp = inp
   local accel, air, rainVel, speedRel = inp.accelW, inp.airW, inp.rainVel, inp.speedRel
+  self:filterAccel(sim, inp)
+  accel = inp.accelW
   self.accelW:set(accel.x, accel.y, accel.z)
+  self:aeroInputs(sim, air)
   self.airW:set(air.x, air.y, air.z)
   self.rainDirW:set(rainVel.x / math.max(speedRel, 1e-6), rainVel.y / math.max(speedRel, 1e-6), rainVel.z / math.max(speedRel, 1e-6))
   local up = sim.cameraUp or vec3(0, 1, 0)
@@ -377,7 +530,10 @@ function R2:updateInputs(sim)
   st.spray = spray
   local rainFilm = (st.fluxMMs or 0) * (1 - (st.stickFrac or 0.6)) * p.filmRainK
   local sprayFilm = spray * p.sprayFluxMMs
-  st.filmRate = (rainFilm + sprayFilm) * p.filmK
+  -- rev47f: the two sources have separate gains (rev11-47e: filmK scaled both, so hiding spray with
+  -- filmK 0 also removed the unresolved rain -- the trail / head-drop / wetness supply)
+  st.rainFilm, st.sprayFilm = rainFilm * p.filmK, sprayFilm
+  st.filmRate = rainFilm * p.filmK + sprayFilm
   p.filmRateMMs = st.filmRate
   local dRain = st.meanDiamMM or 0.5
   local dMix = (rainFilm * dRain + sprayFilm * p.sprayDiamMM) / math.max(rainFilm + sprayFilm, 1e-9)
@@ -402,7 +558,7 @@ function R2:simulate(sim)
   self.simFrame = sim.frame
   local s = self.store
   local p = self.p
-  p.exposure, p.apertureMM, p.hazeK, p.debug = s.exposure, s.apertureMM, s.hazeK, s.debug
+  p.exposure, p.apertureMM, p.hazeK, p.debug = s.rainExposure, s.apertureMM, s.hazeK, s.debug
   p.wfRefraction, p.wfSceneMip, p.focusM = s.wfRefraction, s.wfSceneMip, s.focusM
   p.contactDeg, p.wobbleAmp, p.lensK = s.contactDeg, s.wobbleAmp, s.lensK
   p.defocusDA = s.defocusDA
@@ -447,6 +603,7 @@ function R2:simulate(sim)
   local P = self.physics
   local vExp = P.speed(p, 2.0, self.inp.accelG * 9.81, self.inp.airSpeed, p.pinCoat)
   if vExp == math.huge then vExp = p.vMax end          -- rev42: blown-off drops leave, no steps needed
+  if (self.inp.airSpeed or 0) > 10 then vExp = math.max(vExp, p.runbackMax) end   -- rev47b: runback
   p.substeps = P.substeps(p, dt, self.cellMM, userSub, vExp)
   self.frameSeed = sim.frame % 1048576
   self.h = dt / p.substeps
@@ -483,17 +640,31 @@ function R2:simulate(sim)
     local pc = self.passCells
     pc.textures.txR2State = self.S[self.si]
     pc.textures.txR2Field = self.F[self.fi]   -- rev21: haze/film births, trail following
+    pc.textures.txR2Trail = self.TG[self.ti]  -- rev47j: pearling reads the rivulet lines
     sceneValues(self, pc.values)
     if not run(self.S[3 - self.si], pc) then self.status = 'compiling cells'; return end
     self.si = 3 - self.si
   end
   do
+    -- rev47j: trail geometry first (reads F_prev, TG_prev); the field then still sees TG_prev, the same
+    -- lines the cells pass beaded (pearling removes that water), and both swap together.
+    local pt = self.passTrail
+    pt.textures.txR2State = self.S[self.si]
+    pt.textures.txR2Field = self.F[self.fi]
+    pt.textures.txR2Trail = self.TG[self.ti]
+    sceneValues(self, pt.values)
+    pt.values.gR2Dt = self.frameDt                 -- the packed move is the whole frame's
+    local trailOk = run(self.TG[3 - self.ti], pt)
     local pf = self.passField
     pf.textures.txR2State = self.S[self.si]
     pf.textures.txR2Field = self.F[self.fi]
+    pf.textures.txR2Trail = self.TG[self.ti]
     sceneValues(self, pf.values)
     pf.values.gR2Dt = self.frameDt                 -- field integrates the whole frame
-    if run(self.F[3 - self.fi], pf) then self.fi = 3 - self.fi end
+    if run(self.F[3 - self.fi], pf) then
+      self.fi = 3 - self.fi
+      if trailOk then self.ti = 3 - self.ti end
+    end
   end
   self:updateWaterMap(self.frameDt)
   self:metricsUpdate(sim)
@@ -527,7 +698,7 @@ function R2:drawParams(depth)
   local t = self[key]
   if not t then
     t = { mesh = self.mesh, transform = 'original', async = true,
-      textures = { txR2State = false, txR2Field = false, txR2Scene = false, txR2WMap = false, txR2Mask = self.ctx.maskPath },
+      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2WMap = false, txR2Mask = self.ctx.maskPath },
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
@@ -617,8 +788,11 @@ function R2:drawParams(depth)
   v.gR2DepthCoverage = p.depthCoverage
   v.gR2FieldSize = self.fieldSize
   v.gR2FilmMaxMM = p.filmMaxMM
+  v.gR2TrailMaxMM = p.trailMaxMM
   v.gR2FilmMinMM = p.filmMinMM
   v.gR2FilmFullMM = p.filmFullMM
+  v.gR2TrailMinMM = p.trailMinMM
+  v.gR2TrailFullMM = p.trailFullMM
   v.gR2FilmRefract = p.filmRefract
   v.gR2FilmAbsorb = p.filmAbsorb
   v.gR2FilmMip = p.filmMip
@@ -633,6 +807,10 @@ function R2:drawParams(depth)
   v.gR2ScatterGain = p.scatterGain
   v.gR2Spray = self.store.freezeRain and 0 or (self.stats.spray or 0)
   v.gR2SimDt = self.frameDt or (1 / 60)   -- packed move = displacement of the whole frame
+  v.gR2GrowTime = p.growTime
+  v.gR2FadeTime = p.fadeTime
+  v.gR2FlyTime = p.flyTime
+  v.gR2FlyStretch = p.flyStretch
   v.gR2VMax = p.vMax
   v.gR2VScale = p.vScale
   v.gR2VLimit = self.diag and self.diag.vGather or 0.5   -- physical m/s (h already scaled)
@@ -707,6 +885,7 @@ function R2:draw(src, viewKey, depth)
   if not depth and self.offscreenTest == 'pending' then self:offscreenTestRun() end
   t.textures.txR2State = self.S[self.si]
   t.textures.txR2Field = self.F[self.fi]
+  t.textures.txR2Trail = self.TG and self.TG[self.ti] or false
   t.textures.txR2WMap = self.WM and self.WM[self.wmi] or false
   render.setCullMode(render.CullMode.None)
   render.setBlendMode(render.BlendMode.AlphaBlend)
@@ -774,7 +953,9 @@ function R2:ui()
   end
   if ui.checkbox('Enable RainFX v2 (turns legacy RainFX off)', s.enabled) then s.enabled = not s.enabled end
   if not s.enabled then return end
-  s.exposure = ui.slider('##rfx2exp', s.exposure, 0, 1, 'Rain exposure: %.2f')
+  s.rainExposure = ui.slider('##rfx2exp', s.rainExposure, 0, 1.5, 'Rain exposure (1 = physical): %.2f')
+  self.p.rainSpreadDeg = ui.slider('##rfx2rsd', self.p.rainSpreadDeg, 0, 40, 'Rain direction spread (gusts): %.0f deg')
+  self.p.crownMM = ui.slider('##rfx2cr', self.p.crownMM, 0, 60, 'Helmet crown runoff over the visor top (at rest): %.0f mm catch')
   -- rev23 look lab: judge the drop look alone (reference: 물방울형태및흐름 video)
   if ui.checkbox('Look lab: static reference-sized drops, all other effects off', self.lookLab == true) then
     self.lookLab = not self.lookLab
@@ -812,13 +993,41 @@ function R2:ui()
   ui.text('Drop sizes and stagnation (step 2; check: Metrics -> drops by radius)')
   self.p.fragA = ui.slider('##rfx2fa', self.p.fragA, 0.3, 2.0, 'Size law exponent (0.88 = reference, x0.7 per 1.5x size): %.2f')
   self.p.fragHi = ui.slider('##rfx2fh', self.p.fragHi, 1.0, 6.0, 'Largest new drop (x typical fragment): %.1f')
-  self.p.turbK = ui.slider('##rfx2tk', self.p.turbK, 0, 1.5, 'Turbulent gusts at the visor centre: %.2f')
   self.p.flatK = ui.slider('##rfx2fk2', self.p.flatK, 0, 1, 'Flat top of large drops (r > 1 mm, default 0): %.2f')
   self.p.fragMax = ui.slider('##rfx2fm', self.p.fragMax, 1, 30, 'Small drops per raindrop impact (max): %.0f')
   self.p.clusterK = ui.slider('##rfx2ck', self.p.clusterK, 0, 1, 'Drop groups (clustered births): %.2f')
   self.p.shedK = ui.slider('##rfx2sh', self.p.shedK, 1.0, 5.0, 'Blow-off: air drag > %.1f x pinning')
   self.p.vMax = ui.slider('##rfx2vm', self.p.vMax, 0.005, 0.2, 'Creeping drops, top speed: %.3f m/s')
-  self.p.airDown = ui.slider('##rfx2ad', self.p.airDown, 0, 1.5, 'Surface air turned downward (observed): %.2f')
+  ui.text('Helmet airflow (rev47: sphere flow, boundary layer, pressure gradient)')
+  self.p.aeroKU = ui.slider('##rfx2ku', self.p.aeroKU, 0.1, 1.2, 'Air speed at the helmet (x car speed, cockpit shielding): %.2f')
+  self.p.stagElevDeg = ui.slider('##rfx2se', self.p.stagElevDeg, -40, 40, 'Stagnation point above the visor centre: %.0f deg')
+  self.p.buffetDeg = ui.slider('##rfx2bd', self.p.buffetDeg, 0, 25, 'Helmet buffeting (stagnation wander at 250 km/h): %.1f deg')
+  self.p.buffetHz = ui.slider('##rfx2bh', self.p.buffetHz, 0.5, 8, 'Buffeting frequency: %.1f Hz')
+  ui.text('Car / head jolts (rev47)')
+  self.p.neckHz = ui.slider('##rfx2nh', self.p.neckHz, 0.5, 15, 'Neck low-pass of accelerations: %.1f Hz')
+  self.p.headAccK = ui.slider('##rfx2hk', self.p.headAccK, 0, 1, 'Head motion (visor transform) acceleration share: %.2f')
+  self.p.dropTau = ui.slider('##rfx2dt', self.p.dropTau, 0.0, 0.2, 'Drop inertia (speed follows the force over): %.3f s')
+  self.p.slideTau = ui.slider('##rfx2st', self.p.slideTau, 0.0, 0.4, 'Runback inertia (sliding drops): %.3f s')
+  self.p.runbackK = ui.slider('##rfx2rk', self.p.runbackK, 0.0005, 0.03, 'Runback speed (x air at the drop top): %.3f')
+  self.p.runbackMax = ui.slider('##rfx2rm', self.p.runbackMax, 0.01, 0.5, 'Runback top speed: %.2f m/s')
+  self.p.impactLoss = ui.slider('##rfx2il', self.p.impactLoss, 0, 1, 'Impact on a small drop: share splashed off %.2f')
+  self.p.trailEvapMMs = ui.slider('##rfx2te', self.p.trailEvapMMs, 0.0, 0.05, 'Trail water evaporation: %.4f mm/s')
+  ui.separator()
+  ui.text('Trails and drop life cycle (step 3)')
+  self.p.trailThetaRDeg = ui.slider('##rfx2tr', self.p.trailThetaRDeg, 5, 60, 'Receding contact angle (dry coat; trails from Ca > Ca*): %.1f deg')
+  self.p.trailWetK = ui.slider('##rfx2twk', self.p.trailWetK, 0, 0.8, 'Wet surface lowers the receding angle by: %.2f')
+  self.p.trailLL = ui.slider('##rfx2tll', self.p.trailLL, 0, 20, 'Trail depth (x r Ca^2/3): %.1f')
+  self.p.trailWidthK = ui.slider('##rfx2tw', self.p.trailWidthK, 0.1, 1.0, 'Trail width at high speed (x head radius): %.2f')
+  self.p.pearlRate = ui.slider('##rfx2pr', self.p.pearlRate, 0, 2, 'Trail beading into small drops (per cell): %.2f /s')
+  self.p.trailSlopeMax = ui.slider('##rfx2ts2', self.p.trailSlopeMax, 0.1, 1.5, 'Trail edge slope max (rivulet height / width): %.2f')
+  self.p.trailPinMM = ui.slider('##rfx2tp', self.p.trailPinMM, 0.0, 0.1, 'Trail runs along itself above: %.3f mm (below: pinned residue)')
+  self.p.trailFlowK = ui.slider('##rfx2tf', self.p.trailFlowK, 0.0, 5.0, 'Trail flow speed (x film law): %.2f')
+  ui.text('Thin film dewetting (rev47j, mass-conserving: the unresolved rain gathers into beads)')
+  self.p.filmBeadMM = ui.slider('##rfx2fb', self.p.filmBeadMM, 0.01, 0.2, 'Film gathers into a bead from: %.3f mm')
+  self.p.dewetRate = ui.slider('##rfx2dw', self.p.dewetRate, 0, 20, 'Dewetting rate (per cell): %.1f /s')
+  self.p.flyTime = ui.slider('##rfx2ft', self.p.flyTime, 0.0, 0.2, 'Blown-off drops: flight before they are gone %.2f s')
+  self.p.fadeTime = ui.slider('##rfx2fd', self.p.fadeTime, 0.0, 0.3, 'Swept drops fade out over %.2f s')
+  self.p.growTime = ui.slider('##rfx2gt', self.p.growTime, 0.0, 0.3, 'New drops grow in over %.2f s')
   ui.separator()
   ui.text('Defocus (final step, off by default)')
   s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')
@@ -859,7 +1068,7 @@ function R2:ui()
 end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
-local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,turbK,flatK\n'
+local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,turbK,flatK,dropDepthUM,residenceS\n'
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -887,6 +1096,7 @@ function R2:metricsUpdate(sim)
     w = math.max(w, 1e-6)
     local m = self.metrics or {}
     m.film, m.drops, m.haze = f / w, d / w, h / w
+    m.validFrac = w / 256                      -- rev47d: share of the 32x8 blocks on the visor
     self.metrics = m
     if self.recording then self:metricsWrite(sim) end
   end)
@@ -931,6 +1141,17 @@ function R2:sizesUpdate()
       return b0 * 1.5 ^ 10
     end
     h.p50, h.p90, h.p99 = pct(0.5), pct(0.9), pct(0.99)
+    -- rev47d water budget: standing drop water (bin-centre radii, cap volume shapeK r^3) as a mean depth
+    -- over the visor, against the incoming rain flux -> residence time of the water as drops.
+    local vol = 0
+    for k = 1, 10 do
+      local rc = b0 * 1.5 ^ (k - 0.5)
+      vol = vol + c[k] * self.p.shapeK * rc * rc * rc
+    end
+    local area = 602.0 * 146.3 * math.max((self.metrics and self.metrics.validFrac) or 1, 0.05)
+    h.depthUM = vol / area * 1000
+    local flux = (self.stats.fluxMMs or 0) * self.p.exposure
+    h.residence = flux > 1e-6 and (vol / area) / flux or 0
     local ls, nr = 0, 0
     for k = 2, 8 do
       if c[k] > 0 and c[k + 1] > 0 then ls, nr = ls + math.log(c[k + 1] / c[k]), nr + 1 end
@@ -944,14 +1165,14 @@ function R2:metricsWrite(sim)
   local s, st, si, m, d = ac.getSim(), self.stats, self.sprayInfo or {}, self.metrics, self.diag or {}
   local h = self.sizeHist or { total = 0, p50 = 0, p90 = 0, p99 = 0, ratio = 0 }
   local p50 = math.max(h.p50, 1e-6)
-  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f,%d,%.3f,%.2f,%.2f,%.3f,%.2f,%.2f,%.2f,%.2f\n',
+  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f,%d,%.3f,%.2f,%.2f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f\n',
     os.clock(), s.weatherType or -1, s.rainIntensity or 0, s.rainWetness or 0, s.rainWater or 0,
     s.windSpeedKmh or 0, (st.carSpeed or 0) * 3.6, st.fluxMMs or 0, st.spray or 0, si.cars or 0, si.nearestM or -1,
     st.filmRate or 0, d.filmEqMM or 0, m.film, m.drops, m.haze, self.p.substeps or 0,
     self.store.apertureMM, self.store.focusM, self.store.defocusDA and 1 or 0, self.store.contactDeg,
     self.store.wfRefraction, self.store.wfSceneMip,
     self.store.filmRefract, self.store.filmVeil, self.store.scatterK,
-    h.total, h.p50, h.p90 / p50, h.p99 / p50, h.ratio, self.p.fragA, self.p.fragHi, self.p.turbK, self.p.flatK)
+    h.total, h.p50, h.p90 / p50, h.p99 / p50, h.ratio, self.p.fragA, self.p.fragHi, self.p.turbK, self.p.flatK, h.depthUM or 0, h.residence or 0)
   local ok = pcall(function()
     local f = io.open(self.recordPath, 'a')
     if f then f:write(line); f:close() end
@@ -980,6 +1201,9 @@ function R2:metricsUI()
     ui.text('Drops by radius (mm, 1.5x bins): ' .. table.concat(parts, '  '))
     ui.text(string.format('Radius p50 %.2f mm  p90/p50 %.1f  p99/p50 %.1f  bin ratio %.2f  (reference: 3-3.5, >= 10, 0.70)',
       h.p50, h.p90 / math.max(h.p50, 1e-6), h.p99 / math.max(h.p50, 1e-6), h.ratio))
+    ui.text(string.format('Water budget: rain in %.3f mm/s (x exposure)  standing as drops %.1f um  -> residence %.2f s  | film supply %.3f mm/s%s',
+      (self.stats.fluxMMs or 0) * self.p.exposure, h.depthUM or 0, h.residence or 0, self.stats.filmRate or 0,
+      (self.store.filmK or 1) <= 0 and '  (Rain film supply gain 0: unresolved rain is dropped)' or ''))
   end
   if self.recording then ui.text('Recording: ' .. tostring(self.recordPath)) end
   if self.metricsErr then ui.text('Metrics: ' .. self.metricsErr) end
@@ -990,8 +1214,8 @@ function R2:filmUI()
   local s, st, d, si = self.store, self.stats, self.diag, self.sprayInfo
   ui.separator()
   ui.text('Water film (A regime) / spray')
-  s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Film supply gain: %.2f')
-  s.sprayK = ui.slider('##rfx2sk', s.sprayK, 0, 5, 'Spray gain: %.2f')
+  s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Rain film supply gain (unresolved rain; keep 1): %.2f')
+  s.sprayK = ui.slider('##rfx2sk', s.sprayK, 0, 5, 'Spray gain (cars ahead / road spray; 0 hides spray): %.2f')
   s.filmRefract = ui.slider('##rfx2fr', s.filmRefract, 0, 40, 'Film refraction (wave gain): %.1f')
   s.filmVeil = ui.slider('##rfx2fv', s.filmVeil, 0, 1, 'Film veil: %.2f')
   s.scatterK = ui.slider('##rfx2sc', s.scatterK, 0, 3, 'Scatter veil (haze/film/spray): %.2f')
@@ -1006,6 +1230,7 @@ end
 -- Physics review panel (rev7): inputs breakdown, analytic thresholds, test tools.
 function R2:physicsUI()
   local s, p, i, d = self.store, self.p, self.inp, self.diag
+  local P = self.physics
   ui.separator()
   ui.text('Physics (rainfx2/physics.lua, docs/RAINFX_V2_CORE.md section 14)')
   if ui.checkbox('Freeze rain (no new drops / haze)', s.freezeRain) then s.freezeRain = not s.freezeRain end
@@ -1029,12 +1254,22 @@ function R2:physicsUI()
   local gust = p.turbK * p.airSurface * (i.airSpeed or 0)
   local rcG = gust > 0.1 and 2 * p.surfaceTension * p.pinCoat / (0.25 * p.rhoAir * p.dragCd * math.pi * gust * gust) * 1000 or math.huge
   ui.text(string.format('Centre gusts up to %.1f m/s tangential -> depin alone from r = %s (coat)', gust, rc(rcG)))
+  local U = i.airSpeed or 0
+  ui.text(string.format('Helmet air: outer flow %.1f m/s, boundary layer %.2f mm | swept alone from r = %s (2 deg) %s (20 deg) %s (50 deg)',
+    self.aeroU or 0, self.aeroDelta or 0, rc(P.aeroCritical(p, U, math.rad(2), p.pinCoat)),
+    rc(P.aeroCritical(p, U, math.rad(20), p.pinCoat)), rc(P.aeroCritical(p, U, math.rad(50), p.pinCoat))))
+  ui.text(string.format('Acceleration (car + head): raw %.2f g -> neck-filtered %.2f g', i.accRawG or 0, i.accFiltG or 0))
+  local hl = self.helmetUpLocal
+  ui.text(string.format('Helmet axes from the visor transform (not the camera): local up (%d,%d,%d), up . world up = %.2f',
+    hl and hl.x or 0, hl and hl.y or 0, hl and hl.z or 0, self.helmetUpY or 0))
+  ui.sameLine()
+  if ui.button('Re-pick helmet up') then self.helmetUpLocal = nil end
   ui.text(string.format('Substeps %d -> step limit %.2f m/s (faster drops are speed-limited)',
     p.substeps or 0, d.vGather))
 end
 
 function R2:dispose()
-  for _, list in ipairs({ self.S or {}, self.F or {} }) do
+  for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {} }) do
     for _, c in ipairs(list) do c:dispose() end
   end
   if self.mesh then self.mesh:dispose() end
@@ -1044,7 +1279,7 @@ function R2:dispose()
   if self.Mc then self.Mc:dispose(); self.Mc = nil end
   if self.Hc then self.Hc:dispose(); self.Hc = nil end
   self.source, self.sceneTex, self.C = nil, nil, nil
-  self.S, self.F, self.mesh, self.ready, self.opticsReady = nil, nil, nil, false, false
+  self.S, self.F, self.TG, self.mesh, self.ready, self.opticsReady = nil, nil, nil, nil, false, false
 end
 
 return function(ctx)
@@ -1063,7 +1298,7 @@ return function(ctx)
   local dir = ctx.folder .. '/rainfx2/shaders/'
   local common = readFile(dir .. 'common.hlsl')
   local src = {}
-  for _, name in ipairs({ 'cells', 'field', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap', 'sizes' }) do
+  for _, name in ipairs({ 'cells', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap', 'sizes' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -1073,6 +1308,7 @@ return function(ctx)
     self.src = {
       cells = common .. '\n' .. src.cells,
       field = common .. '\n' .. src.field,
+      trail = common .. '\n' .. src.trail,
       claim = common .. '\n' .. src.claim,
       merge = common .. '\n' .. src.merge,
       seed = common .. '\n' .. src.seed,

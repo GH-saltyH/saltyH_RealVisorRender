@@ -74,8 +74,12 @@ float r2RadiusMM(float volMM3) {
 
 // Rain exposure of the exterior side: rain travelling against the outward normal.
 // gR2NormalSign = -1 only as a manual override.
+// rev47b (rev47 review: near-vertical visor at rest always read 'deep blue'): rain arrives in a cone
+// (turbulence / gusts, sigma ~ gR2RainSpreadS = sin(spread)), so the projected flux is the cosine
+// smoothed over the cone: E(x) = (x + sqrt(x^2 + s^2)) / 2 (analytic soft-plus of the cosine).
 float r2Exposure(float2 t) {
-    return saturate(dot(gR2RainDirW, -r2Normal(t)) * gR2NormalSign + gR2ExposureFloor);
+    float x = dot(gR2RainDirW, -r2Normal(t)) * gR2NormalSign + gR2ExposureFloor;
+    return saturate(0.5 * (x + sqrt(x * x + gR2RainSpreadS * gR2RainSpreadS)));
 }
 
 // Tangential surface airflow speed (m/s) at t.
@@ -131,15 +135,22 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed,
     float r = radiusMM * 1e-3;
     float mass = 1e-6 * gR2ShapeK * radiusMM * radiusMM * radiusMM;     // kg (mm^3 * 1e-9 * 1000)
     float3 g = gR2AccelW - n * dot(gR2AccelW, n);
-    float3 airM = (gR2AirW - n * dot(gR2AirW, n)) * gR2AirSurface;
-    // rev42 observed downward flow (user, real onboard video: once the wind hits, drops run DOWN;
-    // DROP_PIPELINE_PLAN section 5). The helmet/cockpit flow cannot be modelled; a share gR2AirDown
-    // of the mean surface air is turned along the visor's downhill direction.
+    // rev47 helmet aerodynamics (docs/RAINFX_V2_REV46_REVIEW.md section 3; mirrored by physics.lua
+    // P.aeroForces). rev7-46 used the projected relative air x 0.15: zero at the stagnation point, so
+    // drops facing the air never moved (rev46 review). Now: helmet ~ sphere, outer flow
+    // u_e = 1.5 kU U sin(theta) away from the stagnation point (gR2AeroDirW includes its elevation and
+    // the buffeting wander), the drop top sees it through the thin stagnation boundary layer
+    // (delta 0.3-0.7 mm), and the pressure gradient V rho u_e du_e/ds pushes the drop outward.
+    float3 ah = gR2AeroDirW;
+    float cn = -dot(n, ah);                                     // cos(theta), facing the oncoming air
+    float3 ue = (ah - n * dot(ah, n)) * (gR2AeroU * smoothstep(-0.1, 0.2, cn));   // lee side separated
+    float xb = 0.6 * radiusMM / max(gR2BLDeltaMM, 1e-3);
+    float3 air = ue * (xb < 1.0 ? xb * (2.0 - xb) : 1.0);
     float gl = length(g);
-    float3 air = airM + (gl > 1e-4 ? g * (gR2AirDown * length(airM) / gl) : float3(0, 0, 0))
-               + r2TurbAir(t, du, dv);
+    air += (gl > 1e-4 ? g * (gR2AirDown * length(air) / gl) : float3(0, 0, 0)) + r2TurbAir(t, du, dv);
     float airLen = length(air);
-    float3 Fa = (0.25 * gR2RhoAir * gR2DragCd * R2_PI * r * r * airLen) * air;
+    float3 Fa = (0.25 * gR2RhoAir * gR2DragCd * R2_PI * r * r * airLen) * air
+              + ue * (gR2ShapeK * radiusMM * radiusMM * radiusMM * 1e-9 * gR2RhoAir * gR2AeroDuDs * max(cn, 0.0));
     float3 F = mass * g + Fa;
     float Fm = length(F);
     float pinCos = lerp(gR2PinGlass, gR2PinCoat, saturate(dvA.a));
@@ -154,9 +165,21 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed,
     float vq = (Fm - Fpin) / (gR2Friction * max(r, 1e-5));
     // rev43 (rev42 sprint recording: every moving drop crept at the same capped speed, a 'conveyor'):
     // graded saturation v = vMax (1 - exp(-vq / vScale)) keeps big / strongly driven drops faster.
-    speed = length(Fa) > gR2ShedK * Fpin ? 1e3 : gR2VMax * (1.0 - exp(-vq / max(gR2VScale, 1e-4)));
-    if (speed > gR2VShed) return float2(0, 0);               // shed (caller checks speed)
-    float3 v = F * (speed / Fm);
+    // rev47b RUNBACK (rev47 review: the visor dried up with speed): a drop whose air load exceeds
+    // shedK x pinning is not blown off the surface -- it slides with the air (runback, speed ~ runbackK x
+    // the air at its top, at most runbackMax), sweeps and merges, leaves a trail, and leaves the visor
+    // only over an edge. Only drops above gR2LiftMM lift off (flight sentinel 1e3).
+    bool blown = length(Fa) > gR2ShedK * Fpin;
+    // rev47l (rev47k review): rev47b-k wrote clamp(runbackK air, vMax 0.08, runbackMax 0.06) = 0.06 for EVERY
+    // blown drop (lower bound above the upper) -- all runback drops slid at one speed and all left trails.
+    // Now the speed grows with the excess of the air load over the blow-off load (big drops: air ~ r^2,
+    // pinning ~ r), continuous with the creeping regime below it.
+    float vCreep = gR2VMax * (1.0 - exp(-vq / max(gR2VScale, 1e-4)));
+    float excess = saturate(1.0 - gR2ShedK * Fpin / max(length(Fa), 1e-12));
+    float vRun = max(min(vCreep, gR2RunbackMax), min(gR2RunbackK * airLen * excess, gR2RunbackMax));
+    speed = blown ? (radiusMM > gR2LiftMM ? 1e3 : vRun) : vCreep;
+    // rev45: a blown-off drop returns the force DIRECTION (1 m/s) so the caller can launch it (flight)
+    float3 v = F * ((speed > gR2VShed ? 1.0 : speed) / Fm);
     float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
     float det = max(a * c - b * b, 1e-20);
     float pu = dot(du, v), pv = dot(dv, v);
@@ -209,48 +232,199 @@ float2 r2Steer(float2 t, float2 vt, float drive) {
     return res;
 }
 
+// rev45 LIFE CYCLE (step 3, docs/RAINFX_V2_DROP_PHYSICS_MODEL.md section 6 B): the state texture is
+// twice the cell width; the right half holds per-drop L = (age s, flight time left s, fade time left s,
+// flight direction rad). The cells / merge / seed passes write both halves with the same gather, so
+// L always follows its drop. Visible effect (visor): drops grow in, fade out when a splash sweeps
+// them, and a blown-off drop flies off for a few frames as a stretched streak that leaves a trail,
+// instead of popping in / vanishing (rev43-44 'ticking').
+float4 r2Life(int2 s) {
+    return txR2State.Load(int3(s + int2((int)gR2Cells.x, 0), 0));
+}
+
+// rev45 wetness of the surface at a field sample (rule_trail 5): micro haze + film.
+float r2Wet(float4 F) {
+    return saturate(F.g * gR2WetHaze + (F.b * gR2FilmMaxMM + F.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
+}
+// rev45 trail water depth (mm) left behind a moving head drop (rule_trail 3-7, user-approved review):
+// film left by a receding contact line grows with speed ~ Ca^(2/3) (Landau-Levich), more on a wet
+// surface, none behind small drops (they flow dry). Shared by cells (mass lost) and field (deposit).
+// rev46 (rev45 review: trails behind slowly sliding drops in a 30-150 km/h head wind were only a wiped
+// haze mark, thick only where flying drops left them): a sliding drop leaves a residual rivulet whose
+// thickness scales with the head (its rear contact line), so the speed term starts at half strength
+// and the head size counts (sqrt(r / 0.5 mm), <= 1.6).
+// rev47l TRAIL RULE (docs/RAINFX_V2_TRAIL_RULES.md; rev47k review: even small drops in light rain drew long
+// thick trails -- every runback drop left one). A sliding drop leaves water only when its receding contact
+// line cannot keep up (Cox-Voinov / Podgorski-Flesselles-Limat): the receding dynamic angle reaches zero at
+//   Ca* = theta_r^3 / (9 ln(r / lambda)),   Ca = mu U / gamma = U / 72 m/s,   lambda = 1 nm,
+// with the receding angle lowered by a wet surface: theta_r = trailThetaR (1 - trailWetK wet).
+//   s = Ca / Ca* < 1 : dry slide (rounded / cornered rear, no trail)            -> returns 0
+//   s >= 1          : the rear cusp opens; rivulet half-width hw = 0.5 trailWidthK r sqrt(1 - 1/s)
+//                     (narrow just above the threshold = pearling, wider when faster), centre depth
+//                     h0 = trailLL r Ca^(2/3) (Landau-Levich, thicker when faster), at most the edge slope
+//                     2 h0 / hw <= trailSlopeMax.
+// Big heads move faster (force ~ r^2, pinning ~ r) -> they cross the threshold first; small drops flow dry.
+float r2TrailRule(float rmm, float vms, float wet, out float hw) {
+    hw = 0.0;
+    if (rmm <= gR2MinRadiusMM || vms <= 0.0) return 0.0;
+    float th = radians(gR2TrailThetaRDeg) * (1.0 - gR2TrailWetK * saturate(wet));
+    float caS = th * th * th / (9.0 * log(max(rmm * 1e6, 10.0)));   // r / 1 nm
+    float ca = vms / 72.0;
+    float sR = ca / max(caS, 1e-9);
+    if (sR <= 1.0) return 0.0;
+    hw = 0.5 * gR2TrailWidthK * rmm * sqrt(1.0 - 1.0 / sR);
+    float h = gR2TrailLL * rmm * pow(ca, 0.6667);
+    return min(h, 0.5 * hw * gR2TrailSlopeMax);
+}
+
+// ---------- rev47j trail rivulets + mass-conserving dewetting (docs/RAINFX_V2_REV47J_REVIEW.md) ----------
+// Trail geometry texture (field resolution, RGBA16F): xy = nearest centre-line point of the rivulet
+// through this texel (mm from the texel centre), z = direction (rad), w = half-width (mm). The depth of
+// the centre line is field R. The visor draws the rivulet as a lens kernel of that line (sub-texel sharp).
+struct R2TrailHit { float depth; float2 pt; float2 dir; float hwMM; };
+R2TrailHit r2TrailNone() {
+    R2TrailHit h;
+    h.depth = 0; h.pt = float2(0, 0); h.dir = float2(1, 0); h.hwMM = 0;
+    return h;
+}
+// Candidate: the rivulet left by the REAR contact line of the moving drop of cell s this frame (the
+// swept segment shifted back by the head radius, rev47h). Texels within hw + 0.9 field texel of the
+// centre line store it, so the visor finds it from the texel under any pixel of the rivulet.
+void r2TrailCand(float2 pc, int2 s, float4 st, float wet, inout R2TrailHit h) {
+    float2 b = float2(s) + st.xy;
+    float2 a = b - r2UnpackMove(st.w);
+    if (dot(b - a, b - a) <= 4e-4) return;
+    float rmm = r2RadiusMM(st.z);
+    float2 dirm = (b - a) * rsqrt(dot(b - a, b - a));
+    float rC = rmm / gR2CellMM;
+    float2 a2 = a - dirm * rC, b2 = b - dirm * rC;
+    float2 ab = b2 - a2;
+    float2 q = a2 + ab * saturate(dot(pc - a2, ab) / max(dot(ab, ab), 1e-10));
+    float vms = length(b - a) * gR2CellMM * 1e-3 / max(gR2Dt, 1e-5);
+    float hw;
+    float dep = r2TrailRule(rmm, vms, wet, hw);
+    if (dep <= h.depth) return;
+    float texMM = 0.5 * (gR2CellSizeMM.x * gR2Cells.x / gR2FieldSize.x + gR2CellSizeMM.y * gR2Cells.y / gR2FieldSize.y);
+    if (length((pc - q) * gR2CellSizeMM) > hw + 0.9 * texMM) return;
+    h.depth = dep;
+    h.pt = q;
+    float2 dmm = dirm * gR2CellSizeMM;
+    h.dir = dmm * rsqrt(max(dot(dmm, dmm), 1e-12));
+    h.hwMM = hw;
+}
+int2 r2FieldPerCell() { return max(int2(round(gR2FieldSize / gR2Cells)), int2(1, 1)); }
+// Mean film depth (mm) over the field texels of cell c (cells and field passes read the same F_prev).
+float r2CellFilmMM(int2 c) {
+    int2 k = r2FieldPerCell();
+    float s = 0;
+    [loop] for (int y = 0; y < k.y; ++y)
+        [loop] for (int x = 0; x < k.x; ++x)
+            s += txR2Field.Load(int3(c * k + int2(x, y), 0)).b;
+    return s * gR2FilmMaxMM / (float)(k.x * k.y);
+}
+// Dewetting / pearling events of cell c this frame: pure hashes of (cell, frame), so the cells pass
+// (turns the water into a bead) and the field pass (removes the same water) always agree.
+bool r2DewetEvent(int2 c) {
+    return r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9001u)) < gR2DewetRate * gR2SimDt;
+}
+// rev47l: a narrow rivulet beads up faster (Plateau-Rayleigh growth ~ 1 / width): rate x 0.25 mm / hw.
+bool r2PearlEvent(int2 c, float hwMM) {
+    float k = clamp(0.25 / max(hwMM, 1e-3), 0.5, 6.0);
+    return r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * k * gR2SimDt;
+}
+// Cell of the centre-line point stored at field texel f (geometry g).
+int2 r2TrailCell(int2 f, float4 g) {
+    float2 pc = (float2(f) + 0.5) / gR2FieldSize * gR2Cells + g.xy / gR2CellSizeMM;
+    return int2(floor(pc));
+}
+
 // One drop step. Every gathering cell evaluates this identically for a source.
 struct R2Move {
     float2 dest;   // absolute cell coordinates after the step
     float vol;     // mm^3 after losses
-    float alive;   // 0: none / shed / left the surface
+    float alive;   // 0: none / gone (flight over, faded, left the surface)
     float moved;   // cells travelled
+    float4 life;   // rev45 L after this step
 };
-R2Move r2Predict(int2 cell, float4 s) {
+R2Move r2Predict(int2 cell, float4 s, float4 L) {
     R2Move o;
     o.dest = float2(cell) + s.xy;
     o.vol = 0;
     o.alive = 0;
     o.moved = 0;
+    o.life = L;
+    o.life.x = L.x + gR2Dt;
     if (s.z <= 0) return o;
     float2 t = (float2(cell) + s.xy) / gR2Cells;
     float rmm = r2RadiusMM(s.z);
-    // rev41: pinning heterogeneity is a smooth surface field (gR2PinScale, ~4 mm features) instead of
-    // white noise per 1.2 mm cell, which made a drop near its threshold stop and start at every cell
-    // edge (jerky "lightning" motion, rev40 review). Position only -> same in every gathering cell.
-    float pinNoise = lerp(gR2PinNoiseMin, gR2PinNoiseMax, r2VNoise(t * gR2PinScale + 53.1));
-    // rev8: kinetic hysteresis. A drop that moved in the last step/frame is held by the
-    // (smaller) receding/advancing hysteresis of a moving contact line: once depinned it
-    // keeps sliding instead of stopping at the first strong cell (rev7 permanent traps).
-    float2 lastMove = r2UnpackMove(s.w);
-    if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
-    float speed;
-    float drive;
-    float2 vt = r2DropVelocity(t, rmm, pinNoise, speed, drive);
-    vt = r2Steer(t, vt, drive);
-    float2 dc = vt * gR2Dt * gR2Cells;
-    if (speed > gR2VShed) return o;                          // shed: leaves the surface
-    // rev7: a fast drop is LIMITED to the gather window instead of being deleted
-    // (rev6 deleted every drop faster than ~0.28 m/s at 60 fps / 2 substeps).
+    float4 Fs = txR2Field.SampleLevel(samLinearClamp, t, 0);
+    float2 dc = float2(0, 0);
+    float vol = s.z;
+    bool gone = false;
+    if (L.z > 0) {
+        // fading (swept by a splash): stays, shrinks on screen, then it is gone
+        o.life.z = L.z - gR2Dt;
+        gone = o.life.z <= 0;
+    } else if (L.y > 0) {
+        // flying (blown off): leaves along its launch direction at gR2FlySpeed, losing trail water
+        o.life.y = L.y - gR2Dt;
+        gone = o.life.y <= 0;
+        dc = float2(cos(L.w), sin(L.w)) * (gR2FlySpeed * 1000.0 * gR2Dt) / gR2CellSizeMM;
+    } else {
+        // rev41: pinning heterogeneity is a smooth surface field (gR2PinScale, ~4 mm features).
+        float pinNoise = lerp(gR2PinNoiseMin, gR2PinNoiseMax, r2VNoise(t * gR2PinScale + 53.1));
+        // rev8: kinetic hysteresis (a moving contact line is held less than a resting one).
+        float2 lastMove = r2UnpackMove(s.w);
+        if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
+        float speed;
+        float drive;
+        float2 vt = r2DropVelocity(t, rmm, pinNoise, speed, drive);
+        if (speed > gR2VShed) {
+            // blown off: launch (rev42-44 deleted the drop at once -> it 'teleported' away)
+            float2 dcell = vt * gR2Cells;
+            float2 dirc = dcell * rsqrt(max(dot(dcell, dcell), 1e-20));
+            o.life.y = gR2FlyTime;
+            o.life.w = atan2(dirc.y, dirc.x);
+            dc = dirc * (gR2FlySpeed * 1000.0 * gR2Dt) / gR2CellSizeMM;
+        } else {
+            vt = r2Steer(t, vt, drive);
+            // rev47 drop inertia (rev46 review: car jolts gave 'lightning' zig-zags): the speed relaxes
+            // to the force-driven target over gR2DropTau; the previous speed is the packed move of the
+            // last frame (substep 1) or of the substeps so far in this frame. A reversed force first
+            // brakes the drop through zero instead of flipping its direction.
+            float prevDur = gR2Sub > 1.5 ? (gR2Sub - 1.0) * gR2Dt : gR2SimDt;
+            float2 vPrev = lastMove / max(prevDur, 1e-4);              // cells / s
+            float2 vTgt = vt * gR2Cells;
+            float tauI = speed > gR2VMax * 1.01 ? gR2SlideTau : gR2DropTau;   // rev47b: runback slides longer
+            float kI = tauI > 1e-4 ? 1.0 - exp(-gR2Dt / tauI) : 1.0;
+            float2 vNew = vPrev + (vTgt - vPrev) * kI;
+            // rev47a (rev47 review, rev47_unacceptableMovement.mp4: small drops crept ~2 mm/s with no air
+            // and no motion): the stop test compared mm^2/s^2 against 4e-6 (meant 4 = 2 mm/s), so it never
+            // fired, and the packed move (1/31.25 cell steps) rounds 0.7 of a step back up to a full step:
+            // vPrev -> 0.7 vPrev -> rounds to 1 step -> perpetual creep at one step per frame. A drop with
+            // no driving force now stops once it is slower than 1.5 packing steps per frame or 3 mm/s.
+            float stopMMs = max(3.0, 1.5 * length(gR2CellSizeMM) / 31.25 / max(prevDur, 1e-4));
+            if (dot(vTgt, vTgt) <= 0.0 && length(vNew * gR2CellSizeMM) < stopMMs) vNew = float2(0, 0);
+            dc = vNew * gR2Dt;
+        }
+    }
+    // the gather window limits one step (fast drops are speed-limited, never deleted)
     float dm = max(abs(dc.x), abs(dc.y));
     if (dm > gR2GatherCells) dc *= gR2GatherCells / dm;
     float travelMM = length(dc * gR2CellSizeMM);
-    float vol = s.z - gR2TrailLoss * travelMM * rmm * rmm
-                    - gR2Evap * gR2Dt * R2_PI * rmm * rmm;
+    // rev45 trail (rule_trail 3): the head loses the water it leaves behind; it collects the haze and
+    // film it sweeps (rule_merge 3, rule_trail 11); evaporation as before.
+    float wet = r2Wet(Fs);
+    float vms = travelMM * 1e-3 / max(gR2Dt, 1e-5);
+    float hwT;
+    float hT0 = r2TrailRule(rmm, vms, wet, hwT);
+    vol -= 1.3333 * hT0 * hwT * travelMM;   // rev47j/l: parabolic rivulet section (4/3) h0 hw
+    vol += (Fs.g * gR2HazeDepthMM + Fs.b * gR2FilmMaxMM * gR2FilmCollect) * 2.0 * rmm * travelMM;
+    vol -= gR2Evap * gR2Dt * R2_PI * rmm * rmm;
     // Keep the destination inside the 5x5 gather window (merged drops may sit off-cell).
     float2 dest = float2(cell) + clamp(s.xy + dc, -1.99, 2.99);
-    if (r2Valid(dest / gR2Cells) < 0.5) return o;           // absorbing boundary / hole
-    if (r2RadiusMM(vol) < gR2MinRadiusMM) return o;          // residue only (trace field keeps it)
+    if (gone || r2Valid(dest / gR2Cells) < 0.5) return o;  // gone / absorbing boundary / hole
+    if (r2RadiusMM(vol) < gR2MinRadiusMM) return o;           // residue only (the trail keeps it)
     o.dest = dest;
     o.vol = vol;
     o.alive = 1;

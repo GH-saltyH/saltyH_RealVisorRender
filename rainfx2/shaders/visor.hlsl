@@ -62,7 +62,8 @@ float r2FilmBSpline(float2 t, out float2 grad) {
         float4 row;
         [unroll] for (int i = 0; i < 4; ++i) {
             int2 q = clamp(int2(i0) + int2(i - 1, j - 1), int2(0, 0), size);
-            row[i] = txR2Field.Load(int3(q, 0)).b;
+            float4 fq = txR2Field.Load(int3(q, 0));
+            row[i] = fq.b;   // rev47j: film only (rivulets are drawn as lens kernels, r2TrailBest)
         }
         float rx = dot(wx, row);
         h += wy[j] * rx;
@@ -138,8 +139,14 @@ bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
     float4 st = txR2State.Load(int3(s, 0));
     if (st.z <= 0) return false;
     c.r = max(r2VisorRadiusMM(st.z), gR2MinDrawMM);
+    // rev45 life cycle (right half of the state texture): grow in, fade out, flight streak
+    float4 L = txR2State.Load(int3(s + int2(size.x, 0), 0));
+    float vis = lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
+    if (L.z > 0) vis *= saturate(L.z / max(gR2FadeTime, 1e-3));
+    if (L.y > 0) vis *= lerp(0.55, 1.0, saturate(L.y / max(gR2FlyTime, 1e-3)));
+    c.r *= vis;
     c.q = (pc - (float2(s) + st.xy)) * gR2CellSizeMM;
-    float reach = 1.3 * gR2KernelScale * c.r + reachMM;     // stretch/wobble margin
+    float reach = 1.3 * gR2KernelScale * c.r * (L.y > 0 ? 1.0 + gR2FlyStretch : 1.0) + reachMM;   // stretch/wobble margin
     if (dot(c.q, c.q) > reach * reach) return false;
     c.seed = r2VisorSeed(st.w);
     float2 mv = r2VisorMove(st.w) * gR2CellSizeMM;            // mm in the last frame
@@ -147,6 +154,10 @@ bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
     c.m = ml > 1e-4 ? mv / ml : float2(0, 0);
     float v = ml * 1e-3 / max(gR2SimDt, 1e-5);                 // m/s
     c.k = gR2MotionStretch * saturate(v / max(gR2VMax, 1e-3));
+    if (L.y > 0) {                                             // flying: long streak along the flight
+        c.m = normalize(float2(cos(L.w), sin(L.w)) * gR2CellSizeMM);
+        c.k = gR2FlyStretch;
+    }
     return true;
 }
 
@@ -195,6 +206,55 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     float sth = sin(radians(clamp(th, 5.0, 89.0)));
     float beta = gR2FlatK * saturate((c.r - gR2FlatStartMM) / max(gR2FlatFullMM - gR2FlatStartMM, 1e-3));
     r2Kernel(q, gR2KernelScale * c.r, float2(c.r, sth), beta, T, P, G, RW, HW);
+}
+
+// rev47j RIVULET KERNEL (rev47i review + reference frames: a sliding large drop leaves a thin, sharp,
+// long-lived line, about a quarter of the drop width). The field R holds the centre-line depth h0, the
+// trail texture TG the line itself (point, direction, half-width hw). Among the 3 x 3 field texels around
+// the pixel the line closest to the pixel is drawn as a cylindrical lens of half-width hw whose edge angle
+// follows the water: tan(theta) = 2 h0 / hw (parabolic section) -- the same lens and union as the drops,
+// so the head and its tail join (teardrop with a tail) and a thinning trail flattens out of sight.
+struct R2Trail { float2 q; float2 tau; float hw; float sth; };
+bool r2TrailBest(float2 pc, out R2Trail tr) {
+    tr.q = float2(0, 0); tr.tau = float2(1, 0); tr.hw = 0; tr.sth = 0;
+    float2 ft = pc / gR2Cells * gR2FieldSize;
+    int2 f0 = int2(floor(ft));
+    int2 fmax = int2(gR2FieldSize) - 1;
+    float2 pMM = pc * gR2CellSizeMM;
+    float2 texMM = gR2CellSizeMM * gR2Cells / gR2FieldSize;
+    float best = 0.0;
+    [loop] for (int j = -1; j <= 1; ++j) {
+        [loop] for (int i = -1; i <= 1; ++i) {
+            int2 f = clamp(f0 + int2(i, j), int2(0, 0), fmax);
+            float h0 = txR2Field.Load(int3(f, 0)).r * gR2TrailMaxMM;
+            if (h0 < gR2TrailMinMM) continue;
+            float4 g = txR2Trail.Load(int3(f, 0));
+            if (g.w <= 1e-4) continue;
+            float2 Q = (float2(f) + 0.5) * texMM + g.xy;
+            float2 tau = float2(cos(g.z), sin(g.z));
+            float2 dv = pMM - Q;
+            float al = dot(dv, tau);
+            if (abs(al) > 1.2 * max(texMM.x, texMM.y)) continue;   // a line is valid near its own texel
+            float2 dp = dv - tau * al;
+            float Rk = gR2KernelScale * g.w;
+            float k = 1.0 - dot(dp, dp) / (Rk * Rk);
+            if (k <= best) continue;
+            best = k;
+            tr.q = dp;
+            tr.tau = tau;
+            tr.hw = g.w;
+            float tn = min(2.0 * h0 / g.w, 1.0) * smoothstep(gR2TrailMinMM, gR2TrailFullMM, h0);
+            tr.sth = tn * rsqrt(1.0 + tn * tn);
+        }
+    }
+    return best > 0.0;
+}
+// The rivulet into the union at an extra offset dq (mm, D-A taps): only the cross-line part counts.
+void r2AddTrail(R2Trail tr, float2 dq, inout float P, inout float2 G, inout float2 RW, inout float HW) {
+    float2 q = tr.q + (dq - tr.tau * dot(dq, tr.tau));
+    R2Shape T;
+    T.u1 = float2(1, 0); T.s1 = 0; T.u2 = float2(1, 0); T.s2 = 0; T.u3 = float2(1, 0); T.s3 = 0;
+    r2Kernel(q, gR2KernelScale * tr.hw, float2(tr.hw, tr.sth), 0.0, T, P, G, RW, HW);
 }
 
 // rev24 view context for the physical lens: eye ray, outward visor normal, world vectors of one mm
@@ -417,6 +477,11 @@ float4 main(PS_IN pin) {
     // texel-edge creases -> no mosaic at near-eye magnification).
     float2 hG;
     float hF = r2FilmBSpline(t, hG) * gR2FilmMaxMM;
+    // rev47i (rev47h review: lowering the film threshold drew a thin blurring sheet over the whole visor):
+    // the film W keeps its own threshold; the trail layer (field R) has a lower one of its own, so thin
+    // rivulets show without making the thin rain film visible everywhere.
+    // rev47j: rivulets left the film path (lens kernels below); the film W only shows as a real sheet
+    // (thicker than the dewetting beads, gR2FilmMinMM) -- the thin rain film gathers into drops.
     float filmCov = gR2LookLab > 0.5 ? 0.0 : smoothstep(gR2FilmMinMM, gR2FilmFullMM, hF);
     float2 fieldMM = gR2TexMM / gR2FieldSize;                      // mm per field texel (u, v)
     float2 filmSlope = hG * gR2FilmMaxMM / fieldMM * gR2FilmRefract * (gR2LookLab > 0.5 ? 0.0 : 1.0);
@@ -425,7 +490,11 @@ float4 main(PS_IN pin) {
     float2 gsF = filmSlope.x * pxU + filmSlope.y * pxV;
     float2 dirF = dot(gsF, gsF) > 1e-20 ? normalize(gsF) : float2(0, 0);
     float2 offF = dirF * (fl * thetaK * gR2FovK) * float2(aspect, 1.0);
-    float filmMip = gR2FilmMip * filmCov;
+    // rev46 (rev45 review: trails look milky; legacy RAINFX_TRAIL_REFRACTION.md T2/T5 solved the same):
+    // water does not blur -- sharp base mip, extra blur only with the slope (curvature); thin water is
+    // clear, only thick (aerated) sheets get the veil / scatter.
+    float filmMip = filmCov * (gR2FilmMip + min(0.6 * fl, 2.0));
+    float thickK = smoothstep(0.15, 0.4, hF);
 
     // ---- analytic WF drops: metaball union of dome kernels (5x5 candidates) ----
     float2 pc = t * gR2Cells;
@@ -494,6 +563,15 @@ float4 main(PS_IN pin) {
             }
         }
     }
+    // rev47j rivulets (trail lens kernels), only where the field holds trail water
+    R2Trail trl;
+    if (gR2LookLab < 0.5 && gR2CspMode < 0.5 && Fd.r > 1e-4 && r2TrailBest(pc, trl)) {
+        if (multi) {
+            [unroll] for (int k = 0; k < 4; ++k) r2AddTrail(trl, dqT[k], Pm[k], Gm[k], RWm[k], HWm[k]);
+        } else {
+            r2AddTrail(trl, float2(0, 0), P, G, RW, HW);
+        }
+    }
     float U = 1.0 - P;
     float Rmm = RW.x / max(HW, 1e-6);
     float sth = RW.y / max(HW, 1e-6);
@@ -528,7 +606,7 @@ float4 main(PS_IN pin) {
     float3 cspDbg = float3(0, 0, 0);
     if (gR2CspMode > 0.5) cDrop = r2CspWater(t, sp, offF, filmMip, aspect, vw, cov, cspDbg);
     // Drops sink into a thick film: their own outline fades.
-    cov *= 1.0 - gR2FilmAbsorb * filmCov;
+    cov *= 1.0 - gR2FilmAbsorb * filmCov * thickK;   // rev47j: only a thick sheet swallows the outline
     float haze = gR2LookLab > 0.5 ? 0.0 : saturate(Fd.g * gR2HazeK + Fd.r * gR2TraceHaze) * (1.0 - cov);
 
 #ifdef R2_DEPTH_ONLY
@@ -540,15 +618,23 @@ float4 main(PS_IN pin) {
     float a = cov + aFilm + haze;
     // rev16/17 forward scattering of the VISOR SURFACE (micro haze M, film; spray 0).
     float scatterX = gR2ScatterM * sqrt(max(Fd.g - gR2ScatterM0, 0.0))
-                   + gR2ScatterFilm * filmCov * saturate(hF / max(gR2FilmFullMM, 1e-4))
+                   + gR2ScatterFilm * filmCov * thickK
                    + gR2ScatterSpray * gR2Spray;
     float scat = gR2LookLab > 0.5 ? 0.0 : min(1.0 - exp(-scatterX), gR2ScatterMax);
+    // rev47j (rev47i review: the veil covered the drops at speed): micro haze and film lie BETWEEN the
+    // drops on the surface -- a drop has absorbed what was under it -- so their scatter is not drawn over drops.
+    scat *= 1.0 - cov;
     clip(gR2Debug > 0.5 ? 1.0 : max(a, scat) - 0.003);
 
     float3 cBlur = r2Scene(sp, gR2HazeMip);
     float3 veil = lerp(cBlur, gR2VeilColor, gR2VeilMix);
     float3 cFilm = r2Scene(saturate(sp + offF), filmMip);
-    cFilm = lerp(cFilm, veil, gR2FilmVeil * filmCov);
+    cFilm = lerp(cFilm, veil, gR2FilmVeil * filmCov * thickK);
+    // rev46 edge cues of a rivulet (legacy T4): steep sides lose light (thin dark line), the side
+    // facing the sky catches a thin bright line -- the volume of the water band.
+    float rimF = smoothstep(0.6, 2.5, fl) * filmCov;
+    float upF = saturate(-dot(dirF, float2(0.0, 1.0)));
+    cFilm = cFilm * (1.0 - 0.35 * rimF) + gR2VeilColor * (0.25 * rimF * upF * upF * upF * upF);
     float3 col = (cDrop * cov + cFilm * aFilm + veil * haze) / max(a, 1e-4);
     // Composite the scatter over everything below (alpha blending: out = src*A + dst*(1-A)).
     // Wanted: (col*a + dst*(1-a))*(1-s) + amb*s  ->  A = a + s - a*s, src = (col*a*(1-s) + amb*s) / A.
