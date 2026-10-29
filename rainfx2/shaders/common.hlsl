@@ -130,7 +130,7 @@ float3 r2TurbAir(float2 t, float3 du, float3 dv) {
 // rev41: drive = Fpin / |F| of a moving drop (1 = just depinned, -> 0 = driven far above pinning);
 // the path heterogeneity (r2Steer) scales with it: weakly driven drops meander, strongly driven
 // drops follow the force in nearly straight lines.
-float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed, out float drive) {
+float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out float speed, out float drive) {
     speed = 0;
     drive = 1;
     float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
@@ -160,6 +160,25 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, out float speed,
     float Fm = length(F);
     float pinCos = lerp(gR2PinGlass, gR2PinCoat, saturate(dvA.a));
     float Fpin = gR2SurfaceTension * 2.0 * r * pinCos * pinNoise;
+    // rev48-S7 FURMIDGE WIDTH (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 22): the retention force is
+    // gamma w (cos theta_r - cos theta_a) with w = the contact width ACROSS the force. rev7-S6 used w = 2r for
+    // every shape. With the footprint ellipse (aspect A, axis u1): w / 2r = 1 / sqrt(c^2 / A + A (1 - c^2)),
+    // c = cos(angle between the cross-force direction and u1) -> a drop long along the force (gravity sag,
+    // slug, runback head) is held less, one long across it (air stretch at right angles) more.
+    // Footprint aspect is area-preserving (S4c), so the drive (volume) is unchanged.
+    float a0 = dot(du, du), b0 = dot(du, dv), c0 = dot(dv, dv);
+    float det0 = max(a0 * c0 - b0 * b0, 1e-20);
+    float pu0 = dot(du, F), pv0 = dot(dv, F);
+    float2 fMM = float2(c0 * pu0 - b0 * pv0, a0 * pv0 - b0 * pu0) / det0 * (gR2CellSizeMM * gR2Cells);
+    float eW = length(sh.xy);
+    if (gR2ShpOn > 0.5 && gR2FootPinK > 0.0 && eW > 1e-3 && dot(fMM, fMM) > 1e-20) {
+        float AW = sqrt((0.5 + eW) / max(0.5 - eW, 0.05));
+        float phiW = 0.5 * atan2(sh.y, sh.x);
+        float2 fd = normalize(fMM);
+        float cW = dot(float2(-fd.y, fd.x), float2(cos(phiW), sin(phiW)));
+        float wf = rsqrt(cW * cW / AW + AW * (1.0 - cW * cW));
+        Fpin *= lerp(1.0, clamp(wf, 0.6, 1.6), gR2FootPinK);
+    }
     if (Fm <= Fpin) return float2(0, 0);
     drive = Fpin / max(Fm, 1e-12);
     // rev42 (rev41 recording): the visor is ~5 cm from the eye, 1 mm ~ 30 px, so 0.3 m/s is ~150 px per
@@ -683,9 +702,19 @@ struct R2Move {
     float alive;   // 0: none / gone (flight over, faded, left the surface)
     float moved;   // cells travelled
     float4 life;   // rev45 L after this step
+    float2 cDest;  // rev48-S6c E8: the tail piece split off this step (absolute cells), its volume (0 = none)
+    float cVol;    //   and its axis (rad); every gathering cell evaluates the same event (cell + frame hash)
+    float cPhi;
 };
-R2Move r2Predict(int2 cell, float4 s, float4 L) {
+// rev48-S6c E8 SPLIT CHILD marker: life.w = -5 (between the flight angle range [-pi, pi], used only while
+// flying, and the splat marker < -9.5). A fresh child is drawn at once (it is existing water) and is not
+// swept back into its parent by the claim pass (claim.hlsl).
+bool r2SplitChild(float4 L) { return abs(L.w + 5.0) < 0.5 && L.y <= 0.0; }
+R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     R2Move o;
+    o.cDest = float2(0, 0);
+    o.cVol = 0;
+    o.cPhi = 0;
     o.dest = float2(cell) + s.xy;
     o.vol = 0;
     o.alive = 0;
@@ -733,7 +762,7 @@ R2Move r2Predict(int2 cell, float4 s, float4 L) {
         if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
         float speed = 0.0;
         float drive = 1.0;
-        float2 vt = r2DropVelocity(t, rmm, pinNoise, speed, drive);
+        float2 vt = r2DropVelocity(t, rmm, pinNoise, sh, speed, drive);
         if (speed > gR2VShed) {
             // blown off: launch (rev42-44 deleted the drop at once -> it 'teleported' away)
             float2 dcell = vt * gR2Cells;
@@ -780,6 +809,44 @@ R2Move r2Predict(int2 cell, float4 s, float4 L) {
     float2 dest = float2(cell) + clamp(s.xy + dc, -1.99, 2.99);
     if (gone || r2Valid(dest / gR2Cells) < 0.5) return o;  // gone / absorbing boundary / hole
     if (r2RadiusMM(vol) < gR2MinRadiusMM) return o;           // residue only (the trail keeps it)
+    // rev48-S6c E8 TAIL SPLIT (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 21). A sliding drop sheds its tail
+    // as a separate drop when (A) it is stretched beyond shpSplitA (the rear pinches off, pearling of the
+    // receding end; Podgorski et al. 2001) or (B) its tail lets go in a turn (|dl| > shpSnapDeg, the hook /
+    // snap of S6b) while it still has a tail (e >= 0.12). One event per drop at shpSplitRate / s while the
+    // condition holds; the piece (volume share fs) is placed behind the parent's new footprint along the axis,
+    // just outside contact distance, inside the 5x5 gather window (else no event: mass stays exact).
+    float2 dcMM = dc * gR2CellSizeMM;
+    float e8 = length(sh.xy);
+    if (gR2ShpOn > 0.5 && gR2ShpSplitRate > 0.0 && L.y <= 0.0 && L.z <= 0.0 && e8 > 1e-3
+        && dot(dcMM, dcMM) > 25.0 * gR2Dt * gR2Dt && rmm >= gR2ShpSplitRMin) {   // > 5 mm/s
+        float A8 = sqrt((0.5 + e8) / max(0.5 - e8, 0.05));
+        float2 lastMove8 = r2UnpackMove(s.w);
+        float phi8 = 0.5 * atan2(sh.y, sh.x);
+        float2 u8 = float2(cos(phi8), sin(phi8));
+        float2 d8 = normalize(dcMM);
+        float dl8 = r2Wrap90(atan2(d8.y, d8.x) - phi8);
+        bool cA = A8 >= gR2ShpSplitA;
+        bool cB = abs(dl8) > radians(gR2ShpSnapDeg) && e8 >= 0.12 && dot(lastMove8, lastMove8) > 1e-6;   // already sliding
+        uint fk = (uint)gR2Frame * 8u + (uint)gR2Sub;
+        if ((cA || cB) && r2Rand(uint3((uint)cell.x, (uint)cell.y, fk + 7100u)) < gR2ShpSplitRate * gR2Dt) {
+            float h8 = r2Rand(uint3((uint)cell.y, (uint)cell.x, fk + 7101u));
+            float fs = cA ? 0.12 + 0.1 * saturate((A8 - gR2ShpSplitA) / gR2ShpSplitA) + 0.08 * h8 : 0.06 + 0.08 * h8;
+            float rc = rmm * pow(max(fs, 1e-4), 0.3333);
+            float eP = 0.55 * e8;                                   // the parent after losing its tail
+            float AP = sqrt((0.5 + eP) / (0.5 - eP));
+            float distMM = gR2CoalesceK * (rmm * pow(max(1.0 - fs, 1e-4), 0.3333) * sqrt(AP) + rc) + 0.12;
+            float2 tb = -u8 * (dot(d8, u8) >= 0.0 ? 1.0 : -1.0);  // the tail end of the axis
+            float2 cd = dest + tb * distMM / gR2CellSizeMM;
+            int2 cc = int2(floor(cd)) - cell;
+            if (rc >= 1.2 * gR2MinRadiusMM && all(abs(cc) <= int2(2, 2)) && any(int2(floor(cd)) != int2(floor(dest)))
+                && r2Valid(cd / gR2Cells) > 0.5) {
+                o.cDest = cd;
+                o.cVol = fs * vol;
+                o.cPhi = atan2(tb.y, tb.x);
+                vol -= o.cVol;
+            }
+        }
+    }
     o.dest = dest;
     o.vol = vol;
     o.alive = 1;

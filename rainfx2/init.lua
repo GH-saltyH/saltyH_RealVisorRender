@@ -142,9 +142,11 @@ local DEFAULTS = {
   shpMergeK = 1.0, shpWaist = 0.3,      -- rev48-S3 merged footprint (tensor gain, peanut waist of a balanced pair)
   asymK = 0.35, asymGravR = 1.0,       -- rev48-S2d off-centre apex (strength, radius where it points downhill)
   footPhys = true,                     -- rev48-S3b coalescence uses the drawn footprint (S4c: = the water radius x shape)
+  footPinK = 1.0,                      -- rev48-S7 Furmidge: pinning by the contact width across the force (0 = 2r)
   shpBoK = 1.2, shpTearK = 0.12,
   shpSlugTau = 0.6, shpAirK = 0.08, shpAirMax = 1.6,   -- rev48-S5 E3 slug length memory, E6 air stretch of pinned drops
   shpTailTau = 0.25, shpTailStretch = 0.2, shpHookK = 2.0, shpFrontK = 1.2, shpSnapDeg = 40.0,   -- rev48-S6 F2 turns (S6b: head hook)
+  shpSplitA = 2.6, shpSplitRate = 6.0, shpSplitRMin = 0.45, shpNeckK = 1.5, shpNeckT = 0.12, hiSplit = false,   -- rev48-S6c E8 tail split (aspect, events / s, min parent radius mm)
   shpOn = true, shpBendP = 0.07, shpLobeP = 0.02, shpSagP = 0.0, shpRelaxMove = 0.12, shpRelaxStill = 10.0,   -- rev48-S5 E7 replaces the random sag class (shpSagP 0)
   shpMotionK = 0.6, shpMotionV = 0.04, shpArrest = 0.5,   -- rev48-S4 motion morph (aspect 1 + k v/V), splat arrest share
   trailSlopeMax = 0.45,                      -- rev47k: rivulet edge slope 2 h0 / hw <= 0.45 (~24 deg; rev47j 0.8 drew glass rods)
@@ -316,7 +318,9 @@ local function sceneValues(self, v)
   v.gR2ShpBoK, v.gR2ShpTearK = p.shpBoK, p.shpTearK
   v.gR2ShpSlugTau, v.gR2ShpAirK, v.gR2ShpAirMax = p.shpSlugTau, p.shpAirK, p.shpAirMax
   v.gR2ShpTailTau, v.gR2ShpTailStretch, v.gR2ShpHookK, v.gR2ShpSnapDeg = p.shpTailTau, p.shpTailStretch, p.shpHookK, p.shpSnapDeg   -- rev48-S6 F2
+  v.gR2ShpSplitA, v.gR2ShpSplitRate, v.gR2ShpSplitRMin = p.shpSplitA, p.shpSplitRate, p.shpSplitRMin   -- rev48-S6c E8
   v.gR2FootPhys = p.footPhys and 1 or 0
+  v.gR2FootPinK = p.footPinK
   v.gR2BaseSpread = p.baseSpread
   v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
   v.gR2ShpImpactK, v.gR2ShpImpactMax = p.shpImpactK, p.shpImpactMax
@@ -771,6 +775,7 @@ function R2:drawParams(depth)
   v.gR2BaseSpread = p.baseSpread       -- rev48-S2'b
   v.gR2AsymK, v.gR2AsymGravR = p.asymK, p.asymGravR   -- rev48-S2d
   v.gR2ShpFrontK = p.shpFrontK                         -- rev48-S6 F2 outer-front apex
+  v.gR2ShpNeckK, v.gR2ShpNeckT, v.gR2HiSplit = p.shpNeckK, p.shpNeckT, p.hiSplit and 1 or 0   -- rev48-S6c E8 neck / review highlight
   v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
   v.gR2WetHaze = p.wetHaze
   v.gR2Threshold = p.threshold
@@ -1099,6 +1104,12 @@ function R2:ui()
   self.p.shpHookK = ui.slider('##rfx2ck', self.p.shpHookK, 0, 4, 'Head bends onto the new heading (hook, x tan): %.2f')
   self.p.shpFrontK = ui.slider('##rfx2fk', self.p.shpFrontK, 0, 3, 'Thick front moves to the outer side: %.2f')
   self.p.shpSnapDeg = ui.slider('##rfx2sd', self.p.shpSnapDeg, 10, 90, 'Tail lets go above: %.0f deg')
+  self.p.shpSplitA = ui.slider('##rfx2spa', self.p.shpSplitA, 1.5, 4.5, 'Sliding drop sheds its tail above aspect: %.2f')
+  self.p.shpSplitRate = ui.slider('##rfx2spr', self.p.shpSplitRate, 0, 20, 'Tail split events (while stretched / snapping): %.1f /s')
+  self.p.shpSplitRMin = ui.slider('##rfx2spm', self.p.shpSplitRMin, 0.2, 1.5, 'Only drops above this radius split: %.2f mm')
+  self.p.shpNeckK = ui.slider('##rfx2nk', self.p.shpNeckK, 0, 3, 'Split piece necks toward its parent: %.2f')
+  self.p.shpNeckT = ui.slider('##rfx2nt', self.p.shpNeckT, 0.02, 0.5, 'Neck retracts over: %.2f s')
+  if ui.checkbox('Highlight split pieces (cyan, 1.5 s)', self.p.hiSplit) then self.p.hiSplit = not self.p.hiSplit end
   self.p.shpMotionK = ui.slider('##rfx2smk', self.p.shpMotionK, 0, 1.5, 'Sliding head elongation: %.2f')
   self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
   ui.text('Oblique impact (rev48-S2): aspect = 1 + k Vt/Vn, lamella and fragments stretched downstream')
@@ -1107,6 +1118,7 @@ function R2:ui()
   self.p.baseSpread = ui.slider('##rfx2bs', self.p.baseSpread, 1, 2, 'Resting drop profile (splat rule at f): %.2f  [1 = dome; 1.3-1.5 = mid-recoil look]')
   self.p.asymK = ui.slider('##rfx2ak', self.p.asymK, 0, 0.6, 'Off-centre apex (thicker downhill / per-drop): %.2f')
   if ui.checkbox('Merge at the drawn footprint (resting spread x shape)', self.p.footPhys) then self.p.footPhys = not self.p.footPhys end
+  self.p.footPinK = ui.slider('##rfx2fpk', self.p.footPinK, 0, 1, 'Pinning by contact width across the force (Furmidge): %.2f')
   self.p.shpMergeK = ui.slider('##rfx2mk', self.p.shpMergeK, 0, 1.5, 'Merged footprint elongation: %.2f')
   self.p.shpWaist = ui.slider('##rfx2mw', self.p.shpWaist, 0, 0.45, 'Merged pair peanut waist: %.2f')
   self.p.spreadVarK = ui.slider('##rfx2svk', self.p.spreadVarK, 0, 1.5, 'Per-drop flattening (large drops, seeded): +%.2f')

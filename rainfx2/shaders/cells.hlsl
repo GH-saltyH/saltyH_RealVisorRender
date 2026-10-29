@@ -27,6 +27,7 @@ float4 main(PS_IN pin) {
     int2 c = px - int2(third * (int)gR2Cells.x, 0);
     float4 shape = float4(0, 0, r2PackHarm(0, 0), 0);
     bool bigMoved = false;
+    bool bigSplit = false;                        // rev48-S6c E8: the winner shed its tail this step
     R2ShapeAcc sacc = r2ShapeAccInit();           // rev48-S3: drops landing in one cell merge footprints
     int2 size = int2(gR2Cells);
     float4 life = float4(0, 0, 0, 0);
@@ -34,16 +35,33 @@ float4 main(PS_IN pin) {
     float2 accP = float2(0, 0);
     float2 accD = float2(0, 0);
     float bigV = 0, seed = 0;          // shape seed follows the largest contributor
-    [unroll] for (int y = -2; y <= 2; ++y) {
-        [unroll] for (int x = -2; x <= 2; ++x) {
+    // rev48-S6c: [loop] -- with the E8 split in r2Predict the unrolled 5x5 body exceeded FXC's unroll limit (X3511)
+    [loop] for (int y = -2; y <= 2; ++y) {
+        [loop] for (int x = -2; x <= 2; ++x) {
             int2 s = c + int2(x, y);
             if (any(s < int2(0, 0)) || any(s >= size)) continue;
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
-            R2Move m = r2Predict(s, st, r2Life(s));
+            float4 shs = r2Shape(s);
+            R2Move m = r2Predict(s, st, r2Life(s), shs);
+            // rev48-S6c E8: the tail piece split off by source s lands here -> a resting drop (or it merges with
+            // what is here); it is existing water: drawn at once, not swept back into its parent (life.w -5)
+            if (m.cVol > 0 && all(int2(floor(m.cDest)) == c)) {
+                float4 shC = r2ShapeMake(1.2, m.cPhi, 0.0, 0.0, 0.0, r2UnpackBF(shs.w).y);
+                float waC = r2FootW(m.cVol, shC);
+                accV += m.cVol;
+                accW += waC;
+                accP += (m.cDest - float2(c)) * waC;
+                r2ShapeAccAdd(sacc, shC, m.cVol, (m.cDest - float2(c)) * gR2CellSizeMM);
+                if (waC > bigV) {
+                    bigV = waC; seed = fmod(r2UnpackSeed(st.w) + 17.0, R2_SEEDS);
+                    float thP = atan2(-sin(m.cPhi), -cos(m.cPhi));   // direction to the parent (visor neck)
+                    life = float4(0, 0, 0, -5.0 + 0.1 * thP / 3.14159265);
+                    shape = shC; bigMoved = false; bigSplit = false;
+                }
+            }
             if (m.alive < 0.5) continue;
             if (any(int2(floor(m.dest)) != c)) continue;
-            float4 shs = r2Shape(s);
             float wa = r2FootW(m.vol, shs);
             accV += m.vol;
             accW += wa;
@@ -51,10 +69,12 @@ float4 main(PS_IN pin) {
             r2ShapeAccAdd(sacc, shs, m.vol, (m.dest - float2(c)) * gR2CellSizeMM);
             accD += (m.dest - (float2(s) + st.xy)) * m.vol;
             if (gR2Sub > 1.5) accD += r2UnpackMove(st.w) * m.vol;   // accumulate within the frame
-            if (wa > bigV) { bigV = wa; seed = r2UnpackSeed(st.w); life = m.life; shape = shs; bigMoved = m.moved > 1e-3; }
+            if (wa > bigV) { bigV = wa; seed = r2UnpackSeed(st.w); life = m.life; shape = shs; bigMoved = m.moved > 1e-3; bigSplit = m.cVol > 0; }
         }
     }
     if (third == 2 && accV > 0) shape = r2ShapeCompose(sacc, bigMoved);   // rev48-S4: moving head keeps its shape
+    // rev48-S6c E8: a parent that shed its tail is shorter (e x 0.55) and straight (the hook / bow went with it)
+    if (third == 2 && bigSplit) shape = float4(shape.xy * 0.55, shape.z, r2PackBF(0.0, r2UnpackBF(shape.w).y));
     float2 p = accW > 0 ? accP / accW : float2(0.5, 0.5);
     float2 disp = accV > 0 ? accD / accV : float2(0, 0);
 

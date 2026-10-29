@@ -163,7 +163,7 @@ void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H,
     HW += h;
 }
 
-struct R2Cand { float2 q; float r; float seed; float2 m; float k; float4 sh; float f; float fx; };
+struct R2Cand { float2 q; float r; float seed; float2 m; float k; float4 sh; float f; float fx; float ch; float2 nk; };   // S6c: child age (-1 = none), neck dir
 
 // Candidate drop of cell s (false = empty or out of reach). reachMM widens the test for D-A taps.
 bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, float wetV, out R2Cand c) {
@@ -187,7 +187,11 @@ bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, float wetV, out R2Cand 
     c.f = (splat && gR2ShpOn > 0.5 && f0 > fB) ? fB + (f0 - fB) * exp(-L.x / max(gR2ShpSpreadTau, 1e-3)) : fB;
     if (gR2ShpOn < 0.5) c.f = 1.0;
     c.fx = max(c.f - fB, 0.0);
-    float vis = splat ? 1.0 : lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
+    bool child = abs(L.w + 5.0) < 0.5 && L.y <= 0;              // rev48-S6c E8 split piece: existing water
+    c.ch = child ? L.x : -1.0;
+    float thN = (L.w + 5.0) * 31.4159265;                          // direction to the parent at the split
+    c.nk = float2(cos(thN), sin(thN));
+    float vis = (splat || child) ? 1.0 : lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
     if (L.z > 0) vis *= saturate(L.z / max(gR2FadeTime, 1e-3));
     if (L.y > 0) vis *= lerp(0.55, 1.0, saturate(L.y / max(gR2FlyTime, 1e-3)));
     // rev48-S4c (S4b review: drawn sizes larger than the water made size / collision hard to judge): the
@@ -280,6 +284,13 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     T.u2 = slide ? c.m : air.gdir;
     float kk = slide ? c.k : kSag;
     float a = dot(q, T.u2);
+    // rev48-S6c E8 neck: a fresh split piece is still drawn toward its parent (its rear stretched to the old
+    // tail), retracting over shpNeckT -- the tail necks and beads up instead of a piece popping out
+    if (c.ch >= 0.0 && c.ch < gR2ShpNeckT) {
+        T.u2 = -c.nk;
+        kk = max(kk, gR2ShpNeckK * (1.0 - c.ch / max(gR2ShpNeckT, 1e-3)));
+        a = dot(q, T.u2);
+    }
     T.s2 = a < 0.0 ? kk / (1.0 + kk) : 0.0;
     q -= T.u2 * (a * T.s2);
     // Wobble (rev20): a pinned drop in strong airflow rocks and squashes along the air before it
@@ -667,10 +678,12 @@ float4 main(PS_IN pin) {
     // rev20: dynamic loops (rev19 unrolled 25 x (1 + 4 taps) x lobes: minutes of FXC and a long
     // first-use stall in game). Only the 4 D-A taps are unrolled (static register arrays).
     int yEnd = gR2CspMode > 0.5 ? -3 : 2;                     // rev29 CSP mode: no cell lens
+    float splitMark = 0.0;
     [loop] for (int y = -2; y <= yEnd; ++y) {
         [loop] for (int x = -2; x <= 2; ++x) {
             R2Cand c;
             if (!r2Cand(c0 + int2(x, y), pc, size, reachMM, wetV, c)) continue;
+            if (c.ch >= 0.0 && c.ch < 1.5 && dot(c.q, c.q) < 1.44 * c.r * c.r) splitMark = 1.0;   // S6c highlight
             if (multi) {   // rev25: no [branch] - r2DropLens takes ddx/ddy of its lookup
                 [unroll] for (int k = 0; k < 4; ++k) r2AddDrop(c.q + dqT[k], c, air, wetFlat, Pm[k], Gm[k], RWm[k], HWm[k]);
             } else {
@@ -822,6 +835,8 @@ float4 main(PS_IN pin) {
         col = float3(cov, Fd.g, Fd.r) * gR2DebugBright;   // R = drop coverage (sharp lens edge)
         a = max(a, 0.6);
     }
+    // rev48-S6c: 'Highlight split pieces' -- E8 tail pieces younger than 1.5 s in cyan (review aid)
+    if (gR2HiSplit > 0.5 && splitMark > 0.0) { col = lerp(col, float3(0.0, 1.0, 1.0), 0.8); a = max(a, 0.85); }
     return float4(col, saturate(a));
 #endif
 }

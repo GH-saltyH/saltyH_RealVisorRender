@@ -43,6 +43,8 @@ float4 main(PS_IN pin) {
             float2 ps = float2(s) + st.xy;
             float2 as = ps - r2UnpackMove(st.w);
             float dc = min(r2SegDist(ps, am, pm), r2SegDist(pm, as, ps));   // cells, segment vs point
+            // rev48-S6c E8: a fresh split piece sits on its parent's path -- end positions only (no sweep)
+            if ((r2SplitChild(Lm) && Lm.x < 0.3) || (r2SplitChild(Ls) && Ls.x < 0.3)) dc = length(ps - pm);
             float dmm = dc * gR2CellMM;
             // rev48-S3b: footprint radii toward each other (resting spread x merged tensor = what is drawn)
             float2 dirMM = (ps - pm) * gR2CellSizeMM;
