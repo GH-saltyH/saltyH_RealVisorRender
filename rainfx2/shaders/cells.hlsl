@@ -103,6 +103,14 @@ float4 main(PS_IN pin) {
         float4 ig = r2ImpactGeom(t);                    // rev48-S2 oblique impact (Vt direction, aspect)
         float sqA = sqrt(ig.z);
         float bestV = 0.0, bestK = 1.0;              // rev48-S5 E1: K / K0 of the winning fragment's impact
+        bool bestWhole = false;                      // rev48-G B-2: the winner is the raindrop itself (sticks ~whole)
+        // rev48-G B-1 (docs/RAINFX_V2_REF_GAP_REVIEW.md section 3): an oblique, fast impact throws its secondary
+        // drops DOWNSTREAM with the tangential air (crown / prompt splash), not into a radial ring; q blends
+        // the rim ring (near-normal, slow: Vt/Vn <= 0.5) into a downstream fan (Vt/Vn >= 2).
+        float qOb = saturate((ig.w - 0.5) / 1.5);
+        float thF = atan(1.0 / max(ig.w, 1e-3)) + 0.26;   // fan half-angle: the splash cone tilted by Vt/Vn, +15 deg
+        float tanF = tan(min(thF, 1.3));
+        float wFanIn = 1.0 / clamp(thF / 3.14159265, 0.25, 1.0);   // keep the mean count: 1 / covered share
         bool swept = false;
         float2 bestP = float2(0.5, 0.5);
         [loop] for (int ey = -2; ey <= 2; ++ey) {
@@ -137,7 +145,12 @@ float4 main(PS_IN pin) {
                 // rev48-S2' (reference birth events): satellites are left where the receding rim breaks -- on the
                 // RIM of the splat footprint; the bulk (large fragments) gathers inside. Ring weight ~ mean 1.
                 float ring = smoothstep(0.55, 0.9, length(dl) / max(Rs, 1e-3));
-                pf *= dF < 0.5 * d ? lerp(0.3, 2.0, ring) : lerp(1.6, 0.4, ring);
+                float wRing = dF < 0.5 * d ? lerp(0.3, 2.0, ring) : lerp(1.6, 0.4, ring);
+                float dmA = dot(dm, ig.xy), dmC = dot(dm, float2(-ig.y, ig.x));   // from the impact point
+                float wFan = (dmA > -0.3 * gR2CellMM && abs(dmC) <= max(dmA, 0.0) * tanF + 0.5 * gR2CellMM) ? wFanIn : 0.0;
+                pf *= lerp(wRing, wFan, qOb);
+                // rev48-G B-3: secondary drops carried off by the tangential air (not re-deposited) -> haze / film
+                pf *= 1.0 - saturate(gR2SplashAirK * qOb) * (dF < 0.7 * d ? 1.0 : 0.0);
                 if (r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
                 if (0.5 * dF < gR2MinRadiusMM) continue;                             // too small: haze
                 // rev47b: no 'torn off at birth' rule -- new drops run back with the air
@@ -145,6 +158,7 @@ float4 main(PS_IN pin) {
                 if (bv > bestV) {
                     bestV = bv;
                     bestK = K / max(gR2SplashK0, 1e-3);
+                    bestWhole = dF >= 0.7 * d || K < 3.0 * gR2SplashK0;
                     bestP = float2(r2Rand(uint3(c.x, c.y, k + 202u)), r2Rand(uint3(c.x, c.y, k + 303u)));
                 }
             }
@@ -174,8 +188,15 @@ float4 main(PS_IN pin) {
                 float weN = 1000.0 * vn * vn * (2e-3 * r2RadiusMM(bestV)) / 0.072;
                 float f0 = clamp(gR2ShpSpreadMin + 0.45 * log2(max(weN / 30.0, 1.0)) * 0.5
                                  + 0.4 * r2Rand(uint3((uint)c.y, (uint)c.x, seed0 + 4141u)), gR2ShpSpreadMin, gR2ShpSpreadMax);
-                life.w = -(10.0 + f0);
-                shape = r2ShapeImpact(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t, ig, wetB, f0, bestK);   // rev48-S4 arrest
+                // rev48-G B-2: only the raindrop itself spreads as a lamella (splat f0 + recoil, torn rims); a
+                // secondary drop of a splash is born compact (S2' gave every satellite the f0 3.2 splat -> rings
+                // of C-shaped splats at speed, the 'firework' of the rev48 review)
+                if (bestWhole) {
+                    life.w = -(10.0 + f0);
+                    shape = r2ShapeImpact(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t, ig, wetB, f0, bestK);   // rev48-S4 arrest
+                } else {
+                    shape = r2ShapeImpact(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t, ig, wetB, 1.0, 1.0);
+                }
             }
             // rev48-S2 skid (newborn) / rev48-S2' PUSH (merged into an existing drop): the tangential impact
             // momentum moves the drop by its mass share; the kinetic pinning (pinKinetic) of a pushed drop near

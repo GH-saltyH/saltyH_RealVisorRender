@@ -43,7 +43,7 @@ P.DEFAULTS = {
   -- shielding), helmet radius, stagnation point elevation above the visor centre (deg, + = above ->
   -- flow over the visor runs down and out), buffeting wander of the stagnation point (deg at 250 km/h)
   aeroKU = 0.35, helmetR = 0.13,   -- rev47c 0.6 -> 0.35 (observed persistence, REV47B_REVIEW)
-  stagElevDeg = 12.0, buffetDeg = 4.0, buffetHz = 1.5,   -- rev47b 8/3 -> 4/1.5
+  stagElevDeg = 35.0, buffetDeg = 4.0, buffetHz = 1.5,   -- rev47b 8/3 -> 4/1.5; rev48-M1 stagnation 12 -> 35 deg (MOTION_REVIEW s7)
   -- rev47b runback: drops blown loose slide with the air (speed runbackK x air at the drop top, between
   -- vMax and runbackMax), lift off only above liftMM; sliding inertia slideTau; impact splash share
   -- rev47c (REV47B_REVIEW: 0.5 m/s = ~250 px per frame at the visor scale; references show visible flow of a

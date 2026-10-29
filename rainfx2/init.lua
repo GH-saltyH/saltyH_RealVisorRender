@@ -53,6 +53,7 @@ local DEFAULTS = {
   -- rev41 (rev40 review: at speed far too few visible small drops): resA 0.5 -> 0.3 (resolved share at
   -- 250 km/h 0.11 -> 0.25), resB 0.3 -> 0.4 (fragments 0.18 -> 0.12 mm)
   splashK0 = 58, resA = 0.3, resB = 0.4,
+  splashAirK = 0.0,   -- rev48-G B-3: share of oblique-splash satellites carried off by the air (0 = all re-deposit)
   -- rev21 growth of visible drops from unresolved water: haze condensation, film head drops
   nucM = 0.35, nucRate = 0.6, headMinMM = 0.08, headRate = 3.0, filmCollect = 0.3,
   -- rev21 CSP adoption: lateral kicks from surface noise (6 mm features), trail following
@@ -218,6 +219,7 @@ local function sceneValues(self, v)
   v.gR2StickSlow = p.stickSlow
   v.gR2SpeedRel = st.speedRel or p.terminalSpeed
   v.gR2SplashK0 = p.splashK0
+  v.gR2SplashAirK = p.splashAirK
   v.gR2ResA = p.resA
   v.gR2ResB = p.resB
   v.gR2NucM = p.nucM
@@ -1050,6 +1052,7 @@ function R2:ui()
   self.p.fragHi = ui.slider('##rfx2fh', self.p.fragHi, 1.0, 6.0, 'Largest new drop (x typical fragment): %.1f')
   self.p.flatK = ui.slider('##rfx2fk2', self.p.flatK, 0, 1, 'Flat top of large drops (r > 1 mm, default 0): %.2f')
   self.p.fragMax = ui.slider('##rfx2fm', self.p.fragMax, 1, 30, 'Small drops per raindrop impact (max): %.0f')
+  self.p.splashAirK = ui.slider('##rfx2sak2', self.p.splashAirK, 0, 1, 'Oblique splash: satellites carried off by the air: %.2f')
   self.p.clusterK = ui.slider('##rfx2ck', self.p.clusterK, 0, 1, 'Drop groups (clustered births): %.2f')
   self.p.shedK = ui.slider('##rfx2sh', self.p.shedK, 1.0, 5.0, 'Blow-off: air drag > %.1f x pinning')
   self.p.vMax = ui.slider('##rfx2vm', self.p.vMax, 0.005, 0.2, 'Creeping drops, top speed: %.3f m/s')
@@ -1174,7 +1177,7 @@ function R2:ui()
 end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
-local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,turbK,flatK,dropDepthUM,residenceS\n'
+local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,turbK,flatK,dropDepthUM,residenceS,stagElevDeg,nBand0,p99Band0MM,nBand1,p99Band1MM,nBand2,p99Band2MM\n'
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -1224,29 +1227,40 @@ function R2:sizesUpdate()
   self.Hc:accessData(function(err, data)
     self.sizesBusy = false
     if err or not data then self.metricsErr = tostring(err); return end
+    -- rev48-M3: also per third of the cell rows (stripes 0-4 / 5-10 / 11-15 along the visor V axis), so the
+    -- large-drop tail can be located (air-facing band vs lower / lee band)
     local c, total = {}, 0
+    local cb, tb = { {}, {}, {} }, { 0, 0, 0 }
     for x = 0, 9 do
       local n = 0
+      local nb = { 0, 0, 0 }
       for y = 0, 15 do
         data:colorTo(tmp, x, y)
-        n = n + math.floor(tmp.rgb.r * 255 + 0.5) * 256 + math.floor(tmp.rgb.g * 255 + 0.5)
+        local v = math.floor(tmp.rgb.r * 255 + 0.5) * 256 + math.floor(tmp.rgb.g * 255 + 0.5)
+        n = n + v
+        local band = y <= 4 and 1 or (y <= 10 and 2 or 3)
+        nb[band] = nb[band] + v
       end
       c[x + 1], total = n, total + n
+      for k = 1, 3 do cb[k][x + 1], tb[k] = nb[k], tb[k] + nb[k] end
     end
     data:dispose()
     local h = { counts = c, total = total }
-    local function pct(q)
-      if total <= 0 then return 0 end
-      local target, cum = q * total, 0
+    local function pctOf(cc, tot, q)
+      if tot <= 0 then return 0 end
+      local target, cum = q * tot, 0
       for k = 1, 10 do
-        if cum + c[k] >= target and c[k] > 0 then
-          return b0 * 1.5 ^ (k - 1 + (target - cum) / c[k])
+        if cum + cc[k] >= target and cc[k] > 0 then
+          return b0 * 1.5 ^ (k - 1 + (target - cum) / cc[k])
         end
-        cum = cum + c[k]
+        cum = cum + cc[k]
       end
       return b0 * 1.5 ^ 10
     end
+    local function pct(q) return pctOf(c, total, q) end
     h.p50, h.p90, h.p99 = pct(0.5), pct(0.9), pct(0.99)
+    h.band = {}
+    for k = 1, 3 do h.band[k] = { n = tb[k], p50 = pctOf(cb[k], tb[k], 0.5), p99 = pctOf(cb[k], tb[k], 0.99) } end
     -- rev47d water budget: standing drop water (bin-centre radii, cap volume shapeK r^3) as a mean depth
     -- over the visor, against the incoming rain flux -> residence time of the water as drops.
     local vol = 0
@@ -1271,14 +1285,16 @@ function R2:metricsWrite(sim)
   local s, st, si, m, d = ac.getSim(), self.stats, self.sprayInfo or {}, self.metrics, self.diag or {}
   local h = self.sizeHist or { total = 0, p50 = 0, p90 = 0, p99 = 0, ratio = 0 }
   local p50 = math.max(h.p50, 1e-6)
-  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f,%d,%.3f,%.2f,%.2f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f\n',
+  local bd = h.band or { { n = 0, p99 = 0 }, { n = 0, p99 = 0 }, { n = 0, p99 = 0 } }
+  local line = string.format('%.2f,%d,%.4f,%.4f,%.4f,%.1f,%.1f,%.4f,%.3f,%d,%.1f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.2f,%.2f,%d,%.0f,%.2f,%.1f,%.2f,%.2f,%.2f,%d,%.3f,%.2f,%.2f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.1f,%d,%.3f,%d,%.3f,%d,%.3f\n',
     os.clock(), s.weatherType or -1, s.rainIntensity or 0, s.rainWetness or 0, s.rainWater or 0,
     s.windSpeedKmh or 0, (st.carSpeed or 0) * 3.6, st.fluxMMs or 0, st.spray or 0, si.cars or 0, si.nearestM or -1,
     st.filmRate or 0, d.filmEqMM or 0, m.film, m.drops, m.haze, self.p.substeps or 0,
     self.store.apertureMM, self.store.focusM, self.store.defocusDA and 1 or 0, self.store.contactDeg,
     self.store.wfRefraction, self.store.wfSceneMip,
     self.store.filmRefract, self.store.filmVeil, self.store.scatterK,
-    h.total, h.p50, h.p90 / p50, h.p99 / p50, h.ratio, self.p.fragA, self.p.fragHi, self.p.turbK, self.p.flatK, h.depthUM or 0, h.residence or 0)
+    h.total, h.p50, h.p90 / p50, h.p99 / p50, h.ratio, self.p.fragA, self.p.fragHi, self.p.turbK, self.p.flatK, h.depthUM or 0, h.residence or 0,
+    self.p.stagElevDeg or 0, bd[1].n, bd[1].p99, bd[2].n, bd[2].p99, bd[3].n, bd[3].p99)
   local ok = pcall(function()
     local f = io.open(self.recordPath, 'a')
     if f then f:write(line); f:close() end
