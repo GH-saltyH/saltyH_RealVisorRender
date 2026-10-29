@@ -24,7 +24,7 @@ FLOAT2 = {'gR2WMSize', 'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSi
 FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos', 'gR2CamLook', 'gR2CamSide', 'gR2CamUp'}
 MATRIX = {'gR2ObjToWorld'}
 
-SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2WMap', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask']
+SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2WMap', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask', 'txR2FieldOld', 'txR2SheetK', 'txR2SheetNuc']
 VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Trail', 'txR2Scene', 'txR2WMap', 'txR2Mask']
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 
@@ -36,6 +36,9 @@ PASSES = [  # name, template, files, textures, defines
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
     ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], SCENE_TEXTURES, ''),
     ('trail', 'ui.fx', ['common.hlsl', 'trail.hlsl'], SCENE_TEXTURES, ''),
+    ('sheet', 'ui.fx', ['common.hlsl', 'sheet.hlsl'], SCENE_TEXTURES, ''),
+    ('sheetcoef', 'ui.fx', ['common.hlsl', 'sheetcoef.hlsl'], SCENE_TEXTURES, ''),
+    ('nuc', 'ui.fx', ['common.hlsl', 'nuc.hlsl'], SCENE_TEXTURES, ''),
     ('wmap', 'ui.fx', ['common.hlsl', 'wmap.hlsl'], SCENE_TEXTURES, ''),
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),

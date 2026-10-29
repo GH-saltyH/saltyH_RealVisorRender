@@ -679,6 +679,92 @@ float r2CellFilmMM(int2 c) {
             s += txR2Field.Load(int3(c * k + int2(x, y), 0)).b;
     return s * gR2FilmMaxMM / (float)(k.x * k.y);
 }
+// ---------- rev48-W1 WATER SHEET (docs/RAINFX_V2_WATER_SHEET_PLAN.md) ----------
+// With the sheet on, field B is the sheet / film height h (one water, mm / gR2FilmMaxMM). A drop that sits on
+// sheet water (h under its centre >= gR2SheetHJoin) or has grown to gR2SheetRMax hands gR2SheetAbsorbK of its
+// volume to the sheet per frame (all of it below r 0.15 mm): the field pass adds it (S_next, F_prev), the
+// merge pass of the next frame removes it from the drop (same S, F_prev = txR2FieldOld) -- exact exchange.
+// rev48-W1d NUCLEATION (docs/RAINFX_V2_WATER_SHEET_PLAN.md section 7.3): a sheet is born only from drop water --
+// where the drops of a 5x5-cell cluster are dense (coverage >= gR2SheetNucPhi, drop water depth >= sheetHJoin)
+// and an impact lamella bridges them, the nuc pass (nuc.hlsl, S_next) marks the cell; all of that drop joins
+// the sheet at once, spread over r2SheetNucRMM (the bridged puddle), so the cluster's caps overlap into one sheet.
+// NM texel of cell s: R nucleation, G drop coverage, B drop water depth, A sheet area share of the 5x5 cells (W1f).
+float4 r2SheetNucAt(int2 s) {
+    return gR2SheetOn > 0.5 ? txR2SheetNuc.Load(int3(clamp(s, int2(0, 0), int2(gR2Cells) - 1), 0)) : float4(0, 0, 0, 0);
+}
+// rev48-W1f CONNECTED SHEET (W1e review: at heavy the sheet took drops over one by one -- drop-shaped sheet blobs):
+// water is a sheet only where it covers more of the 5x5-cell window than the largest drop could
+// (gR2SheetConnA = sheetConnK * pi rMax^2 / window); a smaller patch is a drop's worth of water, not a sheet.
+bool r2SheetConnected(float4 nm) {
+    return nm.a >= gR2SheetConnA;
+}
+// rev48-W1g IMPACT-FILM REGIME (W1f review: at hurricane the exposed face stayed drops + trails): when ALL the rain
+// landing here (resolved + unresolved, x local exposure) arrives faster than unconnected water breaks up
+// (q >= sheetThinRate * sheetHJoin), successive splashes land on each other's lamellae -- the resolved share does
+// not stay as separate drops either, all of it feeds the water layer (cells: no births; field: adds it).
+float r2ImpactFilmQ(float2 t) {
+    return (gR2SheetResMMs + gR2FilmRate) * r2Exposure(t);
+}
+bool r2ImpactFilm(float2 t) {
+    return gR2SheetOn > 0.5 && r2ImpactFilmQ(t) >= gR2SheetThinRate * gR2SheetHJoin;
+}
+float r2SheetNucRMM(float r) {
+    return max(r, 1.8 * min(gR2CellSizeMM.x, gR2CellSizeMM.y));   // stays inside the field pass 5x5 cell window
+}
+float r2SheetAbsorbFrac(float4 st, float4 L, float hUnderMM, float4 nm) {
+    float k = 0.0;
+    if (gR2SheetOn > 0.5 && st.z > 0 && L.y <= 0 && L.z <= 0) {
+        float r = r2RadiusMM(st.z);
+        if (nm.r > 0.5) k = 1.0;
+        else if ((hUnderMM >= gR2SheetHJoin || r >= gR2SheetRMax) && r2SheetConnected(nm)) k = r < 0.15 ? 1.0 : gR2SheetAbsorbK;
+    }
+    return k;
+}
+int2 r2CellOfTexel(int2 f) {
+    return int2(floor((float2(f) + 0.5) / gR2FieldSize * gR2Cells));
+}
+int2 r2FieldTexelAt(float2 cellPos) {
+    return clamp(int2(floor(cellPos / gR2Cells * gR2FieldSize)), int2(0, 0), int2(gR2FieldSize) - 1);
+}
+// rev48-W1e CONTACT (W1d review: a sheet ran over drops that only blurred): water touching water merges -- the
+// sheet height a drop sees is the highest under its footprint (centre + 4 rim points), not only under its centre.
+// Field (F_prev) and merge (txR2FieldOld = the same F_prev) call it with the same texture and state.
+float r2SheetHUnder(Texture2D tx, float2 cellPos, float rMM) {
+    float2 d = rMM / gR2CellSizeMM;
+    float h = tx.Load(int3(r2FieldTexelAt(cellPos), 0)).b;
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos + float2(d.x, 0)), 0)).b);
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(d.x, 0)), 0)).b);
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos + float2(0, d.y)), 0)).b);
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(0, d.y)), 0)).b);
+    return h * gR2FilmMaxMM;
+}
+// Dewetting of THIN film only: a film already thick enough to be a sheet does not bead up (rev48-W1).
+// rev48-W1e: with the sheet on, water below the sheet threshold is unconnected splash water (micro droplets): it
+// breaks up at sheetThinRate (field pass) instead of beading into cell-volume drops of one size (W1b/W1c reviews).
+bool r2DewetFilmOK(float hC) {
+    return gR2SheetOn < 0.5 && hC >= gR2FilmBeadMM;
+}
+// rev48-W1 sheet velocity coefficients at t (world law -> field uv / s): v(h) = A h + B h^2 (h in mm),
+// air shear tau h / (2 mu) with the helmet outer flow (same u_e as r2DropVelocity, Cf = gR2FilmCf) and
+// gravity rho g_t h^2 / (3 mu).
+float4 r2SheetCoef(float2 t) {
+    float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
+    float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
+    float3 n = r2Normal(t);
+    float3 g = gR2AccelW - n * dot(gR2AccelW, n);
+    float3 ah = gR2AeroDirW;
+    float cn = -dot(n, ah);
+    float3 ue = (ah - n * dot(ah, n)) * (gR2AeroU * smoothstep(-0.1, 0.2, cn));
+    float3 tau = (0.5 * gR2RhoAir * gR2FilmCf * length(ue)) * ue;          // Pa
+    float3 vA = tau * 0.5;                                                  // m/s per mm: tau h / (2 mu)
+    float3 vB = g * (1.0 / 3.0);                                            // m/s per mm^2: rho g h^2 / (3 mu)
+    float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
+    float det = max(a * c - b * b, 1e-20);
+    float2 A = float2(c * dot(du, vA) - b * dot(dv, vA), a * dot(dv, vA) - b * dot(du, vA)) / det;
+    float2 B = float2(c * dot(du, vB) - b * dot(dv, vB), a * dot(dv, vB) - b * dot(du, vB)) / det;
+    return float4(A, B) * gR2FilmFlowK;
+}
+
 // Dewetting / pearling events of cell c this frame: pure hashes of (cell, frame), so the cells pass
 // (turns the water into a bead) and the field pass (removes the same water) always agree.
 bool r2DewetEvent(int2 c) {
@@ -803,7 +889,11 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     float hwT = 0.0;
     float hT0 = r2TrailRule(rmm, vms, wet, hwT);
     vol -= 1.3333 * hT0 * hwT * travelMM;   // rev47j/l: parabolic rivulet section (4/3) h0 hw
-    vol += (Fs.g * gR2HazeDepthMM + Fs.b * gR2FilmMaxMM * gR2FilmCollect) * 2.0 * rmm * travelMM;
+    // rev48-W1g: a drop sweeps thin water, not a sheet (W1f review: running drops ate the sheet and laid trails
+    // inside it; on a sheet the drop is what gets absorbed -- field / merge)
+    float hSweep = Fs.b * gR2FilmMaxMM;
+    if (gR2SheetOn > 0.5 && hSweep >= gR2SheetHJoin) hSweep = 0.0;
+    vol += (Fs.g * gR2HazeDepthMM + hSweep * gR2FilmCollect) * 2.0 * rmm * travelMM;
     vol -= gR2Evap * gR2Dt * R2_PI * rmm * rmm;
     // Keep the destination inside the 5x5 gather window (merged drops may sit off-cell).
     float2 dest = float2(cell) + clamp(s.xy + dc, -1.99, 2.99);

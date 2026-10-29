@@ -147,6 +147,11 @@ local DEFAULTS = {
   shpBoK = 1.2, shpTearK = 0.12,
   shpSlugTau = 0.6, shpAirK = 0.08, shpAirMax = 1.6,   -- rev48-S5 E3 slug length memory, E6 air stretch of pinned drops
   shpTailTau = 0.25, shpTailStretch = 0.2, shpHookK = 2.0, shpFrontK = 1.2, shpSnapDeg = 40.0,   -- rev48-S6 F2 turns (S6b: head hook)
+  -- rev48-W1 water sheet (docs/RAINFX_V2_WATER_SHEET_PLAN.md): off until verified (P1: physics + metrics only)
+  sheetOn = false, sheetSub = 8, sheetHJoin = 0.10, sheetFront = 0.22, sheetSmooth = 0.12, sheetAbsorbK = 0.5,
+  sheetRMax = 1.5, sheetUMax = 0.25, sheetFilmMaxMM = 2.0, sheetRecedeDeg = 50,   -- W1h: visor receding contact angle; unconnected water dewets at 2.3 (theta_r / 60)^3 /s (Cox-Voinov theta^3)
+  sheetNucPhi = 0.5, sheetConnK = 1.3, sheetRetract = 20.0,   -- W1f: connected sheet > 1.3 x largest drop footprint in 5x5 cells; rear retraction /s
+                          -- rev48-W1d: sheet nucleates from dense drop clusters (coverage) hit by an impact
   shpSplitA = 2.6, shpSplitRate = 6.0, shpSplitRMin = 0.45, shpNeckK = 1.5, shpNeckT = 0.12, hiSplit = false,   -- rev48-S6c E8 tail split (aspect, events / s, min parent radius mm)
   shpOn = true, shpBendP = 0.07, shpLobeP = 0.02, shpSagP = 0.0, shpRelaxMove = 0.12, shpRelaxStill = 10.0,   -- rev48-S5 E7 replaces the random sag class (shpSagP 0)
   shpMotionK = 0.6, shpMotionV = 0.04, shpArrest = 0.5,   -- rev48-S4 motion morph (aspect 1 + k v/V), splat arrest share
@@ -197,6 +202,13 @@ local function fragLaw(p, out)
   out.m3 = C * (hi ^ (3 - a) - lo ^ (3 - a)) / (3 - a)
   out.m1 = math.abs(1 - a) < 1e-6 and C * math.log(hi / lo) or C * (hi ^ (1 - a) - lo ^ (1 - a)) / (1 - a)
   return out
+end
+
+-- rev48-W1h: unconnected water on the visor dewets (gathers into beads, swept by drops) at a rate ~ the dewetting
+-- speed, which scales as theta_r^3 (Cox-Voinov / de Gennes); calibrated 2.3 /s at theta_r 60 deg (W1g).
+local function sheetThinRate(p)
+  local k = (p.sheetRecedeDeg or 50) / 60
+  return 2.3 * k * k * k
 end
 
 local function sceneValues(self, v)
@@ -279,10 +291,19 @@ local function sceneValues(self, v)
   v.gR2FilmCf = p.filmCf
   v.gR2FilmFlowK = p.filmFlowK
   v.gR2FilmDiffuse = p.filmDiffuse
-  v.gR2FilmMaxMM = p.filmMaxMM
+  v.gR2FilmMaxMM = p.sheetOn and p.sheetFilmMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
+  v.gR2SheetOn = p.sheetOn and 1 or 0
+  v.gR2SheetHJoin, v.gR2SheetFront, v.gR2SheetSmooth = p.sheetHJoin, p.sheetFront, p.sheetSmooth
+  v.gR2SheetAbsorbK, v.gR2SheetRMax, v.gR2SheetUMax = p.sheetAbsorbK, p.sheetRMax, p.sheetUMax
+  v.gR2SheetThinRate = sheetThinRate(p)   -- rev48-W1h: from the visor wettability
+  v.gR2SheetNucPhi = p.sheetNucPhi
+  v.gR2SheetConnA = (p.sheetConnK or 1.3) * math.pi * p.maxRadiusMM * p.maxRadiusMM / (25 * (self.cellSizeMM and self.cellSizeMM.x * self.cellSizeMM.y or 1.344))
+  v.gR2SheetRetract = p.sheetRetract
+  v.gR2SheetDt = (self.frameDt or 1 / 60) / math.max(p.sheetSub or 8, 1)
+  v.gR2SheetResMMs = ((self.stats and self.stats.fluxMMs) or 0) * ((self.stats and self.stats.stickFrac) or 0)
   v.gR2FilmRate = self.store.freezeRain and 0 or (st.filmRate or 0)
   v.gR2FilmSplashMM = st.filmSplashMM or 0.1
-  v.gR2FilmMinMM = p.filmMinMM
+  v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
   -- rev40 size mix, stagnation turbulence, size histogram
   local fl = fragLaw(p, self.frag or {})
   self.frag = fl
@@ -367,6 +388,7 @@ local function newPass(self, shader)
     async = true,
     blendMode = render.BlendMode.Opaque,
     textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2WMap = false, txR2Trail = false,
+      txR2FieldOld = false, txR2SheetK = false, txR2SheetNuc = false,   -- rev48-W1 water sheet (W1d nucleation mask)
       txR2Du = root .. 'du.dds', txR2Dv = root .. 'dv.dds', txR2Mask = self.ctx.maskPath },
     values = sceneValues(self, {}),
     shader = shader,
@@ -394,6 +416,12 @@ function R2:ensureResources()
   self.S = { canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
   self.C = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 claims')
   self.F = { canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field A'), canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field B') }
+  -- rev48-W1: sheet substeps ping-pong between the new field and this scratch (the previous field stays intact
+  -- for the merge pass of the next frame = txR2FieldOld); sheet velocity coefficients once per frame
+  self.FS = canvas(p.fieldU, p.fieldV, 1, u16, 'RainFX2 field sheet scratch')
+  self.SK = canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 sheet coef')
+  -- rev48-W1d: nucleation mask per cell (made on S_next; read by this frame's field and next frame's merge)
+  self.NM = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 sheet nucleation')
   -- rev47j trail geometry (line point / direction / half-width per field texel)
   local h16 = render.TextureFormat.R16G16B16A16.Float
   self.TG = { canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail A'), canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail B') }
@@ -415,6 +443,9 @@ function R2:ensureResources()
   self.texMM = vec2(602.0, 146.3)
   self.passCells = newPass(self, self.src.cells)
   self.passField = newPass(self, self.src.field)
+  self.passSheet = newPass(self, self.src.sheet)            -- rev48-W1
+  self.passSheetK = newPass(self, self.src.sheetcoef)
+  self.passNuc = newPass(self, self.src.nuc)               -- rev48-W1d
   self.passTrail = newPass(self, self.src.trail)
   self.passWMap = newPass(self, self.src.wmap)
   self.passClaim = newPass(self, self.src.claim)
@@ -668,7 +699,7 @@ function R2:simulate(sim)
   -- rev13: coalescence runs FIRST (on last frame's state). The merge may leave a drop
   -- centre off its cell (centroid); the P1 substeps that follow relocate it, so the visor
   -- never sees off-cell drops (rev12: drops cut by the 5x5 draw window along cell edges).
-  if p.coalesceK > 0 then
+  if p.coalesceK > 0 or p.sheetOn then   -- rev48-W1: the merge pass also removes the sheet-absorbed share
     local pk, pm = self.passClaim, self.passMerge
     pk.textures.txR2State = self.S[self.si]
     pk.textures.txR2Field = self.F[self.fi]        -- rev48-S3b: wetness for the footprint radius
@@ -676,6 +707,8 @@ function R2:simulate(sim)
     if run(self.C, pk) then
       pm.textures.txR2State = self.S[self.si]
       pm.textures.txR2Claim = self.C
+      pm.textures.txR2FieldOld = self.F[3 - self.fi]   -- rev48-W1: F_prev of last frame's field pass
+      pm.textures.txR2SheetNuc = self.NM                -- rev48-W1d: last frame's nucleation (same S)
       sceneValues(self, pm.values)
       if run(self.S[3 - self.si], pm) then self.si = 3 - self.si end
     end
@@ -704,13 +737,44 @@ function R2:simulate(sim)
     sceneValues(self, pt.values)
     pt.values.gR2Dt = self.frameDt                 -- the packed move is the whole frame's
     local trailOk = run(self.TG[3 - self.ti], pt)
+    -- rev48-W1d: sheet nucleation mask on S_next (this field pass adds, next frame's merge removes)
+    if p.sheetOn then
+      local pn = self.passNuc
+      pn.textures.txR2State = self.S[self.si]
+      pn.textures.txR2Field = self.F[self.fi]        -- W1f: sheet area share from F_prev
+      sceneValues(self, pn.values)
+      pn.values.gR2Dt = self.frameDt
+      if not run(self.NM, pn) then self.NM:clear(rgbm(0, 0, 0, 0)) end
+      self.nmDirty = true
+    elseif self.nmDirty then
+      self.NM:clear(rgbm(0, 0, 0, 0)); self.nmDirty = false
+    end
     local pf = self.passField
     pf.textures.txR2State = self.S[self.si]
     pf.textures.txR2Field = self.F[self.fi]
     pf.textures.txR2Trail = self.TG[self.ti]
+    pf.textures.txR2SheetNuc = self.NM
     sceneValues(self, pf.values)
     pf.values.gR2Dt = self.frameDt                 -- field integrates the whole frame
     if run(self.F[3 - self.fi], pf) then
+      -- rev48-W1 WATER SHEET: conservative flux substeps on the new field (B), scratch ping-pong (even count)
+      if p.sheetOn then
+        local pkc, psh = self.passSheetK, self.passSheet
+        sceneValues(self, pkc.values)
+        if run(self.SK, pkc) then
+          local nsub = math.max(2, 2 * math.floor((p.sheetSub or 8) / 2 + 0.5))
+          local a, b = self.F[3 - self.fi], self.FS
+          sceneValues(self, psh.values)
+          psh.values.gR2SheetDt = self.frameDt / nsub
+          psh.textures.txR2SheetK = self.SK
+          psh.textures.txR2SheetNuc = self.NM        -- W1f: retraction into connected sheet only
+          for _ = 1, nsub do
+            psh.textures.txR2Field = a
+            if not run(b, psh) then break end
+            a, b = b, a
+          end
+        end
+      end
       self.fi = 3 - self.fi
       if trailOk then self.ti = 3 - self.ti end
     end
@@ -844,9 +908,9 @@ function R2:drawParams(depth)
   v.gR2VeilMix = p.veilMix
   v.gR2DepthCoverage = p.depthCoverage
   v.gR2FieldSize = self.fieldSize
-  v.gR2FilmMaxMM = p.filmMaxMM
+  v.gR2FilmMaxMM = p.sheetOn and p.sheetFilmMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
   v.gR2TrailMaxMM = p.trailMaxMM
-  v.gR2FilmMinMM = p.filmMinMM
+  v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
   v.gR2FilmFullMM = p.filmFullMM
   v.gR2TrailMinMM = p.trailMinMM
   v.gR2TrailFullMM = p.trailFullMM
@@ -1113,6 +1177,21 @@ function R2:ui()
   self.p.shpNeckK = ui.slider('##rfx2nk', self.p.shpNeckK, 0, 3, 'Split piece necks toward its parent: %.2f')
   self.p.shpNeckT = ui.slider('##rfx2nt', self.p.shpNeckT, 0.02, 0.5, 'Neck retracts over: %.2f s')
   if ui.checkbox('Highlight split pieces (cyan, 1.5 s)', self.p.hiSplit) then self.p.hiSplit = not self.p.hiSplit end
+  ui.text('Water sheet (rev48-W1 P1: physics + metrics; Debug 5 shows it; not drawn as a lens yet)')
+  if ui.checkbox('Water sheet: one water for film / sheet, conservative flow', self.p.sheetOn) then self.p.sheetOn = not self.p.sheetOn end
+  self.p.sheetSub = ui.slider('##rfx2wss', self.p.sheetSub, 2, 16, 'Sheet flow substeps per frame: %.0f', true)
+  self.p.sheetUMax = ui.slider('##rfx2wum', self.p.sheetUMax, 0.02, 0.5, 'Sheet speed cap: %.2f m/s')
+  self.p.sheetHJoin = ui.slider('##rfx2wj', self.p.sheetHJoin, 0.04, 0.4, 'Sheet from (drops join it): %.2f mm')
+  self.p.sheetFront = ui.slider('##rfx2wf', self.p.sheetFront, 0.1, 0.6, 'Sheet front advances above: %.2f mm')
+  self.p.sheetAbsorbK = ui.slider('##rfx2wa', self.p.sheetAbsorbK, 0.1, 1, 'Drop joins the sheet per frame: %.2f')
+  self.p.sheetRMax = ui.slider('##rfx2wr', self.p.sheetRMax, 0.8, 1.5, 'Capped puddles above this radius become sheet: %.2f mm')
+  self.p.sheetSmooth = ui.slider('##rfx2wsm', self.p.sheetSmooth, 0, 0.24, 'Sheet surface tension smoothing: %.2f')
+  self.p.sheetRecedeDeg = ui.slider('##rfx2wtr', self.p.sheetRecedeDeg, 15, 100, 'Visor receding contact angle: %.0f deg (30 dirty, 50 used, 65 new coat, 90 repellent)')
+  ui.text(string.format('  unconnected water dewets %.2f /s -> impact film (all rain x exposure) above %.3f mm/s (now %.3f mm/s x exposure)', sheetThinRate(self.p), sheetThinRate(self.p) * self.p.sheetHJoin, ((self.stats.fluxMMs or 0) * (self.stats.stickFrac or 0)) + (self.stats.filmRate or 0)))
+  self.p.rainWindK = ui.slider('##rfx2rwk', self.p.rainWindK or 0.6, 0, 1, 'Rain drift by the wind (helmet height / shelter): %.2f')
+  self.p.sheetNucPhi = ui.slider('##rfx2wnp', self.p.sheetNucPhi, 0.2, 0.9, 'Sheet nucleates at drop coverage: %.2f')
+  self.p.sheetConnK = ui.slider('##rfx2wck', self.p.sheetConnK, 0.5, 3, 'Sheet = connected area > largest drop x %.2f')
+  self.p.sheetRetract = ui.slider('##rfx2wrt', self.p.sheetRetract, 0, 60, 'Sheet rear retracts thin water: %.0f /s')
   self.p.shpMotionK = ui.slider('##rfx2smk', self.p.shpMotionK, 0, 1.5, 'Sliding head elongation: %.2f')
   self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
   ui.text('Oblique impact (rev48-S2): aspect = 1 + k Vt/Vn, lamella and fragments stretched downstream')
@@ -1431,7 +1510,7 @@ return function(ctx)
   local dir = ctx.folder .. '/rainfx2/shaders/'
   local common = readFile(dir .. 'common.hlsl')
   local src = {}
-  for _, name in ipairs({ 'cells', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap', 'sizes' }) do
+  for _, name in ipairs({ 'cells', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'wmap', 'sizes', 'sheet', 'sheetcoef', 'nuc' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -1448,6 +1527,9 @@ return function(ctx)
       metrics = common .. '\n' .. src.metrics,
       sizes = common .. '\n' .. src.sizes,
       wmap = common .. '\n' .. src.wmap,
+      sheet = common .. '\n' .. src.sheet,
+      sheetcoef = common .. '\n' .. src.sheetcoef,
+      nuc = common .. '\n' .. src.nuc,
       visor = src.visor,
       source = src.source,
       visorDepth = '#define R2_DEPTH_ONLY 1\n' .. src.visor,

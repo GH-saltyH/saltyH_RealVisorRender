@@ -104,6 +104,9 @@ float4 main(PS_IN pin) {
         float sqA = sqrt(ig.z);
         float bestV = 0.0, bestK = 1.0;              // rev48-S5 E1: K / K0 of the winning fragment's impact
         bool bestWhole = false;                      // rev48-G B-2: the winner is the raindrop itself (sticks ~whole)
+        // rev48-W1: a raindrop landing on sheet water joins the sheet (field pass adds the resolved share)
+        bool onSheet = gR2SheetOn > 0.5 && (txR2Field.SampleLevel(samLinearClamp, t, 0).b * gR2FilmMaxMM >= gR2SheetHJoin
+                                            || r2ImpactFilm(t));   // rev48-W1g impact-film regime
         // rev48-G B-1 (docs/RAINFX_V2_REF_GAP_REVIEW.md section 3): an oblique, fast impact throws its secondary
         // drops DOWNSTREAM with the tangential air (crown / prompt splash), not into a radial ring; q blends
         // the rim ring (near-normal, slow: Vt/Vn <= 0.5) into a downstream fan (Vt/Vn >= 2).
@@ -151,7 +154,7 @@ float4 main(PS_IN pin) {
                 pf *= lerp(wRing, wFan, qOb);
                 // rev48-G B-3: secondary drops carried off by the tangential air (not re-deposited) -> haze / film
                 pf *= 1.0 - saturate(gR2SplashAirK * qOb) * (dF < 0.7 * d ? 1.0 : 0.0);
-                if (r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
+                if (onSheet || r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
                 if (0.5 * dF < gR2MinRadiusMM) continue;                             // too small: haze
                 // rev47b: no 'torn off at birth' rule -- new drops run back with the air
                 float bv = 0.5235988 * dF * dF * dF;
@@ -219,7 +222,7 @@ float4 main(PS_IN pin) {
                               r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9004u)));
         if (r2DewetEvent(c)) {
             float hC = r2CellFilmMM(c);
-            if (hC >= gR2FilmBeadMM) vBead += hC * gR2CellSizeMM.x * gR2CellSizeMM.y;
+            if (r2DewetFilmOK(hC)) vBead += hC * gR2CellSizeMM.x * gR2CellSizeMM.y;
         }
         // pearl event (per line: rate grows as the rivulet narrows); cheap reject at the highest rate first
         if (r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * 6.0 * gR2SimDt) {

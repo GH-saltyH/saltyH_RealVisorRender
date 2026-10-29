@@ -63,6 +63,8 @@ P.DEFAULTS = {
   pinMM = 4.0,              -- rev41: pinning heterogeneity feature size (smooth field, was white noise per cell)
   coalesceK = 1.0,
   windK = 1.0,              -- ambient wind reaching the visor (CSP wind ignores pits/cockpit shelter)
+  rainWindK = 0.6,          -- rev48-W1h: rain drift by the wind -- CSP wind is a reference (~10 m) speed; log law at the
+                            -- helmet (~1 m) ~0.6, less with shelter. Drops relax to the wind in vt/g ~0.6 s, so they do drift.
   -- water film W (rev11): lubrication-theory film, see P.filmVelocity
   filmCf = 0.005,           -- skin-friction coefficient of the air over the film
   filmFlowK = 1.0,          -- gain on the film velocity
@@ -137,7 +139,7 @@ function P.inputs(sim, p, out)
     out.windSource = string.format('windDirectionDeg %.0f (fallback)', sim.windDirectionDeg or 0)
   end
   local air = wind * (p.windK or 1) - carVel
-  local rainVel = vec3(0, -p.terminalSpeed, 0) + air
+  local rainVel = vec3(0, -p.terminalSpeed, 0) + wind * (p.rainWindK or 0.6) - carVel   -- W1h: own wind factor
   out.accelW, out.airW = accel, air
   out.rainVel = rainVel
   out.speedRel = rainVel:length()

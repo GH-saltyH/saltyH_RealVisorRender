@@ -17,6 +17,8 @@ float4 main(PS_IN pin) {
     float4 life = float4(0, 0, 0, 0);
     float4 me = txR2State.Load(int3(c, 0));
     float4 mc = txR2Claim.Load(int3(c, 0));
+    // rev48-W1: the share each drop handed to the water sheet last frame (field pass: same S, F_prev) leaves it
+    me.z *= 1.0 - r2SheetAbsorbFrac(me, r2Life(c), r2SheetHUnder(txR2FieldOld, float2(c) + me.xy, r2RadiusMM(me.z)), r2SheetNucAt(c));
     // rev48-S4b: position, seed, life and shape follow FOOTPRINT AREA (r2FootW), volume adds
     float accV = 0, accW = 0, bigW = 0, w = r2PackMove(float2(0, 0), 0);
     float2 accP = float2(0, 0);
@@ -28,14 +30,16 @@ float4 main(PS_IN pin) {
         accV = me.z; accW = wa; accP = me.xy * wa; bigW = wa; w = me.w; life = r2Life(c);
         r2ShapeAccAdd(sacc, shape, me.z, me.xy * gR2CellSizeMM);
     }
-    [unroll] for (int y = -2; y <= 2; ++y) {
-        [unroll] for (int x = -2; x <= 2; ++x) {
+    [loop] for (int y = -2; y <= 2; ++y) {
+        [loop] for (int x = -2; x <= 2; ++x) {
             if (x == 0 && y == 0) continue;
             int2 s = c + int2(x, y);
             if (any(s < int2(0, 0)) || any(s >= size)) continue;
             float4 cl = txR2Claim.Load(int3(s, 0));
             if (cl.z < 0.5 || any(int2(round(cl.xy)) != int2(-x, -y))) continue;
             float4 st = txR2State.Load(int3(s, 0));
+            st.z *= 1.0 - r2SheetAbsorbFrac(st, r2Life(s), r2SheetHUnder(txR2FieldOld, float2(s) + st.xy, r2RadiusMM(st.z)), r2SheetNucAt(s));
+            if (st.z <= 0) continue;
             float4 shs = r2Shape(s);
             float wa = r2FootW(st.z, shs);
             accV += st.z;

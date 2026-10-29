@@ -1,0 +1,4 @@
+heavy_highspeed  flux 0.200 mm/s: rain 1152 mm3, sheet 125, drops 3 (39), out 1024, cover 33%, mass err 2.9e-14 (rel), transition dH p50 0.270 p95 0.550 mm (n 2943) vs sheet itself p50 0.211 p95 0.688, impacts on sheet 131
+veryWet_spray    flux 0.600 mm/s: rain 3456 mm3, sheet 200, drops 2 (26), out 3254, cover 63%, mass err 3.6e-14 (rel), transition dH p50 0.244 p95 0.607 mm (n 5335) vs sheet itself p50 0.171 p95 0.508, impacts on sheet 875
+light_highspeed  flux 0.016 mm/s: rain 92 mm3, sheet 25, drops 1 (6), out 67, cover 0%, mass err 8.2e-15 (rel), transition dH p50 0.000 p95 0.000 mm (n 0) vs sheet itself p50 0.376 p95 0.613, impacts on sheet 0
+heavy_stopped    flux 0.020 mm/s: rain 115 mm3, sheet 39, drops 76 (812), out 0, cover 0%, mass err 1.6e-14 (rel), transition dH p50 0.000 p95 0.000 mm (n 0) vs sheet itself p50 0.001 p95 0.009, impacts on sheet 0

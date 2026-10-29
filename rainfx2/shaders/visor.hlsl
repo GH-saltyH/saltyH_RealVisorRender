@@ -785,9 +785,11 @@ float4 main(PS_IN pin) {
         col = float3(saturate(z / 0.15), saturate(cocPx / 40.0), cov) * gR2DebugBright;
         a = 0.85;
     } else if (gR2Debug > 4.5) {
-        // Film thickness: black 0, blue thin, cyan ~0.05 mm, white >= 0.2 mm.
-        float k = saturate(hF / 0.2);
-        col = float3(k * k, sqrt(k), saturate(hF / 0.01)) * gR2DebugBright;
+        // Film thickness (rev48-W1e): below the sheet threshold gR2FilmMinMM (= sheetHJoin with the sheet on) dim
+        // blue up to 0.6 at the threshold (unconnected micro water); a sheet green -> white at threshold + 0.3 mm.
+        float hj = max(gR2FilmMinMM, 1e-3);
+        float k = saturate((hF - hj) / 0.3);
+        col = (hF < hj ? float3(0.0, 0.12, 0.6) * saturate(hF / hj) : lerp(float3(0.0, 0.85, 0.35), float3(1, 1, 1), k)) * gR2DebugBright;
         a = 0.85;
     } else if (gR2Debug > 3.5) {
         // Physics view (sharp discs, aperture ignored). rev10: ABSOLUTE speed bins
