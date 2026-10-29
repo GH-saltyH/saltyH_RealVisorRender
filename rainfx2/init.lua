@@ -56,7 +56,8 @@ local DEFAULTS = {
   -- rev21 growth of visible drops from unresolved water: haze condensation, film head drops
   nucM = 0.35, nucRate = 0.6, headMinMM = 0.08, headRate = 3.0, filmCollect = 0.3,
   -- rev21 CSP adoption: lateral kicks from surface noise (6 mm features), trail following
-  meander = 0.35, meanderMM = 6.0, trailFollow = 1.5,
+  meander = 0.0, meanderMM = 6.0, trailFollow = 1.5,   -- rev48-S6: the 6 mm meander is replaced by the defect field (F1)
+  defMM = 1.2, defK = 5.0, defPin = 0.35,              -- rev48-S6 F1 surface defects: scale, gradient steering, stick-slip pinning
   -- sheetDrain rev14 0.5 -> 0.1: drainage dominated the film balance (eq ~ supply), now edge
   -- outflow does (eq ~ supply^(1/2..1/3)), compressing light..heavy into the cover window.
   traceDecay = 0.6, traceAmount = 0.6, sweepWidth = 0.9, sheetDrain = 0.1,
@@ -131,7 +132,21 @@ local DEFAULTS = {
   -- trail water (rule_trail; rev47j width 0.35 -> 0.5 r: reference ~1/4 of the head)
   trailThetaRDeg = 28.0, trailWetK = 0.35, trailLL = 5.0,   -- rev47l trail rule (Ca vs Ca*, docs/RAINFX_V2_TRAIL_RULES.md)
   -- rev48-S1 shape state (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 6): birth class shares, relaxation
-  shpOn = true, shpBendP = 0.07, shpLobeP = 0.05, shpSagP = 0.08, shpRelaxMove = 0.25, shpRelaxStill = 4.0,
+  shpImpactK = 0.15, shpImpactMax = 1.8,   -- rev48-S2' (birth events: splats spread nearly evenly; was 0.35 / 3)
+  baseSpread = 1.0,
+  spreadVarK = 0.5, spreadR0 = 0.15, spreadR1 = 0.8, spreadWetK = 0.3,   -- rev48-S2c per-drop resting spread
+    -- rev48-S2'b: resting drop profile = splat rule at this f (1 = rev48 dome; try 1.3-1.5)
+  shpSpreadMin = 1.8, shpSpreadMax = 3.2, shpSpreadTau = 0.12, shpLamShift = 0.15,   -- rev48-S2' splat spread / recoil
+  shpSkidK = 0.01, shpSkidMax = 0.05, shpRecoilT = 0.8,   -- rev48-S2b recoil 0.4 -> 0.8 s (60 s rest: settled drops stayed vertical ovals)
+  -- (rev48-S2 oblique impact)
+  shpMergeK = 1.0, shpWaist = 0.3,      -- rev48-S3 merged footprint (tensor gain, peanut waist of a balanced pair)
+  asymK = 0.35, asymGravR = 1.0,       -- rev48-S2d off-centre apex (strength, radius where it points downhill)
+  footPhys = true,                     -- rev48-S3b coalescence uses the drawn footprint (S4c: = the water radius x shape)
+  shpBoK = 1.2, shpTearK = 0.12,
+  shpSlugTau = 0.6, shpAirK = 0.08, shpAirMax = 1.6,   -- rev48-S5 E3 slug length memory, E6 air stretch of pinned drops
+  shpTailTau = 0.25, shpTailStretch = 0.2, shpHookK = 2.0, shpFrontK = 1.2, shpSnapDeg = 40.0,   -- rev48-S6 F2 turns (S6b: head hook)
+  shpOn = true, shpBendP = 0.07, shpLobeP = 0.02, shpSagP = 0.0, shpRelaxMove = 0.12, shpRelaxStill = 10.0,   -- rev48-S5 E7 replaces the random sag class (shpSagP 0)
+  shpMotionK = 0.6, shpMotionV = 0.04, shpArrest = 0.5,   -- rev48-S4 motion morph (aspect 1 + k v/V), splat arrest share
   trailSlopeMax = 0.45,                      -- rev47k: rivulet edge slope 2 h0 / hw <= 0.45 (~24 deg; rev47j 0.8 drew glass rods)
   trailPinMM = 0.02, trailFlowK = 1.0,       -- rev47k: rivulets deeper than this run along themselves (film law x flowK)
   wetHaze = 1.5, hazeDepthMM = 0.004,        -- wetness from haze; water depth of full haze
@@ -211,6 +226,7 @@ local function sceneValues(self, v)
   v.gR2ClearMaxMM = p.clearMaxMM
   v.gR2ClearK = p.clearK
   v.gR2Meander = p.meander
+  v.gR2DefInvMM, v.gR2DefK, v.gR2DefPin = 1.0 / math.max(p.defMM, 0.05), p.defK, p.defPin   -- rev48-S6 F1
   v.gR2TrailFollow = p.trailFollow
   if not self.meanderScale then self.meanderScale = vec2(602.0 / p.meanderMM, 146.3 / p.meanderMM) end
   v.gR2MeanderScale = self.meanderScale
@@ -295,6 +311,17 @@ local function sceneValues(self, v)
   v.gR2ShpOn = p.shpOn and 1 or 0
   v.gR2ShpBendP, v.gR2ShpLobeP, v.gR2ShpSagP = p.shpBendP, p.shpLobeP, p.shpSagP
   v.gR2ShpRelaxMove, v.gR2ShpRelaxStill = p.shpRelaxMove, p.shpRelaxStill
+  v.gR2ShpMergeK, v.gR2ShpWaist = p.shpMergeK, p.shpWaist
+  v.gR2ShpMotionK, v.gR2ShpMotionV, v.gR2ShpArrest = p.shpMotionK, p.shpMotionV, p.shpArrest
+  v.gR2ShpBoK, v.gR2ShpTearK = p.shpBoK, p.shpTearK
+  v.gR2ShpSlugTau, v.gR2ShpAirK, v.gR2ShpAirMax = p.shpSlugTau, p.shpAirK, p.shpAirMax
+  v.gR2ShpTailTau, v.gR2ShpTailStretch, v.gR2ShpHookK, v.gR2ShpSnapDeg = p.shpTailTau, p.shpTailStretch, p.shpHookK, p.shpSnapDeg   -- rev48-S6 F2
+  v.gR2FootPhys = p.footPhys and 1 or 0
+  v.gR2BaseSpread = p.baseSpread
+  v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
+  v.gR2ShpImpactK, v.gR2ShpImpactMax = p.shpImpactK, p.shpImpactMax
+  v.gR2ShpSkidK, v.gR2ShpSkidMax, v.gR2ShpRecoilT = p.shpSkidK, p.shpSkidMax, p.shpRecoilT
+  v.gR2ShpSpreadMin, v.gR2ShpSpreadMax, v.gR2ShpLamShift = p.shpSpreadMin, p.shpSpreadMax, p.shpLamShift
   v.gR2TrailThetaRDeg = p.trailThetaRDeg
   v.gR2TrailWetK = p.trailWetK
   v.gR2TrailLL = p.trailLL
@@ -638,6 +665,7 @@ function R2:simulate(sim)
   if p.coalesceK > 0 then
     local pk, pm = self.passClaim, self.passMerge
     pk.textures.txR2State = self.S[self.si]
+    pk.textures.txR2Field = self.F[self.fi]        -- rev48-S3b: wetness for the footprint radius
     sceneValues(self, pk.values)
     if run(self.C, pk) then
       pm.textures.txR2State = self.S[self.si]
@@ -739,6 +767,12 @@ function R2:drawParams(depth)
     coc(0.03), coc(0.06), coc(0.12))
   v.gR2KernelScale = p.kernelScale
   v.gR2ShpOn = p.shpOn and 1 or 0   -- rev48-S1
+  v.gR2ShpSpreadTau = p.shpSpreadTau   -- rev48-S2'
+  v.gR2BaseSpread = p.baseSpread       -- rev48-S2'b
+  v.gR2AsymK, v.gR2AsymGravR = p.asymK, p.asymGravR   -- rev48-S2d
+  v.gR2ShpFrontK = p.shpFrontK                         -- rev48-S6 F2 outer-front apex
+  v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
+  v.gR2WetHaze = p.wetHaze
   v.gR2Threshold = p.threshold
   v.gR2ContactDeg = p.contactDeg
   v.gR2ContactSpread = p.contactSpread
@@ -1050,8 +1084,44 @@ function R2:ui()
   self.p.shpBendP = ui.slider('##rfx2sb', self.p.shpBendP, 0, 0.5, 'Bent (banana / S) share at birth: %.2f')
   self.p.shpLobeP = ui.slider('##rfx2sl', self.p.shpLobeP, 0, 0.5, 'Lobed (peanut / Y) share at birth: %.2f')
   self.p.shpSagP = ui.slider('##rfx2ss', self.p.shpSagP, 0, 0.5, 'Sagging (r > 0.6 mm, along gravity) share: %.2f')
-  self.p.shpRelaxStill = ui.slider('##rfx2sr', self.p.shpRelaxStill, 0.1, 30, 'Pinned shape relaxes over: %.1f s (r >= 0.3 mm)')
-  self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding shape relaxes over: %.2f s')
+  self.p.shpRelaxStill = ui.slider('##rfx2sr', self.p.shpRelaxStill, 0.1, 60, 'Pinned shape is held for: %.1f s (r >= 0.3 mm)')
+  self.p.shpArrest = ui.slider('##rfx2sa', self.p.shpArrest, 0, 1, 'Splat arrested by pinning (kept spread share): %.2f')
+  self.p.shpBoK = ui.slider('##rfx2bo', self.p.shpBoK, 0, 3, 'Gravity sag of pinned drops (aspect 1 + k Bo): %.2f')
+  self.p.shpTearK = ui.slider('##rfx2tk', self.p.shpTearK, 0, 0.3, 'Torn rims of splashing impacts: %.2f')
+  self.p.shpSlugTau = ui.slider('##rfx2sg', self.p.shpSlugTau, 0.05, 3, 'Elongated drop keeps its length when it starts to slide: %.2f s')
+  self.p.shpAirK = ui.slider('##rfx2sak', self.p.shpAirK, 0, 0.3, 'Air stretches pinned drops (x We_air): %.2f')
+  ui.text('Flow on a rough surface (rev48-S6): defects steer the head, turns bend the drop')
+  self.p.defMM = ui.slider('##rfx2dmm', self.p.defMM, 0.3, 5, 'Surface defect size: %.2f mm')
+  self.p.defK = ui.slider('##rfx2dk', self.p.defK, 0, 15, 'Defects steer the head (zig-zag, x pinning asymmetry): %.1f')
+  self.p.defPin = ui.slider('##rfx2dp', self.p.defPin, 0, 0.8, 'Defects hold the head (stick-slip): %.2f')
+  self.p.shpTailTau = ui.slider('##rfx2tt', self.p.shpTailTau, 0.03, 1, 'Pinned tail follows a turn over: %.2f s')
+  self.p.shpTailStretch = ui.slider('##rfx2ts', self.p.shpTailStretch, 0, 0.4, 'Head-tail stretch in a turn: %.2f')
+  self.p.shpHookK = ui.slider('##rfx2ck', self.p.shpHookK, 0, 4, 'Head bends onto the new heading (hook, x tan): %.2f')
+  self.p.shpFrontK = ui.slider('##rfx2fk', self.p.shpFrontK, 0, 3, 'Thick front moves to the outer side: %.2f')
+  self.p.shpSnapDeg = ui.slider('##rfx2sd', self.p.shpSnapDeg, 10, 90, 'Tail lets go above: %.0f deg')
+  self.p.shpMotionK = ui.slider('##rfx2smk', self.p.shpMotionK, 0, 1.5, 'Sliding head elongation: %.2f')
+  self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
+  ui.text('Oblique impact (rev48-S2): aspect = 1 + k Vt/Vn, lamella and fragments stretched downstream')
+  self.p.shpImpactK = ui.slider('##rfx2ik', self.p.shpImpactK, 0, 1, 'Impact stretch k: %.2f')
+  self.p.shpImpactMax = ui.slider('##rfx2im', self.p.shpImpactMax, 1, 4, 'Impact stretch max: %.1f')
+  self.p.baseSpread = ui.slider('##rfx2bs', self.p.baseSpread, 1, 2, 'Resting drop profile (splat rule at f): %.2f  [1 = dome; 1.3-1.5 = mid-recoil look]')
+  self.p.asymK = ui.slider('##rfx2ak', self.p.asymK, 0, 0.6, 'Off-centre apex (thicker downhill / per-drop): %.2f')
+  if ui.checkbox('Merge at the drawn footprint (resting spread x shape)', self.p.footPhys) then self.p.footPhys = not self.p.footPhys end
+  self.p.shpMergeK = ui.slider('##rfx2mk', self.p.shpMergeK, 0, 1.5, 'Merged footprint elongation: %.2f')
+  self.p.shpWaist = ui.slider('##rfx2mw', self.p.shpWaist, 0, 0.45, 'Merged pair peanut waist: %.2f')
+  self.p.spreadVarK = ui.slider('##rfx2svk', self.p.spreadVarK, 0, 1.5, 'Per-drop flattening (large drops, seeded): +%.2f')
+  self.p.spreadR1 = ui.slider('##rfx2sr1', self.p.spreadR1, 0.2, 2.0, 'Full flattening from radius: %.2f mm (starts at 0.15 mm)')
+  self.p.spreadWetK = ui.slider('##rfx2swk', self.p.spreadWetK, 0, 1, 'Wet surface flattens more: x(1 + %.2f wet)')
+  if self.p.baseSpread > 1.001 then
+    local f = self.p.baseSpread
+    ui.text(string.format('  -> footprint x%.2f, contact angle %.0f deg, flat top %.2f (visual only; physics radius unchanged)',
+      f, (self.store.contactDeg or 60) / (f * math.sqrt(f)), 0.85 * math.min(f - 1, 1)))
+  end
+  self.p.shpSpreadMin = ui.slider('##rfx2sp0', self.p.shpSpreadMin, 1, 4, 'Impact splat spread min (x final radius): %.2f')
+  self.p.shpSpreadMax = ui.slider('##rfx2sp1', self.p.shpSpreadMax, 1, 5, 'Impact splat spread max: %.2f')
+  self.p.shpSpreadTau = ui.slider('##rfx2spt', self.p.shpSpreadTau, 0.02, 0.6, 'Splat recoil time constant: %.2f s')
+  self.p.shpRecoilT = ui.slider('##rfx2rt', self.p.shpRecoilT, 0, 2, 'Impact splat recoil window: %.2f s (relaxes like a sliding drop)')
+  self.p.shpSkidMax = ui.slider('##rfx2sk', self.p.shpSkidMax, 0, 0.15, 'Skid after impact, max: %.3f m/s')
   ui.separator()
   ui.text('Defocus (final step, off by default)')
   s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')

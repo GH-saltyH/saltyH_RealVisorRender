@@ -37,6 +37,16 @@ float r2VisorRadiusMM(float v) {
     return v > 0 ? exp2(log2(v / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
 }
 float r2VisorSeed(float w) { return floor(w / 262144.0); }    // = r2UnpackSeed (rev40: 64 seeds)
+float2 r2UnpackBF(float w) {                                     // = common.hlsl (rev48-S4 bend + resting spread)
+    if (w >= 0.0) return float2(w, 1.0);
+    float v = -w - 1.0;
+    float qr = floor(v / 4096.0);
+    float qb = qr - 1024.0 * floor(qr / 1024.0);                 // rev48-S6b: bend mode above
+    return float2((qb - 500.0) / 250.0, 1.0 + (v - qr * 4096.0) / 1000.0);
+}
+float r2UnpackBMode(float w) {                                   // = common.hlsl (0 bow, 1 / 2 hook at the +u1 / -u1 end)
+    return w >= 0.0 ? 0.0 : floor(floor((-w - 1.0) / 4096.0) / 1024.0);
+}
 float2 r2UnpackHarm(float z) {                                   // = common.hlsl (rev48-S1 shape state)
     float hi = floor(z / 2048.0);
     return float2(hi / 1000.0 - 0.5, (z - hi * 2048.0) / 2000.0);
@@ -121,7 +131,11 @@ struct R2Shape { float2 u1; float s1; float2 u2; float s2; float2 u3; float s3; 
 // rev48-S1 contour harmonics H = (a2, a3, a3 phase): the kernel radius is modulated by
 // 1 + a2 cos 2psi + a3 cos 3(psi - phase), psi measured from the drop's major axis hu (a2 > 0.2 pinches a
 // peanut waist across it, a3 > 0.1 gives a Y / triangle). No atan2: multiple-angle polynomials.
-void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H, float2 hu,
+// rev48-S2d ASYMMETRIC CAP AS = (apex direction xy, strength k): the shading height is h (1 - k d),
+// d = q.a / Rk -- the same footprint (coverage uses h), but the apex sits off-centre toward -a: a real
+// drop on an inclined, hysteretic surface is thicker downhill and thinner uphill, and every drop's
+// pinning history differs (S2c review: 'all drops are the same dome with the same shading').
+void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H, float2 hu, float3 AS,
               inout float P, inout float2 G, inout float2 RW, inout float HW) {
     float dR = 1.0;
     if (abs(H.x) + H.y > 1e-3) {
@@ -136,6 +150,10 @@ void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H,
     float h = 1.0 - (1.0 - beta) * x - beta * x * x;
     if (h <= 0.0) return;
     float2 g = (-2.0 * ik * (1.0 - beta + 2.0 * beta * x)) * q;
+    if (AS.z > 1e-3) {
+        float d = dot(q, AS.xy) / max(Rk * dR, 1e-5);
+        g = g * (1.0 - AS.z * d) - AS.xy * (h * AS.z / max(Rk * dR, 1e-5));
+    }
     g -= T.u3 * (dot(T.u3, g) * T.s3);
     g -= T.u2 * (dot(T.u2, g) * T.s2);
     g -= T.u1 * (dot(T.u1, g) * T.s1);
@@ -145,10 +163,10 @@ void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H,
     HW += h;
 }
 
-struct R2Cand { float2 q; float r; float seed; float2 m; float k; float4 sh; };
+struct R2Cand { float2 q; float r; float seed; float2 m; float k; float4 sh; float f; float fx; };
 
 // Candidate drop of cell s (false = empty or out of reach). reachMM widens the test for D-A taps.
-bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
+bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, float wetV, out R2Cand c) {
     c = (R2Cand)0;
     if (any(s < int2(0, 0)) || any(s >= size)) return false;
     float4 st = txR2State.Load(int3(s, 0));
@@ -156,17 +174,34 @@ bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
     c.r = max(r2VisorRadiusMM(st.z), gR2MinDrawMM);
     // rev45 life cycle (right half of the state texture): grow in, fade out, flight streak
     float4 L = txR2State.Load(int3(s + int2(size.x, 0), 0));
-    float vis = lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
+    // rev48-S2' impact SPREAD (life.w = -(10 + f0), cells): the newborn is a thin splat f x its final
+    // radius, recoiling f = 1 + (f0 - 1) exp(-age / tau); it replaces the grow-in of other births.
+    // rev48-S4: the drop's own remembered flatness fS (shape state, set by its birth / arrest / merge, held
+    // while pinned, morphed while moving) -- rev48-S2c hashed it from the cell index, which re-rolled a moving
+    // drop's look at every cell crossing (S3b review: 1-frame flashes). A splat recoils from f0 to fS.
+    float4 shS = txR2State.Load(int3(s + int2(2 * size.x, 0), 0));
+    float2 bfS = r2UnpackBF(shS.w);
+    float fB = max(max(bfS.y, gR2BaseSpread), 1.0);
+    bool splat = L.w < -9.5 && L.y <= 0;
+    float f0 = -L.w - 10.0;
+    c.f = (splat && gR2ShpOn > 0.5 && f0 > fB) ? fB + (f0 - fB) * exp(-L.x / max(gR2ShpSpreadTau, 1e-3)) : fB;
+    if (gR2ShpOn < 0.5) c.f = 1.0;
+    c.fx = max(c.f - fB, 0.0);
+    float vis = splat ? 1.0 : lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
     if (L.z > 0) vis *= saturate(L.z / max(gR2FadeTime, 1e-3));
     if (L.y > 0) vis *= lerp(0.55, 1.0, saturate(L.y / max(gR2FlyTime, 1e-3)));
-    c.r *= vis;
+    // rev48-S4c (S4b review: drawn sizes larger than the water made size / collision hard to judge): the
+    // resting flatness f only shapes the PROFILE (contact angle / f^1.5, flat top) inside the drop's own
+    // footprint; only the transient impact splat (same water spread thin, < 0.3 s) is wider than r.
+    c.r *= vis * (c.f / fB);
     c.q = (pc - (float2(s) + st.xy)) * gR2CellSizeMM;
-    float shE = length(txR2State.Load(int3(s + int2(2 * size.x, 0), 0)).xy);
+    float shE = length(shS.xy);
     float shA = sqrt((0.5 + shE) / max(0.5 - shE, 0.05));                 // rev48-S1: aspect widens the reach
-    float reach = 1.3 * gR2KernelScale * c.r * sqrt(shA) * 1.35 * (L.y > 0 ? 1.0 + gR2FlyStretch : 1.0) + reachMM;
+    float reach = 1.3 * gR2KernelScale * c.r * sqrt(shA) * 1.35 * (L.y > 0 ? 1.0 + gR2FlyStretch : 1.0) + reachMM
+                + 0.5 * c.r * (1.0 - fB / c.f);                           // splat centre shifted upstream
     if (dot(c.q, c.q) > reach * reach) return false;
     c.seed = r2VisorSeed(st.w);
-    c.sh = txR2State.Load(int3(s + int2(2 * size.x, 0), 0));   // rev48-S1 shape state
+    c.sh = shS;                                                // rev48-S1 shape state
     float2 mv = r2VisorMove(st.w) * gR2CellSizeMM;            // mm in the last frame
     float ml = length(mv);
     c.m = ml > 1e-4 ? mv / ml : float2(0, 0);
@@ -176,6 +211,16 @@ bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, out R2Cand c) {
         c.m = normalize(float2(cos(L.w), sin(L.w)) * gR2CellSizeMM);
         c.k = gR2FlyStretch;
     }
+    // rev48-S3b (rev48_S3 recording: big splats / merged drops showed straight cut edges and 'tick' notches):
+    // a drop is only drawn by pixels within +-2 cells of its own cell, so its whole kernel (aspect, contour
+    // modes, bend, motion stretch, splat shift) must fit 2 cells (~2.3 mm). Larger visuals are scaled down to
+    // that window instead of being cut; the physics footprint uses the same cap (common r2FootRadiusMM).
+    float2 hmC = r2UnpackHarm(c.sh.z);
+    float hF = min(1.0 + (max(hmC.x, 0.0) + hmC.y) * (1.0 + 2.0 * c.fx) + 0.1 * c.fx, 1.7);
+    float ext = gR2KernelScale * c.r * sqrt(shA) * hF * (1.0 + c.k) + 0.5 * c.r * c.fx / c.f
+              + abs(bfS.x) * gR2KernelScale * c.r / sqrt(shA);
+    float lWin = 2.0 * min(gR2CellSizeMM.x, gR2CellSizeMM.y) - 0.05;
+    if (ext > lWin) c.r *= lWin / ext;
     return true;
 }
 
@@ -196,6 +241,13 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     float shE = length(c.sh.xy);
     float shA = sqrt((0.5 + shE) / max(0.5 - shE, 0.05));
     float2 hm = r2UnpackHarm(c.sh.z);
+    // rev48-S2' splat: its footprint sits UPSTREAM of the final drop (the rim recedes toward the downstream
+    // end, where the drop gathers), contour modes grow with the spread (rings / torn branches)
+    if (c.fx > 1e-3) {
+        float2 down = dot(c.m, c.m) > 0.5 ? c.m : air.gdir;
+        q += down * (0.5 * c.r * c.fx / c.f);
+        hm = float2(clamp(hm.x * (1.0 + 2.0 * c.fx) + 0.06 * c.fx, -0.45, 0.45), min(hm.y * (1.0 + 2.0 * c.fx) + 0.04 * c.fx, 0.3));
+    }
     float sphi = 0.5 * atan2(c.sh.y, c.sh.x);
     float rk0 = gR2KernelScale * c.r;
     float rkS = rk0;
@@ -207,7 +259,10 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
         // bend: the major-axis ends move across by bend x minor half-length (parabola along the axis)
         float2 vv = float2(-T.u1.y, T.u1.x);
         float aa = dot(q, T.u1) / max(rk0 * sqrt(shA), 1e-4);
-        q -= vv * (c.sh.w * rkS * aa * aa);
+        // rev48-S6b: a turning slide is a HOOK -- only the head half (mode 1: +u1 end, 2: -u1 end) bends
+        float bmd = r2UnpackBMode(c.sh.w);
+        float ah = bmd < 0.5 ? aa : (bmd < 1.5 ? max(aa, 0.0) : max(-aa, 0.0));
+        q -= vv * (r2UnpackBF(c.sh.w).x * rkS * ah * ah);
         q -= T.u1 * (dot(q, T.u1) * T.s1);
         H = float3(hm.x, hm.y, h1 * 6.2831853);
     } else {
@@ -242,9 +297,28 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     float th = gR2ContactDeg + gR2ContactSpread * (2.0 * h2 - 1.0);
     th -= gR2Hysteresis * (a < 0.0 ? saturate(c.k / max(gR2MotionStretch, 1e-3)) : 0.0);
     th *= 1.0 - wetFlat;
-    float sth = sin(radians(clamp(th, 5.0, 89.0)));
+    // rev48-S2' splat: a spreading lamella is a thin sheet with its mass in a thick RIM (reference: bright flat
+    // interior, dark crisp outline). S2'a: rim angle theta / f^1.5 (rev S2' f^3 flattened the rim away too)
+    // and a flat-top profile (beta -> 0.85) so the interior stays flat while the edge refracts.
+    th /= c.f * sqrt(c.f);
+    float sth = sin(radians(clamp(th, 4.0, 89.0)));
     float beta = gR2FlatK * saturate((c.r - gR2FlatStartMM) / max(gR2FlatFullMM - gR2FlatStartMM, 1e-3));
-    r2Kernel(q, rkS, float2(rkS / gR2KernelScale, sth), beta, T, H, T.u1, P, G, RW, HW);
+    beta = max(beta, 0.85 * saturate(c.f - 1.0));
+    // rev48-S2d apex offset: downhill (gravity) for large drops, a per-drop direction for small ones
+    float2 rd = float2(cos(h2 * 6.2831853 + 1.3), sin(h2 * 6.2831853 + 1.3));
+    float2 ad = lerp(rd, air.gdir, saturate(c.r * c.r / max(gR2AsymGravR * gR2AsymGravR, 1e-4)));
+    // rev48-S4: a sliding drop is a HEAD -- thick at the front, thinning into its tail (teardrop stretch)
+    if (dot(c.m, c.m) > 0.5) {
+        float km = saturate(c.k / max(gR2MotionStretch, 1e-3));
+        ad = lerp(ad, c.m, km);
+        // rev48-S6 F2: in a turn the advancing front is compressed on the OUTER side (S6b: the hooked head tip
+        // sits on the inner side +vv sign(bend)) -> the thick apex moves to the outer front
+        float bnd = gR2ShpOn > 0.5 ? r2UnpackBF(c.sh.w).x : 0.0;
+        ad -= float2(-T.u1.y, T.u1.x) * (sign(bnd) * min(gR2ShpFrontK * abs(bnd), 1.5) * km);
+    }
+    ad = dot(ad, ad) > 1e-6 ? normalize(ad) : float2(0, 1);
+    float3 AS = float3(-ad, gR2AsymK * (0.35 + 0.65 * frac(c.seed * 0.6180339887 + 0.55)));
+    r2Kernel(q, rkS, float2(rkS / gR2KernelScale, sth), beta, T, H, T.u1, AS, P, G, RW, HW);
 }
 
 // rev47j RIVULET KERNEL (rev47i review + reference frames: a sliding large drop leaves a thin, sharp,
@@ -293,7 +367,7 @@ void r2AddTrail(R2Trail tr, float2 dq, inout float P, inout float2 G, inout floa
     float2 q = tr.q + (dq - tr.tau * dot(dq, tr.tau));
     R2Shape T;
     T.u1 = float2(1, 0); T.s1 = 0; T.u2 = float2(1, 0); T.s2 = 0; T.u3 = float2(1, 0); T.s3 = 0;
-    r2Kernel(q, gR2KernelScale * tr.hw, float2(tr.hw, tr.sth), 0.0, T, float3(0, 0, 0), float2(1, 0), P, G, RW, HW);
+    r2Kernel(q, gR2KernelScale * tr.hw, float2(tr.hw, tr.sth), 0.0, T, float3(0, 0, 0), float2(1, 0), float3(0, 0, 0), P, G, RW, HW);
 }
 
 // rev24 view context for the physical lens: eye ray, outward visor normal, world vectors of one mm
@@ -510,6 +584,8 @@ float4 main(PS_IN pin) {
     float2 sp = pin.PosH.xy * gR2InvRT;
     float aspect = gR2InvRT.x / max(gR2InvRT.y, 1e-9);    // H / W
     float4 Fd = txR2Field.SampleLevel(samLinearClamp, t, 0);
+    // rev48-S2c local wetness (haze + film + trail water) for the per-drop resting spread
+    float wetV = saturate(Fd.g * gR2WetHaze + (Fd.b * gR2FilmMaxMM + Fd.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
 
     // ---- water film (sheet W, field B): a thin refracting, scattering layer ----
     // rev13: thickness and its gradient from a cubic B-spline over 4x4 field texels (C2, no
@@ -594,7 +670,7 @@ float4 main(PS_IN pin) {
     [loop] for (int y = -2; y <= yEnd; ++y) {
         [loop] for (int x = -2; x <= 2; ++x) {
             R2Cand c;
-            if (!r2Cand(c0 + int2(x, y), pc, size, reachMM, c)) continue;
+            if (!r2Cand(c0 + int2(x, y), pc, size, reachMM, wetV, c)) continue;
             if (multi) {   // rev25: no [branch] - r2DropLens takes ddx/ddy of its lookup
                 [unroll] for (int k = 0; k < 4; ++k) r2AddDrop(c.q + dqT[k], c, air, wetFlat, Pm[k], Gm[k], RWm[k], HWm[k]);
             } else {

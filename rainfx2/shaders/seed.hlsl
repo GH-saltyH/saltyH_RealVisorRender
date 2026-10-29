@@ -30,7 +30,7 @@ float4 main(PS_IN pin) {
             float2 q = float2(r2Rand(uint3(u.x, u.y, k * 5u + 3u)), r2Rand(uint3(u.x, u.y, k * 5u + 4u))) * 0.999;
             float sd = floor(r2Rand(uint3(u.y, u.x, k * 5u + 5u)) * R2_SEEDS);
             res = float4(q, gR2ShapeK * rr * rr * rr, r2PackMove(float2(0, 0), sd));
-            if (shapeThird) res = r2ShapeBirth(u, k * 5u + 77u, rr, t);
+            if (shapeThird) res = r2ShapeBirth(u, k * 5u + 77u, rr, t, 0.0);
         }
     } else if (u.x % 6u == 3u && u.y % 6u == 3u && valid) {
         float band = floor(saturate(t.x) * 8.0) / 7.0;

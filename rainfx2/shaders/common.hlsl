@@ -95,6 +95,11 @@ float r2VNoise(float2 p) {
     return lerp(lerp(r2Hash21(i), r2Hash21(i + float2(1, 0)), f.x),
                 lerp(r2Hash21(i + float2(0, 1)), r2Hash21(i + float2(1, 1)), f.x), f.y);
 }
+// rev48-S6 F1 SURFACE DEFECTS (docs/RAINFX_V2_SHAPE_STATE_PLAN.md sections 18-20; stick-slip on heterogeneous
+// coatings, Varagnolo et al. PRL 2013): a static field D in [0, 1] on the visor (features of defMM, mm space).
+float r2Defect(float2 pMM) {
+    return r2VNoise(pMM * gR2DefInvMM + float2(31.7, 11.3));
+}
 
 // rev40 stagnation turbulence (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md step 2). Driving straight,
 // the air meets the visor centre along the normal: the mean tangential air is ~0 there and small
@@ -214,19 +219,24 @@ float2 r2FilmVelocity(float2 t, float hMM) {
 // rev41 (rev40 review: "lightning" zig-zag at 100-300 km/h): the turn is SMOOTH noise (rev21 used
 // sign kicks -> abrupt +-19 deg switches every few mm), both terms scale with drive = Fpin/|F|
 // (strongly driven drops run straight), and the total turn is capped at 0.5 (27 deg).
-float2 r2Steer(float2 t, float2 vt, float drive) {
+// rev48-S6b F1: + the defect asymmetry across the HEAD. defSteer (mm-space vector, from r2Predict) points to
+// the weaker side with length defK defPin |D_left - D_right| / sqrt(max(1, 2r / defMM)): the lateral share of
+// the pinning force over the drive (x drive below), a wide contact line averaging more defects.
+// rev48-S6 used defK 2 r (grad D . side): |lat| 5-18 -> the +-0.5 clamp was hit ~80 % of the time and the
+// heading jumped +-27 deg at every defect (rev48_S6 review: exaggerated weaving).
+float2 r2Steer(float2 t, float2 vt, float drive, float2 defSteer) {
     float2 texMM = gR2CellSizeMM * gR2Cells;
     float2 vm = vt * texMM;                                   // mm/s on the visor
     float sp = length(vm);
     float2 res = vt;
-    if (sp > 1e-3 && (gR2Meander > 0 || gR2TrailFollow > 0)) {
+    if (sp > 1e-3 && (gR2Meander > 0 || gR2TrailFollow > 0 || gR2DefK > 0)) {
         float2 dir = vm / sp;
         float2 side = float2(-dir.y, dir.x);
-        float nz = r2VNoise(t * gR2MeanderScale) * 2.0 - 1.0;
+        float nz = gR2Meander > 0 ? r2VNoise(t * gR2MeanderScale) * 2.0 - 1.0 : 0.0;
         float2 ahead = t + dir * (1.5 / texMM);
         float tl = txR2Field.SampleLevel(samLinearClamp, ahead + side * (1.0 / texMM), 0).r;
         float tr = txR2Field.SampleLevel(samLinearClamp, ahead - side * (1.0 / texMM), 0).r;
-        float lat = clamp((gR2Meander * nz + gR2TrailFollow * (tl - tr)) * saturate(drive), -0.5, 0.5);
+        float lat = clamp((gR2Meander * nz + dot(defSteer, side) + gR2TrailFollow * (tl - tr)) * saturate(drive), -0.5, 0.5);
         res = normalize(dir + side * lat) * sp / texMM;
     }
     return res;
@@ -248,6 +258,7 @@ float4 r2Life(int2 s) {
 //          M = I/2 + [[m1, m2], [m2, -m1]] -> aspect A = sqrt((0.5 + e) / (0.5 - e)), major axis phi (visor mm)
 //   z    = packed contour harmonics: a2 (along the major axis; > 0.2 = peanut waist), a3 (Y / triangle)
 //   w    = bend (offset of the major-axis ends across, x minor half-length; banana / S along a path)
+//          rev48-S4: packed with the drop's own resting spread f (flatness memory), r2PackBF; w >= 0 = legacy bend
 // One analytic kernel draws round, oval, sagging, bent, lobed drops from these 4 numbers (visor r2AddDrop).
 float4 r2Shape(int2 s) {
     return txR2State.Load(int3(s + int2(2 * (int)gR2Cells.x, 0), 0));
@@ -259,10 +270,36 @@ float2 r2UnpackHarm(float z) {
     float hi = floor(z / 2048.0);
     return float2(hi / 1000.0 - 0.5, (z - hi * 2048.0) / 2000.0);
 }
-float4 r2ShapeMake(float A, float phi, float a2, float a3, float bend) {
+// rev48-S4 bend + resting spread in one fp32: w = -(1 + qb 4096 + qf), qb = bend 250 + 500, qf = (f - 1) 1000
+// rev48-S6b bend MODE (+1024 x mode on the bend code, < 2^24): 0 = symmetric bow (births, merges: banana / S),
+// 1 = HOOK at the +u1 end, 2 = hook at the -u1 end (a turning slide: the head half bends onto the new heading,
+// the tail half stays on the old path).
+float r2PackBFM(float bend, float f, float mode) {
+    return -(1.0 + (round(clamp(bend, -2.0, 2.0) * 250.0 + 500.0) + 1024.0 * mode) * 4096.0 + round(clamp(f - 1.0, 0.0, 3.0) * 1000.0));
+}
+float r2PackBF(float bend, float f) {
+    return r2PackBFM(bend, f, 0.0);
+}
+float r2UnpackBMode(float w) {
+    return w >= 0.0 ? 0.0 : floor(floor((-w - 1.0) / 4096.0) / 1024.0);
+}
+float2 r2UnpackBF(float w) {
+    if (w >= 0.0) return float2(w, 1.0);                 // legacy (rev48-S1..S3b): bend only
+    float v = -w - 1.0;
+    float qr = floor(v / 4096.0);
+    float qb = qr - 1024.0 * floor(qr / 1024.0);
+    return float2((qb - 500.0) / 250.0, 1.0 + (v - qr * 4096.0) / 1000.0);
+}
+// rev48-S2c rule, now evaluated ONCE per drop (birth / equilibrium) with a per-drop hash h instead of the
+// cell index (S3b review: the cell-index hash re-rolled a moving drop's flatness at every cell crossing).
+float r2RestEq(float rmm, float h, float wet) {
+    return max(gR2BaseSpread, 1.0) + gR2SpreadVarK * smoothstep(gR2SpreadR0, gR2SpreadR1, rmm)
+         * (0.35 + 0.65 * h) * (1.0 + gR2SpreadWetK * wet);
+}
+float4 r2ShapeMake(float A, float phi, float a2, float a3, float bend, float f) {
     float A2 = A * A;
     float e = min(0.5 * (A2 - 1.0) / (A2 + 1.0), 0.45);
-    return float4(e * cos(2.0 * phi), e * sin(2.0 * phi), r2PackHarm(a2, a3), bend);
+    return float4(e * cos(2.0 * phi), e * sin(2.0 * phi), r2PackHarm(a2, a3), r2PackBF(bend, f));
 }
 // Tangential gravity direction at t in visor mm (for sagging births).
 float2 r2GravDirMM(float2 t) {
@@ -276,11 +313,40 @@ float2 r2GravDirMM(float2 t) {
     float2 mm = uv * gR2CellSizeMM * gR2Cells;
     return dot(mm, mm) > 1e-12 ? normalize(mm) : float2(0, 1);
 }
+// rev48-S5 E7: tangential gravity at t -- (direction in visor mm, |g_t| / 9.81)
+float3 r2GravInfo(float2 t) {
+    float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
+    float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
+    float3 n = r2Normal(t);
+    float3 g = gR2AccelW - n * dot(gR2AccelW, n);
+    float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
+    float det = max(a * c - b * b, 1e-20);
+    float2 uv = float2(c * dot(du, g) - b * dot(dv, g), a * dot(dv, g) - b * dot(du, g)) / det;
+    float2 mm = uv * gR2CellSizeMM * gR2Cells;
+    return float3(dot(mm, mm) > 1e-12 ? normalize(mm) : float2(0, 1), length(g) / 9.81);
+}
+// rev48-S5 E6: the helmet air at a drop's top (same law as r2DropVelocity) -- (direction in visor mm, u_top m/s)
+float3 r2AirTopInfo(float2 t, float rmm) {
+    float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
+    float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
+    float3 n = r2Normal(t);
+    float3 ah = gR2AeroDirW;
+    float cn = -dot(n, ah);
+    float3 ue = (ah - n * dot(ah, n)) * (gR2AeroU * smoothstep(-0.1, 0.2, cn));
+    float xb = 0.6 * rmm / max(gR2BLDeltaMM, 1e-3);
+    float3 air = ue * (xb < 1.0 ? xb * (2.0 - xb) : 1.0);
+    float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
+    float det = max(a * c - b * b, 1e-20);
+    float2 uv = float2(c * dot(du, air) - b * dot(dv, air), a * dot(dv, air) - b * dot(du, air)) / det;
+    float2 mm = uv * gR2CellSizeMM * gR2Cells;
+    return float3(dot(mm, mm) > 1e-12 ? normalize(mm) : float2(1, 0), length(air));
+}
 // S1 birth shape: classes sampled with the reference frequencies (SHAPE_STATE_PLAN section 6):
 // bent (banana / S) gR2ShpBendP, lobed (peanut / Y) gR2ShpLobeP, sagging (r > 0.6 mm, along gravity)
 // gR2ShpSagP, else round / weak oval (aspect 1-1.4). S2 replaces the random class by the impact physics.
-float4 r2ShapeBirth(uint2 c, uint k, float rmm, float2 t) {
+float4 r2ShapeBirth(uint2 c, uint k, float rmm, float2 t, float wet) {
     if (gR2ShpOn < 0.5) return float4(0, 0, r2PackHarm(0, 0), 0);
+    float fEq = r2RestEq(rmm, r2Rand(uint3(c.x, c.y, k + 35u)), wet);
     float u = r2Rand(uint3(c.x, c.y, k + 31u)), u2 = r2Rand(uint3(c.y, c.x, k + 32u));
     float u3 = r2Rand(uint3(c.x, c.y, k + 33u)), u4 = r2Rand(uint3(c.y, c.x, k + 34u));
     float phi = 3.14159265 * u2;
@@ -296,15 +362,222 @@ float4 r2ShapeBirth(uint2 c, uint k, float rmm, float2 t) {
         phi = atan2(gd.y, gd.x);
         A = lerp(1.25, 1.7, u3); a2 = 0.05; a3 = 0.06 * u4;
     }
-    return r2ShapeMake(A, phi, a2, a3, bend);
+    return r2ShapeMake(A, phi, a2, a3, bend, fEq);
 }
-// Relaxation toward round: fast while sliding or for small drops, slow for large pinned ones
-// (contact-line pinning holds a footprint). Higher contour modes relax faster (~ k).
-float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt) {
-    float tau = moving ? gR2ShpRelaxMove : 0.05 + gR2ShpRelaxStill * saturate(rmm * rmm / 0.09);
-    float k = exp(-dt / max(tau, 1e-3));
-    float2 h = r2UnpackHarm(sh.z);
-    return float4(sh.xy * k, r2PackHarm(h.x * k * k, h.y * k * k * k), sh.w * k);
+// rev48-S2 OBLIQUE IMPACT geometry at t (docs/RAINFX_V2_SHAPE_STATE_PLAN.md sections 2-3): the relative
+// rain velocity splits into the normal part Vn (spreading, splash) and the tangential part Vt, which
+// stretches the lamella DOWNSTREAM. Returns (unit Vt direction in visor mm, aspect A, Vt / Vn).
+//   A = min(1 + shpImpactK Vt / Vn, shpImpactMax): at rest on a near-vertical visor (incidence 70-85 deg,
+//   Vt/Vn 3-10) A -> 3 along the fall; at speed (10-25 deg) A ~ 1.1.
+float4 r2ImpactGeom(float2 t) {
+    float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
+    float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
+    float3 n = r2Normal(t) * gR2NormalSign;
+    float3 v = gR2RainDirW * gR2SpeedRel;
+    float vn = max(dot(v, -n), 0.05 * gR2SpeedRel + 1e-3);
+    float3 vt = v - n * dot(v, n);
+    float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
+    float det = max(a * c - b * b, 1e-20);
+    float2 uv = float2(c * dot(du, vt) - b * dot(dv, vt), a * dot(dv, vt) - b * dot(du, vt)) / det;
+    float2 mm = uv * gR2CellSizeMM * gR2Cells;
+    float ratio = length(vt) / vn;
+    float2 dir = dot(mm, mm) > 1e-12 ? normalize(mm) : float2(0, 1);
+    return float4(dir, min(1.0 + gR2ShpImpactK * ratio, gR2ShpImpactMax), ratio);
+}
+// Impact birth shape: elongated along Vt (aspect between 0.6 and 1 of the lamella's), weak contour modes
+// (fingers relax or detach as satellites); a share keeps the S1 bent / lobed classes until S3 forms them.
+// rev48-S4 ARREST (user: the mid-recoil splat frames are the best drops -- keep such states): the receding rim
+// of a splat is stopped by pinning somewhere between the full spread f0 and the drop's equilibrium; the
+// arrested fraction a = shpArrest u^2 sets the drop's remembered flatness f, its kept oblique aspect and its
+// kept contour irregularity. The visor recoils from f0 to this f, which then stays (r2ShapeRelax holds it).
+// rev48-S5 E1: the arrest follows the LOCAL pinning (pinning heterogeneity field, same as r2Predict): a
+// strongly pinned spot stops the receding rim early (stays wide / flat / irregular), a slippery spot lets it
+// recoil to a compact drop. kSplash = K / K0 of the impact: a splashing lamella leaves torn, lobed rims.
+float4 r2ShapeImpact(uint2 c, uint k, float rmm, float2 t, float4 ig, float wet, float f0, float kSplash) {
+    if (gR2ShpOn < 0.5) return float4(0, 0, r2PackHarm(0, 0), 0);
+    if (r2Rand(uint3(c.y, c.x, k + 41u)) < gR2ShpBendP + gR2ShpLobeP) return r2ShapeBirth(c, k, rmm, t, wet);
+    float fEq = r2RestEq(rmm, r2Rand(uint3(c.x, c.y, k + 45u)), wet);
+    float u = r2Rand(uint3(c.y, c.x, k + 46u));
+    float pinN = r2VNoise(t * gR2PinScale + 53.1);
+    float ar = gR2ShpArrest * (0.25 + 0.75 * pinN) * u;
+    float fA = fEq + max(f0 - fEq, 0.0) * ar;
+    float A = 1.0 + (ig.z - 1.0) * lerp(0.6, 1.0, r2Rand(uint3(c.x, c.y, k + 42u))) * (0.3 + 0.7 * ar);
+    float phi = atan2(ig.y, ig.x);
+    float a2 = 0.08 * r2Rand(uint3(c.y, c.x, k + 43u)) + 0.12 * (fA - fEq);
+    float a3 = 0.06 * r2Rand(uint3(c.x, c.y, k + 44u)) + 0.10 * (fA - fEq)
+             + gR2ShpTearK * saturate(log2(max(kSplash, 1.0)) / 3.0) * (0.5 + 0.5 * ar / max(gR2ShpArrest, 1e-3));
+    return r2ShapeMake(A, phi, a2, a3, 0.0, fA);
+}
+
+// ---------- rev48-S3b PHYSICS FOOTPRINT = VISUAL FOOTPRINT ----------
+// (rev48_S3 review: drops drawn larger by the resting spread (S2c) and the merged tensor (S3) merged only at
+// their old, smaller physics radius -- visibly overlapping drops did not coalesce.) Same rule as the visor
+// r2Cand: resting spread f (size, per-drop hash, wetness) x the tensor ellipse radius toward dirMM, capped
+// by the +-2 cell draw window. Used by the coalescence claim.
+float r2FootRadiusMM(int2 s, float4 st, float4 sh, float wet, float2 dirMM) {
+    float r = r2RadiusMM(st.z);
+    if (gR2ShpOn < 0.5 || gR2FootPhys < 0.5) return r;
+    float2 bf = r2UnpackBF(sh.w);
+    float R = r;                                              // rev48-S4c: flatness shapes the profile only
+    float e = length(sh.xy);
+    float A = sqrt((0.5 + e) / max(0.5 - e, 0.05));
+    float2 hm = r2UnpackHarm(sh.z);
+    float hF = min(1.0 + max(hm.x, 0.0) + hm.y, 1.7);
+    float ext = 1.24 * R * sqrt(A) * hF + abs(bf.x) * 1.24 * R / sqrt(A);
+    float lWin = 2.0 * min(gR2CellSizeMM.x, gR2CellSizeMM.y) - 0.05;
+    if (ext > lWin) R *= lWin / ext;
+    float phi = 0.5 * atan2(sh.y, sh.x);
+    float dl = length(dirMM);
+    float cs = dl > 1e-6 ? dot(dirMM / dl, float2(cos(phi), sin(phi))) : 1.0;
+    return R / sqrt(cs * cs / A + A * (1.0 - cs * cs));
+}
+
+// ---------- rev48-S3 MERGED FOOTPRINT (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 13) ----------
+// Coalescing drops keep their union footprint for a while (contact lines stay pinned): the merged drop's
+// second-moment tensor is the volume-weighted sum of each contributor's own tensor (r^2/2 (I/2 + M_i)) plus
+// its offset from the common centroid (parallel axis). Accumulate per contributor (positions in mm in any
+// common frame), then compose: anisotropy = deviatoric part / trace, the major axis runs along the merge
+// line; two comparable drops add a peanut waist (a2 along the major axis), the largest keeps its contour.
+// rev48-S4b (S4 review: a moving head that touched a larger-LOOKING drop ahead removed it in one frame and
+// survived alone): the weights are FOOTPRINT AREAS (r f)^2, not volumes. Physically the water of the touching
+// pair flows toward the footprint of lower Laplace pressure -- the wider, flatter (pinned) one -- so the
+// merged drop sits where the larger footprint was, takes its seed / life / shape, and keeps the union area.
+float r2FootW(float vol, float4 sh) {
+    float rf = r2RadiusMM(vol);                 // rev48-S4c: drawn footprint = the water's own radius
+    return rf * rf;
+}
+struct R2ShapeAcc { float3 S; float2 P; float W; float n; float wMax; float wSecond; float4 big; float V; float F; };
+R2ShapeAcc r2ShapeAccInit() {
+    R2ShapeAcc a;
+    a.S = float3(0, 0, 0); a.P = float2(0, 0); a.W = 0; a.n = 0; a.wMax = 0; a.wSecond = 0; a.V = 0; a.F = 0;
+    a.big = float4(0, 0, r2PackHarm(0, 0), 0);
+    return a;
+}
+void r2ShapeAccAdd(inout R2ShapeAcc a, float4 sh, float vol, float2 pMM) {
+    float w = r2FootW(vol, sh);                   // footprint area (mm^2 / pi)
+    float b = 0.5 * w;
+    a.S += w * float3(b * (0.5 + sh.x) + pMM.x * pMM.x, b * (0.5 - sh.x) + pMM.y * pMM.y, b * sh.y + pMM.x * pMM.y);
+    a.P += w * pMM;
+    a.W += w;
+    a.F += w * r2UnpackBF(sh.w).y;
+    a.V += vol;
+    a.n += 1.0;
+    if (w > a.wMax) { a.wSecond = a.wMax; a.wMax = w; a.big = sh; }
+    else if (w > a.wSecond) a.wSecond = w;
+}
+// rev48-S4: a MOVING head that sweeps SMALL drops (< 20 % of the union area) keeps its own motion shape
+// (S3b: composing with every small drop on the path rotated / popped it); a comparable or larger contact
+// composes the union (elongated along the contact line = along the motion), then morphs back into a head.
+float4 r2ShapeCompose(R2ShapeAcc a, bool bigMoving) {
+    if (a.n < 1.5 || a.W <= 0 || gR2ShpOn < 0.5) return a.big;
+    if (bigMoving && a.wMax > 0.8 * a.W) return a.big;
+    float2 c = a.P / a.W;
+    float3 S = a.S / a.W - float3(c.x * c.x, c.y * c.y, c.x * c.y);
+    float T = max(S.x + S.y, 1e-8);
+    float2 m = float2(0.5 * (S.x - S.y) / T, S.z / T) * gR2ShpMergeK;
+    float e = length(m);
+    if (e > 0.45) m *= 0.45 / e;
+    float2 hb = r2UnpackHarm(a.big.z);
+    float bal = 4.0 * a.wMax * a.wSecond / max((a.wMax + a.wSecond) * (a.wMax + a.wSecond), 1e-12);
+    float a2 = max(hb.x, gR2ShpWaist * bal * saturate(length(m) / 0.25));
+    float2 bfB = r2UnpackBF(a.big.w);
+    // rev48-S4c: flatness = area-weighted mean, a fresh merged puddle flatter (profile only).
+    // rev48-S6 F3: by the footprint excess of the union over the merged drop's own footprint (the contact
+    // line has not receded yet): f_u = sqrt(sum r_i^2 / r_m^2) -- equal pair 1.12, a small drop into a big ~1
+    float rm = r2RadiusMM(a.V);
+    float fU = clamp(sqrt(a.W / max(rm * rm, 1e-8)), 1.0, 1.4);
+    float fM = a.F / a.W + (fU - 1.0);
+    return float4(m, r2PackHarm(a2, hb.y), r2PackBFM(bfB.x * (1.0 - bal), fM, r2UnpackBMode(a.big.w)));
+}
+
+// rev48-S4 SHAPE MEMORY + MOTION MORPH (S3b review: flowing drops must follow the flow -- head and tail along
+// the motion, no random pops; and a shape caught mid-event should persist until the next event):
+//  * moving: the footprint morphs toward a motion ellipse (aspect 1 + shpMotionK v/shpMotionV along the
+//    motion, contour modes and bend fade, flatness toward a compact head) over shpRelaxMove;
+//  * pinned: the shape is HELD (contact-line pinning) -- it relaxes only over shpRelaxStill x size, so the
+//    arrested splats, merged puddles and the last motion shape stay until something moves the drop again.
+// rev48-S5 E7: a PINNED drop relaxes toward its gravity-sag ellipse (aspect 1 + shpBoK Bo, Bo = (r / 2.7 mm)^2
+// |g_t| / g, major axis along the slope) instead of a circle -- large drops on the near-vertical visor are long.
+// rev48-S5 E3 (an elongated drop that starts to slide): the motion target keeps the drop's own length for a
+// while (a long slug -- the old footprint becomes head + tail along the motion, rotated, not shrunk through a
+// circle); it shortens to the head over shpSlugTau. The trail rule then decides whether the slug leaves water.
+// rev48-S5 E6 (pinned drop in the helmet air): the air at its top stretches it along the air by
+// 1 + shpAirK We_air (We = rho u^2 r / gamma, capped), added to the gravity sag (anisotropy vectors add).
+// rev48-S6: wrap an angle to [-pi/2, pi/2) (axis angles are defined mod pi)
+float r2Wrap90(float a) {
+    return a - 3.14159265 * floor(a / 3.14159265 + 0.5);
+}
+float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt, float2 dirMM, float vms, float h, float wet, float3 gI, float3 aI) {
+    // single exit (FXC X4000 'potentially uninitialized' with the early return of the moving branch)
+    float2 hm = r2UnpackHarm(sh.z);
+    float2 bf = r2UnpackBF(sh.w);
+    float fEq = r2RestEq(rmm, h, wet);
+    float4 res = sh;
+    if (moving && dot(dirMM, dirMM) > 1e-12) {
+        // rev48-S6 F2 TURNS: the stored major axis is the TAIL line (the low-passed past path); its
+        // misalignment dl with the heading is the turn signal (no extra state). The axis ROTATES toward the
+        // heading over shpTailTau (the pinned receding tail lags) and the head-tail line stretches
+        // (shpTailStretch |sin dl|); above shpSnapDeg the tail lets go (axis over ~4 frames).
+        // rev48-S6b (rev48_S6 review: 'the original shape rotates, the head under-turns'; expected a gentle L):
+        // the HEAD half bends onto the heading at once (~2 frames) -- one-sided bend at the head end (mode 1/2)
+        // with tip slope shpHookK x tan(dl left after the tail moved) -- and straightens as the tail is pulled in.
+        // S6 bowed the whole drop symmetrically (crescent) while rotating it: the head kept the old direction.
+        float A = 1.0 + gR2ShpMotionK * saturate(vms / max(gR2ShpMotionV, 1e-4));
+        float A2 = A * A;
+        float eM = min(0.5 * (A2 - 1.0) / (A2 + 1.0), 0.45);
+        float2 d = normalize(dirMM);
+        float e0 = length(sh.xy);
+        float psi = atan2(d.y, d.x);
+        float phi = e0 > 1e-4 ? 0.5 * atan2(sh.y, sh.x) : r2Wrap90(psi);
+        float dl = r2Wrap90(psi - phi);
+        float sgn = dot(d, float2(cos(phi), sin(phi))) >= 0.0 ? 1.0 : -1.0;
+        // the packed move is quantized (1/31.25 cell ~ 0.037 mm): a slow drop's heading is noisy -> weight
+        // the turn response by the frame move in packing steps (full from 4 steps)
+        float wq = saturate(length(dirMM) * 31.25 / max(gR2CellMM, 1e-3) / 4.0);
+        bool snap = abs(dl) > radians(gR2ShpSnapDeg);
+        float tauR = snap ? 0.5 * gR2ShpRelaxMove : gR2ShpTailTau * (1.0 - 0.5 * saturate(wet));
+        float kr = (1.0 - exp(-dt / max(tauR, 1e-3))) * (snap ? 1.0 : lerp(0.25, 1.0, wq));
+        float phiN = phi + dl * kr;
+        float eS = snap ? 0.0 : gR2ShpTailStretch * abs(sin(dl)) * wq;
+        // E3 slug memory keeps the drop's own length, not the turn stretch (else it ratchets up)
+        float eT = min(max(eM, max(e0 - eS, 0.0) * exp(-dt / max(gR2ShpSlugTau, 1e-3))) + eS, 0.45);
+        float k = 1.0 - exp(-dt / max(snap ? 0.5 * gR2ShpRelaxMove : gR2ShpRelaxMove, 1e-3));
+        float e = e0 + (eT - e0) * k;
+        // hook: tip slope = hookK tan(dl left), in the visor's units (tip offset b x minor half, aa^2 over the
+        // head half) -> b = 0.5 hookK A tan(dl)
+        float Ae = sqrt((0.5 + e) / max(0.5 - e, 0.05));
+        float dlN = r2Wrap90(psi - phiN);
+        float mode = sgn > 0.0 ? 1.0 : 2.0;
+        float mOld = r2UnpackBMode(sh.w);
+        float bT = sgn * 0.5 * gR2ShpHookK * Ae * tan(clamp(dlN, -0.9, 0.9)) * wq;
+        float kh = 1.0 - exp(-dt / 0.03);
+        float bN = (mOld == mode ? bf.x : 0.0) + (bT - (mOld == mode ? bf.x : 0.0)) * kh;
+        // a bow of another kind (birth / merge banana, or a hook at the other end) first fades out over
+        // shpRelaxMove, then the hook starts (no pop)
+        if (mOld != mode && abs(bf.x) > 0.03) { bN = bf.x * (1.0 - k); mode = mOld; }
+        // the visor's u1 = (cos phi, sin phi), phi in (-90, 90]: crossing the boundary flips u1 -> the bend
+        // side flips (and a hook's head end)
+        float phiW = r2Wrap90(phiN);
+        if (abs(phiW - phiN) > 1.0) { bN = -bN; mode = mode > 0.5 ? 3.0 - mode : 0.0; }
+        float fMove = 1.0 + 0.5 * (fEq - 1.0);
+        res = float4(e * float2(cos(2.0 * phiW), sin(2.0 * phiW)), r2PackHarm(hm.x * (1.0 - k), hm.y * (1.0 - k)),
+                     r2PackBFM(bN, lerp(bf.y, fMove, k), mode));
+    } else {
+        float tau = 0.05 + gR2ShpRelaxStill * saturate(rmm * rmm / 0.09);
+        float k = exp(-dt / max(tau, 1e-3));
+        float Ag = 1.0 + gR2ShpBoK * (rmm * rmm / 7.29) * gI.z;
+        float Ag2 = Ag * Ag;
+        float eg = min(0.5 * (Ag2 - 1.0) / (Ag2 + 1.0), 0.45);
+        float2 mg = eg * float2(gI.x * gI.x - gI.y * gI.y, 2.0 * gI.x * gI.y);
+        float weA = 1.2 * aI.z * aI.z * rmm * 1e-3 / 0.072;
+        float Aa = 1.0 + min(gR2ShpAirK * weA, gR2ShpAirMax - 1.0);
+        float Aa2 = Aa * Aa;
+        mg += min(0.5 * (Aa2 - 1.0) / (Aa2 + 1.0), 0.45) * float2(aI.x * aI.x - aI.y * aI.y, 2.0 * aI.x * aI.y);
+        float eT = length(mg);
+        mg *= eT > 0.45 ? 0.45 / eT : 1.0;
+        res = float4(mg + (sh.xy - mg) * k, r2PackHarm(hm.x * k * k, hm.y * k * k * k), r2PackBFM(bf.x * k, fEq + (bf.y - fEq) * k, r2UnpackBMode(sh.w)));   // S6b: a stopped hook stays a hook
+    }
+    return res;
 }
 
 // rev45 wetness of the surface at a field sample (rule_trail 5): micro haze + film.
@@ -366,7 +639,7 @@ void r2TrailCand(float2 pc, int2 s, float4 st, float wet, inout R2TrailHit h) {
     float2 ab = b2 - a2;
     float2 q = a2 + ab * saturate(dot(pc - a2, ab) / max(dot(ab, ab), 1e-10));
     float vms = length(b - a) * gR2CellMM * 1e-3 / max(gR2Dt, 1e-5);
-    float hw;
+    float hw = 0.0;
     float dep = r2TrailRule(rmm, vms, wet, hw);
     if (dep <= h.depth) return;
     float texMM = 0.5 * (gR2CellSizeMM.x * gR2Cells.x / gR2FieldSize.x + gR2CellSizeMM.y * gR2Cells.y / gR2FieldSize.y);
@@ -440,9 +713,26 @@ R2Move r2Predict(int2 cell, float4 s, float4 L) {
         float pinNoise = lerp(gR2PinNoiseMin, gR2PinNoiseMax, r2VNoise(t * gR2PinScale + 53.1));
         // rev8: kinetic hysteresis (a moving contact line is held less than a resting one).
         float2 lastMove = r2UnpackMove(s.w);
+        // rev48-S6b F1: the head (one radius ahead along the last move) meets the defects first: the mean of
+        // its two sides scales the pinning (stick-slip), their difference steers (r2Steer)
+        float2 lmMM = lastMove * gR2CellSizeMM;
+        float lmL = length(lmMM);
+        float2 pMM = t * gR2CellSizeMM * gR2Cells;
+        float dMean = 0.5;
+        float2 defSteer = float2(0, 0);
+        if (lmL > 1e-4) {
+            float2 dh = lmMM / lmL;
+            float2 sd = float2(-dh.y, dh.x) * rmm;
+            float dL = r2Defect(pMM + dh * rmm + sd), dR = r2Defect(pMM + dh * rmm - sd);
+            dMean = 0.5 * (dL + dR);
+            defSteer = -sd / rmm * (gR2DefK * gR2DefPin * (dL - dR) * rsqrt(max(1.0, 2.0 * rmm * gR2DefInvMM)));
+        } else {
+            dMean = r2Defect(pMM);
+        }
+        pinNoise *= max(1.0 + gR2DefPin * (2.0 * dMean - 1.0), 0.05);
         if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
-        float speed;
-        float drive;
+        float speed = 0.0;
+        float drive = 1.0;
         float2 vt = r2DropVelocity(t, rmm, pinNoise, speed, drive);
         if (speed > gR2VShed) {
             // blown off: launch (rev42-44 deleted the drop at once -> it 'teleported' away)
@@ -452,7 +742,7 @@ R2Move r2Predict(int2 cell, float4 s, float4 L) {
             o.life.w = atan2(dirc.y, dirc.x);
             dc = dirc * (gR2FlySpeed * 1000.0 * gR2Dt) / gR2CellSizeMM;
         } else {
-            vt = r2Steer(t, vt, drive);
+            vt = r2Steer(t, vt, drive, defSteer);
             // rev47 drop inertia (rev46 review: car jolts gave 'lightning' zig-zags): the speed relaxes
             // to the force-driven target over gR2DropTau; the previous speed is the packed move of the
             // last frame (substep 1) or of the substeps so far in this frame. A reversed force first
@@ -481,7 +771,7 @@ R2Move r2Predict(int2 cell, float4 s, float4 L) {
     // film it sweeps (rule_merge 3, rule_trail 11); evaporation as before.
     float wet = r2Wet(Fs);
     float vms = travelMM * 1e-3 / max(gR2Dt, 1e-5);
-    float hwT;
+    float hwT = 0.0;
     float hT0 = r2TrailRule(rmm, vms, wet, hwT);
     vol -= 1.3333 * hT0 * hwT * travelMM;   // rev47j/l: parabolic rivulet section (4/3) h0 hw
     vol += (Fs.g * gR2HazeDepthMM + Fs.b * gR2FilmMaxMM * gR2FilmCollect) * 2.0 * rmm * travelMM;

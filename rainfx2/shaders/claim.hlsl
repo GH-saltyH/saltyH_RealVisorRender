@@ -18,9 +18,13 @@ float4 main(PS_IN pin) {
     // path came within contact distance of, not only the ones touching its end position.
 
     float rm = r2RadiusMM(me.z);
+    float4 shM = r2Shape(c);                                  // rev48-S3b footprint inputs
+    float wetM = 0.0;                                         // rev48-S4: footprint uses the stored flatness
     float2 pm = float2(c) + me.xy;
     float2 am = pm - r2UnpackMove(me.w);                     // where it came from last frame
     float im = r2CellIndex(c);
+    // rev48-S4b: rank by FOOTPRINT AREA (the merged drop gathers where the wider footprint was, merge.hlsl)
+    float wM = r2FootW(me.z, shM);
     float bestV = 0, bestI = -1;
     int2 best = int2(0, 0);
     [unroll] for (int y = -2; y <= 2; ++y) {
@@ -33,14 +37,20 @@ float4 main(PS_IN pin) {
             float4 Ls = r2Life(s);
             if (Ls.y > 0 || Ls.z > 0) continue;
             float is = r2CellIndex(s);
-            if (st.z < me.z || (st.z == me.z && is < im)) continue;     // must rank above me
+            float4 shS = r2Shape(s);
+            float wS = r2FootW(st.z, shS);
+            if (wS < wM || (wS == wM && is < im)) continue;             // must rank above me
             float2 ps = float2(s) + st.xy;
             float2 as = ps - r2UnpackMove(st.w);
             float dc = min(r2SegDist(ps, am, pm), r2SegDist(pm, as, ps));   // cells, segment vs point
             float dmm = dc * gR2CellMM;
-            if (dmm >= gR2CoalesceK * (rm + r2RadiusMM(st.z))) continue;
-            if (st.z > bestV || (st.z == bestV && is > bestI)) {
-                bestV = st.z; bestI = is; best = int2(x, y);
+            // rev48-S3b: footprint radii toward each other (resting spread x merged tensor = what is drawn)
+            float2 dirMM = (ps - pm) * gR2CellSizeMM;
+            float rmF = r2FootRadiusMM(c, me, shM, wetM, dirMM);
+            float rsF = r2FootRadiusMM(s, st, shS, 0.0, -dirMM);
+            if (dmm >= gR2CoalesceK * (rmF + rsF)) continue;
+            if (wS > bestV || (wS == bestV && is > bestI)) {
+                bestV = wS; bestI = is; best = int2(x, y);
             }
         }
     }

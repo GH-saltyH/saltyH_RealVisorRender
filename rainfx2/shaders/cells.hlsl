@@ -27,9 +27,10 @@ float4 main(PS_IN pin) {
     int2 c = px - int2(third * (int)gR2Cells.x, 0);
     float4 shape = float4(0, 0, r2PackHarm(0, 0), 0);
     bool bigMoved = false;
+    R2ShapeAcc sacc = r2ShapeAccInit();           // rev48-S3: drops landing in one cell merge footprints
     int2 size = int2(gR2Cells);
     float4 life = float4(0, 0, 0, 0);
-    float accV = 0;
+    float accV = 0, accW = 0;                     // rev48-S4b: accW = footprint-area weight (position, winner)
     float2 accP = float2(0, 0);
     float2 accD = float2(0, 0);
     float bigV = 0, seed = 0;          // shape seed follows the largest contributor
@@ -42,17 +43,24 @@ float4 main(PS_IN pin) {
             R2Move m = r2Predict(s, st, r2Life(s));
             if (m.alive < 0.5) continue;
             if (any(int2(floor(m.dest)) != c)) continue;
+            float4 shs = r2Shape(s);
+            float wa = r2FootW(m.vol, shs);
             accV += m.vol;
-            accP += (m.dest - float2(c)) * m.vol;
+            accW += wa;
+            accP += (m.dest - float2(c)) * wa;
+            r2ShapeAccAdd(sacc, shs, m.vol, (m.dest - float2(c)) * gR2CellSizeMM);
             accD += (m.dest - (float2(s) + st.xy)) * m.vol;
             if (gR2Sub > 1.5) accD += r2UnpackMove(st.w) * m.vol;   // accumulate within the frame
-            if (m.vol > bigV) { bigV = m.vol; seed = r2UnpackSeed(st.w); life = m.life; shape = r2Shape(s); bigMoved = m.moved > 1e-3; }
+            if (wa > bigV) { bigV = wa; seed = r2UnpackSeed(st.w); life = m.life; shape = shs; bigMoved = m.moved > 1e-3; }
         }
     }
-    float2 p = accV > 0 ? accP / accV : float2(0.5, 0.5);
+    if (third == 2 && accV > 0) shape = r2ShapeCompose(sacc, bigMoved);   // rev48-S4: moving head keeps its shape
+    float2 p = accW > 0 ? accP / accW : float2(0.5, 0.5);
     float2 disp = accV > 0 ? accD / accV : float2(0, 0);
 
     float2 t = (float2(c) + 0.5) / gR2Cells;
+    float wetB = third == 2 ? r2Wet(txR2Field.SampleLevel(samLinearClamp, t, 0)) : 0.0;   // rev48-S4 shape births / equilibrium
+    float3 gI = third == 2 ? r2GravInfo(t) : float3(0, 1, 0);                              // rev48-S5 E7 sag target
     // rev44 COUPLED IMPACT EVENTS (rev43 sprint recording: ~2.7 drops appeared and ~2.7 vanished per
     // frame in a 900 x 300 px sky crop, at unrelated places -> 'ticking'). rev22-43 cleared small
     // drops and placed fragments by two independent per-cell random draws, so a drop vanished with no
@@ -72,7 +80,9 @@ float4 main(PS_IN pin) {
         float vImp = max(gR2SpeedRel * exposure, 0.5);
         uint seed0 = (uint)gR2Frame * 8u + (uint)gR2Sub;
         float cl = r2Cluster(t);
-        float bestV = 0.0;
+        float4 ig = r2ImpactGeom(t);                    // rev48-S2 oblique impact (Vt direction, aspect)
+        float sqA = sqrt(ig.z);
+        float bestV = 0.0, bestK = 1.0;              // rev48-S5 E1: K / K0 of the winning fragment's impact
         bool swept = false;
         float2 bestP = float2(0.5, 0.5);
         [loop] for (int ey = -2; ey <= 2; ++ey) {
@@ -90,7 +100,12 @@ float4 main(PS_IN pin) {
                 float Rs = max(0.5 * d * 0.87 * pow(max(1000.0 * vImp * d, 1e-3), 0.2), 0.6 * gR2CellMM);
                 float2 ip = float2(int2(e)) + float2(r2Rand(uint3(e.x, e.y, seed0 + 202u)), r2Rand(uint3(e.x, e.y, seed0 + 303u)));
                 float2 dm = (float2(c) + 0.5 - ip) * gR2CellSizeMM;
-                if (dot(dm, dm) > Rs * Rs) continue;                                // lamella misses c
+                // rev48-S2: the lamella is an ellipse of aspect A stretched along Vt, its centre shifted
+                // downstream -- fragments and the swept patch fall below / downstream of the impact point.
+                // rev48-S2': shift 0.3 -> gR2ShpLamShift (0.15): the reference splats spread nearly evenly
+                float2 dl = float2(dot(dm, ig.xy) - gR2ShpLamShift * Rs * (ig.z - 1.0), dot(dm, float2(-ig.y, ig.x)));
+                dl *= float2(1.0 / sqA, sqA);
+                if (dot(dl, dl) > Rs * Rs) continue;                                // lamella misses c
                 if (K > gR2SplashK0 && accV > 0 && r2RadiusMM(accV) < gR2ClearMaxMM
                     && r2Rand(uint3(c.x, c.y, seed0 + 4242u + (uint)(ex + 2) * 5u + (uint)(ey + 2))) < gR2ClearK) {
                     swept = true;                                                    // swept by the splash
@@ -98,13 +113,18 @@ float4 main(PS_IN pin) {
                 float ncov = max(3.14159265 * Rs * Rs / cellMM2, 1.0);
                 float pf = min(nFrag, gR2FragMax) / ncov;
                 uint k = seed0 + 505u + (uint)(ex + 2) * 5u + (uint)(ey + 2);
-                if (r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
                 float dF = min(dRes * r2FragX(r2Rand(uint3(c.y, c.x, k + 606u))), d);
+                // rev48-S2' (reference birth events): satellites are left where the receding rim breaks -- on the
+                // RIM of the splat footprint; the bulk (large fragments) gathers inside. Ring weight ~ mean 1.
+                float ring = smoothstep(0.55, 0.9, length(dl) / max(Rs, 1e-3));
+                pf *= dF < 0.5 * d ? lerp(0.3, 2.0, ring) : lerp(1.6, 0.4, ring);
+                if (r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
                 if (0.5 * dF < gR2MinRadiusMM) continue;                             // too small: haze
                 // rev47b: no 'torn off at birth' rule -- new drops run back with the air
                 float bv = 0.5235988 * dF * dF * dF;
                 if (bv > bestV) {
                     bestV = bv;
+                    bestK = K / max(gR2SplashK0, 1e-3);
                     bestP = float2(r2Rand(uint3(c.x, c.y, k + 202u)), r2Rand(uint3(c.x, c.y, k + 303u)));
                 }
             }
@@ -127,8 +147,22 @@ float4 main(PS_IN pin) {
             if (bestV > accV) {
                 seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed0 + 404u)) * R2_SEEDS);
                 life = float4(0, 0, 0, 0);                                         // newborn: grows in
-                shape = r2ShapeBirth(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t);
+                // rev48-S2' SPREAD: the newborn is first a thin splat f0 x its final radius (normal Weber number
+                // We_n = rho Vn^2 d / gamma, f0 1.8-3.2 with spread), recoiling in the visor as
+                // f(age) = 1 + (f0 - 1) exp(-age / shpSpreadTau). life.w = -(10 + f0) marks it (flight unused).
+                float vn = gR2SpeedRel / sqrt(1.0 + ig.w * ig.w);
+                float weN = 1000.0 * vn * vn * (2e-3 * r2RadiusMM(bestV)) / 0.072;
+                float f0 = clamp(gR2ShpSpreadMin + 0.45 * log2(max(weN / 30.0, 1.0)) * 0.5
+                                 + 0.4 * r2Rand(uint3((uint)c.y, (uint)c.x, seed0 + 4141u)), gR2ShpSpreadMin, gR2ShpSpreadMax);
+                life.w = -(10.0 + f0);
+                shape = r2ShapeImpact(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t, ig, wetB, f0, bestK);   // rev48-S4 arrest
             }
+            // rev48-S2 skid (newborn) / rev48-S2' PUSH (merged into an existing drop): the tangential impact
+            // momentum moves the drop by its mass share; the kinetic pinning (pinKinetic) of a pushed drop near
+            // its threshold then lets it run on -- the reference's 'drop pushed off by an impact'.
+            float vSk = min(gR2ShpSkidK * ig.w * gR2SpeedRel / sqrt(1.0 + ig.w * ig.w), gR2ShpSkidMax);
+            float share = bestV / (accV + bestV);
+            disp = (bestV > accV ? float2(0, 0) : disp) + ig.xy * (vSk * share * 1000.0 * gR2Dt) / gR2CellSizeMM;
             accV += bestV;
         }
     }
@@ -172,7 +206,7 @@ float4 main(PS_IN pin) {
                 accV = vBead;
                 p = pBead;
                 seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9005u)) * R2_SEEDS);
-                shape = r2ShapeBirth(uint2(c), (uint)gR2Frame * 8u + 9100u, r2RadiusMM(vBead), t);
+                shape = r2ShapeBirth(uint2(c), (uint)gR2Frame * 8u + 9100u, r2RadiusMM(vBead), t, wetB);
                 disp = float2(0, 0);
                 life = float4(0, 0, 0, 0);
             }
@@ -197,7 +231,7 @@ float4 main(PS_IN pin) {
             accV = 0.5235988 * bornD * bornD * bornD;
             p = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 4u)), r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 5u)));
             seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 6u)) * R2_SEEDS);
-            shape = r2ShapeBirth(uint2(c), seed1 + 600u, 0.5 * bornD, t);
+            shape = r2ShapeBirth(uint2(c), seed1 + 600u, 0.5 * bornD, t, wetB);
             disp = float2(0, 0);
             life = float4(0, 0, 0, 0);
         }
@@ -209,6 +243,18 @@ float4 main(PS_IN pin) {
     // 0.1 % of its in-cell position toward the cell origin (-u, -v) -> the slow drift of resting drops
     // toward one offset that the user saw since the first v2 build (~1 mm over a few seconds).
     if (accV <= 0) life = float4(0, 0, 0, 0);
-    if (third == 2) return accV > 0 ? r2ShapeRelax(shape, r2RadiusMM(accV), bigMoved, gR2Dt) : float4(0, 0, r2PackHarm(0, 0), 0);
-    return lifeHalf ? life : float4(min(saturate(p), 0.9995), accV, r2PackMove(disp, seed));
+    // single exit (FXC X4000 with the rev48 third-section early return)
+    float4 res = lifeHalf ? life : float4(min(saturate(p), 0.9995), accV, r2PackMove(disp, seed));
+    if (third == 2) {
+        // rev48-S4: motion morph from this step's displacement; pinned shapes are held (arrested splats keep
+        // their state -- the S2 recoil flag is gone, the visor recoil f0 -> f is purely visual)
+        float2 dMM = disp * gR2CellSizeMM;
+        float vms = length(dMM) * 1e-3 / max(gR2Dt * max(gR2Sub, 1.0), 1e-5);
+        bool mov = vms > 2e-3 && !(life.w < -9.5 && life.x < 0.3);   // a fresh splat's skid does not erase its arrest
+        float rNow = r2RadiusMM(accV);
+        float3 aI = accV > 0 ? r2AirTopInfo((float2(c) + p) / gR2Cells, rNow) : float3(1, 0, 0);   // rev48-S5 E6
+        res = accV > 0 ? r2ShapeRelax(shape, rNow, mov, gR2Dt, dMM, vms, frac(seed * 0.4142136 + 0.17), wetB, gI, aI)
+                       : float4(0, 0, r2PackHarm(0, 0), 0);
+    }
+    return res;
 }
