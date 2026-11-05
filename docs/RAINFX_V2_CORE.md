@@ -1903,3 +1903,6 @@ rev34–42 렌즈는 한 방울 안에 서로 다른 세 출처를 섞었다.
 - glass 순서는 COAT → rain → EXT → INT(E2 / E3)이다. 캡처는 EXT 이후이다.
 - EXT 밴드는 SDF 텍스처 + fwidth AA를 쓴다.
 - RainFX 패스별 Render Stats(`RainFX2 sim/<pass>`, `draw/source`)를 추가했다. 상세는 PERF.md §5에 있다.
+
+### 65.66 PERF-3 (2026-11-06)
+- predict.hlsl: r2Predict를 방울당 substep 1회 계산한다(cells가 창 25 × third 3 = 75회 재계산하던 중복을 제거). cells는 txR2Pred를 읽는다. 결과는 동일하다.

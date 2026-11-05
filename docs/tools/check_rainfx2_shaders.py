@@ -24,12 +24,13 @@ FLOAT2 = {'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2In
 FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos', 'gR2CamLook', 'gR2CamSide', 'gR2CamUp'}
 MATRIX = {'gR2ObjToWorld'}
 
-SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask', 'txR2FieldOld', 'txR2SheetK', 'txR2SheetNuc', 'txR2Lam', 'txR2Bead', 'txR2Big']
+SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask', 'txR2FieldOld', 'txR2SheetK', 'txR2SheetNuc', 'txR2Lam', 'txR2Bead', 'txR2Big', 'txR2Pred']
 VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Trail', 'txR2Scene', 'txR2Mask', 'txR2Lam', 'txR2SheetNuc', 'txR2Big']
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 
 PASSES = [  # name, template, files, textures, defines
     ('cells', 'ui.fx', ['common.hlsl', 'cells.hlsl'], SCENE_TEXTURES, ''),
+    ('predict', 'ui.fx', ['common.hlsl', 'predict.hlsl'], SCENE_TEXTURES, ''),
     ('claim', 'ui.fx', ['common.hlsl', 'claim.hlsl'], SCENE_TEXTURES, ''),
     ('merge', 'ui.fx', ['common.hlsl', 'merge.hlsl'], SCENE_TEXTURES, ''),
     ('seed', 'ui.fx', ['common.hlsl', 'seed.hlsl'], SCENE_TEXTURES, ''),

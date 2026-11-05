@@ -376,6 +376,7 @@ local function newPass(self, shader, name)
     textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2Trail = false,
       txR2FieldOld = false, txR2SheetK = false, txR2SheetNuc = false, txR2Lam = false, txR2Bead = false,   -- rev48-W1 water sheet (W1d nucleation mask, W1q lamella registry)
       txR2Big = false,   -- rev48-R7a big-drop tiles
+      txR2Pred = false,  -- PERF-3 per-drop prediction (predict.hlsl -> cells)
       txR2Du = root .. 'du.dds', txR2Dv = root .. 'dv.dds', txR2Mask = self.ctx.maskPath },
     values = sceneValues(self, {}),
     shader = shader,
@@ -436,6 +437,8 @@ function R2:ensureResources()
   self.cellMM = (self.cellSizeMM.x + self.cellSizeMM.y) * 0.5
   self.texMM = vec2(602.0, 146.3)
   self.passCells = newPass(self, self.src.cells, 'cells')
+  self.passPredict = newPass(self, self.src.predict, 'predict')   -- PERF-3
+  self.PR = canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop prediction')
   self.passField = newPass(self, self.src.field, 'field')
   self.passSheet = newPass(self, self.src.sheet, 'sheet')            -- rev48-W1
   self.passSheetK = newPass(self, self.src.sheetcoef, 'sheetcoef')
@@ -774,7 +777,19 @@ function R2:simulate(sim)
   end
   for i = 1, p.substeps do
     self.sub = i
+    do   -- PERF-3: each drop's step once (cells gathers the stored results); same textures as the cells pass
+      local pp = self.passPredict
+      pp.textures.txR2State = self.S[self.si]
+      pp.textures.txR2Field = self.F[self.fi]
+      pp.textures.txR2Trail = self.TG[self.ti]
+      pp.textures.txR2SheetNuc = self.NM
+      pp.textures.txR2Bead = self.BM
+      pp.textures.txR2Lam = self.LM[self.li]
+      sceneValues(self, pp.values)
+      if not run(self.PR, pp) then self.status = 'compiling predict'; return end
+    end
     local pc = self.passCells
+    pc.textures.txR2Pred = self.PR
     pc.textures.txR2State = self.S[self.si]
     pc.textures.txR2Field = self.F[self.fi]   -- rev21: haze/film births, trail following
     pc.textures.txR2Trail = self.TG[self.ti]  -- rev47j: pearling reads the rivulet lines
@@ -1548,7 +1563,7 @@ function R2:dispose()
   for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {} }) do
     for _, c in ipairs(list) do free(c) end
   end
-  for _, k in ipairs({ 'C', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+  for _, k in ipairs({ 'C', 'PR', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
     free(self[k]); self[k] = nil
   end
   self.sceneTex = nil
@@ -1587,7 +1602,7 @@ return function(ctx)
   local dir = ctx.folder .. '/rainfx2/shaders/'
   local common = readFile(dir .. 'common.hlsl')
   local src = {}
-  for _, name in ipairs({ 'cells', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big' }) do
+  for _, name in ipairs({ 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -1596,6 +1611,7 @@ return function(ctx)
   if not self.err then
     self.src = {
       cells = common .. '\n' .. src.cells,
+      predict = common .. '\n' .. src.predict,
       field = common .. '\n' .. src.field,
       trail = common .. '\n' .. src.trail,
       claim = common .. '\n' .. src.claim,

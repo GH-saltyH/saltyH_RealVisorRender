@@ -35,7 +35,13 @@ float4 main(PS_IN pin) {
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
             float4 shs = r2Shape(s);
-            R2Move m = r2Predict(s, st, r2Life(s), shs);
+            // PERF-3: the prediction of source s was computed once by predict.hlsl (same function, same inputs)
+            float4 pr0 = txR2Pred.Load(int3(s, 0));
+            R2Move m;
+            m.dest = pr0.xy; m.vol = pr0.z; m.alive = pr0.w > 0.5 ? 1.0 : 0.0; m.moved = max(pr0.w - 1.0, 0.0);
+            m.life = txR2Pred.Load(int3(s + int2(size.x, 0), 0));
+            float4 pr2 = txR2Pred.Load(int3(s + int2(2 * size.x, 0), 0));
+            m.cDest = pr2.xy; m.cVol = pr2.z; m.cPhi = pr2.w;
             // rev48-S6c E8: the tail piece split off by source s lands here -> a resting drop (or it merges with
             // what is here); it is existing water: drawn at once, not swept back into its parent (life.w -5)
             if (m.cVol > 0 && all(int2(floor(m.cDest)) == c)) {

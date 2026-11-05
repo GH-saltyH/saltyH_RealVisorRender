@@ -99,3 +99,31 @@
   | 형상 수정 | 윤곽은 원본 마스크를 따름 | 밴드 모양 자체를 다시 그릴 수 있음 |
 
   - **권장:** SDF로 충분하다. 밴드 모양 자체를 바꾸고 싶을 때만 Blender에서 면을 분리한다. 그 경우에도 SDF 텍스처를 새 마스크에서 다시 굽는 것이 AA에 유리하다.
+
+## 6. PERF-2 결과와 PERF-3 (2026-11-06)
+- **사용자 확인:**
+  - LIFE-1(재개)과 E2 / E3 유지를 확인했다.
+  - GLASS-ORDER-1은 의도대로 동작한다. 한계: 상단 극단 곡면에서는 굴절 샘플이 밴드 밖(배경)으로 나간다. 심각도는 낮다.
+  - BAND-SDF-1: E2 / E3을 덧입히면 앨리어싱과 요철이 모두 사라진다. EXT 단독에서는 약간 남는다.
+- **CPU 프로파일(RainFX2 포함, 1.79 ms / frame, 24 콜백):**
+
+  | 콜백 | CPU (ms) | 내용 |
+  |---|---|---|
+  | sceneReady L14929 | 0.56 | RainFX2 sim(Lua 쪽 패스 제출) |
+  | sceneReady L14568 | 0.42 | optics updateBake / ExternalProbe / NativeSource |
+  | main.smoke L14943 | 0.36 | glassFallback(HDR 복사, glass 스택, RainFX2 draw) |
+  | windowMain | 0.24 | UI(창이 열려 있을 때) |
+  | script.update | 0.09 | |
+
+  - CPU 합계 1.8 ms로는 RainFX2의 FPS 손실(≈ 3 ms)을 설명하지 못한다. 대부분 GPU이다. 패스별 GPU 값(Render Stats `RainFX2 sim/*`, `RainFX2 draw*`)이 다음 근거이다.
+- **PERF-3(구조적 중복 제거, 결과 동일):**
+  - cells 패스는 출력 텍셀(512×128 × 3: drop / life / shape)마다 5×5 창의 모든 방울에 r2Predict(힘 균형, 결함장, 경계층, E8 분할, 증발 …)를 다시 계산했다. 방울 하나가 substep마다 최대 75번(25 창 × 3 third) 계산되었다.
+  - r2Predict는 원천 셀 입력에만 의존한다(수집 픽셀과 무관). 그래서 새 패스 `predict.hlsl`이 방울당 3 텍셀(dest / vol / alive + moved, life, E8 child)로 한 번만 계산한다. cells는 그 값을 읽는다(같은 함수, 같은 입력이므로 비트 동일).
+  - 추가 메모리: 3×512×128 RGBA32F = 3 MB. Render Stats에 `RainFX2 sim/predict`, `sim/cells`가 따로 나온다.
+- **다음 후보(GPU 측정 후):**
+  - cells의 충돌 5×5 루프(세 third 모두 실행)
+  - field 5×5 수집
+  - claim / merge 34 후보
+  - visor draw(전체 화면 메쉬, 34 후보 루프)
+  - 굴절 소스(0.5배 + 밉)
+  - glass: HDR 전체 해상도 복사 + 밉 체인 2–3회(fallback / cachedScene / optics)
