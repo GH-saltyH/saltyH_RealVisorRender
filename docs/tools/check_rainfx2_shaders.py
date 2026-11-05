@@ -20,12 +20,12 @@ DLL = os.path.join(ROOT, 'lights-patch-v0.3.0-preview728', 'dwrite.dll')
 SRC = os.path.join(ROOT, 'rainfx2', 'shaders')
 OUT = os.path.join(ROOT, 'tmp', 'rainfx2_shaders')
 
-FLOAT2 = {'gR2WMSize', 'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
+FLOAT2 = {'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
 FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos', 'gR2CamLook', 'gR2CamSide', 'gR2CamUp'}
 MATRIX = {'gR2ObjToWorld'}
 
-SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2WMap', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask', 'txR2FieldOld', 'txR2SheetK', 'txR2SheetNuc']
-VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Trail', 'txR2Scene', 'txR2WMap', 'txR2Mask']
+SCENE_TEXTURES = ['txR2State', 'txR2Field', 'txR2Claim', 'txR2Trail', 'txR2Du', 'txR2Dv', 'txR2Mask', 'txR2FieldOld', 'txR2SheetK', 'txR2SheetNuc', 'txR2Lam', 'txR2Bead', 'txR2Big']
+VISOR_TEXTURES = ['txR2State', 'txR2Field', 'txR2Trail', 'txR2Scene', 'txR2Mask', 'txR2Lam', 'txR2SheetNuc', 'txR2Big']
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 
 PASSES = [  # name, template, files, textures, defines
@@ -39,7 +39,9 @@ PASSES = [  # name, template, files, textures, defines
     ('sheet', 'ui.fx', ['common.hlsl', 'sheet.hlsl'], SCENE_TEXTURES, ''),
     ('sheetcoef', 'ui.fx', ['common.hlsl', 'sheetcoef.hlsl'], SCENE_TEXTURES, ''),
     ('nuc', 'ui.fx', ['common.hlsl', 'nuc.hlsl'], SCENE_TEXTURES, ''),
-    ('wmap', 'ui.fx', ['common.hlsl', 'wmap.hlsl'], SCENE_TEXTURES, ''),
+    ('lam', 'ui.fx', ['common.hlsl', 'lam.hlsl'], SCENE_TEXTURES, ''),
+    ('bead', 'ui.fx', ['common.hlsl', 'bead.hlsl'], SCENE_TEXTURES, ''),
+    ('big', 'ui.fx', ['common.hlsl', 'big.hlsl'], SCENE_TEXTURES, ''),
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
     ('visor', 'mesh.fx', ['visor.hlsl'], VISOR_TEXTURES, ''),

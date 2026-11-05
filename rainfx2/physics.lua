@@ -2,8 +2,7 @@
 -- separate from optics/appearance so the physics can be reviewed and tested on its own.
 -- The GPU side is r2DropVelocity / r2Predict in shaders/common.hlsl; every formula
 -- here mirrors it 1:1 (keep in sync). Units: SI unless the name says MM.
--- rev40: the GPU adds random stagnation gusts (common.hlsl r2TurbAir) to the air; not mirrored here
--- (random by design), init.lua physicsUI shows their peak speed and the radius they depin alone.
+-- (C-clean 2026-11-04: the rev40 random stagnation gusts are removed from the GPU and here.)
 -- Review and sources: docs/RAINFX_V2_CORE.md section 14.
 
 local P = {}
@@ -15,16 +14,16 @@ P.DEFAULTS = {
   surfaceTension = 0.072,   -- N/m, water
   pinCoat = 0.18,           -- dcos on the hydrophobic coat (visor exterior)
   pinGlass = 0.35,          -- dcos on bare polycarbonate
-  pinNoiseMin = 0.6, pinNoiseMax = 1.4,   -- per-cell heterogeneity (stick-slip)
-  pinKinetic = 0.6,         -- hysteresis of a moving drop / static (rev8, no permanent traps)
+  pinNoiseMin = 0.9, pinNoiseMax = 1.1,   -- per-cell heterogeneity (F5: 0.6-1.4 x defects 0.65-1.35 spread the onset speed x1.4 -> whole regions froze)
+  pinKinetic = 0.9,         -- hysteresis of a moving drop / static (rev8 0.6; F4b 0.9: a just-depinned drop crawls (reference 3 cm/s), no 0.07 m/s jump)
   -- motion: quasi-steady sliding, v = (F - Fpin) / (friction * r)
   -- rev19 (rev18 Debug 4: the right third ran into the solver limit at 1x): 0.06 slid a 2.2 mm
   -- drop at 1.4 m/s under gravity alone, i.e. capillary number Ca = mu v / gamma = 0.019, above
   -- the pearling/rivulet transition of sliding drops (Ca ~ 0.005-0.01, Podgorski, Flesselles &
   -- Limat 2001; Le Grand, Daerr & Limat 2005). Contact-line dissipation for a ~90 deg cap is
   -- F ~ (3 mu ln(L/a) / theta) * 4r * v ~ 0.1..0.15 * r * v (ln ~ 10..15).
-  friction = 0.15,          -- N s/m^2 (gravity only: 1.2 mm 0.09, 1.6 mm 0.25, 2.2 mm 0.5 m/s)
-  dragCd = 1.0, rhoAir = 1.2,
+  friction = 0.3,           -- N s/m^2 (F4b 0.15 -> 0.3: reference small drop 25 mm in 0.83 s at 5th gear; gravity: 2.2 mm ~0.25 m/s)
+  rhoAir = 1.2,   -- F4: dragCd removed (air load = size law P.airLoad)
   -- rev13: 0.35 streamed every drop >= 0.2 mm off the visor at 250 km/h (drop cover 1.5 %
   -- in all T3/T4 runs); reference B shows mostly static soft drops at speed (helmet behind
   -- screen/halo). 0.15: <= 0.3 mm stay, 0.5 mm creep, >= 1 mm stream/shed.
@@ -35,31 +34,26 @@ P.DEFAULTS = {
   -- rev42 (rev41 recording): 1 mm on the visor is ~30 px, 0.3 m/s ~150 px per frame -> jumps. Moving
   -- drops now creep (speed saturates smoothly at vMax); drops whose AIR drag exceeds shedK x pinning are
   -- blown off at once (no visible run across the visor).
-  vMax = 0.08,              -- m/s, rev19 0.5, rev41 0.30, rev42 0.03 tanh, rev43 0.08 graded:
-  vScale = 0.25,            -- v = vMax (1 - exp(-vq / vScale)), vq = quasi-steady speed
-  shedK = 2.0,              -- blown off when air drag > shedK x pinning force
-  airDown = 0.0,            -- rev42-46 observed-flow fix (0.8); rev47 0: replaced by the stagnation elevation
+  vMax = 0.08,              -- m/s, R6: only the visor's motion-stretch reference speed (physics uncapped)
   -- rev47 helmet aerodynamics (P.aeroForces): effective free stream at the helmet (cockpit / screen
   -- shielding), helmet radius, stagnation point elevation above the visor centre (deg, + = above ->
   -- flow over the visor runs down and out), buffeting wander of the stagnation point (deg at 250 km/h)
-  aeroKU = 0.35, helmetR = 0.13,   -- rev47c 0.6 -> 0.35 (observed persistence, REV47B_REVIEW)
+  aeroKU = 0.8, helmetR = 0.13,   -- rev47c 0.35 compensated the 18x drag (Cd 1); F1 0.5; F1b 0.8 (F1 review: at 0.5 the air-only critical radius was 0.6-1.2 mm at 200-250 km/h (sin theta, BL, pin spread), few drops ran) -> 1.15 mm @100, 0.44 @200, 0.34 @250 km/h (theta 45) = reference S1 / S2
   stagElevDeg = 35.0, buffetDeg = 4.0, buffetHz = 1.5,   -- rev47b 8/3 -> 4/1.5; rev48-M1 stagnation 12 -> 35 deg (MOTION_REVIEW s7)
   -- rev47b runback: drops blown loose slide with the air (speed runbackK x air at the drop top, between
   -- vMax and runbackMax), lift off only above liftMM; sliding inertia slideTau; impact splash share
   -- rev47c (REV47B_REVIEW: 0.5 m/s = ~250 px per frame at the visor scale; references show visible flow of a
   -- few cm/s): runbackK 0.03 -> 0.003, runbackMax 0.5 -> 0.06, slideTau 0.1 -> 0.15, impactLoss 0.3 -> 0.15
-  runbackK = 0.003, runbackMax = 0.06, liftMM = 1.5, slideTau = 0.15, impactLoss = 0.15,
+  runbackMax = 0.06, impactLoss = 0.15,   -- R6: runbackMax = rivulet flow top speed only (runbackK / liftMM / slideTau removed)
   -- rev47 drop inertia (s): a drop's speed relaxes to the force-driven target over dropTau (contact-line
   -- relaxation); acceleration low-pass of the helmet (neck), cut-off Hz and damping
   dropTau = 0.04, neckHz = 3.0, neckZeta = 0.7, headAccK = 1.0, headAccMaxG = 2.0,
   -- shed test uses the UNCAPPED quasi-steady speed: 3.0 at friction 0.06 = 1.2 at 0.15 (same force,
   -- airflow shedding at speed unchanged)
-  vShed = 1.0,              -- m/s, rev42: only the shed sentinel (speed 1e3) is above it
   -- losses
   -- rev9: 0.02 removed ~2%/mm from a 0.5 mm drop (half its volume across the visor),
   -- drops shrank below the kinetic threshold and stopped mid-way. Hydrophobic coat: ~0.25.
-  trailLoss = 0.005, evap = 1e-4,
-  minRadiusMM = 0.04, maxRadiusMM = 1.5,   -- rev41: 0.08 / 2.2 (rev40 review: many more small drops, max much smaller)
+  minRadiusMM = 0.04, maxRadiusMM = 3.0,   -- rev48-R7a: 3.0 (R3b 1.9 clipped merged pairs: 'a drop that ate another kept its size'); the big-drop window draws it;   -- rev41: 0.08 / 2.2 (rev40 review: many more small drops, max much smaller)
   pinMM = 4.0,              -- rev41: pinning heterogeneity feature size (smooth field, was white noise per cell)
   coalesceK = 1.0,
   windK = 1.0,              -- ambient wind reaching the visor (CSP wind ignores pits/cockpit shelter)
@@ -70,14 +64,13 @@ P.DEFAULTS = {
   filmFlowK = 1.0,          -- gain on the film velocity
   filmDiffuse = 0.6,        -- surface-tension smoothing per frame (5-tap blend)
   filmMaxMM = 0.5,          -- W = 1 thickness
-  sprayFluxMMs = 0.5,       -- film supply (mm/s) at spray estimate 1 (following closely, flooded)
-  sprayDiamMM = 0.25,       -- spray droplet diameter (many small splashes)
+  sprayDiamMM = 0.09,       -- rev48-P2: fine tyre spray, number mean 70-90 um (Shearman; Borg & Vevang)
+  splashShare = 0.05,       -- rev48-P2: ballistic tread drops (1-4 mm) as a share of the near-field spray water
   -- rev14 (rev13 review): 0.35 left Heavy Rain at 250 km/h with no film (eq 0.068 mm < 0.05-0.15 window)
   -- rev21: 0.8 x 0.59 / 0.88 -- the R-size rule leaves more rain unresolved at speed (Heavy Rain
   -- T3: 0.88 vs 0.59 of the volume), so the share is rescaled to keep the rev15 film calibration.
   filmRainK = 0.54,         -- rev15: 0.8 (0.7 left Heavy Rain/Hurricane T3 at 43-48 %, target > 50 %)
                             -- share of non-sticking rain that joins the film (rest: micro haze)
-  sprayHaze = 0.4,          -- micro haze rate (1/s) at spray estimate 1
   -- solver
   maxSubsteps = 4,          -- automatic substeps never exceed this
   gatherCells = 1.95,       -- max displacement per substep (5x5 gather window)
@@ -164,20 +157,27 @@ function P.aeroScales(p, U)
   local delta = a > 1e-3 and 2.4 * math.sqrt(P.NU_AIR / a) * 1000 or 50
   return ue, a, math.min(delta, 50)
 end
+-- rev48-F4: air load on a sessile drop = the coat pinning x (u / U_c(V))^2, U_c = shedU10 (V / 10 uL)^-shedBeta
+function P.criticalU(p, rMM)
+  local V = p.shapeK * rMM * rMM * rMM
+  return (p.shedU10 or 20) * math.max(V / 10, 1e-7) ^ (-(p.shedBeta or 0.1))
+end
+function P.airLoad(p, rMM, u)
+  local Uc = P.criticalU(p, rMM)
+  return p.surfaceTension * 2 * rMM * 1e-3 * p.pinCoat * (u / Uc) ^ 2
+end
 function P.aeroForces(p, rMM, U, thetaRad, pinCos)
   local r = rMM * 1e-3
   local ue0, a, delta = P.aeroScales(p, U)
   local ue = ue0 * math.sin(thetaRad)
-  local x = 0.6 * rMM / delta
-  local uh = ue * (x < 1 and x * (2 - x) or 1)
-  local Fd = 0.25 * p.rhoAir * p.dragCd * math.pi * r * r * uh * uh
-  local Fp = p.shapeK * rMM * rMM * rMM * 1e-9 * p.rhoAir * ue * a * math.cos(thetaRad)
+  local Fd = P.airLoad(p, rMM, ue)   -- rev48-F4 size law (common.hlsl r2DropVelocity)
+  local Fp = 0   -- F5: pressure-gradient push removed (inside U_c(V))
   return Fd + Fp, p.surfaceTension * 2 * r * pinCos
 end
 -- Smallest radius (mm) swept by the air alone at angle theta from the stagnation point.
 function P.aeroCritical(p, U, thetaRad, pinCos)
   local lo, hi = 0.01, 5.0
-  local function moves(rr) local F, Fp = P.aeroForces(p, rr, U, thetaRad, pinCos); return F > (p.shedK or 2) * Fp end
+  local function moves(rr) local F, Fp = P.aeroForces(p, rr, U, thetaRad, pinCos); return F > Fp end   -- R6: depins (shedK removed)
   if not moves(hi) then return math.huge end
   if moves(lo) then return lo end
   for _ = 1, 40 do
@@ -194,7 +194,7 @@ function P.forces(p, rMM, gTan, airTan, pinCos, noise)
   local mass = 1e-6 * p.shapeK * rMM * rMM * rMM
   local Fg = mass * gTan
   local u = airTan * p.airSurface
-  local Fa = 0.25 * p.rhoAir * p.dragCd * math.pi * r * r * u * u
+  local Fa = P.airLoad(p, rMM, u)
   local Fpin = p.surfaceTension * 2 * r * pinCos * (noise or 1)
   return Fg, Fa, Fpin
 end
@@ -204,9 +204,7 @@ function P.speed(p, rMM, gTan, airTan, pinCos)
   local Fg, Fa, Fpin = P.forces(p, rMM, gTan, airTan, pinCos)
   local F = Fg + Fa
   if F <= Fpin then return 0 end
-  if Fa > (p.shedK or 1e9) * Fpin then return rMM > (p.liftMM or 1e9) and math.huge or (p.runbackMax or p.vMax) end   -- rev47b runback
-  local vq = (F - Fpin) / (p.friction * rMM * 1e-3)
-  return p.vMax * (1 - math.exp(-vq / p.vScale))
+  return (F - Fpin) / (p.friction * rMM * 1e-3)   -- rev48-R6: the force balance (no display cap / shed sentinel)
 end
 
 -- Smallest radius (mm) that moves, by bisection on F(r) - Fpin(r) (monotone in r).
@@ -232,7 +230,7 @@ end
 
 -- Substeps so the fastest expected drop stays inside the gather window.
 function P.substeps(p, dt, cellMM, userMin, vExpected)
-  local need = math.ceil(math.min(vExpected, p.vShed) * dt * 1000 / (p.gatherCells * cellMM))
+  local need = math.ceil(vExpected * dt * 1000 / (p.gatherCells * cellMM))   -- R6 (maxSubsteps bounds it)
   return math.max(userMin, math.min(p.maxSubsteps, math.max(1, need)))
 end
 

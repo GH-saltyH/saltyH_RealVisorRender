@@ -9,14 +9,6 @@ float r2FragX(float u) {
     return exp2(log2(max(lerp(gR2FragLoP, gR2FragHiP, u), 1e-6)) * gR2FragInvA);
 }
 
-// rev41 clustering (rev40 review: the reference shows dense groups of small and large drops, v2 an
-// even spread): birth rates are modulated by a slowly drifting low-frequency field (gR2ClusterK,
-// features of clusterMM, time scale ~3 s) with mean 1, so groups form and dissolve.
-float r2Cluster(float2 t) {
-    float n = r2VNoise(t * gR2ClusterScale + float2(gR2Time * 0.21, gR2Time * 0.13));
-    return max(1.0 + gR2ClusterK * (2.0 * n - 1.0) * 1.6, 0.0);
-}
-
 float4 main(PS_IN pin) {
     // rev45: the target is twice the cell width; the second third writes the life cycle L of the same
     // cell (identical gather, so L follows the drop that wins the cell).
@@ -90,78 +82,79 @@ float4 main(PS_IN pin) {
     // splash replaces a patch of drops at once, cause and effect together. Expected rates equal the
     // rev41 rates (fragments per covered cell = min(nFrag, fragMax) / covered cells).
     // Fragments below the smallest stable radius are not born (rev43: they lived exactly one frame).
-    if (gR2ImpactRate > 0 && r2Valid(t) > 0.5) {
-        float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
-        float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
-        float cellArea = length(cross(du, dv)) / (gR2Cells.x * gR2Cells.y);   // m^2
+    // rev48-U1 ONE RAINDROP = ONE EVENT (docs/RAINFX_V2_UNIFIED_IMPACT_PLAN.md): the impacts of this frame come from the
+    // registry (lam.hlsl), same hash as the field / visor. A dry landing is the raindrop itself: its stuck share
+    // fRes (R2: Bird oblique halves, deposition = whole drop) of the raindrop volume pi d^3 / 6 is born as ONE splat drop at the impact point (S2'
+    // spread f0 -> recoil = the lamella and its residual, one entity, no pop); the splashed rest throws satellites
+    // (half of it, rim / downstream fan) and leaves as spray / haze. Landing on fed or connected sheet water: the field
+    // takes it. Landing on a drop: merges with it (+ push). Once per frame (the registry is per frame).
+    if (gR2ImpactRate > 0 && r2Valid(t) > 0.5 && gR2Sub < 1.5) {
         float cellMM2 = gR2CellSizeMM.x * gR2CellSizeMM.y;
         float exposure = r2Exposure(t);
-        float lambda = gR2ImpactRate * cellArea * exposure * gR2Exposure * gR2Dt;   // impacts per cell
-        float vImp = max(gR2SpeedRel * exposure, 0.5);
-        uint seed0 = (uint)gR2Frame * 8u + (uint)gR2Sub;
-        float cl = r2Cluster(t);
+        uint seed0 = (uint)gR2Frame * 8u + 1u;
         float4 ig = r2ImpactGeom(t);                    // rev48-S2 oblique impact (Vt direction, aspect)
         float sqA = sqrt(ig.z);
-        float bestV = 0.0, bestK = 1.0;              // rev48-S5 E1: K / K0 of the winning fragment's impact
-        bool bestWhole = false;                      // rev48-G B-2: the winner is the raindrop itself (sticks ~whole)
-        // rev48-W1: a raindrop landing on sheet water joins the sheet (field pass adds the resolved share)
-        bool onSheet = gR2SheetOn > 0.5 && (txR2Field.SampleLevel(samLinearClamp, t, 0).b * gR2FilmMaxMM >= gR2SheetHJoin
-                                            || r2ImpactFilm(t));   // rev48-W1g impact-film regime
-        // rev48-G B-1 (docs/RAINFX_V2_REF_GAP_REVIEW.md section 3): an oblique, fast impact throws its secondary
-        // drops DOWNSTREAM with the tangential air (crown / prompt splash), not into a radial ring; q blends
-        // the rim ring (near-normal, slow: Vt/Vn <= 0.5) into a downstream fan (Vt/Vn >= 2).
-        float qOb = saturate((ig.w - 0.5) / 1.5);
-        float thF = atan(1.0 / max(ig.w, 1e-3)) + 0.26;   // fan half-angle: the splash cone tilted by Vt/Vn, +15 deg
-        float tanF = tan(min(thF, 1.3));
-        float wFanIn = 1.0 / clamp(thF / 3.14159265, 0.25, 1.0);   // keep the mean count: 1 / covered share
+        float bestV = 0.0, bestK = 1.0, bestD = 0.0, bestVI = 0.5;
+        bool bestWhole = false;
+        bool onSheet = gR2SheetOn > 0.5 && ((txR2Field.SampleLevel(samLinearClamp, t, 0).b * gR2FilmMaxMM >= gR2SheetHJoin
+                                             && r2SheetConnected(r2SheetNucAt(c))) || r2ImpactFilm(t));
         bool swept = false;
         float2 bestP = float2(0.5, 0.5);
         [loop] for (int ey = -2; ey <= 2; ++ey) {
             [loop] for (int ex = -2; ex <= 2; ++ex) {
-                uint2 e = uint2(c + int2(ex, ey));
-                if (r2Rand(uint3(e.x, e.y, seed0)) >= lambda * cl) continue;        // no impact at e
-                float u1 = r2Rand(uint3(e.y, e.x, seed0 + 101u));
-                float d = clamp(-log(max(1.0 - u1, 1e-6)) * gR2MeanDiamMM, 0.1, 3.5);
-                float K = sqrt(13.8889 * vImp * vImp * d) * pow(max(1000.0 * vImp * d, 1e-3), 0.25);
-                float kr = min(1.0, gR2SplashK0 / max(K, 1e-3));
-                float fRes = gR2StickSlow * pow(max(kr, 1e-6), gR2ResA);
-                float dRes = d * pow(max(kr, 1e-6), gR2ResB);
-                float nFrag = fRes * pow(d / max(dRes, 1e-3), 3.0) / max(gR2FragM3, 1e-3);
-                // lamella radius (mm), beta ~ 0.87 Re^1/5; a non-splashing drop stays in its cell
-                float Rs = max(0.5 * d * 0.87 * pow(max(1000.0 * vImp * d, 1e-3), 0.2), 0.6 * gR2CellMM);
-                float2 ip = float2(int2(e)) + float2(r2Rand(uint3(e.x, e.y, seed0 + 202u)), r2Rand(uint3(e.x, e.y, seed0 + 303u)));
-                float2 dm = (float2(c) + 0.5 - ip) * gR2CellSizeMM;
-                // rev48-S2: the lamella is an ellipse of aspect A stretched along Vt, its centre shifted
-                // downstream -- fragments and the swept patch fall below / downstream of the impact point.
-                // rev48-S2': shift 0.3 -> gR2ShpLamShift (0.15): the reference splats spread nearly evenly
+                int2 e = c + int2(ex, ey);
+                if (any(e < int2(0, 0)) || any(e >= int2(gR2Cells))) continue;
+                float encI = txR2Lam.Load(int3(e, 0)).x;
+                R2Impact im;
+                if (!r2ImpactAt(e, encI, im) || floor(encI) - 1.0 != gR2Frame) continue;
+                float d = im.d;
+                R2Outcome oc = r2ImpactOutcome(d, exposure, ig);          // R2 / R4 (common, shared with the field F-layer)
+                float vImpD = oc.vImp, We = oc.We, Re = oc.Re, K = oc.K, Kdn = oc.Kdn, Kup = oc.Kup;
+                float lDn = oc.lDn, lUp = oc.lUp, fRes = oc.fRes, Rs = oc.Rs;
+                float2 dm = (float2(c) + 0.5 - im.ip) * gR2CellSizeMM;
                 float2 dl = float2(dot(dm, ig.xy) - gR2ShpLamShift * Rs * (ig.z - 1.0), dot(dm, float2(-ig.y, ig.x)));
                 dl *= float2(1.0 / sqA, sqA);
-                if (dot(dl, dl) > Rs * Rs) continue;                                // lamella misses c
-                if (K > gR2SplashK0 && accV > 0 && r2RadiusMM(accV) < gR2ClearMaxMM
-                    && r2Rand(uint3(c.x, c.y, seed0 + 4242u + (uint)(ex + 2) * 5u + (uint)(ey + 2))) < gR2ClearK) {
+                bool impactCell = all(int2(floor(im.ip)) == c);
+                if (!impactCell && dot(dl, dl) > Rs * Rs) continue;                 // lamella misses c
+                if (onSheet || im.fed) continue;                                     // the sheet takes it (field)
+                float dmA = dot(dm, ig.xy);
+                float Kside = dmA >= 0.0 ? Kdn : Kup;                                // R2: this cell's half of the lamella
+                if (Kside > gR2SplashK0 && accV > 0 && r2RadiusMM(accV) < gR2ClearMaxMM && !impactCell
+                    && r2Rand(uint3(c.x, c.y, im.sk + 4242u)) < gR2ClearK) {
                     swept = true;                                                    // swept by the splash
                 }
-                float ncov = max(3.14159265 * Rs * Rs / cellMM2, 1.0);
-                float pf = min(nFrag, gR2FragMax) / ncov;
-                uint k = seed0 + 505u + (uint)(ex + 2) * 5u + (uint)(ey + 2);
-                float dF = min(dRes * r2FragX(r2Rand(uint3(c.y, c.x, k + 606u))), d);
-                // rev48-S2' (reference birth events): satellites are left where the receding rim breaks -- on the
-                // RIM of the splat footprint; the bulk (large fragments) gathers inside. Ring weight ~ mean 1.
-                float ring = smoothstep(0.55, 0.9, length(dl) / max(Rs, 1e-3));
-                float wRing = dF < 0.5 * d ? lerp(0.3, 2.0, ring) : lerp(1.6, 0.4, ring);
-                float dmA = dot(dm, ig.xy), dmC = dot(dm, float2(-ig.y, ig.x));   // from the impact point
-                float wFan = (dmA > -0.3 * gR2CellMM && abs(dmC) <= max(dmA, 0.0) * tanF + 0.5 * gR2CellMM) ? wFanIn : 0.0;
-                pf *= lerp(wRing, wFan, qOb);
-                // rev48-G B-3: secondary drops carried off by the tangential air (not re-deposited) -> haze / film
-                pf *= 1.0 - saturate(gR2SplashAirK * qOb) * (dF < 0.7 * d ? 1.0 : 0.0);
-                if (onSheet || r2Rand(uint3(c.x, c.y, k)) >= pf) continue;
-                if (0.5 * dF < gR2MinRadiusMM) continue;                             // too small: haze
-                // rev47b: no 'torn off at birth' rule -- new drops run back with the air
+                if (impactCell) {
+                    // the raindrop itself: its stuck share, one splat drop at the impact point
+                    // rev48-F6 (F5 review: every landing stamped a CLUSTER -- F1 spread a sub-fineRMM residue as fine water over
+                    // a 1-cell disc, drawn as several micro-grid droplets): a raindrop's residue is one drop where it hit
+                    // (F9: the fine layer is gone)
+                    float bv = fRes * 0.5235988 * d * d * d;
+                    if (r2RadiusMM(bv) >= gR2MinRadiusMM && bv > bestV) {   // F6: the raindrop's residue is ONE drop at any size
+                        bestV = bv; bestK = K / max(gR2SplashK0, 1e-3); bestWhole = true; bestD = d; bestVI = vImpD;
+                        bestP = saturate(im.ip - float2(c));
+                    }
+                    continue;
+                }
+                if (Kside <= gR2SplashK0) continue;                                  // R2: this half does not splash
+                // R2 satellites: half of this half's splashed water, in fragments of the size law (dRes = d (K0/K_side)^resB),
+                // detached from the RIM of the splashing half (ring 0.75-1.1 Rs; corona / prompt splash leave the lamella edge)
+                float krS = gR2SplashK0 / Kside;
+                float dRes = d * pow(abs(krS), gR2ResB);
+                float lS = dmA >= 0.0 ? lDn : lUp;
+                float nFrag = 0.25 * lS * pow(d / max(dRes, 1e-3), 3.0) / max(gR2FragM3, 1e-3);   // 0.5 half x 0.5 satellites
+                // the rim is only reachable within the +-2 cell impact gather: a wider lamella (Laan: 8 mm at 120 km/h) puts
+                // its satellites on the reachable ring (they fly off the rim; most land inside it)
+                float Rr = min(Rs, 1.9 * gR2CellMM);
+                float rr = length(dl) / max(Rr, 1e-3);
+                float ringW = smoothstep(0.55, 0.8, rr) * (1.0 - smoothstep(1.0, 1.2, rr));
+                float nRim = max(0.5 * 3.14159265 * 2.0 * Rr * 0.4 * Rr / cellMM2, 1.0);         // cells on the half ring
+                float pf = min(nFrag, gR2FragMax) / nRim * ringW;
+                uint k = im.sk + 505u + (uint)(ex + 2) * 5u + (uint)(ey + 2);
+                float dF = min(dRes * r2FragX(r2Rand(uint3(c.y, c.x, k + 606u))), 0.7 * d);
+                if (r2Rand(uint3(c.x, c.y, k)) >= pf || r2RadiusMM(0.5235988 * dF * dF * dF) < max(gR2MinRadiusMM, gR2FineRMM)) continue;   // F9: sub-entity satellites leave as mist
                 float bv = 0.5235988 * dF * dF * dF;
-                if (bv > bestV) {
-                    bestV = bv;
-                    bestK = K / max(gR2SplashK0, 1e-3);
-                    bestWhole = dF >= 0.7 * d || K < 3.0 * gR2SplashK0;
+                if (bv > bestV && !bestWhole) {
+                    bestV = bv; bestK = K / max(gR2SplashK0, 1e-3);
                     bestP = float2(r2Rand(uint3(c.x, c.y, k + 202u)), r2Rand(uint3(c.x, c.y, k + 303u)));
                 }
             }
@@ -186,9 +179,12 @@ float4 main(PS_IN pin) {
                 life = float4(0, 0, 0, 0);                                         // newborn: grows in
                 // rev48-S2' SPREAD: the newborn is first a thin splat f0 x its final radius (normal Weber number
                 // We_n = rho Vn^2 d / gamma, f0 1.8-3.2 with spread), recoiling in the visor as
-                // f(age) = 1 + (f0 - 1) exp(-age / shpSpreadTau). life.w = -(10 + f0) marks it (flight unused).
-                float vn = gR2SpeedRel / sqrt(1.0 + ig.w * ig.w);
-                float weN = 1000.0 * vn * vn * (2e-3 * r2RadiusMM(bestV)) / 0.072;
+                // f(age) = fS + (f0 - fS) exp(-age / tau), tau = r2SplatTau (R1). life.w = -(10 + f0) marks it (flight unused).
+                // rev48-U2 (U1 review: no visible splat at rest, f0 ~ 1.8): the lamella spreads with the TOTAL impact
+                // speed and the raindrop's own diameter (an oblique drop spreads as an elongated sheet, Vt stretches
+                // it -- r2ShapeImpact; Yeh 2013 / Almohammadi 2017: beta_max ~ We^1/4 of the full velocity on
+                // inclined walls). U1 used the normal speed of the stuck residue's size -> f0 pinned at the minimum.
+                float weN = 1000.0 * bestVI * bestVI * (1e-3 * (bestWhole ? bestD : 2.0 * r2RadiusMM(bestV))) / 0.072;
                 float f0 = clamp(gR2ShpSpreadMin + 0.45 * log2(max(weN / 30.0, 1.0)) * 0.5
                                  + 0.4 * r2Rand(uint3((uint)c.y, (uint)c.x, seed0 + 4141u)), gR2ShpSpreadMin, gR2ShpSpreadMax);
                 // rev48-G B-2: only the raindrop itself spreads as a lamella (splat f0 + recoil, torn rims); a
@@ -199,6 +195,7 @@ float4 main(PS_IN pin) {
                     shape = r2ShapeImpact(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t, ig, wetB, f0, bestK);   // rev48-S4 arrest
                 } else {
                     shape = r2ShapeImpact(uint2(c), seed0 + 4040u, r2RadiusMM(bestV), t, ig, wetB, 1.0, 1.0);
+                    life.w = -7.0;                                  // R2b: splash satellite (review highlight only)
                 }
             }
             // rev48-S2 skid (newborn) / rev48-S2' PUSH (merged into an existing drop): the tangential impact
@@ -206,6 +203,9 @@ float4 main(PS_IN pin) {
             // its threshold then lets it run on -- the reference's 'drop pushed off by an impact'.
             float vSk = min(gR2ShpSkidK * ig.w * gR2SpeedRel / sqrt(1.0 + ig.w * ig.w), gR2ShpSkidMax);
             float share = bestV / (accV + bestV);
+            // rev48-U2: a NEWBORN splat does not skid (U1 review: 'bouncing' at speed) -- it sticks and recoils
+            // (r2Predict ramp); only a drop that is hit is pushed.
+            if (bestV > accV) vSk = 0.0;
             disp = (bestV > accV ? float2(0, 0) : disp) + ig.xy * (vSk * share * 1000.0 * gR2Dt) / gR2CellSizeMM;
             accV += bestV;
         }
@@ -222,7 +222,10 @@ float4 main(PS_IN pin) {
                               r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9004u)));
         if (r2DewetEvent(c)) {
             float hC = r2CellFilmMM(c);
-            if (r2DewetFilmOK(hC)) vBead += hC * gR2CellSizeMM.x * gR2CellSizeMM.y;
+            if (r2DewetFilmOK(hC, c)) {
+                vBead += hC * gR2CellSizeMM.x * gR2CellSizeMM.y;
+                if (gR2SheetOn > 0.5) pBead = r2CellFilmCentroid(c, pBead);   // W1m: the residual beads where it lies
+            }
         }
         // pearl event (per line: rate grows as the rivulet narrows); cheap reject at the highest rate first
         if (r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * 6.0 * gR2SimDt) {
@@ -243,6 +246,16 @@ float4 main(PS_IN pin) {
             }
             vBead += vT;
         }
+        // rev48-W1t: the isolated patch around this cell beads into one drop (bead.hlsl, same frame, field removes it)
+        bool patchBead = false;
+        if (gR2SheetOn > 0.5) {
+            float4 bm = txR2Bead.Load(int3(c, 0));
+            if (bm.w > 0.5 && bm.x > 0) {
+                vBead += bm.x;
+                pBead = clamp(bm.yz, float2(0, 0), float2(0.9995, 0.9995));
+                patchBead = true;
+            }
+        }
         if (vBead > 0) {
             if (accV > 0) {
                 accV += vBead;
@@ -252,34 +265,11 @@ float4 main(PS_IN pin) {
                 seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9005u)) * R2_SEEDS);
                 shape = r2ShapeBirth(uint2(c), (uint)gR2Frame * 8u + 9100u, r2RadiusMM(vBead), t, wetB);
                 disp = float2(0, 0);
-                life = float4(0, 0, 0, 0);
+                life = float4(patchBead ? gR2GrowTime : 0.0, 0, 0, 0);   // W1t: the patch water is already there (no grow-in)
             }
         }
     }
-    // rev21: visible drops also GROW out of the unresolved water (research section 3.2):
-    //  - dense micro haze condenses into a small drop (it then collects the haze, field pass);
-    //  - the leading edge of a moving film throws a head drop (reference A, red circles).
-    if (accV <= 0 && r2Valid(t) > 0.5) {
-        float4 F = txR2Field.SampleLevel(samLinearClamp, t, 0);
-        uint seed1 = (uint)gR2Frame * 8u + (uint)gR2Sub + 7777u;
-        float nuc = gR2NucRate * max(F.g - gR2NucM, 0.0) * gR2Dt * r2Cluster(t);
-        float bornD = 0;
-        if (r2Rand(uint3((uint)c.x, (uint)c.y, seed1)) < nuc)
-            bornD = min(gR2NucDiamMM * r2FragX(r2Rand(uint3((uint)c.y, (uint)c.x, seed1 + 1u))), 1.5);   // rev40: same size law
-        // rev47j: the film head drops (rev21) and the trail pearling births (rev45) created water; both are
-        // replaced by the mass-conserving dewetting / pearling events above.
-        if (bornD > 0) {                                  // rev42: no drop the air tears off at once
-            if (0.5 * bornD < gR2MinRadiusMM) bornD = 0.0;   // rev44: no one-frame drops (rev47b: runback, no torn-off rule)
-        }
-        if (bornD > 0) {
-            accV = 0.5235988 * bornD * bornD * bornD;
-            p = float2(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 4u)), r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 5u)));
-            seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, seed1 + 6u)) * R2_SEEDS);
-            shape = r2ShapeBirth(uint2(c), seed1 + 600u, 0.5 * bornD, t, wetB);
-            disp = float2(0, 0);
-            life = float4(0, 0, 0, 0);
-        }
-    }
+    // rev48-F9: F1 fine coalescence removed with the fine layer (it made drops out of the fine water G)
     // Excess beyond the largest stable cap runs off (keeps one-drop-per-cell bounded).
     float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
     accV = min(accV, vMax);
@@ -297,7 +287,7 @@ float4 main(PS_IN pin) {
         bool mov = vms > 2e-3 && !(life.w < -9.5 && life.x < 0.3);   // a fresh splat's skid does not erase its arrest
         float rNow = r2RadiusMM(accV);
         float3 aI = accV > 0 ? r2AirTopInfo((float2(c) + p) / gR2Cells, rNow) : float3(1, 0, 0);   // rev48-S5 E6
-        res = accV > 0 ? r2ShapeRelax(shape, rNow, mov, gR2Dt, dMM, vms, frac(seed * 0.4142136 + 0.17), wetB, gI, aI)
+        res = accV > 0 ? r2ShapeRelax(shape, rNow, mov, gR2Dt, dMM, vms, r2PinAt(t), wetB, gI, aI)
                        : float4(0, 0, r2PackHarm(0, 0), 0);
     }
     return res;

@@ -28,7 +28,8 @@ float4 main(PS_IN pin) {
             int2 s = c + int2(x, y);
             if (any(s < int2(0, 0)) || any(s >= size)) continue;
             n += 1;
-            aS += txR2Field.SampleLevel(samLinearClamp, (float2(s) + 0.5) / gR2Cells, 0).b * gR2FilmMaxMM >= gR2SheetHJoin ? 1.0 : 0.0;
+            float2 ts = (float2(s) + 0.5) / gR2Cells;
+            aS += txR2Field.SampleLevel(samLinearClamp, ts, 0).b * gR2FilmMaxMM >= r2SheetH(ts) ? 1.0 : 0.0;
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
             float4 L = r2Life(s);
@@ -40,6 +41,9 @@ float4 main(PS_IN pin) {
     }
     float area = max(n, 1.0) * gR2CellSizeMM.x * gR2CellSizeMM.y;
     float phi = A / area, D = V / area;
-    float nuc = (hit && gR2ImpactRate > 0 && phi >= gR2SheetNucPhi && D >= gR2SheetHJoin) ? 1.0 : 0.0;
+    // rev48-W1v (W1u review: frozen oily patches at rest): a drop cluster turns into a sheet only where the surface is kept
+    // wet by the impact supply -- on a dry, slowly fed surface touching drops coalesce as DROPS (claim / merge); the old rule
+    // spread whole clusters into pinned 4 mm patches that no other rule could take apart
+    float nuc = (hit && gR2ImpactRate > 0 && phi >= gR2SheetNucPhi && D >= gR2SheetHJoin && r2WetTx(txR2Field, t)) ? 1.0 : 0.0;
     return float4(nuc, phi, D, aS / max(n, 1.0));   // A: sheet area share (W1f connected sheet)
 }

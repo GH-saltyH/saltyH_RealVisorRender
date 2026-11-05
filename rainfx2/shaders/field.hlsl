@@ -1,12 +1,31 @@
 // P2: surface field update. Target: F_next (RGBA16_UNorm), reads F_prev and S_next.
 //   R = trail rivulet: centre-line water depth / gR2TrailMaxMM (rev47 T-layer; rev47j geometry in TG)
-//   G = micro haze M: unresolved droplets / mist (scattering, mip blur)
+//   G = unused (rev48-F9: the F1-F8 fine layer was removed; always 0)
 //   B = water film W (rev11): thickness / gR2FilmMaxMM. Semi-Lagrangian advection with
 //       r2FilmVelocity, surface-tension smoothing (5-tap), stochastic 3x3 splash supply
 //       (rain that does not stick as drops + spray from cars ahead), drainage.
 //   A = rain exposure of the exterior side (debug view 2)
 // Every texel looks at the 5x5 drop cells around it and their swept segment of
 // this step (position - packed displacement -> position).
+
+
+// rev48-U1: water of an impact that lands on fed / sheet water, laid at once over its lamella ellipse (Vt-stretched,
+// ragged soft rim) -- it joins the sheet. (Dry landings are drops: cells.hlsl. W1k-W1w field lamellae removed.)
+float r2ImpactSheetDep(R2Impact im, float2 pc, float vUi, float RsI, float4 igS, out float aS, out float bS, out float shS,
+                       out float2 dmS) {
+    float sq = sqrt(max(igS.z, 1.0));
+    aS = RsI * sq; bS = RsI / sq;
+    float kw = min(1.0, 2.2 / max(aS, 1e-3));                    // the 5x5 window
+    aS *= kw; bS *= kw;
+    shS = gR2ShpLamShift * RsI * (igS.z - 1.0) * kw;
+    dmS = (pc - im.ip) * gR2CellSizeMM;
+    float2 dl = float2(dot(dmS, igS.xy) - shS, dot(dmS, float2(-igS.y, igS.x))) / float2(aS, bS);
+    float dlen = length(dl);
+    float2 dn = dlen > 1e-5 ? dl / dlen : float2(1, 0);
+    float rag = 0.85 + 0.3 * (r2VNoise(dn * 5.1 + float(im.sk & 1023u) * 0.061) - 0.5);
+    float q = dlen / max(rag, 1e-3);
+    return (1.0 - smoothstep(0.9, 1.1, q)) * vUi / (3.14159265 * aS * bS * 0.75);
+}
 
 float4 main(PS_IN pin) {
     int2 f = int2(pin.PosH.xy);
@@ -25,10 +44,41 @@ float4 main(PS_IN pin) {
     float sheetAdd = 0;                // rev48-W1: water handed to the sheet by drops on it (mm)
     float2 texMM2 = gR2CellSizeMM * gR2Cells / gR2FieldSize;
     float2 pMM = pc * gR2CellSizeMM;
+    // rev48-W1j IMPACT LAMELLAE (W1i review: real sheets form from impacts all over the exposed face, overlapping before
+    // they vanish; round where the rain hits head-on, stretched / torn on the oblique sides). With the sheet on, the
+    // unresolved rain arrives as discrete splats: each impact of the 5x5 cells (same rate as cells.hlsl, own hash) lays
+    // its unresolved water uniformly over its lamella ellipse (radius Rs, aspect A along Vt, ragged rim). The total
+    // rain it brings feeds the local supply estimate q (field A) that decides the fed regime (r2FedTx).
+    float stampU = 0, stampQ = 0;
+    bool stampOn = gR2SheetOn > 0.5 && gR2ImpactRate > 0;
+    float vU = 0, vR = 0, vIS = 1;
+    float4 igS = float4(1, 0, 1, 0);
+    if (stampOn) {
+        vU = gR2FilmRate / (gR2ImpactRate * 1e-6);                     // mm^3 per mean impact (expectation-exact)
+        vR = gR2SheetResMMs / (gR2ImpactRate * 1e-6);
+        igS = r2ImpactGeom(t);
+        vIS = max(gR2SpeedRel * r2Exposure(t), 0.5);
+    }
     [loop] for (int y = -2; y <= 2; ++y) {
         [loop] for (int x = -2; x <= 2; ++x) {
             int2 s = c0 + int2(x, y);
             if (any(s < int2(0, 0)) || any(s >= size)) continue;
+            // rev48-U1: impacts of this frame (registry). All of them feed the local supply q (fed / wet regime); an impact
+            // that landed on fed water lays its whole water into the sheet here (cells bears no drop for it)
+            if (stampOn) {
+                R2Impact im;
+                float encI = txR2Lam.Load(int3(s, 0)).x;
+                if (r2ImpactAt(s, encI, im) && floor(encI) - 1.0 == gR2Frame) {
+                    float wD = (im.d * im.d * im.d) / max(gR2DsdM3, 1e-4);   // P1: share of the mean impact volume
+                    float vUi = vU * wD, vRi = vR * wD;
+                    float RsI = max(0.5 * im.d * 0.87 * pow(1000.0 * vIS * im.d, 0.2), 0.6 * gR2CellMM);
+                    float aS, bS, shS; float2 dmS;
+                    float dep = r2ImpactSheetDep(im, pc, vUi + vRi, RsI, igS, aS, bS, shS, dmS);
+                    if (im.fed) stampU += dep;
+                    float2 dl0 = float2(dot(dmS, igS.xy) - shS, dot(dmS, float2(-igS.y, igS.x))) / float2(aS, bS);
+                    if (dot(dl0, dl0) <= 1.0) stampQ += (vUi + vRi) / (3.14159265 * aS * bS);
+                }
+            }
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
             float2 b = float2(s) + st.xy;
@@ -37,7 +87,7 @@ float4 main(PS_IN pin) {
                 int2 fb = r2FieldTexelAt(b);
                 float4 nm = r2SheetNucAt(s);
                 float nuc = nm.r;
-                float kAbs = r2SheetAbsorbFrac(st, r2Life(s), r2SheetHUnder(txR2Field, b, r2RadiusMM(st.z)), nm);
+                float kAbs = r2SheetAbsorbFrac(st, r2Life(s), r2SheetHUnder(txR2Field, b, r2RadiusMM(st.z)), nm, r2SheetH(b / gR2Cells), r2WetTx(txR2Field, b / gR2Cells));
                 if (kAbs > 0) {
                     float vA = kAbs * st.z;
                     float rr = r2RadiusMM(st.z);
@@ -70,13 +120,24 @@ float4 main(PS_IN pin) {
 
     float3 n = r2Normal(t);
     float exposureRaw = r2Exposure(t);
+    float hcHere = r2SheetH(t);                    // rev48-W1i sheet threshold here (fed: sheetHFed)
     float exposure = exposureRaw * gR2Exposure;
-    float uT = r2AirTangent(n);
     float T = F.r, M = F.g, W = F.b;
-    M += gR2MicroRate * exposure * gR2Dt * (1.0 - M);
-    M *= exp(-gR2Dt * (gR2MicroEvap + gR2MicroShear * uT * uT));
-    float mWiped = M * cover * gR2MicroCollect;
-    M -= mWiped;
+    // rev48-W1t: a patch that beaded this frame (bead.hlsl window of a cell within +-2 cells) gives up its F_prev water
+    if (gR2SheetOn > 0.5 && W * gR2FilmMaxMM >= gR2SheetKeepMM) {
+        int2 cf = int2(floor((float2(f) + 0.5) / gR2FieldSize * gR2Cells));
+        [loop] for (int by = -1; by <= 1; ++by) {             // W1w: a bead takes its own 3x3 cells
+            [loop] for (int bx = -1; bx <= 1; ++bx) {
+                int2 sb = cf + int2(bx, by);
+                if (any(sb < int2(0, 0)) || any(sb >= size)) continue;
+                if (txR2Bead.Load(int3(sb, 0)).w > 0.5) W = 0;
+            }
+        }
+    }
+    // rev48-F9 (F8 review, Debug 4 vs 8: the background pattern was the fine layer -- G drawn as hashed micro-grid droplets
+    // that are no drops, never move and kept accumulating, even at 0 % intensity): the fine layer is REMOVED. G stays 0.
+    // Sub-entity splash satellites leave as mist with the helmet air (cells); the fine road spray (70-90 um) joins the film W.
+    M = 0.0;
     // rev47 T-LAYER (docs/RAINFX_V2_REV46_REVIEW.md section 1): R = trail water depth / trailMaxMM.
     // rev45-46 put it into the film W, whose 5-tap diffusion (0.6 / frame) spread a one-texel trail below
     // the visible threshold in 2-3 frames. Trail water on the hydrophobic coat stays pinned: no diffusion,
@@ -107,7 +168,7 @@ float4 main(PS_IN pin) {
     // a bead on the line; the texels whose stored centre-line point lies in that cell give the water up.
     if (hT >= gR2PearlMM && r2PearlEvent(r2TrailCell(f, gT), gT.w)) hT = 0.0;
     float trailMM = tr.depth;
-    hT = max(hT, trailMM + (trailMM > 0 ? mWiped * gR2HazeDepthMM : 0.0));
+    hT = max(hT, trailMM);
     T = hT / max(gR2TrailMaxMM, 1e-4);
     // ---- film W ----
     float hPrev = W * gR2FilmMaxMM;
@@ -117,21 +178,27 @@ float4 main(PS_IN pin) {
         // rev48-W1: the sheet pass moves the water (conservative fluxes, substeps); here only sources / sinks
         W += sheetAdd / gR2FilmMaxMM;
         // raindrops landing on sheet water (F_prev, as the cells pass sees it) or in the impact-film regime (W1g)
-        if (F.b * gR2FilmMaxMM >= gR2SheetHJoin || r2ImpactFilm(t)) W += gR2SheetResMMs * exposure * gR2Dt / gR2FilmMaxMM;
+        // resolved raindrops: on sheet water they join it (expectation, as the cells pass suppresses their births); in the
+        // fed regime the resolved share of this frame's lamellae lands as water too (cells: no births where fed)
+        // W1w (rest-state simulation, docs/prototypes/rainfx2_w1v_rest_sim.py): only a CONNECTED sheet takes the resolved rain;
+        // an isolated patch that did (and suppressed drop births there) grew without bound -- 12 % of the visor after 60 s
+        // U1: rain on a connected sheet outside the fed regime joins it (expectation; cells bears no drop there)
+        if (!r2ImpactFilm(t) && F.b * gR2FilmMaxMM >= hcHere && r2SheetConnected(r2SheetNucAt(c0)))
+            W += (gR2SheetResMMs + gR2FilmRate) * exposure * gR2Dt / gR2FilmMaxMM;
         // rev48-W1c (W1b review: at rest the visor filled with dense, equal medium drops): thin film below the
         // sheet threshold is spread micro water, not a coherent patch -- rev11-47 smoothed it every frame
         // (filmDiffuse 0.6); without that each splash deposit stayed a blob, crossed the bead threshold and
         // beaded into a drop of one size (cell volume). Same smoothing again between THIN neighbours only,
         // as an antisymmetric face exchange of F_prev (conservative); the sheet itself is left to the sheet pass.
         float hI = F.b * gR2FilmMaxMM;
-        if (hI < gR2SheetHJoin) {
+        if (hI < hcHere) {
             int2 fmx = int2(gR2FieldSize) - 1;
             float ex = 0;
             int2 nb[4] = { int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1) };
             [unroll] for (int q = 0; q < 4; ++q) {
                 int2 g = clamp(f + nb[q], int2(0, 0), fmx);
                 float hJ = txR2Field.Load(int3(g, 0)).b * gR2FilmMaxMM;
-                ex += (hJ < gR2SheetHJoin && r2Valid((float2(g) + 0.5) / gR2FieldSize) > 0.5) ? hJ - hI : 0.0;
+                ex += (hJ < r2SheetHAtTexel(g) && r2Valid((float2(g) + 0.5) / gR2FieldSize) > 0.5) ? hJ - hI : 0.0;
             }
             W += 0.25 * gR2FilmDiffuse * ex / gR2FilmMaxMM;
         }
@@ -149,7 +216,7 @@ float4 main(PS_IN pin) {
     // on the partially wetting visor a thin unresolved sheet is not stable; it gathers into beads. The
     // cells pass turned the film of an event cell (mean depth >= gR2FilmBeadMM) into a bead or fed it to
     // the drop there; its texels give the water up here (same hash, same F_prev mean).
-    if (r2DewetEvent(c0) && r2DewetFilmOK(r2CellFilmMM(c0))) W = 0;
+    if (r2DewetEvent(c0) && r2DewetFilmOK(r2CellFilmMM(c0), c0)) W = 0;
     // Supply: gR2FilmRate mm/s at full exposure, in splashes of gR2FilmSplashMM each.
     float rate = gR2FilmRate * exposure;
     if (gR2SheetOn > 0.5) {
@@ -161,7 +228,7 @@ float4 main(PS_IN pin) {
         // (h < sheetHJoin) breaks up into micro droplets at sheetThinRate (below); where the splash supply q beats
         // that (q > sheetThinRate * sheetHJoin, the lamellae of successive impacts overlap faster than they break
         // up) the water connects into a sheet and flows -- the impact-fed sheet of torrential rain at speed.
-        W += rate * gR2Dt / gR2FilmMaxMM;
+        W = max(W + stampU / gR2FilmMaxMM, 0.0);                        // W1j/W1k: discrete lamellae + recoil
     } else if (rate > 0) {
         float lam = rate * gR2Dt / max(gR2FilmSplashMM, 1e-6);   // splashes per texel per frame
         float pHit = min(lam, 1.0);
@@ -177,6 +244,7 @@ float4 main(PS_IN pin) {
         }
         W += add * dep / gR2FilmMaxMM;
     }
+    W += gR2SprayFineMMs * exposure * gR2Dt / gR2FilmMaxMM;   // F9: fine road spray -> film (was the fine layer F1-F8)
     // rev47b CROWN RUNOFF (rev47 review: at rest the visor only saw the little rain that reaches a near-
     // vertical face): rain caught on the helmet crown drains over the top edge of the visor. A texel within
     // gR2CrownBandMM of the upper edge (one step up the surface leaves the visor) receives the crown catch
@@ -202,15 +270,38 @@ float4 main(PS_IN pin) {
     // the bead and sheet thresholds drains as before (rev14); the sheet itself (h >= sheetHJoin) only flows.
     float hW = W * gR2FilmMaxMM;
     // W1e: unconnected water breaks up; W1f: so does an isolated patch thicker than the threshold (not a sheet)
-    bool sheetHere = hW >= gR2SheetHJoin && r2SheetConnected(r2SheetNucAt(c0));
-    W *= gR2SheetOn < 0.5 ? exp(-gR2Dt * gR2SheetDrain) : (sheetHere ? 1.0 : exp(-gR2Dt * gR2SheetThinRate));
+    bool sheetHere = hW >= hcHere && r2SheetConnected(r2SheetNucAt(c0));
+    // rev48-W1k (user: a shrunk lamella stays as a small sagging patch until other water takes it): an isolated patch
+    // >= the threshold is a REMNANT -- it stays (slow evaporation), flows if thick, is collected by drops passing through
+    // it and joins a sheet that reaches it; only unconnected water below the threshold breaks up.
+    if (gR2SheetOn < 0.5) W *= exp(-gR2Dt * gR2SheetDrain);
+    else if (!sheetHere) {
+        // rev48-W1o (user: let the lamella shrink, thicken and stay at a fitting size): a remnant is kept when it is a
+        // sheet-thick patch or a LUMP (>= sheetKeepMM and >= sheetLumpK x the mean 2 texels around: the recoiled residual);
+        // an even thin film around it breaks up as micro water
+        int2 fm = int2(gR2FieldSize) - 1;
+        float hRing = 0.25 * (txR2Field.Load(int3(clamp(f + int2(2, 0), int2(0, 0), fm), 0)).b
+                            + txR2Field.Load(int3(clamp(f - int2(2, 0), int2(0, 0), fm), 0)).b
+                            + txR2Field.Load(int3(clamp(f + int2(0, 2), int2(0, 0), fm), 0)).b
+                            + txR2Field.Load(int3(clamp(f - int2(0, 2), int2(0, 0), fm), 0)).b) * gR2FilmMaxMM;
+        bool keep = hW >= hcHere || (hW >= gR2SheetKeepMM && hW >= gR2SheetLumpK * hRing);
+        bool wetS = r2WetTx(txR2Field, t);                 // W1r: wetted surface keeps its layer
+        W = (keep || wetS) ? max(W - gR2TrailEvapMMs * gR2Dt / gR2FilmMaxMM, 0.0) : W * exp(-gR2Dt * gR2SheetThinRate);
+    }
     // rev21: drops sweeping through the film take it with them (and wipe the haze, M above).
-    if (!sheetHere) W *= 1.0 - coverM * gR2FilmCollect;   // rev22: pinned drops do not drain the film; W1g: nor a sheet
+    if (!sheetHere && !(gR2SheetOn > 0.5 && r2WetTx(txR2Field, t))) W *= 1.0 - coverM * gR2FilmCollect;   // W1u: drops do not wipe a wet layer   // rev22: pinned drops do not drain the film; W1g: nor a sheet
     // rev48-W1g: a rivulet inside a connected sheet is sheet water (mean depth of the parabolic section 2/3 h0)
     if (gR2SheetOn > 0.5 && sheetHere && T > 0) {
         W += 0.6667 * T * gR2TrailMaxMM / gR2FilmMaxMM;
         T = 0;
     }
 
-    return float4(saturate(T), saturate(M), saturate(W), exposureRaw);
+    // rev48-W1j local rain supply q (mm/s): exponential average of the stamped rain over sheetFedTau (A, / sheetQMax)
+    float aOut = exposureRaw;
+    if (gR2SheetOn > 0.5) {
+        float q = F.a * gR2SheetQMax * exp(-gR2Dt / max(gR2SheetFedTau, 1e-3))
+                + (stampQ + gR2SprayFineMMs * exposure * gR2Dt) / max(gR2SheetFedTau, 1e-3);   // F1: road spray feeds the regime too
+        aOut = saturate(q / gR2SheetQMax);
+    }
+    return float4(saturate(T), saturate(M), saturate(W), aOut);
 }

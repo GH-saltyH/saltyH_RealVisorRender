@@ -1,42 +1,44 @@
--- RainFX v2 (rev11): road spray reaching the visor, estimated from the cars ahead.
--- Reference A (heavy spray at speed) is dominated by water thrown up by the car in
--- front, not by rain. CSP exposes no spray field, so this is a cheap procedural
--- estimate (A4 auxiliary): per car ahead in a narrow cone, distance and lateral
--- falloff x its speed^2 x track water; plus a small self-spray term (own front tyres).
--- Pure Lua, one loop over sim.carsCount per frame, no allocations.
---
--- Returns spray >= 0 (1 = following closely at speed on a flooded track) and fills
--- `out` with a breakdown for the UI.
+-- RainFX v2 road spray reaching the visor (rev48-P2, docs/RAINFX_V2_DEPOSITION_MODEL.md sections 1.5 / 3).
+-- CSP exposes no spray field: the liquid water content of the spray cloud at the helmet is estimated from the cars
+-- ahead with the measured spray laws (Gaylard, Kirwan & Lockerby 2017 review; FHWA 2014 splash & spray report):
+--   * spray needs road water: ~linear in the water film (Koppa) -> w = max(rainWater, rainWetness)
+--   * almost none below ~50 km/h, then density ~ V^2.8 (Maycock 1966; ~V^3 Chatfield 1979)
+--   * the cloud thins behind the car (e-folding sprayRangeM, Borg & Vevang 25 -> 50 m) and widens (plume)
+--   * two parts: fine SPRAY (number mean 70-90 um, airborne, far) and ballistic SPLASH (1-4 mm tread drops, only
+--     close behind: e-folding splashRangeM)
+-- LWC0 (g/m^3 right behind a car at V0 on a flooded road) is calibrated to the visibility of a following driver
+-- (tens of m: ~1-3 g/m^3 for 40 um effective radius) and to reference B / D (sheet within ~1 s when following).
+-- Returns LWC (g/m^3) of fine spray at the helmet; out.splash = the near-field factor for the ballistic drops.
+-- Pure Lua, one loop over the cars per frame, no allocations.
 
 local S = {}
 
 S.DEFAULTS = {
-  sprayRangeM = 25,        -- e-folding distance behind a car
-  sprayMaxM = 90,          -- ignore cars further ahead
-  sprayWidthM = 2.5,       -- lateral gaussian width
-  spraySpeedRef = 50,      -- m/s for speed factor 1
-  -- rev12: 0.12 made own-car spray the whole film supply on every wet track (no cars ahead
-  -- in all 12 profile runs, spray 0.27 at speed). Open-wheel front tyres throw water low and
-  -- backwards; little reaches the helmet.
-  spraySelf = 0.01,         -- own front tyres at spraySpeedRef on a flooded track
+  sprayLWC0 = 3.0,          -- g/m^3 right behind a car at sprayV0 on a flooded road
+  sprayV0 = 70.0,           -- m/s reference speed of the car ahead
+  sprayExp = 2.8,           -- density ~ V^2.8 (Maycock)
+  sprayVMin = 13.9,         -- m/s (50 km/h): below it a tyre throws (almost) no spray
+  sprayRangeM = 25,         -- e-folding distance behind a car (fine spray)
+  splashRangeM = 6,         -- e-folding distance of the ballistic tread drops
+  sprayMaxM = 120,          -- ignore cars further ahead
+  sprayWidthM = 1.5,        -- lateral gaussian half-width right behind the car (~tyre track) ...
+  sprayWidenK = 0.08,       -- ... growing by this x the distance (plume)
+  spraySelf = 0.002,        -- own front tyres (open wheel: low and backwards, little reaches the helmet)
 }
 
--- rev14: spray needs standing water. Linear in water made 29 % puddles (Light Rain) throw a
--- film-forming spray; now nothing below 30 % water, full at 80 % (rev15: Light Rain T4 with
--- 26 % puddles still made a 40 % film at 0.2).
-local function wet(sim)
-  return math.min(1, math.max(0, ((sim.rainWater or 0) - 0.3) / 0.5))
+local function roadWater(sim)
+  return math.min(1, math.max(0, math.max(sim.rainWater or 0, sim.rainWetness or 0)))
 end
 
 function S.estimate(sim, p, out)
   out = out or {}
-  local w = wet(sim)
+  local w = roadWater(sim)
   local me = sim.focusedCar >= 0 and sim.focusedCar or 0
   local car = ac.getCar(me)
-  out.wet, out.nearestM, out.cars = w, -1, 0
+  out.wet, out.nearestM, out.cars, out.splash = w, -1, 0, 0
   if not car or w <= 0 then out.spray = 0; return 0, out end
   local pos, look = car.position, car.look
-  local total = 0
+  local lwc, splash = 0, 0
   local n = sim.carsCount or 0
   for i = 0, n - 1 do
     if i ~= me then
@@ -45,23 +47,31 @@ function S.estimate(sim, p, out)
         local dx, dy, dz = c.position.x - pos.x, c.position.y - pos.y, c.position.z - pos.z
         local ahead = dx * look.x + dy * look.y + dz * look.z
         if ahead > 0 and ahead < p.sprayMaxM then
-          local lx, ly, lz = dx - look.x * ahead, dy - look.y * ahead, dz - look.z * ahead
-          local lat2 = lx * lx + ly * ly + lz * lz
-          local sp = math.min(c.velocity:length() / p.spraySpeedRef, 1.5)
-          local k = math.exp(-ahead / p.sprayRangeM) * math.exp(-lat2 / (p.sprayWidthM * p.sprayWidthM)) * sp * sp
-          if k > 1e-3 then
-            total = total + k
-            out.cars = out.cars + 1
-            if out.nearestM < 0 or ahead < out.nearestM then out.nearestM = ahead end
+          local v = c.velocity:length()
+          if v > p.sprayVMin then
+            local lx, ly, lz = dx - look.x * ahead, dy - look.y * ahead, dz - look.z * ahead
+            local lat2 = lx * lx + ly * ly + lz * lz
+            local wd = p.sprayWidthM + p.sprayWidenK * ahead
+            local sv = (v / p.sprayV0) ^ p.sprayExp * (1 - math.exp(-(v - p.sprayVMin) / 5))   -- smooth onset
+            local cross = math.exp(-lat2 / (wd * wd))
+            local k = sv * cross * math.exp(-ahead / p.sprayRangeM)
+            if k > 1e-4 then
+              lwc = lwc + k
+              splash = splash + sv * cross * math.exp(-ahead / p.splashRangeM)
+              out.cars = out.cars + 1
+              if out.nearestM < 0 or ahead < out.nearestM then out.nearestM = ahead end
+            end
           end
         end
       end
     end
   end
-  local own = math.min(car.velocity:length() / p.spraySpeedRef, 1.5)
-  total = (total + p.spraySelf * own * own) * w
-  out.spray = total
-  return total, out
+  local own = car.velocity:length()
+  local selfK = own > p.sprayVMin and p.spraySelf * (own / p.sprayV0) ^ p.sprayExp or 0
+  lwc = (lwc + selfK) * p.sprayLWC0 * w
+  out.splash = splash * w
+  out.spray = lwc
+  return lwc, out
 end
 
 return S
