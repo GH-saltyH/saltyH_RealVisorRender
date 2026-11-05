@@ -5,6 +5,56 @@ local strAppNameInternal = 'RealVisor'
 -- Version: 0.6.0
 local strVersion= '0.6.0'
 local appNameDebug = '[RealVisor_v' .. strVersion .. ']'
+
+------------------------------------------------------------
+-- PERF-1 PROFILER (docs/RAINFX_V2_PERF.md). Every render.on / render.onSceneReady callback registered by this
+-- script, script.update and windowMain are timed while profiling is on (RainFX tab -> 'Performance profile';
+-- Render Stats shows 'RV <event> L<line>' with CPU and GPU). Off: one boolean test per callback.
+------------------------------------------------------------
+RV_PROF = { on = false, cpu = {}, order = {}, depth = 0 }   -- global: the main chunk is near the 200-local limit
+RV_PROF.add = function(tag, ms)
+    local e = RV_PROF.cpu[tag]
+    if not e then e = { ms = 0, acc = 0, peak = 0 }; RV_PROF.cpu[tag] = e; RV_PROF.order[#RV_PROF.order + 1] = tag end
+    e.acc = e.acc + ms
+end
+RV_PROF.frame = function()
+    for _, e in pairs(RV_PROF.cpu) do
+        e.ms = e.ms * 0.95 + e.acc * 0.05
+        e.peak = math.max(e.peak * 0.995, e.acc)
+        e.acc = 0
+    end
+end
+do
+    local origOn, origReady = render.on, render.onSceneReady
+    local serial = 0
+    local function label(kind, fn)
+        serial = serial + 1
+        local gi = debug and debug.getinfo
+        local ok, info = false, nil
+        if gi then ok, info = pcall(gi, fn, 'S') end
+        local line = ok and type(info) == 'table' and info.linedefined or serial
+        return string.format('RV %s L%d', kind, line)
+    end
+    local function wrap(tag, fn)
+        return function(...)
+            if not RV_PROF.on then return fn(...) end
+            local t0 = os.preciseClock()
+            local a, b, c
+            if RV_PROF.depth == 0 and render.measure then
+                RV_PROF.depth = 1
+                local ok, err = pcall(render.measure, tag, function(...) a, b, c = fn(...) end, ...)
+                RV_PROF.depth = 0
+                if not ok then error(err) end
+            else
+                a, b, c = fn(...)
+            end
+            RV_PROF.add(tag, (os.preciseClock() - t0) * 1000)
+            return a, b, c
+        end
+    end
+    render.on = function(ev, fn, ...) return origOn(ev, wrap(label(tostring(ev), fn), fn), ...) end
+    render.onSceneReady = function(fn, ...) return origReady(wrap(label('sceneReady', fn), fn), ...) end
+end
 --
 -- Author: saltyH
 -- CSP Target: 0.3.0-preview477+
@@ -12573,7 +12623,9 @@ rainDynamicSceneCopyState.e1SurfaceUI = function()
 end
 rainDynamicSceneCopyState.visorLayerDefs = function()
     local T = appFolder .. '/texture/'
-    return {
+    -- BAND-SDF-1: signed-distance band (clean anti-aliased edge); RAIN_VISOR_LAYER_BAND_SDF=false -> the binary original
+    local BAND = cfg.RUNTIME.RAIN_VISOR_LAYER_BAND_SDF == false and 'GLASS/FX/ext_txBand.png' or 'GLASS/FX/ext_txBand_sdf.png'
+    local defs = {
         -- s44: all two-sided (user: single-sided parts were overdrawn by
         -- the two-sided ones; the cost difference is negligible).
         housing = {
@@ -12595,18 +12647,25 @@ rainDynamicSceneCopyState.visorLayerDefs = function()
         glass = {
             { mesh = 'GLASS_COAT_FX', two = true, kind = 2 },
             { rain = true },
+            -- GLASS-ORDER-1: EXT band before INT -- the eye looks through INT (innermost) at EXT, so the INT optics /
+            -- E2/E3 refract the band (their capture is taken after it). rev s55-s57 drew EXT last ('the band owns the
+            -- final overlap') because the band was not in the capture; RAIN_VISOR_LAYER_EXT_LAST restores that order.
+            { mesh = 'GLASS_EXT_FX', two = true, kind = 1,
+              tex = T .. BAND,
+              nrm = T .. 'GLASS/FX/ext_txNormal.png' },
             { mesh = 'GLASS_INT_FX', two = true, kind = 3,
-              band = T .. 'GLASS/FX/ext_txBand.png',
+              band = T .. BAND,
               bandUV = T .. 'GLASS/GLASS_INT_EXT_UV_FIELD.dds',
               nrm = T .. 'GLASS/FX/int_txNormal.dds',
               outline = T .. 'GLASS/FX/int_outline.png',
               lens = T .. 'GLASS/FX/int_lens.dds' },
-            -- The band owns the final overlap; inner optics never replace it.
-            { mesh = 'GLASS_EXT_FX', two = true, kind = 1,
-              tex = T .. 'GLASS/FX/ext_txBand.png',
-              nrm = T .. 'GLASS/FX/ext_txNormal.png' },
         },
     }
+    if cfg.RUNTIME.RAIN_VISOR_LAYER_EXT_LAST then   -- comparison: rev s55-s57 order (EXT over INT, band not refracted)
+        local g = defs.glass
+        g[#g - 1], g[#g] = g[#g], g[#g - 1]
+    end
+    return defs
 end
 -- s56: per-mesh parameter UI of the custom-shader (*_OVERLAY) meshes,
 -- shown in the KN5 tab material popup.
@@ -12950,6 +13009,7 @@ rainDynamicSceneCopyState.visorLayerDrawItem = function(item, ov)
     v.gLayerBandExternalLight = r.RAIN_VISOR_LAYER_BAND_EXTERNAL_LIGHT and 1.0 or 0.0
     v.gLayerBandUnlitBrightness = r.RAIN_VISOR_LAYER_BAND_UNLIT_BRIGHTNESS
     v.gLayerBandAlphaMin = r.RAIN_VISOR_LAYER_BAND_ALPHA_MIN or 0.90
+    v.gLayerBandSDF = r.RAIN_VISOR_LAYER_BAND_SDF == false and 0 or 1   -- BAND-SDF-1
     local probeOn = not r.RAIN_VISOR_LAYER_NATIVE_HOUSING and not ov.internalSource and item.mat ~= nil
         and r.RAIN_VISOR_LAYER_SHADOW_PROBE and vl.probeReady and vl.probeCanvas ~= nil
     p.textures.txLayerProbe = probeOn and vl.probeCanvas or ov.src
@@ -13048,7 +13108,8 @@ rainDynamicSceneCopyState.nativeOccluderEnsure = function()
         if st.root then st.root:dispose() end
         st.root=axisRollNode:loadKN5({filename=r.MODEL_PATH,forceRenderableOn=true})
         if not st.root then error('Cannot load helmet shell shadow model') end
-        st.root:findMeshes('*'):setVisible(false,false)
+        st.all=st.root:findMeshes('*')   -- PERF-1: cached (was a scene query per call, several per frame)
+        st.all:setVisible(false,false)
         st.mesh=st.root:findMeshes('FRAME_MAIN')
         st.owner=visor
     end
@@ -13075,7 +13136,7 @@ rainDynamicSceneCopyState.nativeCapturePrepare = function()
                     or kind=='opticsSource' and r.RAIN_VISOR_OPTICS_ENABLED and r.RAIN_VISOR_OPTICS_NATIVE_SOURCE
                         and r.RAIN_VISOR_OPTICS_TIER>=1)
             st.root:setVisible(enabled or false,false)
-            if kind~='occluder' then st.root:findMeshes('*'):setVisible(false,false) end
+            if kind~='occluder' then (st.all or st.root:findMeshes('*')):setVisible(false,false) end
             if enabled then
                 st.root:getTransformationRaw():set(visor:getTransformationRaw())
                 if st.captureRefs then st.captureRefs:setVisible(true,false) end
@@ -13090,7 +13151,7 @@ rainDynamicSceneCopyState.nativeCaptureHide = function()
     if (rainDynamicSceneCopyState.nativeCaptureActive or 0)>0 then return end
     for _,st in pairs(rainDynamicSceneCopyState.nativeCaptureModel) do
         if st.root then
-            st.root:findMeshes('*'):setVisible(false,false)
+            (st.all or st.root:findMeshes('*')):setVisible(false,false)   -- PERF-1: cached list
             st.root:setVisible(false,false)
         end
     end
@@ -13107,8 +13168,9 @@ rainDynamicSceneCopyState.nativeCaptureRefs = function(includeActors,captureKind
         if st.root then st.root:dispose() end
         st.root=axisRollNode:loadKN5({filename=cfg.RUNTIME.MODEL_PATH,forceRenderableOn=true})
         if not st.root then error('Cannot load registered housing capture model') end
-        st.root:findMeshes('*'):setVisible(false,false)
-        st.root:findMeshes('*'):setShadows(false) -- copies must not affect scene shadows
+        st.all=st.root:findMeshes('*')   -- PERF-1: cached
+        st.all:setVisible(false,false)
+        st.all:setShadows(false) -- copies must not affect scene shadows
         st.owner=visor;st.refs={};st.prepared=false
         rainDynamicSceneCopyState.nativeHousing.generation=
             (rainDynamicSceneCopyState.nativeHousing.generation or 0)+1
@@ -14393,6 +14455,7 @@ rainDynamicSceneCopyState.opticsProbeEnsure = function()
         if st.root then st.root:dispose() end
         st.root=axisRollNode:loadKN5({filename=cfg.RUNTIME.MODEL_PATH,forceRenderableOn=true})
         st.owner=visor;st.prepared=false;st.root:ensureUniqueMaterials()
+        st.all=st.root:findMeshes('*')   -- PERF-1: cached
     end
     st.captureKey=key
     st.root:findMeshes('*'):setVisible(false,false);st.root:findMeshes('*'):setShadows(false)
@@ -14700,16 +14763,22 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
         or st.nativeGlassPreparedFrame~=ac.getSim().frame) then
         vl.status='Waiting for scene-ready native mask';return false
     end
+    -- GLASS-ORDER-1 (2026-11-06): the INT optics / E2/E3 captures are taken right before the first INT (kind 3) item,
+    -- i.e. after everything drawn before it in 'post' -- with the EXT band now drawn first, the band is IN the capture
+    -- and E2/E3 refract it like the rest of the scene (rev s55-s57 drew EXT last because the band was not in the
+    -- capture). Same sources / formats as before; only the moment moves.
     local cachedSource
-    if phase == 'post' and r.RAIN_VISOR_LAYER_OPTICS then
-        vl.opticsReady=false
-        local opticsSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h)
-        vl.opticsReady=opticsSource~=nil
-        if opticsSource then
-            sov.src = opticsSource
+    local captured = false
+    local function opticsCaptures()
+        captured = true
+        if r.RAIN_VISOR_LAYER_OPTICS then
+            vl.opticsReady=false
+            local opticsSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h)
+            vl.opticsReady=opticsSource~=nil
+            if opticsSource then
+                sov.src = opticsSource
+            end
         end
-    end
-    if phase == 'post' then
         if rainDynamicSceneCopyState.cachedOptics:needsComposite() then
             -- Snapshot before E2/E3; cached blur never feeds transmitted colour.
             cachedSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h, true)
@@ -14730,6 +14799,7 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
         if item.rain then
             afterRain = true
         elseif (phase == 'pre' and not afterRain) or (phase == 'post' and afterRain) then
+            if phase == 'post' and item.kind == 3 and not captured then opticsCaptures() end   -- GLASS-ORDER-1
             render.setBlendMode(render.BlendMode.BlendPremultiplied)
             render.setDepthMode(render.DepthMode.ReadOnly)
             if not (phase == 'post' and not vl.opticsReady and item.kind == 3 and r.RAIN_VISOR_LAYER_OPTICS) then
@@ -14791,11 +14861,14 @@ rainDynamicSceneCopyState.glassFallback = function()
             end
             if st.visorLayer.preViewKey~=viewKey then st.visorSceneStack('pre') end
             -- RainFX v2: water between glass 'pre' (housing, COAT) and 'post' (EXT band, INT).
-            local rfx2=st.rainfx2 or nil
-            if rfx2 then render.measure('RainFX2 draw',rfx2.draw,rfx2,vl.fallbackSource,viewKey,false) end
+            local rfx2=st.rainfx2Active()   -- PERF-1: off with the GLASS_RAINFX mesh (KN5 Visible)
+            if rfx2 then   -- LIFE-1: a RainFX failure must never skip the glass 'post' stack (E2/E3, INT, EXT)
+                local okR,errR=pcall(render.measure,'RainFX2 draw',rfx2.draw,rfx2,vl.fallbackSource,viewKey,false)
+                if not okR then rfx2.err='Draw: '..tostring(errR) end
+            end
             st.visorSceneStack('post')
             -- Depth after 'post' so the same-surface EXT is not rejected; later car glass cannot blend over water.
-            if rfx2 then rfx2:draw(vl.fallbackSource,viewKey,true) end
+            if rfx2 then local okD,errD=pcall(rfx2.draw,rfx2,vl.fallbackSource,viewKey,true);if not okD then rfx2.err='Depth: '..tostring(errD) end end
         end)
         if not ok then st.visorLayer.err='Glass fallback: '..tostring(err) end
     end
@@ -14823,6 +14896,27 @@ rainDynamicSceneCopyState.rainfx2Get=function()
     end
     return st.rainfx2 or nil
 end
+-- PERF-1 / LIFE-1: RainFX v2 runs only while its mesh GLASS_RAINFX is Visible (KN5 tab). The on/off TRANSITION is done
+-- in script.update (outside every render callback): hidden -> core:suspend() releases all its GPU resources; shown ->
+-- core:resume() clears the error / cached draw state and the next simulate rebuilds everything (the visor starts dry).
+-- Render callbacks only ask rainfx2Active(); nothing there can dispose / throw into the glass stack.
+rainDynamicSceneCopyState.rainfx2Lifecycle=function()
+    local st=rainDynamicSceneCopyState
+    local core=st.rainfx2Get();if not core then return end
+    local ed=st.visorLayerEditor and st.visorLayerEditor('GLASS_RAINFX')
+    local want=(core.store and core.store.enabled) and ed~=nil and ed.visible~=false and true or false
+    if want==st.rainfx2On then return end
+    st.rainfx2On=want
+    local ok,err=pcall(want and core.resume or core.suspend,core)
+    if not ok then st.rainfx2LifeErr=tostring(err);ac.warn(appNameDebug..' RainFX v2 '..(want and 'resume' or 'suspend')..': '..tostring(err)) end
+end
+rainDynamicSceneCopyState.rainfx2Active=function()
+    local st=rainDynamicSceneCopyState
+    if not st.rainfx2On then return nil end
+    local core=st.rainfx2
+    if not core or not core:enabled() then return nil end
+    return core
+end
 rainDynamicSceneCopyState.rainfx2Arbitrate=function()
     local st=rainDynamicSceneCopyState;local r=cfg.RUNTIME
     local core=st.rainfx2Get()
@@ -14836,8 +14930,8 @@ render.onSceneReady(function()
     local st=rainDynamicSceneCopyState
     if (st.offscreenCaptureActive or 0)>0 or (st.nativeCaptureActive or 0)>0 then return end
     if not initialized or not visor or activeEnableMode~=1 then return end
-    local core=st.rainfx2Get();local sim=ac.getSim()
-    if not core or not sim or not core:enabled() then return end
+    local core=st.rainfx2Active();local sim=ac.getSim()
+    if not core or not sim then return end
     local ok,err=pcall(render.measure,'RainFX2 sim',core.simulate,core,sim)
     if not ok then core.err='Simulate: '..tostring(err) end
 end)
@@ -17157,6 +17251,7 @@ function script.update(dt)
     rainDynamicSceneCopyState.materialSettings:flush()
     rainDynamicSceneCopyState.physicsInputsUpdate()
     rainDynamicSceneCopyState.rainfx2Arbitrate()
+    rainDynamicSceneCopyState.rainfx2Lifecycle()   -- LIFE-1
 
     --------------------------------------------------------
     -- Initialize
@@ -20198,6 +20293,7 @@ function windowMain(dt)
 
     local rfx2=rainDynamicSceneCopyState.rainfx2Get()
     if rfx2 then rfx2:ui() else ui.text('RainFX v2 failed to load: '..tostring(rainDynamicSceneCopyState.rainfx2Error)) end
+    rainDynamicSceneCopyState.rvProfileUI()
     ui.separator()
     rainDynamicSceneCopyState.rainUIUpdateProfile()
     ui.text('RainFX tuning')
@@ -20302,3 +20398,42 @@ render.on('mirror.track.transparent',function()
     rainDynamicSurfaceMesh:setVisible(false,false)
     if not ok then st.mirrorWaterError=tostring(err) end
 end)
+
+------------------------------------------------------------
+-- PERF-1: script.update / windowMain timing and the profile table (RainFX tab)
+------------------------------------------------------------
+-- (no new locals in the main chunk: it is at Lua's 200-local limit)
+RV_PROF.upd = script.update
+script.update = function(dt)
+    RV_PROF.on = cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING == true
+    RV_PROF.frame()
+    if not RV_PROF.on then return RV_PROF.upd(dt) end
+    local t0 = os.preciseClock()
+    RV_PROF.upd(dt)
+    RV_PROF.add('RV script.update (CPU)', (os.preciseClock() - t0) * 1000)
+end
+RV_PROF.win = windowMain
+windowMain = function(dt)
+    if not RV_PROF.on then return RV_PROF.win(dt) end
+    local t0 = os.preciseClock()
+    RV_PROF.win(dt)
+    RV_PROF.add('RV windowMain UI (CPU)', (os.preciseClock() - t0) * 1000)
+end
+rainDynamicSceneCopyState.rvProfileUI = function()
+    if ui.checkbox('Performance profile (every callback of the app: Render Stats "RV ..." CPU+GPU, CPU table below)',
+        cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING) then
+        cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING = not cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING
+    end
+    if not cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING then return end
+    local list, total = {}, 0
+    for _, tag in ipairs(RV_PROF.order) do
+        local e = RV_PROF.cpu[tag]
+        if e.ms > 0.001 then list[#list + 1] = tag; total = total + e.ms end
+    end
+    table.sort(list, function(a, b) return RV_PROF.cpu[a].ms > RV_PROF.cpu[b].ms end)
+    ui.text(string.format('CPU per frame (EMA): total %.2f ms over %d callbacks (GPU: Render Stats)', total, #list))
+    for i = 1, math.min(#list, 30) do
+        local e = RV_PROF.cpu[list[i]]
+        ui.text(string.format('  %6.3f ms  (peak %6.2f)  %s', e.ms, e.peak, list[i]))
+    end
+end

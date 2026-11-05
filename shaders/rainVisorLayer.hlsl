@@ -60,6 +60,8 @@ float4 rainLayerTextureRepeat(Texture2D tx, float2 uv)
 // framebuffer feedback and keeps opaque-band pixels from sampling outside.
 float rainLayerBandCoverage(float alpha)
 {
+    // BAND-SDF-1: ext_txBand_sdf alpha = 0.5 + signed distance / 12 texels (edge at 0.5)
+    if (gLayerBandSDF > 0.5) return step(0.5, alpha);
     float lo = saturate(gLayerBandAlphaMin);
     return smoothstep(lo, min(lo + 0.04, 1.0), alpha);
 }
@@ -443,6 +445,12 @@ float4 main(PS_IN pin)
         // gLayerBandOpacity (1 = fully opaque, nothing behind shows).
         float bandLo = saturate(gLayerBandAlphaMin);
         float band = smoothstep(bandLo, min(bandLo + 0.04, 1.0), d.a);
+        // BAND-SDF-1 (2026-11-06): the band texture's alpha was a binary 2048x512 mask (13 levels, 0.1 % transition
+        // texels) thresholded at 0.064 -> texel staircase and painted bumps on screen. ext_txBand_sdf.png holds a
+        // signed distance (contour smoothed at 1.5 texels, 4x supersampled); the edge is resolved to one screen
+        // pixel with the analytic derivative, at any magnification / mip.
+        if (gLayerBandSDF > 0.5)
+            band = saturate((d.a - 0.5) / max(fwidth(d.a), 1e-4) + 0.5);
         a = lerp(gLayerGlassAlpha, gLayerBandOpacity, band);
         if (band >= 0.999)
             a = gLayerBandOpacity;

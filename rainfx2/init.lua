@@ -367,9 +367,10 @@ local function sceneValues(self, v)
   return v
 end
 
-local function newPass(self, shader)
+local PASS_NAMES = setmetatable({}, { __mode = 'k' })   -- PERF-2: pass table -> Render Stats name (kept out of the params)
+local function newPass(self, shader, name)
   local root = self.ctx.surface.root
-  return {
+  local pass = {
     async = true,
     blendMode = render.BlendMode.Opaque,
     textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2Trail = false,
@@ -379,6 +380,8 @@ local function newPass(self, shader)
     values = sceneValues(self, {}),
     shader = shader,
   }
+  if name then PASS_NAMES[pass] = 'RainFX2 sim/' .. name end
+  return pass
 end
 
 function R2:enabled()
@@ -432,21 +435,21 @@ function R2:ensureResources()
   self.cellSizeMM = vec2(602.0 / p.cellsU, 146.3 / p.cellsV)
   self.cellMM = (self.cellSizeMM.x + self.cellSizeMM.y) * 0.5
   self.texMM = vec2(602.0, 146.3)
-  self.passCells = newPass(self, self.src.cells)
-  self.passField = newPass(self, self.src.field)
-  self.passSheet = newPass(self, self.src.sheet)            -- rev48-W1
-  self.passSheetK = newPass(self, self.src.sheetcoef)
-  self.passNuc = newPass(self, self.src.nuc)               -- rev48-W1d
-  self.passLam = newPass(self, self.src.lam)               -- rev48-W1q
-  self.passBead = newPass(self, self.src.bead)             -- rev48-W1t
-  self.passTrail = newPass(self, self.src.trail)
-  self.passClaim = newPass(self, self.src.claim)
-  self.passMetrics = newPass(self, self.src.metrics)
+  self.passCells = newPass(self, self.src.cells, 'cells')
+  self.passField = newPass(self, self.src.field, 'field')
+  self.passSheet = newPass(self, self.src.sheet, 'sheet')            -- rev48-W1
+  self.passSheetK = newPass(self, self.src.sheetcoef, 'sheetcoef')
+  self.passNuc = newPass(self, self.src.nuc, 'nuc')               -- rev48-W1d
+  self.passLam = newPass(self, self.src.lam, 'lam')               -- rev48-W1q
+  self.passBead = newPass(self, self.src.bead, 'bead')             -- rev48-W1t
+  self.passTrail = newPass(self, self.src.trail, 'trail')
+  self.passClaim = newPass(self, self.src.claim, 'claim')
+  self.passMetrics = newPass(self, self.src.metrics, 'metrics')
   self.Mc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 metrics')
-  self.passSizes = newPass(self, self.src.sizes)
+  self.passSizes = newPass(self, self.src.sizes, 'sizes')
   self.Hc = canvas(10, 16, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 size histogram')
-  self.passMerge = newPass(self, self.src.merge)
-  self.passBig = newPass(self, self.src.big)              -- rev48-R7a
+  self.passMerge = newPass(self, self.src.merge, 'merge')
+  self.passBig = newPass(self, self.src.big, 'big')              -- rev48-R7a
   self.ready = true
   return true
 end
@@ -653,6 +656,13 @@ function R2:updateInputs(sim)
 end
 
 local function run(canvas, pass)
+  -- PERF-2: with the app profiler on (realvisor RV_PROF, global) every simulation pass is its own Render Stats entry
+  local name = RV_PROF and RV_PROF.on and PASS_NAMES[pass]
+  if name and render.measure then
+    local res
+    render.measure(name, function() res = canvas:updateWithShader(pass) end)
+    return res ~= false
+  end
   return canvas:updateWithShader(pass) ~= false
 end
 
@@ -680,7 +690,7 @@ function R2:simulate(sim)
     if self.labRequest or not self.labSeeded then
       self.labRequest = false
       local ps = self.passSeed
-      if not ps then ps = newPass(self, self.src.seed); self.passSeed = ps end
+      if not ps then ps = newPass(self, self.src.seed, 'seed'); self.passSeed = ps end
       sceneValues(self, ps.values)
       self.labSeedN = ((self.labSeedN or 0) + 1) % 100000
       ps.values.gR2Frame = self.labSeedN
@@ -713,7 +723,7 @@ function R2:simulate(sim)
   if self.ladderRequest then
     self.ladderRequest = false
     local ps = self.passSeed
-    if not ps then ps = newPass(self, self.src.seed); self.passSeed = ps end
+    if not ps then ps = newPass(self, self.src.seed, 'seed'); self.passSeed = ps end
     sceneValues(self, ps.values)
     ps.values.gR2SeedMode = 0
     if run(self.S[3 - self.si], ps) then self.si = 3 - self.si end
@@ -850,6 +860,7 @@ function R2:drawParams(depth)
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
+  t.mesh = self.mesh   -- LIFE-1: the drop mesh is rebuilt after a suspend (a cached disposed mesh failed every draw)
   local p, v = self.p, t.values
   local size = render.getRenderTargetSize()
   v.gR2InvRT = vec2(1 / math.max(size.x, 1), 1 / math.max(size.y, 1))
@@ -1031,7 +1042,12 @@ function R2:draw(src, viewKey, depth)
   if viewKey and self[memo] == viewKey then return false end
   local t = self:drawParams(depth)
   if not depth then
-    local ok, res = pcall(self.prepareSource, self, src)
+    local ok, res
+    if RV_PROF and RV_PROF.on and render.measure then   -- PERF-2: refraction source (0.5 x frame + mips) on its own
+      ok, res = pcall(function() local r; render.measure('RainFX2 draw/source', function() r = self:prepareSource(src) end); return r end)
+    else
+      ok, res = pcall(self.prepareSource, self, src)
+    end
     if not ok then self.sourceErr = tostring(res); res = nil end
     -- Raw copy as fallback: alpha 1 everywhere, so r2Scene reduces to a plain fetch.
     self.sceneTex = res or src
@@ -1526,17 +1542,33 @@ function R2:physicsUI()
 end
 
 function R2:dispose()
-  for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {} }) do
-    for _, c in ipairs(list) do c:dispose() end
+  -- PERF-1 / LIFE-1: release EVERY GPU resource; each release is guarded and every field is cleared even if one
+  -- fails, so a later ensureResources / ensureMesh always rebuilds from a clean state.
+  local function free(c) if c then pcall(c.dispose, c) end end
+  for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {} }) do
+    for _, c in ipairs(list) do free(c) end
   end
-  if self.mesh then self.mesh:dispose() end
-  if self.source then self.source:dispose() end
-  if self.C then self.C:dispose() end
-  if self.testCanvas then self.testCanvas:dispose(); self.testCanvas = nil end
-  if self.Mc then self.Mc:dispose(); self.Mc = nil end
-  if self.Hc then self.Hc:dispose(); self.Hc = nil end
-  self.source, self.sceneTex, self.C = nil, nil, nil
-  self.S, self.F, self.TG, self.mesh, self.ready, self.opticsReady = nil, nil, nil, nil, false, false
+  for _, k in ipairs({ 'C', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+    free(self[k]); self[k] = nil
+  end
+  self.sceneTex = nil
+  self.S, self.F, self.TG, self.LM, self.ready, self.opticsReady = nil, nil, nil, nil, false, false
+  self.paramsColour, self.paramsDepth, self.passSource, self.passSeed = nil, nil, nil, nil
+  self.simFrame, self.colourViewKey, self.depthViewKey = nil, nil, nil
+  self.drawW, self.drawH, self.sizeKey, self.sizeVotes = nil, nil, nil, 0
+  self.metricsBusy, self.sizesBusy = false, false   -- a readback in flight on a disposed canvas never returns
+  self.labSeeded = false
+end
+
+-- LIFE-1 (realvisor rainfx2Lifecycle, from script.update): GLASS_RAINFX hidden -> suspend, shown -> resume
+function R2:suspend()
+  self:dispose()
+  self.status = 'off: GLASS_RAINFX hidden (no simulation, no draw, GPU resources released)'
+end
+function R2:resume()
+  self:dispose()          -- idempotent: whatever survived is rebuilt
+  self.err = nil          -- an error of the previous run does not block the restart
+  self.status = 'restarting'
 end
 
 return function(ctx)

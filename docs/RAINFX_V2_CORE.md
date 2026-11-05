@@ -1892,3 +1892,14 @@ rev34–42 렌즈는 한 방울 안에 서로 다른 세 출처를 섞었다.
 ### 65.63 F9 (2026-11-06)
 - 미세층(G)을 제거했다. 근거: Debug 4 대조에서 패턴은 G 대리 방울이었고, f32 후에도 0 %에서 누적되었다.
 - visor의 방울은 모두 엔터티이다. road spray는 film으로 간다.
+
+### 65.64 PERF-1 (2026-11-06)
+- RainFX v2는 GLASS_RAINFX Visible과 연동된다. 숨기면 sim / draw를 건너뛰고 GPU 자원을 해제한다(dispose 누수 수정).
+- 앱 전체 프로파일러(render.on / onSceneReady 래핑, Render Stats 'RV ...' + RainFX 탭 표)를 추가했다.
+- findMeshes('*') 캐시를 적용했다. 상세는 docs/RAINFX_V2_PERF.md에 있다.
+
+### 65.65 LIFE-1 / GLASS-ORDER-1 / BAND-SDF-1 / PERF-2 (2026-11-06)
+- RainFX on / off 전환은 script.update에서만 한다(suspend / resume). drawParams 메쉬 캐시 버그를 수정했다. RainFX 실패가 glass post를 막지 않게 했다.
+- glass 순서는 COAT → rain → EXT → INT(E2 / E3)이다. 캡처는 EXT 이후이다.
+- EXT 밴드는 SDF 텍스처 + fwidth AA를 쓴다.
+- RainFX 패스별 Render Stats(`RainFX2 sim/<pass>`, `draw/source`)를 추가했다. 상세는 PERF.md §5에 있다.
