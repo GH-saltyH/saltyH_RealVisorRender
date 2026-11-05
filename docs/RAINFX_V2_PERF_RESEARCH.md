@@ -127,3 +127,16 @@
   - verify(2)는 조기 배제 후보도 전부 읽어 그린다 → w와 B를 둘 다 검사한다.
 - **검사 도구 추가(PERF-9):** `check_rainfx2_shaders.py`가 rec / visor 패스에서 셰이더가 읽는 gR2 값이 init.lua(candValues, drawParams, draw)에서 설정되는지 확인한다. 설정되지 않은 값은 게임에서 컴파일 오류 없이 0이 되는 공유 리소스 위험이다. 일부러 넣은 오류(gR2FooTest)를 검출하는 것을 확인했다.
 - **UI:** RainFX 탭에 'Drop records' 체크박스를 둔다(off = PERF-7 픽셀별 경로).
+
+## 10. PERF-9 결과 (사용자, Heavy Rain)
+
+| | rec | colour draw | depth |
+|---|---|---|---|
+| Drop records off (PERF-7) | – | 1.836 | 1.496 |
+| on | 0.034 | **1.203** | **1.095** |
+| PERF-6 기준(Tight 0) | – | 2.128 | 1.747 |
+
+- verify 모드로 2분 주행했고 위반이 0이었다.
+- **PERF-6 대비 개선:** colour −43 %, depth −37 %, 합계 약 1.6 ms이다(rec 0.034 ms 포함).
+- **기본 앱:** RealVisor 제거 94–95, 이전 세션 93–97 변동, FX off 97로 측정 오차 범위 안이다. PERF-8 이후 FX off 상태의 앱 고정비는 측정되지 않는 수준이다.
+- **FXC X3556**(rec의 int 나눗셈)은 uint로 수정했다.
