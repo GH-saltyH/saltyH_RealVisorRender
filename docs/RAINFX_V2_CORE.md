@@ -1930,3 +1930,7 @@ rev34–42 렌즈는 한 방울 안에 서로 다른 세 출처를 섞었다.
 - init.lua: `candValues`(visor와 rec 공용 값), `R2:recUpdate()`(simulate의 그려지는 출구), draw의 gR2UseRec / txR2Rec.
 - visor 텍스처는 9 / 13이다. 체크 도구는 rec 패스와 값 누락 검사를 포함한다.
 
+### 65.73 PERF-10 후보 마스크 (2026-11-06)
+- `shaders/msk.hlsl`: MSK cellsU×cellsV RG32F이다. 셀 c0에 닿는 후보 ci의 비트를 담는다.
+- visor 루프는 마스크 비트를 순회한다(gR2UseMask, txR2Msk). visor 텍스처는 10 / 13이다.
+

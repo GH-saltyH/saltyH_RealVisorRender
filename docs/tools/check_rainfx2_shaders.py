@@ -50,6 +50,7 @@ SCENE_TEXTURES = init_textures('local function newPass(self, shader')
 VISOR_TEXTURES = init_textures('function R2:drawParams(depth)')
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 REC_TEXTURES = init_textures('function R2:recUpdate()')   # PERF-9 drop records (own table)
+MSK_TEXTURES = init_textures('  if self.recValid and self.MSK')   # PERF-10 candidate mask (own table)
 
 PASSES = [  # name, template, files, textures, defines
     ('cells', 'ui.fx', ['common.hlsl', 'cells.hlsl'], SCENE_TEXTURES, ''),
@@ -69,6 +70,7 @@ PASSES = [  # name, template, files, textures, defines
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
     ('rec', 'ui.fx', ['cand.hlsl', 'rec.hlsl'], REC_TEXTURES, ''),
+    ('msk', 'ui.fx', ['msk.hlsl'], MSK_TEXTURES, ''),
     ('visor', 'mesh.fx', ['cand.hlsl', 'visor.hlsl'], VISOR_TEXTURES, ''),
     ('visor_depth', 'mesh.fx', ['cand.hlsl', 'visor.hlsl'], VISOR_TEXTURES, '#define R2_DEPTH_ONLY 1\n'),
 ]
@@ -113,6 +115,7 @@ def lua_assigned(*anchors):
 # pass -> the Lua functions that fill that pass's values table
 VALUE_SOURCES = {
     'rec': ('local function candValues(self, v)',),
+    'msk': ('local function candValues(self, v)',),
     'visor': ('local function candValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
     'visor_depth': ('local function candValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
 }

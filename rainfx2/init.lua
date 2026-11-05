@@ -443,6 +443,7 @@ function R2:ensureResources()
   self.passPredict = newPass(self, self.src.predict, 'predict')   -- PERF-3
   self.PR = canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop prediction')
   self.REC = canvas(6 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop records')   -- PERF-9 visor candidates (rec.hlsl)
+  self.MSK = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R32G32.Float, 'RainFX2 candidate mask')   -- PERF-10 (msk.hlsl)
   self.passField = newPass(self, self.src.field, 'field')
   self.passSheet = newPass(self, self.src.sheet, 'sheet')            -- rev48-W1
   self.passSheetK = newPass(self, self.src.sheetcoef, 'sheetcoef')
@@ -927,6 +928,21 @@ function R2:recUpdate()
   if run(self.REC, rp) then
     self.recValid, self.recS, self.recLM = true, self.S[self.si], self.LM and self.LM[self.li]
   end
+  -- PERF-10: per-cell candidate mask from these records (+ the big tiles); same values source
+  self.mskValid = false
+  if self.recValid and self.MSK and self.p.useMask ~= false then
+    local mp = self.passMsk
+    if not mp then
+      mp = { async = true, blendMode = render.BlendMode.Opaque,
+        textures = { txR2Rec = false, txR2Big = false }, values = {}, shader = self.src.msk }
+      PASS_NAMES[mp] = 'RainFX2 sim/msk'
+      self.passMsk = mp
+    end
+    mp.textures.txR2Rec = self.REC
+    mp.textures.txR2Big = self.BG or false
+    candValues(self, mp.values)
+    self.mskValid = run(self.MSK, mp)
+  end
 end
 
 function R2:drawParams(depth)
@@ -934,7 +950,7 @@ function R2:drawParams(depth)
   local t = self[key]
   if not t then
     t = { mesh = self.mesh, transform = 'original', async = true,
-      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Rec = false, txR2Mask = self.ctx.maskPath },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9 9 / 13
+      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Rec = false, txR2Msk = false, txR2Mask = self.ctx.maskPath },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9/10 10 / 13
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
@@ -1119,6 +1135,9 @@ function R2:draw(src, viewKey, depth)
     and self.recLM == (self.LM and self.LM[self.li]) or false
   t.textures.txR2Rec = recOk and self.REC or false
   t.values.gR2UseRec = recOk and 1 or 0
+  local mskOk = recOk and self.mskValid and self.p.useMask ~= false   -- PERF-10: built from these records
+  t.textures.txR2Msk = mskOk and self.MSK or false
+  t.values.gR2UseMask = mskOk and 1 or 0
   render.setCullMode(render.CullMode.None)
   render.setBlendMode(render.BlendMode.AlphaBlend)
   -- rev31: the drop mesh is a copy of the visor surface offset by only 0.05 mm; a depth-tested colour
@@ -1204,6 +1223,7 @@ function R2:ui()
   end
   self.p.perfProbe = ui.slider('##rfx2pp', self.p.perfProbe or 0, 0, 2, 'Visor cost probe: %.0f (0 off | 1 setup only | 2 + drop union, no lens) -- diagnostics', true)
   if ui.checkbox('Drop records (PERF-9: candidates computed once per drop)', self.p.useRec ~= false) then self.p.useRec = self.p.useRec == false end
+  if ui.checkbox('Candidate mask (PERF-10: only drops that reach the cell)', self.p.useMask ~= false) then self.p.useMask = self.p.useMask == false end
   self.p.tightReach = ui.slider('##rfx2tr', self.p.tightReach or 1, 0, 2, 'Tight drop support: %.0f (0 legacy | 1 on | 2 verify: red = skipped drop contributed)', true)
   if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
     self.p.lensPhys = DEFAULTS.lensPhys
@@ -1610,7 +1630,7 @@ function R2:dispose()
   for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {} }) do
     for _, c in ipairs(list) do free(c) end
   end
-  for _, k in ipairs({ 'C', 'PR', 'REC', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
     free(self[k]); self[k] = nil
   end
   self.sceneTex = nil
@@ -1618,6 +1638,7 @@ function R2:dispose()
   self.paramsColour, self.paramsDepth, self.passSource, self.passSeed = nil, nil, nil, nil
   self.simFrame, self.colourViewKey, self.depthViewKey = nil, nil, nil
   self.recValid, self.recS, self.recLM, self.passRec = false, nil, nil, nil   -- PERF-9
+  self.mskValid, self.passMsk = false, nil   -- PERF-10
   self.drawW, self.drawH, self.sizeKey, self.sizeVotes = nil, nil, nil, 0
   self.metricsBusy, self.sizesBusy = false, false   -- a readback in flight on a disposed canvas never returns
   self.labSeeded = false
@@ -1651,7 +1672,7 @@ return function(ctx)
   local common = readFile(dir .. 'common.hlsl')
   local cand = readFile(dir .. 'cand.hlsl')   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big', 'rec' }) do
+  for _, name in ipairs({ 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big', 'rec', 'msk' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -1676,6 +1697,7 @@ return function(ctx)
       big = common .. '\n' .. src.big,
       visor = cand .. '\n' .. src.visor,
       rec = cand .. '\n' .. src.rec,
+      msk = src.msk,
       source = src.source,
       visorDepth = '#define R2_DEPTH_ONLY 1\n' .. cand .. '\n' .. src.visor,
     }

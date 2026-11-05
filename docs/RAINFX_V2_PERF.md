@@ -198,3 +198,7 @@
 - **PERF-9:** 후보의 픽셀 무관 계산(r2CandCore)을 방울당 1회 rec 패스로 옮긴다. visor는 로드 1회로 먼 후보를 배제한다.
   - 공유 코드는 `cand.hlsl`이고, 값은 `candValues` 한 곳에서 만든다. 검사 도구가 값 누락을 검사한다.
   - 상세는 PERF_RESEARCH §8–9에 있다.
+
+## 16. PERF-9 결과 / PERF-10 (2026-11-06)
+- **PERF-9:** draw 1.836 → 1.203 ms, depth 1.496 → 1.095 ms, rec 0.034 ms이다. verify 위반은 0이었다. 기본 앱(FX off)은 측정 오차 범위 안이다.
+- **PERF-10:** 셀별 후보 마스크(msk.hlsl)로 visor가 셀에 닿는 후보만 순회한다. 결과는 동일하다. 상세는 PERF_RESEARCH §10–11에 있다.

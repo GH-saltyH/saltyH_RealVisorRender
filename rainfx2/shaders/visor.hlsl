@@ -800,7 +800,19 @@ float4 main(PS_IN pin) {
     uint nCand = gR2BigOn > 0.5 ? 34u : 25u;
     int2 tc = int2((uint2)c0 >> 2);
     float splitMark = 0.0, impMark = 0.0, tightMiss = 0.0;
-    [loop] for (uint ci = 0u; ci < nCand; ++ci) {
+    // PERF-10 candidate mask (msk.hlsl): only candidates that can reach this pixel's cell. Needs the records, tight
+    // support and no D-A widening (reachMM 0); verify (2) runs all 34 and flags a used candidate the mask lacks.
+    bool maskOk = gR2UseMask > 0.5 && gR2UseRec > 0.5 && gR2TightReach > 0.5 && !multi
+                  && all(c0 >= int2(0, 0)) && all(c0 < size);
+    uint mLo = 0x1FFFFu, mHi = 0x1FFFFu;
+    if (maskOk) { float2 mk = txR2Msk.Load(int3(c0, 0)).xy; mLo = (uint)mk.x; mHi = (uint)mk.y; }
+    bool maskIter = maskOk && gR2TightReach < 1.5;
+    uint bLo = maskIter ? mLo : 0x1FFFFu, bHi = maskIter ? mHi : 0x1FFFFu;
+    [loop] while (bLo != 0u || bHi != 0u) {
+        uint ci;
+        if (bLo != 0u) { ci = firstbitlow(bLo); bLo &= bLo - 1u; }
+        else { ci = 17u + firstbitlow(bHi); bHi &= bHi - 1u; }
+        if (ci >= nCand) continue;
         int2 s;
         bool bp = ci >= 25u;
         if (!bp) {
@@ -828,6 +840,7 @@ float4 main(PS_IN pin) {
         bool beyond = early;
         if (tight) { float sB = r2SupportMM(c, air, reachMM); beyond = beyond || dot(c.q, c.q) > sB * sB; }
         if (beyond && gR2TightReach < 1.5) continue;
+        if (maskOk && !early && ((ci < 17u ? (mLo >> ci) : (mHi >> (ci - 17u))) & 1u) == 0u) tightMiss = 1.0;   // PERF-10 verify
         float hwB = HW + HWm[0] + HWm[1] + HWm[2] + HWm[3];
         if (multi) {   // rev25: no [branch] - r2DropLens takes ddx/ddy of its lookup
             [unroll] for (int k = 0; k < 4; ++k) r2AddDrop(c.q + dqT[k], c, air, wetFlat, Pm[k], Gm[k], RWm[k], HWm[k]);
