@@ -127,3 +127,74 @@
   - visor draw(전체 화면 메쉬, 34 후보 루프)
   - 굴절 소스(0.5배 + 밉)
   - glass: HDR 전체 해상도 복사 + 밉 체인 2–3회(fallback / cachedScene / optics)
+
+## 11. PERF-4 / 4b 회귀 원인 규명과 PERF-5 (2026-11-06)
+- **사용자:**
+  - 앱 리로드 후(프로파일러 off)에도 E7 글리치가 관찰되었다.
+  - git으로 PERF-3 상태를 복원했고, 그 상태에서는 글리치가 없다. PERF-4 / 4b에서 생긴 충돌을 규명해야 한다.
+  - 앞으로 최적화는 공유 / 종속 리소스의 충돌 지점을 철저히 검증한 뒤 반영한다.
+- **복원 확인:** 장치의 realvisor.lua, rainfx2/init.lua, visor.hlsl, 체크 도구, 이 문서가 PERF-3 산출물과 바이트 단위로 같다(CRLF 정규화 후).
+
+### 11.1 근본 원인: CSP 템플릿 예약 텍스처 레지스터 충돌(PERF-4)
+- CSP는 Lua 셰이더의 텍스처를 t0부터 순서대로 선언한다. 템플릿 include는 그 위 레지스터를 예약한다.
+  - **ui.fx**(updateWithShader, 시뮬레이션 패스): scene include의 `__inner_txShadowArray : register(t14)`(그림자 배열)
+  - **mesh.fx**(render.mesh, visor): TX_SLOT_REFLECTION_CUBEMAP t13, SHADOW_ARRAY t14, SHADOW_CLOUDS t15, DEPTH t18, PREV_FRAME t19 …
+- rainfx2 시뮬레이션 패스는 newPass의 공유 텍스처 표 하나를 쓴다.
+  - PERF-3(txR2Pred 추가) 후 14개(t0..t13), 한계와 정확히 같다.
+  - PERF-4는 이 공유 표에 `txR2Occ`를 추가했다(시뮬레이션 패스는 쓰지도 않는다). 15번째 텍스처가 **t14 = CSP 그림자 배열 레지스터**로 들어가 이후 draw의 전역 그림자 배열 바인딩을 덮었다.
+  - 그림자 / 장면 전역을 쓰는 E7(cached optics)이 카메라 변화에 따라 깜빡이고, 엉뚱한 장면 조각을 저해상도로 투영했다. E7 off면 사라지고, realvisor 쪽 변경과 무관하게 지속된 것과 일치한다.
+- **검증 도구 공백:** 체크 도구는 텍스처 목록을 손으로 적어 두었고 txR2Occ가 빠져 있었다. FXC는 14개로 통과했지만 게임은 15개를 바인딩했다.
+- **재현:** 도구에 레지스터 검사를 넣고 PERF-4 표(15개)를 시험하면 cells / predict / claim … 전부 `15 user textures reach reserved register t14 (ui.fx allows 14)`로 실패한다.
+
+### 11.2 PERF-4b와 그 원복이 만든 E2 / E3 소실
+- PERF-4b의 '원복'은 원래 순서(INT optics 캡처 → E7 cached 캡처)가 아니라 역순(cached → optics)을 남겼다. E7이 켜지면 두 번째 연속 복사인 INT 캡처가 실패해 E2 / E3이 사라졌다. 장치는 PERF-3의 realvisor(원래 순서)로 복원되었으므로 해소되었다.
+- PERF-4b(캡처 공유)는 다시 넣지 않는다. 두 캡처의 소비자(INT 6-mip, E7 full-mip, 캡처 순서 의존)가 얽혀 있어, 공유하려면 별도 검증이 필요하다.
+
+### 11.3 PERF-5: 재발 방지 + PERF-4 안전 재적용
+- **체크 도구:**
+  - 텍스처 목록을 `rainfx2/init.lua`의 newPass / drawParams 표에서 직접 읽는다(수기 목록 제거).
+  - 템플릿이 예약한 가장 낮은 레지스터를 계산해 사용자 텍스처 수가 넘으면 FAILED 처리한다(ui.fx 14, mesh.fx 13). `--emit-only`에서도 검사한다.
+  - occ 패스를 목록에 추가했다.
+- **init.lua newPass 위에 예산 주석:** 시뮬레이션 표는 14 / 14로 꽉 찼다. 새 텍스처는 패스별 표 분리가 먼저 필요하다.
+- **PERF-4 재적용(충돌 검증):**
+
+  | 리소스 | 공유 / 종속 | 검증 |
+  |---|---|---|
+  | txR2Occ | visor drawParams 표에만(9 / 13) | 시뮬레이션 표는 14 유지(도구 OK) |
+  | OC 캔버스(128×32 R8) | rainfx2 전용. ensureResources 생성, dispose 목록 포함 | LIFE-1 suspend / resume 재생성 |
+  | passOcc | 공유 newPass 표 사용, State / Field / Big만 바인딩 | 다른 패스 텍스처 상태 변경 없음 |
+  | gR2OccOn | occOk(이번 run 성공) 및 lookLab 아님 및 토글 | resume 직후 / look lab / 일시정지 전 첫 프레임은 0이라 discard 안 함. 일시정지 중에는 OC가 S와 같은 프레임 값 유지 |
+  | discard 조건 | Debug, sheet on, spray scatter에서는 off | visor_depth도 같은 조건 |
+  | realvisor | 변경 없음(PERF-3) | E2 / E3 / E7 경로 무변경 |
+
+  - 'Skip empty visor tiles' 토글로 A/B 측정한다.
+
+## 12. PERF-5 결과 (2026-11-06)
+- FXC 19 OK. E2 / E3과 E7을 모두 켜면 E7 글리치가 없다(t14 충돌이 원인이었음을 확인).
+- **PERF-4 occ 제거:** 'Skip empty visor tiles' on / off의 FPS가 정수 단위로 같고, draw 변동폭에도 차이가 없다. 이득이 없는 리소스 / 패스이므로 뺐다(OC 캔버스, passOcc, txR2Occ, gR2OccOn, discard, 체크 도구 항목).
+  - `rainfx2/shaders/occ.hlsl`은 쓰이지 않는다. 장치에서 삭제해도 된다.
+  - r2Cand의 txR2Lam 로드를 리뷰 마커에서만 하는 것은 유지한다(동작 동일).
+- **E2 / E3 off + E7 on에서 글리치:**
+  - 이 조합에서는 E7 cached 캡처가 post에서 첫 번째(유일한) HDR 복사가 된다.
+    - GLASS-ORDER-1: INT 직전, EXT 이후
+    - 이전 순서: post 시작, EXT 이전
+  - E2 / E3이 켜져 있으면 INT optics 캡처가 먼저 일어나고 글리치가 없다.
+  - 예전부터 있던 문제인지 판정하려고 INT 패널에 'EXT band drawn last'(GLASS-ORDER-1 이전 순서) 체크박스를 추가했다.
+    - 그 상태에서도 글리치가 나면 원래부터 있던 E7 버그이다. 사라지면 GLASS-ORDER-1의 캡처 시점이 원인이다.
+
+## 13. PERF-6 계측과 연구
+- E2 / E3 off + E7 on 글리치는 EXT_LAST와 무관했다(사용자). 진단 환경에서만 발생하며, E7 개선(정면 반사, 톤, 인테리어, 주야간) 이후 재점검한다.
+- 계측 추가(프로파일링 on일 때만)와 연구 계획은 `docs/RAINFX_V2_PERF_RESEARCH.md`에 있다.
+- 핵심 발견: RainFX2 depth pass가 측정되지 않았다. 컬러 패스와 같은 후보 루프를 반복한다.
+
+## 14. PERF-7 / PERF-8 (2026-11-06)
+- **PERF-6 측정:** 후보 루프가 visor 두 패스 비용의 약 90 %이다. depth 패스는 colour와 같은 1.57 ms이다. 렌즈는 3 %이다.
+- **PERF-7:** r2SupportMM(증명된 지지 반경)으로 기여가 없는 후보의 r2AddDrop을 건너뛴다. 결과는 동일하다. 'Tight drop support' 0 legacy | 1 on | 2 verify(빨강 = 위반)이다. 검사 도구는 `docs/tools/check_tight_support.py`이다.
+- **PERF-8:** GLASS_INT_FX(와 그 뒤 항목)가 숨겨지면 optics / cachedScene 캡처와 E7 sceneReady 갱신을 생략한다.
+- 근거와 증명, 충돌 검토는 `RAINFX_V2_PERF_RESEARCH.md` §5–7에 있다.
+
+## 15. PERF-9 방울 레코드 (2026-11-06)
+- **PERF-7 결과:** verify 위반이 0이었다. draw는 −14 %, depth는 −10 %였다.
+- **PERF-9:** 후보의 픽셀 무관 계산(r2CandCore)을 방울당 1회 rec 패스로 옮긴다. visor는 로드 1회로 먼 후보를 배제한다.
+  - 공유 코드는 `cand.hlsl`이고, 값은 `candValues` 한 곳에서 만든다. 검사 도구가 값 누락을 검사한다.
+  - 상세는 PERF_RESEARCH §8–9에 있다.

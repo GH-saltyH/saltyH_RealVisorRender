@@ -12737,6 +12737,11 @@ rainDynamicSceneCopyState.visorLayerParamUI = function(editor, item)
     elseif item.kind == 3 then
         rainDynamicSceneCopyState.cachedOptics:ui()
         ck('E2/E3 inner glass optics (prototype)', 'RAIN_VISOR_LAYER_OPTICS')
+        -- A/B (E7 review): the pre-GLASS-ORDER-1 order -- INT right after rain, EXT last; both captures before EXT
+        if ui.checkbox('EXT band drawn last (pre GLASS-ORDER-1 order, A/B)', r.RAIN_VISOR_LAYER_EXT_LAST == true) then
+            r.RAIN_VISOR_LAYER_EXT_LAST = not r.RAIN_VISOR_LAYER_EXT_LAST
+            local vl = rainDynamicSceneCopyState.visorLayer;vl.defs = nil;vl.drawnSet = nil
+        end
         ck('Preview effective sharp rim', 'RAIN_VISOR_LAYER_OPTICS_MASK_PREVIEW')
         sl('Masked optics brightness (effect gain)', 'RAIN_VISOR_LAYER_OPTICS_BRIGHTNESS', 0.0, 2.0, '%.2f')
         sl('Convex region tint darkness', 'RAIN_VISOR_LAYER_OPTICS_CONVEX_TINT', 0.0, 1.0, '%.2f')
@@ -14571,7 +14576,13 @@ render.onSceneReady(function()
         if optics.mask or optics.hit then optics:dispose() end;return
     end
     optics.pending=false
-    local ok,err=pcall(function() optics:updateBake();optics:updateExternalProbe();optics:updateNativeSource() end)
+    -- PERF-8: bake / probe / native source feed only optics:draw, which returns before drawing for exactly this
+    -- condition (visor_optics.lua st:draw) -> no updates (nothing disposed: showing the mesh resumes from the cache).
+    local ed=rainDynamicSceneCopyState.e1SourceEditor('GLASS_INT_FX')
+    if not ed or not ed.targetMesh or #ed.targetMesh~=1 or ed.visible==false then optics.idle=true;return end
+    optics.idle=false
+    local m=rainDynamicSceneCopyState.measure   -- PERF-6 probe (same helper as 'Native glass mask')
+    local ok,err=pcall(function() m('E7/bake',optics.updateBake,optics);m('E7/probe',optics.updateExternalProbe,optics);m('E7/native source',optics.updateNativeSource,optics) end)
     optics.error=not ok and ('Optics update: '..tostring(err)) or nil
 end)
 rainDynamicSceneCopyState.visorProbeEnsure = function()
@@ -14700,7 +14711,7 @@ rainDynamicSceneCopyState.visorOpticsCapture = function(w, h, cached)
         vl[slot..'W'], vl[slot..'H'] = w, h
         vl[slot..'Mips'] = mips
     end
-    local ok, err = pcall(function()
+    local ok, err = pcall(rainDynamicSceneCopyState.measure, 'Glass/capture '..slot, function()   -- PERF-6 probe
         vl[slot..'Source']:copyFrom('dynamic::hdr')
         if mips > 1 and vl[slot..'Source']:mipsUpdate() == false then error('Optics MIP generation pending') end
     end)
@@ -14769,7 +14780,7 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
     -- capture). Same sources / formats as before; only the moment moves.
     local cachedSource
     local captured = false
-    local function opticsCaptures()
+    local function opticsCaptures(intVisible)
         captured = true
         if r.RAIN_VISOR_LAYER_OPTICS then
             vl.opticsReady=false
@@ -14779,7 +14790,8 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
                 sov.src = opticsSource
             end
         end
-        if rainDynamicSceneCopyState.cachedOptics:needsComposite() then
+        -- PERF-8: the cached snapshot feeds only the E7 composite, which draws nothing while GLASS_INT_FX is hidden
+        if intVisible and rainDynamicSceneCopyState.cachedOptics:needsComposite() then
             -- Snapshot before E2/E3; cached blur never feeds transmitted colour.
             cachedSource = rainDynamicSceneCopyState.visorOpticsCapture(sov.w, sov.h, true)
         elseif vl.cachedSceneSource then
@@ -14795,11 +14807,35 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
         end
     end
     local afterRain = false
-    for _, item in ipairs(vl.defs.glass) do
+    -- PERF-8 (2026-11-06; FX-off measurement: both captures still ran, ~0.06 ms GPU): visible = the same test
+    -- visorLayerDrawItem uses before drawing anything (editor, target mesh, Visible).
+    local function itemVisible(it)
+        local e = it.mesh and rainDynamicSceneCopyState.visorLayerEditor(it.mesh)
+        return (e and e.targetMesh and #e.targetMesh > 0 and e.visible ~= false) and true or false
+    end
+    for gi, item in ipairs(vl.defs.glass) do
         if item.rain then
             afterRain = true
         elseif (phase == 'pre' and not afterRain) or (phase == 'post' and afterRain) then
-            if phase == 'post' and item.kind == 3 and not captured then opticsCaptures() end   -- GLASS-ORDER-1
+            if phase == 'post' and item.kind == 3 and not captured then   -- GLASS-ORDER-1
+                -- PERF-8: the optics capture is sov.src for this item and every item after it in 'post' (EXT under
+                -- RAIN_VISOR_LAYER_EXT_LAST); with none of them visible nothing reads it -> no capture.
+                local intVisible = itemVisible(item)
+                local consumer = intVisible
+                for gj = gi + 1, #vl.defs.glass do
+                    local it = vl.defs.glass[gj]
+                    if not consumer and not it.rain and itemVisible(it) then consumer = true end
+                end
+                if consumer then
+                    opticsCaptures(intVisible)
+                else
+                    captured = true
+                    vl.opticsReady = true   -- not needed: keeps the stack 'drawn' (postViewKey) exactly as when captured
+                    if vl.cachedSceneSource then
+                        vl.cachedSceneSource:dispose(); vl.cachedSceneSource = nil; vl.cachedSceneReady = false
+                    end
+                end
+            end
             render.setBlendMode(render.BlendMode.BlendPremultiplied)
             render.setDepthMode(render.DepthMode.ReadOnly)
             if not (phase == 'post' and not vl.opticsReady and item.kind == 3 and r.RAIN_VISOR_LAYER_OPTICS) then
@@ -14808,7 +14844,7 @@ rainDynamicSceneCopyState.visorSceneStack = function(phase)
             end
             if phase=='post' and item.kind==3 and cachedSource and vl.cachedCompositeViewKey~=viewKey then
                 local before=rainDynamicSceneCopyState.cachedOptics.draws
-                local ok,err=pcall(function() return rainDynamicSceneCopyState.cachedOptics:draw(cachedSource,vl.cachedSceneMips-1) end)
+                local ok,err=pcall(function() return rainDynamicSceneCopyState.measure('Glass/E7 composite',rainDynamicSceneCopyState.cachedOptics.draw,rainDynamicSceneCopyState.cachedOptics,cachedSource,vl.cachedSceneMips-1) end)
                 if not ok then rainDynamicSceneCopyState.cachedOptics.error='Optics composite: '..tostring(err) end
                 if ok and rainDynamicSceneCopyState.cachedOptics.draws>before then vl.cachedCompositeViewKey=viewKey end
             end
@@ -14855,20 +14891,22 @@ rainDynamicSceneCopyState.glassFallback = function()
                     vl.fallbackSource:setName('Glass rain-off/pending source')
                     vl.fallbackW,vl.fallbackH=w,h
                 end
-                if vl.fallbackSource:copyFrom('dynamic::hdr')==false
-                    or vl.fallbackSource:mipsUpdate()==false then error('Glass source pending') end
+                -- PERF-6 probe: profiling-only Render Stats entries (st.measure is a plain call when profiling is off)
+                if st.measure('Glass/fallback copy+mips',function()
+                    return vl.fallbackSource:copyFrom('dynamic::hdr')~=false and vl.fallbackSource:mipsUpdate()~=false
+                end)==false then error('Glass source pending') end
                 vl.fallbackSourceFrame=sim.frame;vl.fallbackSourceViewKey=viewKey
             end
-            if st.visorLayer.preViewKey~=viewKey then st.visorSceneStack('pre') end
+            if st.visorLayer.preViewKey~=viewKey then st.measure('Glass/stack pre',st.visorSceneStack,'pre') end
             -- RainFX v2: water between glass 'pre' (housing, COAT) and 'post' (EXT band, INT).
             local rfx2=st.rainfx2Active()   -- PERF-1: off with the GLASS_RAINFX mesh (KN5 Visible)
             if rfx2 then   -- LIFE-1: a RainFX failure must never skip the glass 'post' stack (E2/E3, INT, EXT)
                 local okR,errR=pcall(render.measure,'RainFX2 draw',rfx2.draw,rfx2,vl.fallbackSource,viewKey,false)
                 if not okR then rfx2.err='Draw: '..tostring(errR) end
             end
-            st.visorSceneStack('post')
+            st.measure('Glass/stack post',st.visorSceneStack,'post')
             -- Depth after 'post' so the same-surface EXT is not rejected; later car glass cannot blend over water.
-            if rfx2 then local okD,errD=pcall(rfx2.draw,rfx2,vl.fallbackSource,viewKey,true);if not okD then rfx2.err='Depth: '..tostring(errD) end end
+            if rfx2 then local okD,errD=pcall(st.measure,'RainFX2 draw/depth',rfx2.draw,rfx2,vl.fallbackSource,viewKey,true);if not okD then rfx2.err='Depth: '..tostring(errD) end end
         end)
         if not ok then st.visorLayer.err='Glass fallback: '..tostring(err) end
     end

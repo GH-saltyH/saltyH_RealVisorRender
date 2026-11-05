@@ -1906,3 +1906,27 @@ rev34–42 렌즈는 한 방울 안에 서로 다른 세 출처를 섞었다.
 
 ### 65.66 PERF-3 (2026-11-06)
 - predict.hlsl: r2Predict를 방울당 substep 1회 계산한다(cells가 창 25 × third 3 = 75회 재계산하던 중복을 제거). cells는 txR2Pred를 읽는다. 결과는 동일하다.
+
+### 65.68 PERF-5 (2026-11-06)
+- PERF-4 E7 글리치의 원인은 시뮬레이션 공유 텍스처 표 15개 → t14(CSP ui.fx 그림자 배열) 충돌이었다.
+- 체크 도구는 init.lua 표를 직접 읽고 예약 레지스터를 검사한다.
+- PERF-4 occ는 visor 표에만 넣어 재적용했다. realvisor는 PERF-3 상태(PERF-4b 미적용)이다. 상세는 PERF.md §11에 있다.
+
+### 65.69 PERF-4 제거 (2026-11-06)
+- occ 점유 discard는 측정상 이득이 없어 제거했다.
+- E2 / E3 off + E7 on 글리치 A/B용으로 INT 패널에 EXT_LAST 체크박스를 추가했다. 상세는 PERF.md §12에 있다.
+
+### 65.70 PERF-6 계측 (2026-11-06)
+- Render Stats 항목을 추가했다(RainFX2 draw/depth, Glass/*, E7/*). visor cost probe(gR2PerfProbe)를 추가했다.
+- 연구 계획은 RAINFX_V2_PERF_RESEARCH.md에 있다.
+
+### 65.71 PERF-7 / PERF-8 (2026-11-06)
+- visor: `r2SupportMM`. 증명된 방울 지지 반경 밖의 후보는 r2AddDrop을 건너뛴다(gR2TightReach 0 / 1 / 2 verify).
+- realvisor: GLASS_INT_FX가 숨겨지면 optics / cachedScene 캡처와 E7 갱신을 생략한다.
+- 상세는 PERF_RESEARCH.md §5–7에 있다.
+
+### 65.72 PERF-9 방울 레코드 (2026-11-06)
+- `shaders/cand.hlsl`: 공유 후보 코드(r2CandCore, r2Cand, r2SupportCore). `shaders/rec.hlsl`: REC 6 × cells 레코드.
+- init.lua: `candValues`(visor와 rec 공용 값), `R2:recUpdate()`(simulate의 그려지는 출구), draw의 gR2UseRec / txR2Rec.
+- visor 텍스처는 9 / 13이다. 체크 도구는 rec 패스와 값 누락 검사를 포함한다.
+

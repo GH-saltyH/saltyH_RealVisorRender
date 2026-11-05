@@ -33,19 +33,6 @@ float4 r2VisorTap(Texture2D tx, float2 t) {
     int2 p = clamp(int2(t * float2((float)w, (float)h)), int2(0, 0), int2((int)w - 1, (int)h - 1));
     return tx.Load(int3(p, 0));
 }
-float r2VisorRadiusMM(float v) {
-    return v > 0 ? exp2(log2(v / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
-}
-// rev48-R3 = common r2CapK / r2CapScale (cap volume: a flatter / lower-angle drop of the same water is wider)
-float r2VCapK(float deg) {
-    float t = tan(0.5 * radians(clamp(deg, 5.0, 90.0)));
-    return 0.5235988 * t * (3.0 + t * t);
-}
-float r2VCapScale(float seed, float f) {
-    if (gR2CapVolume < 0.5) return 1.0;
-    float thD = gR2ContactDeg / (f * sqrt(max(f, 1.0)));
-    return clamp(pow(abs(gR2ShapeK / r2VCapK(max(thD, 15.0))), 1.0 / 3.0), 0.8, 1.6);
-}
 // rev48-P1 = common r2DsdDiam (impacting-diameter inverse CDF)
 float r2VDsdDiam(float u) {
     float q[16] = { gR2DQ0, gR2DQ1, gR2DQ2, gR2DQ3, gR2DQ4, gR2DQ5, gR2DQ6, gR2DQ7,
@@ -53,35 +40,6 @@ float r2VDsdDiam(float u) {
     float x = (1.0 - pow(saturate(1.0 - u), 1.0 / 3.0)) * 15.0;
     int i = min((int)x, 14);
     return lerp(q[i], q[i + 1], saturate(x - (float)i));
-}
-// rev48-R1 = common r2SplatTau (capillary-inertial recoil, ~1 frame)
-float r2VSplatTau(float rmm) {
-    float tc = sqrt(1000.0 * pow(max(rmm, 0.05) * 1e-3, 3.0) / 0.072);
-    return clamp(gR2ShpRecoilC * tc * pow(50.0 / clamp(gR2SheetRecedeDeg, 15.0, 100.0), 1.5), 0.004, 0.3);
-}
-float r2VisorSeed(float w) { return floor(w / 262144.0); }    // = r2UnpackSeed (rev40: 64 seeds)
-float2 r2UnpackBF(float w) {                                     // = common.hlsl (rev48-S4 bend + resting spread)
-    if (w >= 0.0) return float2(w, 1.0);
-    float v = -w - 1.0;
-    float qr = floor(v / 4096.0);
-    float qb = qr - 1024.0 * floor(qr / 1024.0);                 // rev48-S6b: bend mode above
-    return float2((qb - 500.0) / 250.0, 1.0 + (v - qr * 4096.0) / 1000.0);
-}
-float r2UnpackBMode(float w) {                                   // = common.hlsl (0 bow, 1 / 2 hook at the +u1 / -u1 end)
-    return w >= 0.0 ? 0.0 : floor(floor((-w - 1.0) / 4096.0) / 1024.0);
-}
-float2 r2UnpackHarm(float z) {                                   // = common.hlsl (rev48-S1 / R5b shape state)
-    float r = floor(z / 16.0);
-    float hi = floor(r / 1024.0);
-    return float2(hi / 1000.0 - 0.5, (r - hi * 1024.0) / 2000.0);
-}
-float r2UnpackHarmPh(float z) {                                  // = common.hlsl (R5b lobe angle on the visor)
-    return (z - 16.0 * floor(z / 16.0)) * 0.13089969;
-}
-float2 r2VisorMove(float w) {                                 // = r2UnpackMove
-    float m = w - r2VisorSeed(w) * 262144.0;
-    float qx = floor(m / 512.0);
-    return (float2(qx, m - qx * 512.0) - 250.0) / 31.25;   // rev40 packing (common.hlsl r2PackMove)
 }
 // Cubic B-spline reconstruction of the film thickness (field B) with its gradient
 // (per texel). 16 Loads, no filtering artefacts at texel edges.
@@ -199,101 +157,6 @@ void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H,
     P *= 1.0 - h;
     RW += h * props;
     HW += h;
-}
-
-struct R2Cand { float2 q; float r; float seed; float2 m; float k; float4 sh; float f; float fx; float ch; float2 nk; float imp; float sft; float e; float aMax; };   // R3b: aspect cap of the window fit   // U2: lamella centre offset (mm) / min(1 + Vt/Vn, 2)   // U1: imp = 1 impact-born splat < 0.3 s, 2 hit by an impact this frame   // S6c: child age (-1 = none), neck dir
-
-// Candidate drop of cell s (false = empty or out of reach). reachMM widens the test for D-A taps.
-// rev48-R7a = common r2BigWinner: the tile's big drop is drawn from the 3 x 3 tiles (+-4 cells), not the 5 x 5 cells
-bool r2VBigWinner(int2 s) {
-    if (gR2BigOn < 0.5) return false;
-    float4 b = txR2Big.Load(int3((uint2)s >> 2, 0));
-    return b.z > 0.5 && all(int2(round(b.xy)) == s);
-}
-bool r2Cand(int2 s, float2 pc, int2 size, float reachMM, float wetV, bool bigPass, out R2Cand c) {
-    c = (R2Cand)0;
-    if (any(s < int2(0, 0)) || any(s >= size)) return false;
-    float4 st = txR2State.Load(int3(s, 0));
-    if (st.z <= 0) return false;
-    // R7a: each drop is drawn by exactly one of the two loops (the tile lookup only for drops large enough to win)
-    bool win = r2VisorRadiusMM(st.z) >= gR2BigRMM && r2VBigWinner(s);
-    if (win != bigPass) return false;
-    c.r = max(r2VisorRadiusMM(st.z), gR2MinDrawMM);
-    // rev45 life cycle (right half of the state texture): grow in, fade out, flight streak
-    float4 L = txR2State.Load(int3(s + int2(size.x, 0), 0));
-    // rev48-S2' impact SPREAD (life.w = -(10 + f0), cells): the newborn is a thin splat f x its final
-    // radius, recoiling f = 1 + (f0 - 1) exp(-age / tau); it replaces the grow-in of other births.
-    // rev48-S4: the drop's own remembered flatness fS (shape state, set by its birth / arrest / merge, held
-    // while pinned, morphed while moving) -- rev48-S2c hashed it from the cell index, which re-rolled a moving
-    // drop's look at every cell crossing (S3b review: 1-frame flashes). A splat recoils from f0 to fS.
-    float4 shS = txR2State.Load(int3(s + int2(2 * size.x, 0), 0));
-    float2 bfS = r2UnpackBF(shS.w);
-    float fB = max(max(bfS.y, gR2BaseSpread), 1.0);
-    bool splat = L.w < -9.5 && L.y <= 0;
-    float f0 = -L.w - 10.0;
-    // rev48-U2: recoil tau from the receding angle (r2SplatTau); the lamella is centred on the IMPACT point while the
-    // residual walks downstream (r2Predict) -> drawn centre = drop - dI shift (1 - e) e (no jump at birth or end)
-    float eC = (splat && gR2ShpOn > 0.5 && f0 > fB) ? exp(-L.x / r2VSplatTau(r2VisorRadiusMM(st.z))) : 0.0;
-    c.f = fB + max(f0 - fB, 0.0) * eC;
-    c.e = eC;                                                       // U2a: lamella share of the look (1 at birth -> 0)
-    c.sft = gR2ShpLamShift * r2VisorRadiusMM(st.z) * max(f0 - 1.0, 0.0) * eC * (1.0 - eC);
-    if (gR2ShpOn < 0.5) c.f = 1.0;
-    c.fx = max(c.f - fB, 0.0);
-    bool child = abs(L.w + 5.0) < 0.5 && L.y <= 0;              // rev48-S6c E8 split piece: existing water
-    c.ch = child ? L.x : -1.0;
-    // rev48-U1 review aid: born by an impact (splat, < 0.3 s) or an impact of this frame landed in its cell (merge)
-    float encH = txR2Lam.Load(int3(s, 0)).x;
-    c.imp = (splat && L.x < 0.3) ? 1.0 : ((encH > 0.5 && floor(encH) - 1.0 == gR2Frame) ? 2.0 : 0.0);
-    if (abs(L.w + 7.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 3.0;   // R2b: splash satellite < 0.3 s
-    float thN = (L.w + 5.0) * 31.4159265;                          // direction to the parent at the split
-    c.nk = float2(cos(thN), sin(thN));
-    float vis = (splat || child) ? 1.0 : lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
-    if (L.z > 0) vis *= saturate(L.z / max(gR2FadeTime, 1e-3));
-    // rev48-S4c (S4b review: drawn sizes larger than the water made size / collision hard to judge): the
-    // resting flatness f only shapes the PROFILE (contact angle / f^1.5, flat top) inside the drop's own
-    // footprint; only the transient impact splat (same water spread thin, < 0.3 s) is wider than r.
-    c.r *= vis * (c.f / fB) * r2VCapScale(r2VisorSeed(st.w), fB);   // R3: footprint of the drop's own cap
-    c.q = (pc - (float2(s) + st.xy)) * gR2CellSizeMM;
-    float shE = length(shS.xy);
-    float shA = sqrt((0.5 + shE) / max(0.5 - shE, 0.05));                 // rev48-S1: aspect widens the reach
-    // U2a: the lamella ellipse (Vt aspect, bounded by Vt/Vn 3) blends in by e -- continuous bound for reach / window
-    float shAx = shA + c.e * max(min(1.0 + gR2ShpImpactK * 3.0, gR2ShpImpactMax) - shA, 0.0);
-    float reach = 1.3 * gR2KernelScale * c.r * sqrt(shAx) * 1.35 * 2.0 + reachMM
-                + 0.5 * c.r * (1.0 - fB / c.f);                           // splat centre shifted upstream
-    if (dot(c.q, c.q) > reach * reach) return false;
-    c.seed = r2VisorSeed(st.w);
-    c.sh = shS;                                                // rev48-S1 shape state
-    float2 mv = r2VisorMove(st.w) * gR2CellSizeMM;            // mm in the last frame
-    float ml = length(mv);
-    c.m = ml > 1e-4 ? mv / ml : float2(0, 0);
-    float v = ml * 1e-3 / max(gR2SimDt, 1e-5);                 // m/s
-    c.k = gR2MotionStretch * saturate(v / max(gR2VMax, 1e-3));
-    // rev48-S3b (rev48_S3 recording: big splats / merged drops showed straight cut edges and 'tick' notches):
-    // a drop is only drawn by pixels within +-2 cells of its own cell, so its whole kernel (aspect, contour
-    // modes, bend, motion stretch, splat shift) must fit 2 cells (~2.3 mm). Larger visuals are scaled down to
-    // that window instead of being cut; the physics footprint uses the same cap (common r2FootRadiusMM).
-    float2 hmC = r2UnpackHarm(c.sh.z);
-    float hF = min(1.0 + (max(hmC.x, 0.0) + hmC.y) * (1.0 - c.e) + gR2ShpFingerK * saturate(c.fx), 1.7);
-    // rev48-R3b ASPECT-FIRST FIT (R3 review: two large drops merging became a small thin needle -- the merged
-    // union ellipse, aspect up to 4.4, was fitted by shrinking the WHOLE drop): an over-long drop first gives up
-    // elongation (aspect cap c.aMax, area kept = its water), and only a drop too big even when round shrinks.
-    float base = gR2KernelScale * c.r * hF * (1.0 + c.k);
-    float rest = 2.0 * c.sft + abs(bfS.x) * gR2KernelScale * c.r;
-    float lWin = (win ? 4.0 : 2.0) * min(gR2CellSizeMM.x, gR2CellSizeMM.y) - 0.05;   // R7a big-drop window
-    c.aMax = 100.0;
-    if (base * sqrt(shAx) + rest > lWin) {
-        float room = max(lWin - rest, 0.3 * lWin);
-        float aF = (room / max(base, 1e-5)) * (room / max(base, 1e-5));
-        if (aF >= 1.0) c.aMax = aF;
-        else { c.aMax = 1.0; c.r *= lWin / (base + rest); }
-    }
-    // rev48-R6 FRAME STREAK (PHYSICS_AUDIT G): drops now move at their force-balance speed (no display cap), up to the
-    // gather window per substep -- a fast drop is seen over the frame as the smear of its path: the rear stretches by
-    // the frame's move (k = move / kernel radius), within the window that is left (no shrink for it).
-    float kBlur = ml / max(gR2KernelScale * c.r, 1e-4);
-    float kRoom = lWin / max(gR2KernelScale * c.r * hF * sqrt(min(shAx, c.aMax)), 1e-4) - 1.0;
-    c.k = max(c.k, min(kBlur, max(kRoom, 0.0)));
-    return true;
 }
 
 // Per-pixel airflow context for the wobble (rev20): unit air direction in visor mm (u, v) and
@@ -417,6 +280,37 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     float4 SP = float4(0, 0, 0, 0);
     if (c.fx > 1e-3) SP = float4(min(gR2ShpRimK, 0.85) * saturate(c.fx), gR2ShpFingerK * saturate(c.fx) * (0.3 + 0.7 * saturate(0.5 * air.iA)), air.iDir);
     r2Kernel(q, rkS, float2(rkS / gR2KernelScale, sth), beta, T, H, T.u1, AS, SP, P, G, RW, HW);
+}
+
+// PERF-9: candidate from the drop record (rec.hlsl). Same acceptance as r2Cand (bounds, loop, rev48 reach + reachMM);
+// early = beyond the record's early-out radius (+ D-A widening): no contribution, no marker -> skipped after one load.
+bool r2CandRec(int2 s, float2 pc, int2 size, float reachMM, bool bigPass, bool tight, out R2Cand c, out bool early) {
+    c = (R2Cand)0; early = false;
+    if (any(s < int2(0, 0)) || any(s >= size)) return false;
+    float4 R0 = txR2Rec.Load(int3(s, 0));
+    if (R0.z == 0.0 || (R0.z < 0.0) != bigPass) return false;
+    c.q = (pc - R0.xy) * gR2CellSizeMM;
+    float qq = dot(c.q, c.q);
+    float reach = (abs(R0.z) - 1.0) + reachMM;
+    if (qq > reach * reach) return false;
+    float wE = (R0.w + 1.5 * reachMM) * 1.002;
+    early = tight && qq > wE * wE;
+    if (early && gR2TightReach < 1.5) return true;           // caller skips; verify (2) loads the rest and draws it
+    float4 R1 = txR2Rec.Load(int3(s + int2(size.x, 0), 0));
+    float4 R3 = txR2Rec.Load(int3(s + int2(3 * size.x, 0), 0));
+    float4 R4 = txR2Rec.Load(int3(s + int2(4 * size.x, 0), 0));
+    float4 R5 = txR2Rec.Load(int3(s + int2(5 * size.x, 0), 0));
+    c.sh = txR2Rec.Load(int3(s + int2(2 * size.x, 0), 0));
+    c.r = R1.x; c.k = R1.y; c.f = R1.z; c.fx = R1.w;
+    c.m = R3.xy; c.seed = R3.z; c.ch = R3.w;
+    c.e = R4.x; c.sft = R4.y; c.aMax = R4.z; c.imp = R4.w;
+    c.nk = R5.xy;
+    return true;
+}
+
+// PERF-7 support bound with this pixel's wobble amplitude (= r2AddDrop's A); r2SupportCore in cand.hlsl
+float r2SupportMM(R2Cand c, R2Air air, float reachMM) {
+    return r2SupportCore(c, gR2LookLab > 0.5 ? 0.0 : gR2WobbleAmp * smoothstep(0.1, 0.8, gR2WobbleC * c.r * air.u2), reachMM);
 }
 
 // rev47j RIVULET KERNEL (rev47i review + reference frames: a sliding large drop leaves a thin, sharp,
@@ -899,9 +793,13 @@ float4 main(PS_IN pin) {
     // rev48-R7a: ONE candidate loop (FXC failed silently with a second r2AddDrop site x 4 unrolled D-A taps): indices
     // 0-24 = the 5 x 5 cells, 25-33 = the big-drop winners of the 3 x 3 tiles around (window +-4 cells).
     // rev29 CSP mode: no cell lens (no candidates).
+    // PERF-6 cost probe (diagnostics only, gR2PerfProbe 0 = off): 1 = stop after the per-pixel setup (mask, Jacobian, film
+    // B-spline, view frame), 2 = stop after the candidate / kernel union (no lens / composite). Draw-time differences
+    // between 0 / 1 / 2 split the visor cost into setup | candidates | lens + composite.
+    if (gR2PerfProbe > 0.5 && gR2PerfProbe < 1.5) discard;
     uint nCand = gR2BigOn > 0.5 ? 34u : 25u;
     int2 tc = int2((uint2)c0 >> 2);
-    float splitMark = 0.0, impMark = 0.0;
+    float splitMark = 0.0, impMark = 0.0, tightMiss = 0.0;
     [loop] for (uint ci = 0u; ci < nCand; ++ci) {
         int2 s;
         bool bp = ci >= 25u;
@@ -916,14 +814,27 @@ float4 main(PS_IN pin) {
             s = int2(round(bg.xy));
         }
         R2Cand c;
-        if (!r2Cand(s, pc, size, reachMM, wetV, bp, c)) continue;
+        bool early = false;
+        bool tight = gR2TightReach > 0.5;
+        if (gR2UseRec > 0.5) {   // PERF-9 drop records
+            if (!r2CandRec(s, pc, size, reachMM, bp, tight, c, early)) continue;
+            if (early && gR2TightReach < 1.5) continue;
+        } else {
+            if (!r2Cand(s, pc, size, reachMM, wetV, bp, c)) continue;
+        }
         if (c.ch >= 0.0 && c.ch < 1.5 && dot(c.q, c.q) < 1.44 * c.r * c.r) splitMark = 1.0;   // S6c highlight
         if (c.imp > 0.5 && dot(c.q, c.q) < (c.imp > 2.5 ? 9.0 : 1.44) * c.r * c.r) impMark = max(impMark, c.imp);   // R2b: satellites x3 marker
+        // PERF-7: proven no-contribution -> skip (1); verify (2) draws it anyway and flags a contribution
+        bool beyond = early;
+        if (tight) { float sB = r2SupportMM(c, air, reachMM); beyond = beyond || dot(c.q, c.q) > sB * sB; }
+        if (beyond && gR2TightReach < 1.5) continue;
+        float hwB = HW + HWm[0] + HWm[1] + HWm[2] + HWm[3];
         if (multi) {   // rev25: no [branch] - r2DropLens takes ddx/ddy of its lookup
             [unroll] for (int k = 0; k < 4; ++k) r2AddDrop(c.q + dqT[k], c, air, wetFlat, Pm[k], Gm[k], RWm[k], HWm[k]);
         } else {
             r2AddDrop(c.q, c, air, wetFlat, P, G, RW, HW);
         }
+        if (beyond && HW + HWm[0] + HWm[1] + HWm[2] + HWm[3] != hwB) tightMiss = 1.0;
     }
     // rev48-F9: the F2 fine-droplet micro-grid is removed with the fine layer (it drew non-drops as drops)
     // rev47j rivulets (trail lens kernels), only where the field holds trail water
@@ -935,6 +846,10 @@ float4 main(PS_IN pin) {
             r2AddTrail(trl, float2(0, 0), P, G, RW, HW);
         }
     }
+#ifndef R2_DEPTH_ONLY
+    if (tightMiss > 0.5) return float4(8.0, 0.0, 0.0, 1.0);                  // PERF-7 verify: a skipped drop contributed
+#endif
+    if (gR2PerfProbe > 1.5) { if (P > 2.0) return float4(P, 0, 0, 0); discard; }   // PERF-6 probe: keep the union live, draw nothing
     float U = 1.0 - P;
     float Rmm = RW.x / max(HW, 1e-6);
     float sth = RW.y / max(HW, 1e-6);

@@ -368,6 +368,9 @@ local function sceneValues(self, v)
 end
 
 local PASS_NAMES = setmetatable({}, { __mode = 'k' })   -- PERF-2: pass table -> Render Stats name (kept out of the params)
+-- PERF-5 TEXTURE BUDGET: CSP's ui.fx template (scene include) reserves t14 for its shadow array -> a simulation pass may
+-- bind at most 14 textures (t0..t13), and this shared table has exactly 14. Adding one more rebinds the shadow array
+-- for the draws that follow (PERF-4: E7 glitch). docs/tools/check_rainfx2_shaders.py reads this table and fails then.
 local function newPass(self, shader, name)
   local root = self.ctx.surface.root
   local pass = {
@@ -439,6 +442,7 @@ function R2:ensureResources()
   self.passCells = newPass(self, self.src.cells, 'cells')
   self.passPredict = newPass(self, self.src.predict, 'predict')   -- PERF-3
   self.PR = canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop prediction')
+  self.REC = canvas(6 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop records')   -- PERF-9 visor candidates (rec.hlsl)
   self.passField = newPass(self, self.src.field, 'field')
   self.passSheet = newPass(self, self.src.sheet, 'sheet')            -- rev48-W1
   self.passSheetK = newPass(self, self.src.sheetcoef, 'sheetcoef')
@@ -674,6 +678,7 @@ function R2:simulate(sim)
   if not self:enabled() then return end
   if self.simFrame == sim.frame then return end
   self.simFrame = sim.frame
+  self.recValid = false   -- PERF-9: records follow this frame's state (recUpdate on the drawn exits)
   local s = self.store
   local p = self.p
   p.exposure, p.apertureMM, p.debug = s.rainExposure, s.apertureMM, s.debug
@@ -706,11 +711,12 @@ function R2:simulate(sim)
     self.frameDt = self.frameDt or (1 / 60)
     self.opticsReady = true
     self.status = 'look lab (static drops, other effects off)'
+    self:recUpdate()
     return
   end
   self.labSeeded = false
   local dt = sim.dt or 0
-  if dt <= 0 then self.status = 'paused'; return end
+  if dt <= 0 then self.status = 'paused'; self:recUpdate(); return end
   dt = math.min(dt, 1 / 20) * (self.timeScale or 1)   -- rev9: slow motion for physics review
   self.wobbleT = ((self.wobbleT or 0) + dt) % 600
   self:updateInputs(sim)
@@ -861,17 +867,74 @@ function R2:simulate(sim)
     end
   end
   self:metricsUpdate(sim)
+  self:recUpdate()
   self.opticsReady = true
   self.status = 'running'
 end
 
+
+-- PERF-9 (2026-11-06): the values cand.hlsl reads (r2CandCore / r2SupportCore), ONE source for the visor draw
+-- (drawParams) and the drop-record pass (simulate -> recUpdate): the records equal what the visor computed itself.
+-- docs/tools/check_rainfx2_shaders.py fails if cand.hlsl / rec.hlsl use a gR2 value not assigned here.
+local function candValues(self, v)
+  local p = self.p
+  updateShapeK(p)
+  v.gR2Cells = self.cells
+  v.gR2CellSizeMM = self.cellSizeMM
+  v.gR2ShapeK = p.shapeK
+  v.gR2CapVolume = p.capVolume ~= false and 1 or 0
+  v.gR2BigOn, v.gR2BigRMM = p.bigOn and self.BG and 1 or 0, p.bigRMM or 0.8   -- rev48-R7a
+  v.gR2KernelScale = p.kernelScale
+  v.gR2ShpOn = p.shpOn and 1 or 0   -- rev48-S1
+  v.gR2ShpRecoilC = p.shpRecoilC   -- rev48-R1
+  v.gR2ShpLamShift = p.shpLamShift   -- rev48-U2: lamella centre vs the recoiling residual
+  v.gR2ShpRimK, v.gR2ShpFingerK = p.shpRimK or 0.6, p.shpFingerK or 0.25
+  v.gR2ShpImpactK, v.gR2ShpImpactMax = p.shpImpactK, p.shpImpactMax   -- U2a: lamella ellipse along Vt (visor)
+  v.gR2BaseSpread = p.baseSpread       -- rev48-S2'b
+  v.gR2ShpNeckK, v.gR2ShpNeckT, v.gR2HiSplit = p.shpNeckK, p.shpNeckT, p.hiSplit and 1 or 0   -- rev48-S6c E8 neck / review highlight
+  v.gR2HiImpact = p.hiImpact and 1 or 0   -- rev48-U1 review highlight
+  v.gR2ContactDeg = p.contactDeg
+  v.gR2WobbleAmp = p.wobbleAmp
+  v.gR2MotionStretch = p.motionStretch
+  v.gR2Frame = self.frameSeed or 0
+  v.gR2MinDrawMM = p.minDrawMM
+  v.gR2SagK = p.sagK
+  v.gR2SheetRecedeDeg = p.sheetRecedeDeg or 50
+  v.gR2SimDt = self.frameDt or (1 / 60)   -- packed move = displacement of the whole frame
+  v.gR2GrowTime = p.growTime
+  v.gR2FadeTime = p.fadeTime
+  v.gR2VMax = p.vMax
+  v.gR2LookLab = self.lookLab and 1 or 0
+  return v
+end
+
+-- PERF-9: drop records of the CURRENT state (end of every simulate path that leaves S drawn). Its own small texture
+-- table (3 of 14; the shared simulation table stays 14 / 14); values = candValues, the visor's own source.
+function R2:recUpdate()
+  self.recValid = false
+  if not self.REC or self.p.useRec == false then return end
+  local rp = self.passRec
+  if not rp then
+    rp = { async = true, blendMode = render.BlendMode.Opaque,
+      textures = { txR2State = false, txR2Lam = false, txR2Big = false }, values = {}, shader = self.src.rec }
+    PASS_NAMES[rp] = 'RainFX2 sim/rec'
+    self.passRec = rp
+  end
+  rp.textures.txR2State = self.S[self.si]
+  rp.textures.txR2Lam = self.LM and self.LM[self.li] or false
+  rp.textures.txR2Big = self.BG or false
+  candValues(self, rp.values)
+  if run(self.REC, rp) then
+    self.recValid, self.recS, self.recLM = true, self.S[self.si], self.LM and self.LM[self.li]
+  end
+end
 
 function R2:drawParams(depth)
   local key = depth and 'paramsDepth' or 'paramsColour'
   local t = self[key]
   if not t then
     t = { mesh = self.mesh, transform = 'original', async = true,
-      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Mask = self.ctx.maskPath },
+      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Rec = false, txR2Mask = self.ctx.maskPath },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9 9 / 13
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
@@ -879,13 +942,8 @@ function R2:drawParams(depth)
   local p, v = self.p, t.values
   local size = render.getRenderTargetSize()
   v.gR2InvRT = vec2(1 / math.max(size.x, 1), 1 / math.max(size.y, 1))
-  v.gR2Cells = self.cells
-  v.gR2CellSizeMM = self.cellSizeMM
   v.gR2TexMM = self.texMM
-  updateShapeK(p)
-  v.gR2ShapeK = p.shapeK
-  v.gR2CapVolume = p.capVolume ~= false and 1 or 0
-  v.gR2BigOn, v.gR2BigRMM = p.bigOn and self.BG and 1 or 0, p.bigRMM or 0.8   -- rev48-R7a
+  candValues(self, v)   -- PERF-9: every value the candidate code (cand.hlsl) reads -- shared with the record pass
   v.gR2FineRMM = p.fineRMM
   v.gR2ApertureMM = p.apertureMM
   v.gR2FovK = 0.5 / math.tan(math.rad(math.max(ac.getSim().cameraFOV or 60, 1)) * 0.5)
@@ -900,34 +958,21 @@ function R2:drawParams(depth)
   local function coc(z) return p.apertureMM * math.abs(p.focusM - z) / math.max(p.focusM, 1e-3) end
   self.cocInfo = string.format('CoC on the visor: %.2f mm @3 cm, %.2f mm @6 cm, %.2f mm @12 cm (Debug 6 = distance / CoC px)',
     coc(0.03), coc(0.06), coc(0.12))
-  v.gR2KernelScale = p.kernelScale
-  v.gR2ShpOn = p.shpOn and 1 or 0   -- rev48-S1
-  v.gR2ShpRecoilC = p.shpRecoilC   -- rev48-R1
-  v.gR2ShpLamShift = p.shpLamShift   -- rev48-U2: lamella centre vs the recoiling residual
-  v.gR2ShpRimK, v.gR2ShpFingerK = p.shpRimK or 0.6, p.shpFingerK or 0.25
-  v.gR2ShpImpactK, v.gR2ShpImpactMax = p.shpImpactK, p.shpImpactMax   -- U2a: lamella ellipse along Vt (visor)
-  v.gR2BaseSpread = p.baseSpread       -- rev48-S2'b
   v.gR2AsymK, v.gR2AsymGravR = p.asymK, p.asymGravR   -- rev48-S2d
   v.gR2ShpFrontK = p.shpFrontK                         -- rev48-S6 F2 outer-front apex
-  v.gR2ShpNeckK, v.gR2ShpNeckT, v.gR2HiSplit = p.shpNeckK, p.shpNeckT, p.hiSplit and 1 or 0   -- rev48-S6c E8 neck / review highlight
-  v.gR2HiImpact = p.hiImpact and 1 or 0   -- rev48-U1 review highlight
   v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
   v.gR2WetHaze = p.wetHaze
   v.gR2Threshold = p.threshold
-  v.gR2ContactDeg = p.contactDeg
   v.gR2ContactSpread = p.contactSpread
   v.gR2Hysteresis = p.hysteresisDeg
   v.gR2WetFlatten = p.wetFlatten
-  v.gR2WobbleAmp = p.wobbleAmp
   v.gR2WobbleHz = p.wobbleHz
   -- Fa/Fpin = (0.25 rho Cd pi / (2 gamma dcos_coat)) * r * u^2, r in mm -> * 1e-3
   v.gR2WobbleC = 0.25 * p.rhoAir * 1.0 * math.pi / (2 * p.surfaceTension * p.pinCoat) * 1e-3   -- R6b: tuned look (Cd 1)
   v.gR2AirW = self.airW or vec3()
   v.gR2AirSurface = p.airSurface
   v.gR2Time = self.wobbleT or 0
-  v.gR2MotionStretch = p.motionStretch
   -- rev48-P4 sheet surface
-  v.gR2Frame = self.frameSeed or 0
   v.gR2FrameDt = self.frameDt or 1 / 60
   v.gR2MeanDiamMM = (self.stats and self.stats.meanDiamMM) or 0.3
   for i = 0, 15 do v['gR2DQ' .. i] = (self.stats and self.stats.dq and self.stats.dq[i + 1]) or 0.3 end   -- rev48-P1
@@ -935,13 +980,11 @@ function R2:drawParams(depth)
   v.gR2SheetWaveK = p.sheetWaveK or 1
   v.gR2RainDirW = self.rainDirW or vec3(0, -1, 0)   -- rev48-P4b impact direction
   v.gR2ImpactWaveK = p.impactWaveK or 1
-  v.gR2MinDrawMM = p.minDrawMM
   v.gR2WFSceneMip = p.wfSceneMip
   v.gR2DefocusMode = p.defocusDA and 1 or 0
   self.drawCount = ((self.drawCount or 0) + 1) % 4096
   v.gR2FrameNoise = self.drawCount                -- D-A tap rotation (TAA/DLSS resolves it)
   v.gR2Glint = p.glint
-  v.gR2SagK = p.sagK
   v.gR2LensPhys = p.lensPhys
   v.gR2ReflK = p.reflK
   self.camLook = self.camLook or vec3(); self.camSide = self.camSide or vec3(); self.camUp = self.camUp or vec3()
@@ -957,7 +1000,6 @@ function R2:drawParams(depth)
   v.gR2TrailMaxMM = p.trailMaxMM
   v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
   v.gR2SheetOn = p.sheetOn and 1 or 0   -- rev48-P2 sheet lens
-  v.gR2SheetRecedeDeg = p.sheetRecedeDeg or 50
   v.gR2SheetSceneMip = p.sheetSceneMip or 0
   v.gR2SheetSlopeK = p.sheetSlopeK or 1
   v.gR2SheetEdgeK = p.sheetEdgeK or 0.6
@@ -990,12 +1032,7 @@ function R2:drawParams(depth)
   v.gR2ScatterSky = p.scatterSky
   v.gR2ScatterGain = p.scatterGain
   v.gR2Spray = self.store.freezeRain and 0 or (self.stats.spray or 0)
-  v.gR2SimDt = self.frameDt or (1 / 60)   -- packed move = displacement of the whole frame
-  v.gR2GrowTime = p.growTime
-  v.gR2FadeTime = p.fadeTime
-  v.gR2VMax = p.vMax
   v.gR2VLimit = self.diag and self.diag.vGather or 0.5   -- physical m/s (h already scaled)
-  v.gR2LookLab = self.lookLab and 1 or 0
   v.gR2Debug = p.debug
   v.gR2DebugBright = p.debugBright
   return t
@@ -1075,6 +1112,13 @@ function R2:draw(src, viewKey, depth)
   t.textures.txR2Lam = self.LM and self.LM[self.li] or false   -- rev48-P4 impacts on the sheet
   t.textures.txR2SheetNuc = self.NM or false                    -- rev48-W1v Debug 10
   t.textures.txR2Big = self.BG or false                         -- rev48-R7a
+  t.values.gR2PerfProbe = self.p.perfProbe or 0                -- PERF-6 cost probe (0 off)
+  t.values.gR2TightReach = self.p.tightReach or 1              -- PERF-7 tight drop support (0 legacy | 1 on | 2 verify)
+  -- PERF-9: records only if they were built from exactly the textures this draw binds (else the per-pixel path)
+  local recOk = self.recValid and self.p.useRec ~= false and self.recS == t.textures.txR2State
+    and self.recLM == (self.LM and self.LM[self.li]) or false
+  t.textures.txR2Rec = recOk and self.REC or false
+  t.values.gR2UseRec = recOk and 1 or 0
   render.setCullMode(render.CullMode.None)
   render.setBlendMode(render.BlendMode.AlphaBlend)
   -- rev31: the drop mesh is a copy of the visor surface offset by only 0.05 mm; a depth-tested colour
@@ -1158,6 +1202,9 @@ function R2:ui()
     p.labOcc, p.labRMaxMM = v1, v2
     if c1 or c2 then self.labRequest = true end
   end
+  self.p.perfProbe = ui.slider('##rfx2pp', self.p.perfProbe or 0, 0, 2, 'Visor cost probe: %.0f (0 off | 1 setup only | 2 + drop union, no lens) -- diagnostics', true)
+  if ui.checkbox('Drop records (PERF-9: candidates computed once per drop)', self.p.useRec ~= false) then self.p.useRec = self.p.useRec == false end
+  self.p.tightReach = ui.slider('##rfx2tr', self.p.tightReach or 1, 0, 2, 'Tight drop support: %.0f (0 legacy | 1 on | 2 verify: red = skipped drop contributed)', true)
   if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
     self.p.lensPhys = DEFAULTS.lensPhys
     s.apertureMM, s.focusM, s.wfRefraction, s.wfSceneMip = DEFAULTS.apertureMM, DEFAULTS.focusM, DEFAULTS.wfRefraction, DEFAULTS.wfSceneMip
@@ -1563,13 +1610,14 @@ function R2:dispose()
   for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {} }) do
     for _, c in ipairs(list) do free(c) end
   end
-  for _, k in ipairs({ 'C', 'PR', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+  for _, k in ipairs({ 'C', 'PR', 'REC', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
     free(self[k]); self[k] = nil
   end
   self.sceneTex = nil
   self.S, self.F, self.TG, self.LM, self.ready, self.opticsReady = nil, nil, nil, nil, false, false
   self.paramsColour, self.paramsDepth, self.passSource, self.passSeed = nil, nil, nil, nil
   self.simFrame, self.colourViewKey, self.depthViewKey = nil, nil, nil
+  self.recValid, self.recS, self.recLM, self.passRec = false, nil, nil, nil   -- PERF-9
   self.drawW, self.drawH, self.sizeKey, self.sizeVotes = nil, nil, nil, 0
   self.metricsBusy, self.sizesBusy = false, false   -- a readback in flight on a disposed canvas never returns
   self.labSeeded = false
@@ -1601,10 +1649,11 @@ return function(ctx)
   self.stats = {}
   local dir = ctx.folder .. '/rainfx2/shaders/'
   local common = readFile(dir .. 'common.hlsl')
+  local cand = readFile(dir .. 'cand.hlsl')   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big' }) do
+  for _, name in ipairs({ 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big', 'rec' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
-    if not src[name] or not common then
+    if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
     end
   end
@@ -1625,9 +1674,10 @@ return function(ctx)
       lam = common .. '\n' .. src.lam,
       bead = common .. '\n' .. src.bead,
       big = common .. '\n' .. src.big,
-      visor = src.visor,
+      visor = cand .. '\n' .. src.visor,
+      rec = cand .. '\n' .. src.rec,
       source = src.source,
-      visorDepth = '#define R2_DEPTH_ONLY 1\n' .. src.visor,
+      visorDepth = '#define R2_DEPTH_ONLY 1\n' .. cand .. '\n' .. src.visor,
     }
   end
   return self
