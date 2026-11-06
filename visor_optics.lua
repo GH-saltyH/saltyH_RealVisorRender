@@ -97,7 +97,14 @@ return function(d)
     end
     local function q(v) return math.abs(v)<.00005 and '0.0000' or string.format('%.4f',v) end
     local function vectorKey(v) return q(v.x)..','..q(v.y)..','..q(v.z) end
-    function st:cacheKey(sim,pose)
+    local KEY_POINTS={vec3(),vec3(1,0,0),vec3(0,1,0),vec3(0,0,1)}   -- PERF-14: allocated once (read-only)
+    local function getProp(ref,key) return ref:getMaterialPropertyValue(key) end
+    local function propertyFast(ref,key,fallback)   -- = property, without a new closure per call
+        local ok,v=pcall(getProp,ref,key)
+        return ok and type(v)=='number' and v or fallback
+    end
+    -- PERF-14: labels (the invalidation message) are built only when asked (key changed); the key string is unchanged.
+    function st:cacheKey(sim,pose,wantLabels)
         local inverse=pose:inverse()
         local neutralEye,look,up
         if d.localFrame then neutralEye,look,up=d.localFrame() end
@@ -111,29 +118,29 @@ return function(d)
             q(sim.cameraClipNear or .0035),
             tostring(r.RAIN_VISOR_OPTICS_WIDTH),'triangle-tangent-v4-band-mask',q(r.RAIN_VISOR_OPTICS_MATERIAL_NORMAL),
             q(r.RAIN_VISOR_OPTICS_BAND_TRANSMISSION),q(r.RAIN_VISOR_OPTICS_GLASS_TRANSMISSION),q(r.RAIN_VISOR_OPTICS_TRACE_RANGE)}
-        local labels={'Profile','Model path','Model hash','Local eye','Local look','Local up','Camera FOV','Target width','Target height',
-            'Near clip','Bake width','Visor normal','Material normal','Band transmission','Glass transmission','Trace range'}
+        local labels=wantLabels and {'Profile','Model path','Model hash','Local eye','Local look','Local up','Camera FOV','Target width','Target height',
+            'Near clip','Bake width','Visor normal','Material normal','Band transmission','Glass transmission','Trace range'} or nil
         local function transformKey(matrix,label,worldSpace)
-            for _,point in ipairs({vec3(),vec3(1,0,0),vec3(0,1,0),vec3(0,0,1)}) do
-                local p=matrix:transformPoint(point)
+            for i=1,4 do
+                local p=matrix:transformPoint(KEY_POINTS[i])
                 key[#key+1]=vectorKey(worldSpace and inverse:transformPoint(p) or p)
-                labels[#key]=label
+                if labels then labels[#key]=label end
             end
         end
         if d.rootTransform then transformKey(d.rootTransform(),'Model local transform',false) end
         for _,name in ipairs({'GLASS_INT_FX','GLASS_EXT_FX','FRAME_MAIN','BAND_INNER','BODY_FABRIC_TRACE','DRIVER_FACE','DRIVER_BALAKLAVA','CAM','CAM_COVER','CAM_FABRIC'}) do
             local e=d.editor(name);key[#key+1]=name..tostring(e and e.visible~=false or false)
-            labels[#key]=name..' visibility'
+            if labels then labels[#key]=name..' visibility' end
             if e and e.targetMesh and #e.targetMesh==1 then
                 -- Use authored local transforms in the camera-attached runtime.
                 -- Multiplying world/inverse world matrices introduces float
                 -- jitter at track-scale coordinates even when geometry is fixed.
                 local matrix=d.localTransform and d.localTransform(e.targetMesh) or e.targetMesh:getWorldTransformationRaw()
                 transformKey(matrix,name..' local transform',not d.localTransform)
-                key[#key+1]=q(property(e.targetMesh,'ksSpecularEXP',16))
-                labels[#key]=name..' material exponent'
-                key[#key+1]=q(property(e.targetMesh,'ksSpecular',0))
-                labels[#key]=name..' material specular'
+                key[#key+1]=q(propertyFast(e.targetMesh,'ksSpecularEXP',16))
+                if labels then labels[#key]=name..' material exponent' end
+                key[#key+1]=q(propertyFast(e.targetMesh,'ksSpecular',0))
+                if labels then labels[#key]=name..' material specular' end
             end
         end
         return table.concat(key,'|'),neutralEye,key,labels
@@ -180,13 +187,28 @@ return function(d)
             if self.hit then self:disposeBake() end;return
         end
         self.ready=false
-        if not d.validate() then self.status=d.validationStatus();return end
-        local f=io.open(root..'optics.verify','rb')
-        if not f then self.status='Missing optics assets: run build_visor_optics_assets.py';return end
-        local opticsHash=(f:read('*l') or ''):gsub('%s+$','');f:close()
+        local tv=RV_PROF and RV_PROF.on and os.preciseClock()
+        local valid=d.validate()
+        if tv then RV_PROF.add('RV E7/bake: validate (CPU)',(os.preciseClock()-tv)*1000) end
+        if not valid then self.status=d.validationStatus();return end
+        local prof=RV_PROF and RV_PROF.on;local t0=prof and os.preciseClock()   -- PERF-13 CPU probe
+        -- PERF-14 (PERF-13 probe: 0.29 ms / frame -- the asset stamp was opened and read from disk EVERY frame): read at
+        -- most every 2 s; a rebuilt / removed asset set is still noticed, within 2 s instead of the next frame.
+        local now=os.clock()
+        if self.verifyHash==nil or now-(self.verifyAt or -1e9)>=2 then
+            local f=io.open(root..'optics.verify','rb')
+            if f then self.verifyHash=(f:read('*l') or ''):gsub('%s+$','');f:close() else self.verifyHash=false end
+            self.verifyAt=now
+        end
+        if prof then RV_PROF.add('RV E7/bake: optics.verify read (CPU)',(os.preciseClock()-t0)*1000) end
+        if self.verifyHash==false then self.status='Missing optics assets: run build_visor_optics_assets.py';return end
+        local opticsHash=self.verifyHash
         if opticsHash~=d.modelHash() then self.status='Optics assets/model hash mismatch; rebuild optics assets';return end
         local pose=d.pose();if not pose then self.status='Waiting for helmet pose';return end
+        local t1=prof and os.preciseClock()
         local sim=ac.getSim();local key,eye,parts,labels=self:cacheKey(sim,pose)
+        if key~=self.pendingKey then key,eye,parts,labels=self:cacheKey(sim,pose,true) end   -- PERF-14: labels only on change
+        if prof then RV_PROF.add('RV E7/bake: cacheKey (CPU)',(os.preciseClock()-t1)*1000) end
         if key~=self.pendingKey then
             if self.pendingParts then
                 for i=1,math.max(#parts,#self.pendingParts) do

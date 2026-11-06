@@ -159,3 +159,113 @@
   - MSK는 recUpdate에서만 쓰고(REC 직후, 같은 프레임) visor에서만 읽는다. mskValid가 recValid에 종속되고, dispose 목록에도 들어 있다.
   - 단일 r2AddDrop 호출 지점을 유지한다. 루프만 for에서 비트 순회 while로 바꿨다.
 - **UI:** 'Candidate mask' 체크박스.
+
+## 12. PERF-10 결과 (사용자, Heavy Rain)
+
+| 단계 | colour draw | depth | 추가 패스 |
+|---|---|---|---|
+| PERF-6 기준 | 2.128 | 1.747 | – |
+| PERF-7 | 1.836 | 1.496 | – |
+| PERF-9 | 1.203 | 1.095 | rec 0.034 |
+| PERF-10 | **0.567** | **0.368** | + msk 0.025 |
+
+- verify 위반은 0이었다. 마스크 off일 때(같은 세션) draw 1.410, depth 1.261 ms였다.
+- **visor 두 패스 합계:** 3.875 → 0.935 ms(−76 %, 약 2.9 ms 확보)이다. 이미지 손실이 없다(증명 + verify).
+- **남은 RainFX2 GPU:** sim 0.58 + draw 0.57 + depth 0.37 + rec / msk 0.06 ≈ 1.6 ms이다. 이제 sim이 가장 크다.
+- **다음 후보(측정 후):**
+  - sim / cells(PERF-3 이후 0.14)
+  - field
+  - merge
+  - draw / source(0.5배 refraction source + mips)
+  - CPU: sim 제출 0.64 ms(Lua)
+
+## 13. 측정(사용자)과 PERF-11 CPU 계측
+- **FPS:** 같은 조건(정지)에서 69 → 75–77이다.
+- **sim GPU(ms):**
+
+  | cells | field | merge | trail | predict | claim | big |
+  |---|---|---|---|---|---|---|
+  | 0.145 | 0.089 | 0.085 | 0.043 | 0.017 | 0.015 | 0.014 |
+
+  - 합계 0.41, sim 전체 0.58이다(나머지: lam / sizes / metrics / sheet / nuc / bead / seed / rec / msk).
+- **draw / source:** 0.035–0.052 ms이다.
+- **관찰:** sim 패스마다 CPU가 약 0.055–0.07 ms이다(Render Stats). 패스 수(substep 포함) × 이 값이 sim CPU 0.64 ms이다. GPU 패스 하나보다 CPU 제출이 더 비싸다.
+  - 후보 원인 1: sceneValues가 패스마다 약 170개 값을 다시 쓴다(16개 문자열 생성, fragLaw 포함).
+  - 후보 원인 2: CSP가 updateWithShader마다 값 표를 마샬링한다.
+- **PERF-11(계측 + 무해한 수정):**
+  - 'gR2DQ'..i 이름을 한 번만 만든다(sceneValues, drawParams). 같은 키, 같은 값이다.
+  - 프로파일러 on일 때 RV_PROF 표에 두 항목을 넣는다.
+    - `RainFX2 sim Lua: sceneValues`: 프레임당 Lua 시간
+    - `RainFX2 sim Lua: pass submit (N calls)`: updateWithShader 호출 시간. render.measure 비용 포함, 대부분 CSP 마샬링과 제출이다.
+  - 두 값의 비율로 다음 조치를 정한다.
+    - sceneValues가 크면 상수 / 프레임 값을 분리한다.
+    - submit이 크면 패스 수나 값 수를 줄인다.
+
+## 14. PERF-11 결과 → PERF-12 lean pass values
+- **CPU 표(사용자, 프로파일러 on, 프레임당 EMA, 콜백 25개 합 2.54 ms):**
+
+  | 항목 | ms |
+  |---|---|
+  | RV sceneReady L14967(RainFX2 sim 전체) | 0.658 |
+  | RainFX2 sim Lua: pass submit (10 calls) | 0.499 |
+  | RV sceneReady L14573(E7 optics bake / probe / source) | 0.432 |
+  | RV main.smoke L14981(glassFallback: 복사, 스택, RainFX2 draw) | 0.426 |
+  | windowMain UI | 0.258 |
+  | RainFX2 sim Lua: sceneValues | 0.034 |
+
+- **판단:** sceneValues(Lua 값 계산)는 무시할 수준이다. sim CPU의 3/4은 updateWithShader 제출이다(호출당 약 0.05 ms, render.measure 비용 포함).
+  - 패스마다 sceneValues 전체(약 190개 항목, gR2DQ 16개 포함)가 값 표에 들어 있다. CSP는 호출마다 표의 모든 항목을 cbuffer로 옮긴다.
+- **PERF-12:**
+  - newPass가 셰이더 소스의 gR2 이름을 한 번 스캔한다. 그 표에는 그 이름만 복사한다(sceneValuesImpl → 공유 SV_FULL → 이름 목록).
+  - sceneValues가 설정하지 않는 이름은 건드리지 않는다. seed / dt 덮어쓰기 동작은 전과 같다.
+  - 셰이더가 읽는 값과 그 값의 내용은 동일하다.
+- **충돌 검토:**
+  - 이름 목록은 셰이더 소스 전체(주석 포함)에서 뽑으므로 상위집합이다. 누락이 생길 수 없다.
+  - 덮어쓰기 값(gR2Dt, gR2SheetDt, seed의 gR2Frame / SeedMode / Lab*)은 호출자가 run 직전에 매번 다시 쓴다.
+  - 토글하면 모든 패스의 값 표를 새로 만든다. 다른 모드에서 남은 키가 없다. 셰이더 재컴파일 동안 sim이 몇 프레임 'compiling'일 수 있다.
+  - visor / rec / msk 값 표는 대상이 아니다(drawParams / candValues).
+- **UI:** 'Lean pass values' 체크박스. on / off로 `pass submit` CPU를 비교한다.
+- **다음 CPU 후보:**
+  - E7 sceneReady 0.43 ms: updateBake의 cacheKey 문자열을 매 프레임 만든다.
+  - glassFallback 0.43 ms
+
+## 15. PERF-12 결과(효과 없음 → 되돌림)와 PERF-13 CPU 분해
+- **PERF-12 측정:** pass submit은 on 0.310, off 0.325 ms였다. sim 전체는 0.517 / 0.473 ms(EMA 변동 범위)였다. 값 개수는 제출 비용을 좌우하지 않는다.
+  - CSP 제출은 호출당 고정 비용이다(약 0.03 ms, render.measure 포함).
+  - 원칙(이득이 없는 구현은 남기지 않는다, occ와 같다)에 따라 init.lua를 PERF-11 상태로 되돌렸다. DQ 이름 캐시와 CPU 계측은 유지한다.
+  - 이미지 이상은 없었다(사용자).
+- **남은 CPU 상위:**
+  - E7 sceneReady 0.42 ms
+  - glassFallback(main.smoke) 0.40 ms
+  - UI 0.26 ms(창 열림 시)
+- **PERF-13 계측(프로파일러 on만):**
+  - `rainDynamicSceneCopyState.measure`가 각 구간의 CPU를 프로파일 표에 `RV <key> (CPU)`로 넣는다.
+    - glass: fallback copy+mips, stack pre / post, capture optics / cachedScene, E7 composite, RainFX2 draw/depth
+    - E7: E7/bake / probe / native source, Native glass mask
+  - visor_optics updateBake 안을 나눴다: `E7/bake: validate`, `optics.verify read`(매 프레임 디스크 파일 open / read), `cacheKey`(벡터 약 50개 문자열화 + 머티리얼 속성 조회, 매 프레임).
+  - 중첩 구간은 바깥과 안쪽에 모두 나오므로 표의 total은 실제보다 크다.
+
+## 16. PERF-13 결과 → PERF-14 (E7 bake CPU)
+- **측정(프로파일러 on):**
+
+  | 항목 | ms / frame |
+  |---|---|
+  | E7/bake | 0.420 |
+  | └ optics.verify read(매 프레임 디스크 open / read) | **0.292** |
+  | └ cacheKey | 0.120 |
+  | Glass/stack post | 0.189 |
+  | └ E7 composite | 0.099 |
+  | Glass/stack pre | 0.073 |
+  | RainFX2 draw/depth | 0.054 |
+  | Native glass mask | 0.035 |
+  | E7/probe | 0.021 |
+  | fallback copy, captures | < 0.01 |
+
+- **PERF-14(visor_optics.lua):**
+  - optics.verify는 최대 2초마다 읽는다(해시 캐시). 자산 재빌드 / 삭제는 다음 프레임 대신 2초 안에 감지된다. 그 밖의 동작은 같다.
+  - cacheKey는 키 문자열이 비트 동일하다.
+    - 무효화 메시지용 labels 표는 키가 바뀐 프레임에만 만든다(그 프레임은 cacheKey를 한 번 더 호출한다).
+    - transformKey의 점 4개는 상수로 만들어 둔다(매 호출 vec3 할당 44개 제거).
+    - 머티리얼 속성 조회는 클로저 없이 pcall(ref.getMaterialPropertyValue) 형태로 바꿨다(같은 결과, 같은 실패 처리).
+- **충돌 검토:** cacheKey의 호출자는 updateBake 한 곳이다. labels는 키 변경 분기 안에서만 쓰인다. verifyHash는 이 모듈 안에서만 쓴다.
+- **기대 효과:** CPU 약 0.29 ms에 cacheKey 일부를 더한 만큼 줄어든다.

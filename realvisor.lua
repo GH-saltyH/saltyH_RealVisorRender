@@ -7238,12 +7238,15 @@ end
 -- SDK render.measure records CPU AND GPU in Render Stats; submission clocks
 -- alone cannot identify an expensive GPU pass. Diagnostic overhead is opt-in.
 rainDynamicSceneCopyState.measure = function(key,fn,...)
+    local t0=RV_PROF and RV_PROF.on and os.preciseClock()   -- PERF-13: CPU split into the RainFX tab profile table
+    local a,b,c
     if cfg.RUNTIME.RAIN_PERFORMANCE_PROFILING and render.measure then
-        local a,b,c
         render.measure('RealVisor/'..key,function(...) a,b,c=fn(...) end,...)
-        return a,b,c
+    else
+        a,b,c=fn(...)
     end
-    return fn(...)
+    if t0 then RV_PROF.add('RV '..key..' (CPU)',(os.preciseClock()-t0)*1000) end
+    return a,b,c
 end
 local function updateRainGPUState(sim)
     local siChanged=rainDynamicSceneCopyState.siConfigured~=cfg.RUNTIME.RAIN_PHYSICS_SI_PREVIEW
@@ -14582,7 +14585,7 @@ render.onSceneReady(function()
     if not ed or not ed.targetMesh or #ed.targetMesh~=1 or ed.visible==false then optics.idle=true;return end
     optics.idle=false
     local m=rainDynamicSceneCopyState.measure   -- PERF-6 probe (same helper as 'Native glass mask')
-    local ok,err=pcall(function() m('E7/bake',optics.updateBake,optics);m('E7/probe',optics.updateExternalProbe,optics);m('E7/native source',optics.updateNativeSource,optics) end)
+    local ok,err=pcall(function() m('E7/bake',optics.updateBake,optics);m('E7/probe',optics.updateExternalProbe,optics);m('E7/native source',optics.updateNativeSource,optics) end)   -- PERF-13: measure adds CPU to the profile table
     optics.error=not ok and ('Optics update: '..tostring(err)) or nil
 end)
 rainDynamicSceneCopyState.visorProbeEnsure = function()

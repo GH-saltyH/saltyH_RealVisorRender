@@ -208,7 +208,11 @@ local function updateShapeK(p)
   -- rev48-F4: the drop air load is the size law U_c(V) (common r2DropVelocity / physics P.airLoad); R6b's Cd is gone
 end
 
-local function sceneValues(self, v)
+local DQ_NAMES = {}   -- PERF-11: 'gR2DQ' .. i built once (was 16 new strings per pass call)
+for i = 0, 15 do DQ_NAMES[i] = 'gR2DQ' .. i end
+-- PERF-11 CPU probe (profiler on only): Lua time in sceneValues and in pass submission (updateWithShader) per frame
+local SIM_CPU = { sv = 0, run = 0, n = 0 }
+local function sceneValuesImpl(self, v)
   -- Shared constant set for P1-P3 (one cbuffer layout; unused entries are harmless).
   local p, st = self.p, self.stats
   v.gR2Cells = self.cells
@@ -224,7 +228,7 @@ local function sceneValues(self, v)
   v.gR2RainDirW = self.rainDirW
   v.gR2ImpactRate = self.store.freezeRain and 0 or (st.impactRate or 0)
   v.gR2MeanDiamMM = st.meanDiamMM or 0.3
-  for i = 0, 15 do v['gR2DQ' .. i] = (st.dq and st.dq[i + 1]) or 0.3 end   -- rev48-P1 impact diameter inverse CDF
+  for i = 0, 15 do v[DQ_NAMES[i]] = (st.dq and st.dq[i + 1]) or 0.3 end   -- rev48-P1 impact diameter inverse CDF
   v.gR2DsdM3 = st.dsdM3 or 0.162
   v.gR2TerminalSpeed = p.terminalSpeed   -- rev48-R4: reference fall speed inside SpeedRel (per-drop V_t(d) replaces it)
   v.gR2SpeedRel = st.speedRel or p.terminalSpeed
@@ -365,6 +369,14 @@ local function sceneValues(self, v)
   end
   v.gR2PinScale = self.pinScale
   return v
+end
+
+local function sceneValues(self, v)
+  if not (RV_PROF and RV_PROF.on) then return sceneValuesImpl(self, v) end
+  local t0 = os.preciseClock()
+  local r = sceneValuesImpl(self, v)
+  SIM_CPU.sv = SIM_CPU.sv + (os.preciseClock() - t0) * 1000
+  return r
 end
 
 local PASS_NAMES = setmetatable({}, { __mode = 'k' })   -- PERF-2: pass table -> Render Stats name (kept out of the params)
@@ -665,13 +677,17 @@ end
 
 local function run(canvas, pass)
   -- PERF-2: with the app profiler on (realvisor RV_PROF, global) every simulation pass is its own Render Stats entry
-  local name = RV_PROF and RV_PROF.on and PASS_NAMES[pass]
+  if not (RV_PROF and RV_PROF.on) then return canvas:updateWithShader(pass) ~= false end
+  local name = PASS_NAMES[pass]
+  local t0 = os.preciseClock()   -- PERF-11: submission CPU (includes render.measure's own cost when it is used)
+  local res
   if name and render.measure then
-    local res
     render.measure(name, function() res = canvas:updateWithShader(pass) end)
-    return res ~= false
+  else
+    res = canvas:updateWithShader(pass)
   end
-  return canvas:updateWithShader(pass) ~= false
+  SIM_CPU.run, SIM_CPU.n = SIM_CPU.run + (os.preciseClock() - t0) * 1000, SIM_CPU.n + 1
+  return res ~= false
 end
 
 -- Once per simulation frame, from render.onSceneReady.
@@ -679,6 +695,11 @@ function R2:simulate(sim)
   if not self:enabled() then return end
   if self.simFrame == sim.frame then return end
   self.simFrame = sim.frame
+  if RV_PROF and RV_PROF.on and RV_PROF.add and SIM_CPU.n > 0 then   -- PERF-11: last frame's sim CPU split
+    RV_PROF.add('RainFX2 sim Lua: sceneValues', SIM_CPU.sv)
+    RV_PROF.add('RainFX2 sim Lua: pass submit (' .. SIM_CPU.n .. ' calls)', SIM_CPU.run)
+  end
+  SIM_CPU.sv, SIM_CPU.run, SIM_CPU.n = 0, 0, 0
   self.recValid = false   -- PERF-9: records follow this frame's state (recUpdate on the drawn exits)
   local s = self.store
   local p = self.p
@@ -991,7 +1012,7 @@ function R2:drawParams(depth)
   -- rev48-P4 sheet surface
   v.gR2FrameDt = self.frameDt or 1 / 60
   v.gR2MeanDiamMM = (self.stats and self.stats.meanDiamMM) or 0.3
-  for i = 0, 15 do v['gR2DQ' .. i] = (self.stats and self.stats.dq and self.stats.dq[i + 1]) or 0.3 end   -- rev48-P1
+  for i = 0, 15 do v[DQ_NAMES[i]] = (self.stats and self.stats.dq and self.stats.dq[i + 1]) or 0.3 end   -- rev48-P1 (PERF-11 names)
   v.gR2SpeedRel = (self.stats and self.stats.speedRel) or p.terminalSpeed
   v.gR2SheetWaveK = p.sheetWaveK or 1
   v.gR2RainDirW = self.rainDirW or vec3(0, -1, 0)   -- rev48-P4b impact direction
