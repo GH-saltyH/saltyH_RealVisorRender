@@ -173,7 +173,8 @@ local STORED = { enabled = true, rainExposure = DEFAULTS.exposure, wfRefraction 
   filmK = DEFAULTS.filmK, sprayK = DEFAULTS.sprayK, filmRefract = DEFAULTS.filmRefract, filmVeil = DEFAULTS.filmVeil,
   scatterK = DEFAULTS.scatterK,
   debug = DEFAULTS.debug, invertSide = false,
-  windDirOffsetDeg = 180, windDirCalibrated = false }   -- rev48: compass -> game-space wind convention (calibrated live)
+  windDirOffsetDeg = 180, windDirCalibrated = false,
+  airTFix = false, airTFixC = 22.1 }   -- M-REF: replay air temperature (CSP replays do not record it)   -- rev48: compass -> game-space wind convention (calibrated live)
 
 
 -- rev40: truncated power law of the fragment size factor X, pdf ~ X^-(1+a) on [lo, hi].
@@ -597,6 +598,8 @@ end
 function R2:fineBudget(sim)
   local p = self.p
   local T = sim.ambientTemperature or 20
+  if self.store.airTFix then T = self.store.airTFixC end   -- M-REF: replays do not record the air temperature
+  self.cspT = sim.ambientTemperature
   local okH, hum = pcall(ac.getAirHumidity, sim.cameraPosition or vec3())
   local RH = math.min(math.max(okH and hum or 0.6, 0), 0.995)   -- F4 (user): CSP humidity as given (weather profile)
   local rhoSat = 611.2 * math.exp(17.67 * T / (T + 243.5)) / (461.5 * (T + 273.15))   -- kg/m^3
@@ -714,6 +717,17 @@ function R2:simulate(sim)
   p.normalSign = s.invertSide and -1 or 1
   if not self.ctx.surface:validate() then self.status = self.ctx.surface.status or 'geometry not verified'; return end
   if not self:ensureResources() or not self:ensureMesh() then return end
+  if self.clearRequest then   -- M-REF: empty visor for repeatable replay segments (clear, no resource churn)
+    self.clearRequest = false
+    local z = rgbm(0, 0, 0, 0)
+    for _, k in ipairs({ 'S', 'F', 'TG', 'LM' }) do
+      for _, c in ipairs(self[k] or {}) do c:clear(z) end
+    end
+    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'FS', 'SK', 'NM', 'BM', 'BG' }) do
+      if self[k] then self[k]:clear(z) end
+    end
+    self.recValid, self.mskValid = false, false
+  end
   -- rev23 look lab (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md step 1): static reference-distributed
   -- drop set, physics / births / film / haze / scatter / wobble / defocus off. Works while paused.
   if self.lookLab then
@@ -1425,7 +1439,7 @@ function R2:ui()
 end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
-local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,dropDepthUM,residenceS,stagElevDeg,nBand0,p99Band0MM,nBand1,p99Band1MM,nBand2,p99Band2MM\n'
+local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,dropDepthUM,residenceS,stagElevDeg,nBand0,p99Band0MM,nBand1,p99Band1MM,nBand2,p99Band2MM,simTimeS,replay,replayFrame,replayRate,sceneTag,fps,airT,airRH,cspAirT,windDirDeg,cloudBaseM,groundShare,rateMMh,groundMMh,impactRate,meanDiamMM,stickFrac,speedRel,sprayMMs,splashMMs,roadWet,leadKmh,leadLatM,dropsPerCm2,filmRateRain\n'
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -1543,6 +1557,14 @@ function R2:metricsWrite(sim)
     self.store.filmRefract, self.store.filmVeil, self.store.scatterK,
     h.total, h.p50, h.p90 / p50, h.p99 / p50, h.ratio, self.p.fragA, self.p.fragHi, h.depthUM or 0, h.residence or 0,
     self.p.stagElevDeg or 0, bd[1].n, bd[1].p99, bd[2].n, bd[2].p99, bd[3].n, bd[3].p99)
+  -- M-REF (2026-11-06, docs/RAINFX_V2_SPRAY_RAIN_REF.md): replay sync + supply chain + spray source, appended columns
+  local area = 602.0 * 146.3 * math.max((m and m.validFrac) or 1, 0.05)   -- mm^2 of visor in the metric blocks
+  line = line:sub(1, -2) .. string.format(',%.3f,%d,%d,%.2f,%d,%.0f,%.1f,%.3f,%.1f,%.0f,%.0f,%.3f,%.3f,%.3f,%.1f,%.3f,%.3f,%.2f,%.5f,%.5f,%.3f,%.1f,%.2f,%.3f,%.5f\n',
+    (s.time or 0) / 1000, s.isReplayActive and 1 or 0, s.replayCurrentFrame or -1, s.replayPlaybackRate or 0,
+    self.sceneTag or 0, s.fps or 0, self.fineT or 0, self.fineRH or 0, self.cspT or -99, s.windDirectionDeg or 0,
+    st.cloudBaseM or 0, st.groundShare or 0, st.rateMMh or 0, st.groundMMh or 0, st.impactRate or 0, st.meanDiamMM or 0,
+    st.stickFrac or 0, st.speedRel or 0, st.sprayMMs or 0, st.splashMMs or 0, si.wet or 0, si.nearestKmh or -1,
+    si.nearestLatM or -1, (h.total or 0) / (area * 0.01), st.rainFilm or 0)
   local ok = pcall(function()
     local f = io.open(self.recordPath, 'a')
     if f then f:write(line); f:close() end
@@ -1575,6 +1597,15 @@ function R2:metricsUI()
       (self.stats.fluxMMs or 0) * self.p.exposure, h.depthUM or 0, h.residence or 0, self.stats.filmRate or 0,
       (self.store.filmK or 1) <= 0 and '  (Rain film supply gain 0: unresolved rain is dropped)' or ''))
   end
+  -- M-REF: scene tag (CSV column sceneTag) and the replay air temperature
+  if ui.button('Clear visor water (start a measured segment empty)') then self.clearRequest = true end
+  self.sceneTag = math.floor(ui.slider('##rfx2tag', self.sceneTag or 0, 0, 9, 'Scene tag (CSV): %.0f  (e.g. 1 stop, 2 solo fast, 3 pack fast, 4 pack slow)') + 0.5)
+  if ui.checkbox('Fix air temperature (replays do not record it)', self.store.airTFix) then self.store.airTFix = not self.store.airTFix end
+  if self.store.airTFix then self.store.airTFixC = ui.slider('##rfx2atc', self.store.airTFixC, -10, 45, 'Air temperature: %.1f C') end
+  local s0 = ac.getSim()
+  ui.text(string.format('Replay %s  frame %d  rate %.2f  | air %.1f C (CSP %.1f)  RH %.0f %%',
+    s0.isReplayActive and 'on' or 'off', s0.replayCurrentFrame or -1, s0.replayPlaybackRate or 0,
+    self.fineT or 0, self.cspT or -99, (self.fineRH or 0) * 100))
   if self.recording then ui.text('Recording: ' .. tostring(self.recordPath)) end
   if self.metricsErr then ui.text('Metrics: ' .. self.metricsErr) end
 end

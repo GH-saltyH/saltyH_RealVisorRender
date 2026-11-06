@@ -36,6 +36,7 @@ function S.estimate(sim, p, out)
   local me = sim.focusedCar >= 0 and sim.focusedCar or 0
   local car = ac.getCar(me)
   out.wet, out.nearestM, out.cars, out.splash = w, -1, 0, 0
+  out.nearestKmh, out.nearestLatM = -1, -1   -- M-REF: the nearest contributing car (speed, lateral offset)
   if not car or w <= 0 then out.spray = 0; return 0, out end
   local pos, look = car.position, car.look
   local lwc, splash = 0, 0
@@ -59,7 +60,9 @@ function S.estimate(sim, p, out)
               lwc = lwc + k
               splash = splash + sv * cross * math.exp(-ahead / p.splashRangeM)
               out.cars = out.cars + 1
-              if out.nearestM < 0 or ahead < out.nearestM then out.nearestM = ahead end
+              if out.nearestM < 0 or ahead < out.nearestM then
+                out.nearestM, out.nearestKmh, out.nearestLatM = ahead, v * 3.6, math.sqrt(lat2)
+              end
             end
           end
         end
