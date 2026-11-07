@@ -134,7 +134,18 @@ float4 main(PS_IN pin) {
                     // rev48-F6 (F5 review: every landing stamped a CLUSTER -- F1 spread a sub-fineRMM residue as fine water over
                     // a 1-cell disc, drawn as several micro-grid droplets): a raindrop's residue is one drop where it hit
                     // (F9: the fine layer is gone)
+                    // SZ2 (2026-11-06, SZ1 review: a hard size cap / a fixed residue share gives one uniform size -- the reference
+                    // shows a SHAPE: small most common, large ever rarer). Deposition (no half splashes) keeps the whole raindrop.
+                    // A splashing raindrop keeps at most its stuck share fRes (Bird halves, resA = the film share) and that share
+                    // breaks with the receding lamella: the piece left at the impact point follows the ONE fragment size law of
+                    // the satellites (d (K0/K)^resB x X, pdf(X) ~ X^-(1+fragA), reference counts x0.7 per 1.5x bin), so most
+                    // residues are small and a large one is rare, never a fixed ceiling. Same draw in all three thirds.
                     float bv = fRes * 0.5235988 * d * d * d;
+                    if (lDn + lUp > 0.0) {
+                        float dC = d * pow(saturate(gR2SplashK0 / max(K, 1e-3)), gR2ResB)
+                                 * r2FragX(r2Rand(uint3(c.y, c.x, im.sk + 3131u)));
+                        bv = min(0.5235988 * dC * dC * dC, bv);
+                    }
                     if (r2RadiusMM(bv) >= gR2MinRadiusMM && bv > bestV) {   // F6: the raindrop's residue is ONE drop at any size
                         bestV = bv; bestK = K / max(gR2SplashK0, 1e-3); bestWhole = true; bestD = d; bestVI = vImpD;
                         bestP = saturate(im.ip - float2(c));
@@ -165,6 +176,8 @@ float4 main(PS_IN pin) {
                 }
             }
         }
+        // M1b birth cap removed (M3, 2026-11-06): capping every newborn at the aerodynamic limit made one uniform top size;
+        // the residue size now follows the fragment law (SZ2) and a drop above We_c sheds pieces once it runs (r2Predict M3)
         // rev45: a swept drop is replaced by the splash fragment when one lands here (one event), else
         // it fades out over gR2FadeTime instead of vanishing (rev22-44 deleted it at once).
         // rev47b IMPACT MERGE (rev47 review): an impact on a small drop mostly merges with it; a share
@@ -224,6 +237,7 @@ float4 main(PS_IN pin) {
     // The field pass removes exactly that water (same hash of cell and frame, same F_prev / TG_prev).
     if (gR2Sub < 1.5 && r2Valid(t) > 0.5) {
         float vBead = 0;
+        bool pearlB = false;                                                   // review marker: -2 = trail pearl
         float2 pBead = float2(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9003u)),
                               r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9004u)));
         if (r2DewetEvent(c)) {
@@ -251,6 +265,7 @@ float4 main(PS_IN pin) {
                 }
             }
             vBead += vT;
+            if (vT > 0) pearlB = true;
         }
         // rev48-W1t: the isolated patch around this cell beads into one drop (bead.hlsl, same frame, field removes it)
         bool patchBead = false;
@@ -271,8 +286,72 @@ float4 main(PS_IN pin) {
                 seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9005u)) * R2_SEEDS);
                 shape = r2ShapeBirth(uint2(c), (uint)gR2Frame * 8u + 9100u, r2RadiusMM(vBead), t, wetB);
                 disp = float2(0, 0);
-                life = float4(patchBead ? gR2GrowTime : 0.0, 0, 0, 0);   // W1t: the patch water is already there (no grow-in)
+                life = float4(patchBead ? gR2GrowTime : 0.0, 0, 0, pearlB ? -2.0 : -3.0);   // W1t: no grow-in for patch water; -3 = born from
+                                                                          // field water (dewet / pearl / patch), not an impact (review marker, FW1)
             }
+        }
+    }
+    // S1b SPRAY DEPOSITION (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 9; S1 review: a uniform reservoir crossed its nucleation
+    // threshold in every empty cell in the same frame -> equal drops at equal spacing, which then only grew in place).
+    // Road spray arrives as DISCRETE droplets of a broad size distribution (lognormal, number median sprayDiamMM, sigma_g
+    // sprayDsdSigma): the visible ones (cap radius >= minRadiusMM) land one by one at random times / places (Poisson per cell
+    // and frame) -- a new drop in an empty cell, a merge (mass-weighted centre shift) on an existing one; the merge pass
+    // then joins drops that touch. Only the SUB-visible share goes to field G, which existing / new drops take up
+    // (no threshold births: they made the lattice). Last substep, once per frame; the field clears G where S_next has a drop.
+    // SP1 (section 17): a spray droplet lands with the same impact outcome as a raindrop (Mundo K at the spray impact speed
+    // = SpeedRel x sprayVRelK x exposure): it keeps at most its stuck share fRes (resA) and the piece left is d (K0/K)^resB X
+    // (one fragment law). A piece below the drawn size is haze (Lua puts its expectation into G); the splashed rest leaves.
+    // H1: the haze G a drop takes up is the water under its swept contact disc (r2SweepFrac, same function as the field).
+    if (gR2Sub > gR2SubN - 0.5 && r2Valid(t) > 0.5) {
+        float lamS = gR2SprayFineOn > 0.5 ? gR2SprayVisRate * r2Exposure(t) * gR2Exposure * gR2CellSizeMM.x * gR2CellSizeMM.y * gR2SimDt : 0.0;
+        uint ks = (uint)gR2Frame * 8u + 9301u;
+        if (lamS > 0 && r2Rand(uint3((uint)c.x, (uint)c.y, ks)) < 1.0 - exp(-lamS)) {
+            float u0 = 1.0 / (1.0 + exp(-1.702 * gR2SprayZmin));                     // Phi(zmin), logistic approximation
+            float u = lerp(u0, 0.99995, r2Rand(uint3((uint)c.y, (uint)c.x, ks + 1u)));
+            float z = log(u / (1.0 - u)) / 1.702;
+            float dS = min(exp(gR2SprayLnDn + gR2SprayS * z), gR2SprayDMaxMM);
+            float vS = 0.5235988 * dS * dS * dS;
+            float vI = max(gR2SpeedRel * gR2SprayVRelK * r2Exposure(t), 0.3);          // SP1 impact speed (m/s)
+            float KS = sqrt(13.8889 * vI * vI * dS) * pow(max(1000.0 * vI * dS, 1e-3), 0.25);
+            if (KS > gR2SplashK0) {
+                float krS = gR2SplashK0 / KS;
+                float dC = dS * pow(abs(krS), gR2ResB) * r2FragX(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 6u)));   // FXC X3571
+                vS = min(0.5235988 * dC * dC * dC, pow(abs(krS), gR2ResA) * vS);
+            }
+            if (r2RadiusMM(vS) >= gR2MinRadiusMM) {
+                float2 pE = float2(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 2u)), r2Rand(uint3((uint)c.y, (uint)c.x, ks + 3u)));
+                if (accV > 0) {
+                    p = (p * accV + pE * vS) / (accV + vS);                           // coalescence: the centre moves
+                    accV += vS;
+                } else {
+                    accV = vS;
+                    p = pE;
+                    seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 4u)) * R2_SEEDS);
+                    shape = r2ShapeBirth(uint2(c), ks + 5u, r2RadiusMM(vS), t, wetB);
+                    disp = float2(0, 0);
+                    life = float4(0, 0, 0, -8.0);                                    // grows in; -8 = spray impact (review marker)
+                }
+            }
+        }
+        if (accV > 0) {
+            // H1: haze under the drop's swept disc this frame (field texels of the 5x5-cell window the field gathers from)
+            float2 bC = float2(c) + min(saturate(p), 0.9995);
+            float2 mvC = r2UnpackMove(r2PackMove(disp, seed));
+            float rS = r2RadiusMM(accV);
+            float2 texC = gR2FieldSize / gR2Cells;                                    // texels per cell
+            float2 lo = (min(bC, bC - mvC) - rS / gR2CellSizeMM) * texC;
+            float2 hi = (max(bC, bC - mvC) + rS / gR2CellSizeMM) * texC;
+            int2 f0 = max(int2(floor(lo)), max((c - 2) * int2(texC), int2(0, 0)));
+            int2 f1 = min(int2(floor(hi)), min((c + 3) * int2(texC) - 1, int2(gR2FieldSize) - 1));
+            float2 texMM2 = gR2CellSizeMM / texC;
+            float vG = 0;
+            [loop] for (int fy = f0.y; fy <= f1.y; ++fy) {
+                [loop] for (int fx = f0.x; fx <= f1.x; ++fx) {
+                    float g = txR2Field.Load(int3(fx, fy, 0)).g;
+                    if (g > 0) vG += g * r2SweepFrac(int2(fx, fy), bC, mvC, rS);
+                }
+            }
+            accV += vG * gR2FineMaxMM * texMM2.x * texMM2.y;                          // micro droplets join the drop
         }
     }
     // rev48-F9: F1 fine coalescence removed with the fine layer (it made drops out of the fine water G)

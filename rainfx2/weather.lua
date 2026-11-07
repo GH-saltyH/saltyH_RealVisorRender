@@ -77,6 +77,52 @@ function W.fallMap(T, RH, dD, NG)
   return Dground
 end
 
+-- H1 / SP1 one impact (cells.hlsl impact cell / spray event): diameter d mm, normal impact speed v m/s -> (stuck volume,
+-- expected DRAWN piece volume, HAZE volume) mm^3. Mundo K; above K0 the stuck share (K0/K)^resA breaks into fragments of
+-- the one size law d (K0/K)^resB X (X: pdf ~ X^-(1+fragA) on [fragLo, fragHi]); the cell draws one of them (8
+-- mid-quantiles, drawn when its cap radius >= minRadiusMM); the HAZE is the stuck water in the fine fragments the cells
+-- cannot hold (cap radius < hazeRMaxMM, mass share of X below it, minus the drawn piece when it is one of them). Coarser
+-- extra fragments are visible drops beyond the one-per-cell capacity (lost, as before). Below K0 the whole drop stays.
+local XQ = {}
+local function fragQ(p)
+  local a, lo = math.max(p.fragA or 0.88, 0.05), p.fragLo or 0.35
+  local hi = math.max(p.fragHi or 3.0, lo + 1e-3)
+  if XQ.a ~= a or XQ.lo ~= lo or XQ.hi ~= hi then
+    XQ.a, XQ.lo, XQ.hi = a, lo, hi
+    local loP, hiP = lo ^ -a, hi ^ -a
+    for i = 1, 8 do XQ[i] = (loP + (i - 0.5) / 8 * (hiP - loP)) ^ (-1 / a) end
+    XQ.l3, XQ.h3 = lo ^ (3 - a), hi ^ (3 - a)
+  end
+  return XQ
+end
+function W.impactKeep(d, v, p)
+  local V = math.pi / 6 * d * d * d
+  local vmin = (p.shapeK or 2.0944) * (p.minRadiusMM or 0.04) ^ 3
+  local K = math.sqrt(13.8889 * v * v * d) * math.max(1000 * v * d, 1e-3) ^ 0.25
+  local K0 = p.splashK0 or 58
+  if K <= K0 then
+    if V >= vmin then return V, V, 0 end
+    return V, 0, V
+  end
+  local kr = K0 / K
+  local st = kr ^ (p.resA or 0.5) * V
+  local dr = d * kr ^ (p.resB or 0.4)
+  local vhz = (p.shapeK or 2.0944) * (p.hazeRMaxMM or 0.08) ^ 3
+  local q, e, eh = fragQ(p), 0, 0
+  for i = 1, 8 do
+    local dc = dr * q[i]
+    local vp = math.min(math.pi / 6 * dc * dc * dc, st)
+    if vp >= vmin then
+      e = e + vp
+      if vp < vhz then eh = eh + vp end
+    end
+  end
+  local a = math.max(p.fragA or 0.88, 0.05)
+  local xHz = (6 * vhz / math.pi) ^ (1 / 3) / math.max(dr, 1e-6)
+  local fm = (math.min(math.max(xHz, q.lo), q.hi) ^ (3 - a) - q.l3) / math.max(q.h3 - q.l3, 1e-12)
+  return st, e / 8, math.max(st * math.min(math.max(fm, 0), 1) - eh / 8, 0)
+end
+
 function W.supply(R, speedRel, p, out)
   local vt0 = p.terminalSpeed
   local D0 = 0.895 * math.max(R, 0.01) ^ 0.21 * (p.dsdD0K or 1) * (out.familyK or 1)
@@ -164,6 +210,17 @@ function W.supply(R, speedRel, p, out)
   end
   for kk = 1, NG do mean = mean + Wg[kk] * Dg[kk] end
   out.meanDiamMM = wSum > 0 and mean / wSum or D0
+  -- H1 (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 17): the expected SUB-VISIBLE stuck water of the rain impacts (the cells
+  -- impact cell keeps the stuck share, draws only the piece above minRadiusMM) -> haze G, mm/s at exposure 1
+  local hz, ex = 0, p.hazeExpo or 0.9
+  for kk = 1, NG do
+    if Wg[kk] > 0 then
+      local D = Dg[kk]
+      local _, _, h = W.impactKeep(D, math.max(math.sqrt(h2 + vt(D) ^ 2) * ex, 0.3), p)
+      hz = hz + Wg[kk] * h
+    end
+  end
+  out.hazeMMs = hz * 1e-6
   return out
 end
 
@@ -192,6 +249,7 @@ function W.compute(input, out)
     W.supply(R, speedRel, p, out)
   else
     out.impactRate, out.fluxMMs, out.meanDiamMM, out.dsdM3 = 0, 0, 0.3, 0.162
+    out.hazeMMs = 0
     out.dq = out.dq or {}
     for i = 1, 16 do out.dq[i] = 0.3 end
   end

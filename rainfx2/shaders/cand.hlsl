@@ -89,6 +89,9 @@ bool r2CandCore(int2 s, out R2Cand c, out float rLeg, out bool win) {
     float encH = gR2HiImpact > 0.5 ? txR2Lam.Load(int3(s, 0)).x : 0.0;   // PERF-4: review marker only
     c.imp = (splat && L.x < 0.3) ? 1.0 : ((encH > 0.5 && floor(encH) - 1.0 == gR2Frame) ? 2.0 : 0.0);
     if (abs(L.w + 7.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 3.0;   // R2b: splash satellite < 0.3 s
+    if (abs(L.w + 8.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 1.0;   // SP1: spray impact birth < 0.3 s (magenta, as rain)
+    if (abs(L.w + 3.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 4.0;   // FW1 review: born from field water, no impact (green)
+    if (abs(L.w + 2.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 5.0;   // PL1 review: born from trail water (pearl, blue)
     float thN = (L.w + 5.0) * 31.4159265;                          // direction to the parent at the split
     c.nk = float2(cos(thN), sin(thN));
     float vis = (splat || child) ? 1.0 : lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));
@@ -130,12 +133,11 @@ bool r2CandCore(int2 s, out R2Cand c, out float rLeg, out bool win) {
         if (aF >= 1.0) c.aMax = aF;
         else { c.aMax = 1.0; c.r *= lWin / (base + rest); }
     }
-    // rev48-R6 FRAME STREAK (PHYSICS_AUDIT G): drops now move at their force-balance speed (no display cap), up to the
-    // gather window per substep -- a fast drop is seen over the frame as the smear of its path: the rear stretches by
-    // the frame's move (k = move / kernel radius), within the window that is left (no shrink for it).
-    float kBlur = ml / max(gR2KernelScale * c.r, 1e-4);
-    float kRoom = lWin / max(gR2KernelScale * c.r * hF * sqrt(min(shAx, c.aMax)), 1e-4) - 1.0;
-    c.k = max(c.k, min(kBlur, max(kRoom, 0.0)));
+    // rev48-R6 FRAME STREAK removed (NS1, 2026-11-06; RAINFX_V2_SPRAY_RAIN_REF.md section 15): it stretched the rear by the
+    // frame's move / kernel radius (a full-frame exposure smear), up to the 2-cell window -- small running drops became
+    // needles (aspect 5-10). A game frame is a frozen instant (user ruling, section 11) and a sliding drop at the model's
+    // speeds (<= 0.3 m/s, Ca = mu U / gamma <= 4e-3, below the corner / pearling transition: Podgorski et al. 2001) is a
+    // rounded teardrop: the motion stretch c.k = motionStretch x v / vMax (<= 0.35) above is its whole elongation.
     return true;
 }
 

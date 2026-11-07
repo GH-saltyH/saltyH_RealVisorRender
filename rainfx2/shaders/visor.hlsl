@@ -787,7 +787,7 @@ float4 main(PS_IN pin) {
         thickK = smoothstep(0.15, 0.4, hF);
     }
     // A wet surface (film / micro haze) lowers the effective contact angle: edges melt in (ref. A).
-    float wetFlat = gR2LookLab > 0.5 ? 0.0 : gR2WetFlatten * saturate(filmCov + 2.0 * Fd.g);
+    float wetFlat = gR2LookLab > 0.5 ? 0.0 : gR2WetFlatten * saturate(filmCov + 1.3333 * gR2WetHaze * Fd.g);   // H1: wetHaze 0 (micro caps are no film)
     // rev20: dynamic loops (rev19 unrolled 25 x (1 + 4 taps) x lobes: minutes of FXC and a long
     // first-use stall in game). Only the 4 D-A taps are unrolled (static register arrays).
     // rev48-R7a: ONE candidate loop (FXC failed silently with a second r2AddDrop site x 4 unrolled D-A taps): indices
@@ -905,6 +905,14 @@ float4 main(PS_IN pin) {
     float scatterX = gR2ScatterFilm * filmCov * thickK * (sheetMode ? 0.0 : 1.0)
                    + gR2ScatterSpray * gR2Spray;
     float scat = gR2LookLab > 0.5 ? 0.0 : min(1.0 - exp(-scatterX), gR2ScatterMax);
+    // H1 HAZE (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 17): G = sub-visible micro droplets (mm of water). Caps of contact
+    // radius a and volume shapeK a^3 placed at random cover phi = 1 - exp(-pi h / (shapeK a)) of the surface (Poisson),
+    // up to the coalescence saturation of dropwise condensation (breath figures, ~0.55). Each micro cap bends light over a
+    // wide cone -> the covered share is scattered (the same surface-scatter ambient as the film). Not over drops (below).
+    if (gR2LookLab < 0.5 && gR2HazeK > 0.0) {
+        float phiH = min(1.0 - exp(-3.14159265 * Fd.g * gR2FineMaxMM / max(gR2ShapeK * gR2HazeAMM, 1e-6)), gR2HazePhiMax);
+        scat = 1.0 - (1.0 - scat) * (1.0 - gR2HazeK * phiH);
+    }
     // rev47j (rev47i review: the veil covered the drops at speed): micro haze and film lie BETWEEN the
     // drops on the surface -- a drop has absorbed what was under it -- so their scatter is not drawn over drops.
     scat *= 1.0 - cov;
@@ -1013,7 +1021,7 @@ float4 main(PS_IN pin) {
     // rev48-S6c: 'Highlight split pieces' -- E8 tail pieces younger than 1.5 s in cyan (review aid)
     if (gR2HiSplit > 0.5 && splitMark > 0.0) { col = lerp(col, float3(0.0, 1.0, 1.0), 0.8); a = max(a, 0.85); }
     // U1: magenta = impact-born splat (< 0.3 s), yellow = an existing drop hit by an impact this frame (merge)
-    if (gR2HiImpact > 0.5 && impMark > 0.0) { col = lerp(col, impMark > 2.5 ? float3(1.0, 0.25, 0.0) : (impMark > 1.5 ? float3(1.0, 0.9, 0.0) : float3(1.0, 0.0, 1.0)), 0.8); a = max(a, 0.85); }
+    if (gR2HiImpact > 0.5 && impMark > 0.0) { col = lerp(col, impMark > 4.5 ? float3(0.1, 0.35, 1.0) : impMark > 3.5 ? float3(0.0, 1.0, 0.2) : (impMark > 2.5 ? float3(1.0, 0.25, 0.0) : (impMark > 1.5 ? float3(1.0, 0.9, 0.0) : float3(1.0, 0.0, 1.0))), 0.8); a = max(a, 0.85); }
     return float4(col, saturate(a));
 #endif
 }

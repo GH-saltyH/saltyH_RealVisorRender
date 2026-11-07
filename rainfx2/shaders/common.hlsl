@@ -132,15 +132,96 @@ float r2Defect(float2 pMM) {
     return r2VNoise(pMM * gR2DefInvMM + float2(31.7, 11.3));
 }
 
+// J1 STRONG DEFECTS (docs/RAINFX_V2_SPRAY_RAIN_REF.md sections 18-20; stick-slip on heterogeneous coatings, Varagnolo et al.
+// PRL 2013): worn / scratched / soiled spots that hold the contact line far more than the mean hysteresis. A sparse field:
+// value noise of strongMM features above strongThr (0.74 = 15 % of the area) adds S = ((v - thr) / (1 - thr))^2, x strongK
+// to the pinning factor; a drop averages it over its contact width (1-2 samples per axis) -> small drops stop often,
+// large ones run smoothly (size-dependent motion). Returns the pinning contribution c = defPin (2 D - 1) + strongK S at pMM.
+float r2DefectC(float2 pMM, float rmm) {
+    float c = gR2DefPin * (2.0 * r2Defect(pMM) - 1.0);
+    if (gR2StrongK > 0.0) {
+        float nW = clamp(round(2.0 * rmm * gR2StrongInvMM), 1.0, 2.0);
+        float S = 0;
+        [unroll] for (int j = 0; j < 2; ++j) {
+            [unroll] for (int k = 0; k < 2; ++k) {
+                if ((float)j >= nW || (float)k >= nW) continue;
+                float2 o = rmm * (float2((float)j, (float)k) + 0.5) * (2.0 / nW) - rmm;
+                float v = r2VNoise((pMM + o) * gR2StrongInvMM + float2(5.1, 9.7));
+                float e = max(0.0, (v - gR2StrongThr) / max(1.0 - gR2StrongThr, 1e-3));
+                S += e * e;
+            }
+        }
+        c += gR2StrongK * S / (nW * nW);
+    }
+    return c;
+}
+
+// F2a BOUNDARY-LAYER GROWTH (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 21; docs/tools/rainfx2_helmet_bl.py): the laminar layer
+// over the helmet front (Thwaites, axisymmetric) thickens away from the stagnation point -- delta99(theta) / delta99(0)
+// below, theta from the stagnation point, 15 deg knots (shape of the potential outer flow, independent of the speed).
+// A drop of cap height ~0.6 r inside the layer sees u_e x B(0.6 r / delta), B = x (2 - x) -- for small drops ~ the wall
+// shear, which peaks near 60 deg and falls toward separation, not the outer speed (sin theta). The U_c(V) law stays
+// calibrated where it was fitted (theta 45 deg): the load is scaled by (B(theta) / B(45))^2.
+static const float R2_BLT[8] = { 1.0, 0.733, 0.766, 0.826, 0.928, 1.10, 1.42, 2.49 };
+float r2BLDelta(float cn) {                                    // cn = cos(theta from the stagnation point)
+    float x = clamp(degrees(acos(clamp(cn, -1.0, 1.0))) / 15.0, 0.0, 6.999);
+    int i = (int)x;
+    return gR2BLDeltaMM * lerp(R2_BLT[i], R2_BLT[i + 1], x - (float)i);
+}
+float r2BLProfile(float x) { return x < 1.0 ? x * (2.0 - x) : 1.0; }
+float r2BLLoad(float cn, float rmm) {
+    if (gR2BLGrowth < 0.5) return 1.0;
+    float xb = 0.6 * rmm / max(r2BLDelta(cn), 1e-3);
+    float xc = 0.6 * rmm / max(gR2BLDeltaMM * 0.826, 1e-3);   // R2_BLT at 45 deg
+    float q = r2BLProfile(xb) / max(r2BLProfile(xc), 1e-4);
+    return q * q;
+}
+// F2b DYNAMIC RETENTION (Cox-Voinov, the receding / advancing angles of a moving contact line, the same law and theta_r as
+// the trail rule r2TrailRule): theta_r(v)^3 = theta_r^3 - 9 Ca ln(r / 1 nm), theta_a(v)^3 = theta_a^3 + 9 Ca ln, Ca = v / 72.
+// The extra retention 2 gamma r [cos theta_r(v) - cos theta_r + cos theta_a - cos theta_a(v)] grows with speed and saturates
+// when theta_r reaches 0 (Ca*, where the trail opens) -> the speed under a large overload grows sub-linearly.
+float r2DynRetUnit(float vms, float rmm) {                      // extra retention / (2 gamma r)
+    float K = 9.0 * log(max(rmm * 1e6, 10.0));
+    float ca = vms / 72.0;
+    float thr = radians(gR2TrailThetaRDeg);
+    float tha = acos(clamp(cos(thr) - gR2PinCoat, -1.0, 1.0));
+    float tr3 = thr * thr * thr - K * ca;
+    float thrD = tr3 > 0.0 ? pow(max(tr3, 1e-12), 0.3333) : 0.0;                 // FXC X3571
+    float thaD = min(pow(max(tha * tha * tha + K * ca, 1e-12), 0.3333), 3.0);
+    return (cos(thrD) - cos(thr)) + (cos(tha) - cos(thaD));
+}
+
+// T1 COCKPIT TURBULENCE (docs/RAINFX_V2_SPRAY_RAIN_REF.md sections 13-15). The helmet sits in the turbulent wake of the
+// nose, halo and screen: the air at the visor = the mean outer flow u_e + a fluctuation u'. The load ~ |u_e + u'|^2 =
+// u_e^2 + 2 u_e.u' + u'^2: near the shedding threshold the cross term makes drops cross it intermittently (stick-slip,
+// the reference's hesitating creep), and where u_e ~ 0 the direction is picked by u' (left / right) before the
+// diverging mean flow takes over. u' = turbI x kU U x (RMS ~1 smooth 2-D noise) -- frozen turbulence (Taylor): a
+// spatial field of turbMM eddies drifting through at turbHz, so neighbouring drops move together, and it is a function
+// of position and time only (identical in every gathering cell). turbI = cockpit turbulence intensity (environment).
+float3 r2TurbAir(float2 t, float3 du, float3 dv, float3 n) {
+    if (gR2TurbI <= 0.0) return float3(0, 0, 0);
+    float2 p = t * gR2CellSizeMM * gR2Cells / max(gR2TurbMM, 0.5);
+    float tt = gR2Time * gR2TurbHz;
+    float2 nT = float2(r2VNoise(p + float2(tt, 17.3)), r2VNoise(p + float2(41.9, tt + 7.7))) * 2.0 - 1.0;
+    float3 tu = normalize(du) * nT.x + normalize(dv) * nT.y;
+    tu -= n * dot(tu, n);
+    float tl = length(tu);
+    // RMS of a smoothstep value-noise component in [-1, 1] ~ 0.4 -> x 1.7 gives an RMS vector of ~1
+    return tl > 1e-9 ? tu * (gR2TurbI * (gR2AeroU / 1.5) * 1.7 * length(nT) / tl) : float3(0, 0, 0);
+}
+
 // Drop velocity in tex-uv per second. Memoryless terminal-velocity model:
 // gravity+inertia and air drag against contact-angle hysteresis (pinning).
 // Mirrored 1:1 by rainfx2/physics.lua (P.forces / P.speed) for review and diagnostics.
 // rev41: drive = Fpin / |F| of a moving drop (1 = just depinned, -> 0 = driven far above pinning);
 // the path heterogeneity (r2Steer) scales with it: weakly driven drops meander, strongly driven
 // drops follow the force in nearly straight lines.
-float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out float speed, out float drive) {
+float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out float speed, out float drive,
+                      out float2 fDirMM, out float fUnit) {
     speed = 0;
     drive = 1;
+    fDirMM = float2(0, 1);
+    fUnit = 0;   // J1: |F| / (Fpin / pinNoise) -- the force against a unit pinning factor
     float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
     float4 dvA = r2Tap(txR2Dv, t);
     float3 dv = r2ToWorld(dvA.xyz);
@@ -156,7 +237,9 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out f
     // (delta 0.3-0.7 mm), and the pressure gradient V rho u_e du_e/ds pushes the drop outward.
     float3 ah = gR2AeroDirW;
     float cn = -dot(n, ah);                                     // cos(theta), facing the oncoming air
-    float3 ue = (ah - n * dot(ah, n)) * (gR2AeroU * smoothstep(-0.1, 0.2, cn));   // lee side separated
+    float wsE = smoothstep(-0.1, 0.2, cn);
+    float3 ue = (ah - n * dot(ah, n)) * (gR2AeroU * wsE);   // lee side separated
+    ue += r2TurbAir(t, du, dv, n) * wsE;                   // T1 cockpit turbulence (r2TurbAir)
     // rev48-F4 SIZE LAW OF THE AIR LOAD (F3 review + reference 'verySmallWFSize_dryFlow', Light Drizzle, F1 helmet cam:
     // drops of ~0.3-0.4 mm start to move at 137-162 km/h, half that size at 162-192, fine dots at 180-220). R6b used
     // a quadratic drag with ONE Cd calibrated on a 10 uL drop and the laminar boundary-layer attenuation x(2 - x):
@@ -171,9 +254,20 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out f
     float uLen = length(ue);
     float Vul = gR2ShapeK * radiusMM * radiusMM * radiusMM;                  // mm^3 = uL
     float Uc = gR2ShedU10 * pow(max(Vul * 0.1, 1e-7), -gR2ShedBeta);
-    // F5 (F4b review: running drops far faster than the reference): the rev47 pressure-gradient push V rho u_e du_e/ds
-    // (~ r^3: 4.5 x the coat pinning for r 2 mm at 200 km/h) is removed -- the measured U_c(V) already holds every air load
-    float3 Fa = (gR2SurfaceTension * 2.0 * r * gR2PinCoat * uLen / (Uc * Uc)) * ue;
+    // F5 (F4b review: running drops far faster than the reference) removed the rev47 pressure-gradient push; F3 below restores it
+    float3 Fa = (gR2SurfaceTension * 2.0 * r * gR2PinCoat * uLen / (Uc * Uc) * r2BLLoad(cn, radiusMM)) * ue;   // F2a
+    // F3 (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 22): the stagnation-flow PRESSURE GRADIENT -dp/ds = rho u_e du_e/ds pushes the
+    // drop volume outward along the mean outer flow. The U_c(V) law comes from zero-pressure-gradient plates and does not
+    // hold it (F5's 'already holds every air load' was wrong for this term). Sphere: u_e du_e/ds = u0 a sin cos (peaks at
+    // 45 deg, 0 at 90 deg -- unlike the drag ~ sin^2): ~ r^3, so it moves the LARGE drops near the front (reference:
+    // big drops wash the centre) and adds little at the sides. F5 removed it while the speed law was linear (no dynamic
+    // retention, F2b) and nothing limited big drops (M3).
+    if (gR2PGradK > 0.0 && cn > 0.0) {
+        float3 ueM = ah - n * dot(ah, n);
+        float lM = length(ueM);
+        if (lM > 1e-6)
+            Fa += (gR2PGradK * Vul * 1e-9 * gR2RhoAir * gR2AeroU * gR2AeroDuDs * lM * cn * wsE / lM) * ueM;   // lM = sin theta
+    }
     float3 F = mass * g + Fa;
     float Fm = length(F);
     float pinCos = lerp(gR2PinGlass, gR2PinCoat, saturate(dvA.a));
@@ -197,6 +291,8 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out f
         float wf = rsqrt(cW * cW / AW + AW * (1.0 - cW * cW));
         Fpin *= lerp(1.0, clamp(wf, 0.6, 1.6), gR2FootPinK);
     }
+    fDirMM = dot(fMM, fMM) > 1e-20 ? normalize(fMM) : float2(0, 1);
+    fUnit = Fm / max(Fpin / max(pinNoise, 1e-4), 1e-12);
     if (Fm <= Fpin) return float2(0, 0);
     drive = Fpin / max(Fm, 1e-12);
     // rev48-R6 (docs/RAINFX_V2_PHYSICS_AUDIT.md G): ONE force balance for every unpinned drop -- the quasi-steady
@@ -206,6 +302,15 @@ float2 r2DropVelocity(float2 t, float radiusMM, float pinNoise, float4 sh, out f
     // runbackK / runbackMax, the blow-off threshold shedK and the lift-off flight (liftMM, fly*). A fast drop moves
     // up to the gather window per substep (r2Predict) and is drawn as its frame streak (visor R6 blur), not capped.
     float vq = (Fm - Fpin) / (gR2Friction * max(r, 1e-5));
+    if (gR2DynRet > 0.5) {                                     // F2b: v = (F - Fpin - Fdyn(v)) / (friction r), bisection
+        float lo = 0.0, hi = vq;
+        float kR = gR2SurfaceTension * 2.0 * r;
+        [unroll] for (int it = 0; it < 10; ++it) {
+            float mid = 0.5 * (lo + hi);
+            if ((Fm - Fpin - kR * r2DynRetUnit(mid, radiusMM)) / (gR2Friction * max(r, 1e-5)) > mid) lo = mid; else hi = mid;
+        }
+        vq = lo;
+    }
     speed = vq;
     float3 v = F * (speed / Fm);
     float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
@@ -387,13 +492,31 @@ float3 r2AirTopInfo(float2 t, float rmm) {
     float3 ah = gR2AeroDirW;
     float cn = -dot(n, ah);
     float3 ue = (ah - n * dot(ah, n)) * (gR2AeroU * smoothstep(-0.1, 0.2, cn));
-    float xb = 0.6 * rmm / max(gR2BLDeltaMM, 1e-3);
+    float xb = 0.6 * rmm / max(gR2BLGrowth > 0.5 ? r2BLDelta(cn) : gR2BLDeltaMM, 1e-3);   // F2a: layer at this theta
     float3 air = ue * (xb < 1.0 ? xb * (2.0 - xb) : 1.0);
     float a = dot(du, du), b = dot(du, dv), c = dot(dv, dv);
     float det = max(a * c - b * b, 1e-20);
     float2 uv = float2(c * dot(du, air) - b * dot(dv, air), a * dot(dv, air) - b * dot(du, air)) / det;
     float2 mm = uv * gR2CellSizeMM * gR2Cells;
     return float3(dot(mm, mm) > 1e-12 ? normalize(mm) : float2(1, 0), length(air));
+}
+// M1 / M1b: the largest drop volume (mm^3) the helmet air at t lets stand (aerodynamic Weber number of the drop top
+// We = rho_a u_top^2 2r / gamma <= gR2AeroWeC, u_top = outer flow through the stagnation BL); 1e9 = no limit (off / no air).
+float r2AeroMaxVol(float2 t) {
+    if (gR2AeroWeC <= 0.0) return 1e9;
+    float ueL = r2AirTopInfo(t, 1e4).z;                                      // outer flow (xb >= 1)
+    float uT = gR2TurbI * gR2AeroU / 1.5;                                    // T1: + the turbulence RMS
+    ueL = sqrt(ueL * ueL + uT * uT);
+    float k = gR2RhoAir * 2e-3 / max(gR2SurfaceTension, 1e-4);               // We per (m/s)^2 per mm of radius
+    if (k * ueL * ueL * 3.0 <= gR2AeroWeC) return 1e9;                       // even r = 3 mm stands
+    float rc = 3.0;
+    float dBL = gR2BLGrowth > 0.5 ? r2BLDelta(-dot(r2Normal(t), gR2AeroDirW)) : gR2BLDeltaMM;   // F2a
+    [unroll] for (int it = 0; it < 8; ++it) {                                // monotone fixed point from above
+        float xb = 0.6 * rc / max(dBL, 1e-3);
+        float u = ueL * (xb < 1.0 ? xb * (2.0 - xb) : 1.0);
+        rc *= pow(saturate(gR2AeroWeC / max(k * u * u * rc, 1e-6)), 0.3333);
+    }
+    return gR2ShapeK * rc * rc * rc;
 }
 // rev48-R5 DEFECT CONTOUR (docs/RAINFX_V2_PHYSICS_AUDIT.md F; replaces the S1 random classes bent / lobed / sag
 // shpBendP / shpLobeP / shpSagP): a resting contact line is held where the surface pins it -- the line sits further out
@@ -1032,22 +1155,45 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
         float2 lmMM = lastMove * gR2CellSizeMM;
         float lmL = length(lmMM);
         float2 pMM = t * gR2CellSizeMM * gR2Cells;
-        float dMean = 0.5;
+        float cMean = 0.0;
         float2 defSteer = float2(0, 0);
         if (lmL > 1e-4) {
             float2 dh = lmMM / lmL;
             float2 sd = float2(-dh.y, dh.x) * rmm;
-            float dL = r2Defect(pMM + dh * rmm + sd), dR = r2Defect(pMM + dh * rmm - sd);
-            dMean = 0.5 * (dL + dR);
-            defSteer = -sd / rmm * (gR2DefK * gR2DefPin * (dL - dR) * rsqrt(max(1.0, 2.0 * rmm * gR2DefInvMM)));
+            float cL = r2DefectC(pMM + dh * rmm + sd, rmm), cR = r2DefectC(pMM + dh * rmm - sd, rmm);   // J1: + strong defects
+            cMean = 0.5 * (cL + cR);
+            defSteer = -sd / rmm * (gR2DefK * (cL - cR) * rsqrt(max(1.0, 2.0 * rmm * gR2DefInvMM)));
         } else {
-            dMean = r2Defect(pMM);
+            cMean = r2DefectC(pMM, rmm);
         }
-        pinNoise *= max(1.0 + gR2DefPin * (2.0 * dMean - 1.0), 0.05);
+        float pinN0 = pinNoise;                                   // J1 escape: the smooth pinning noise alone
+        pinNoise *= max(1.0 + cMean, 0.05);
         if (dot(lastMove, lastMove) > 1e-6) pinNoise *= gR2PinKinetic;
         float speed = 0.0;
         float drive = 1.0;
-        float2 vt = r2DropVelocity(t, rmm, pinNoise, sh, speed, drive);
+        float2 fDirMM; float fUnit;
+        float2 vt = r2DropVelocity(t, rmm, pinNoise, sh, speed, drive, fDirMM, fUnit);
+        // J1 ESCAPE: a drop held at a defect advances where its contact line is free -- head directions +-30 / +-60 deg
+        // from the force; it moves along the one whose force component beats the (static) pinning there by the most.
+        if (gR2Escape > 0.5 && speed <= 0.0 && fUnit > 0.0) {
+            float bestM = 0.0; float2 bestD = float2(0, 0);
+            [unroll] for (int ea = 0; ea < 4; ++ea) {
+                float ang = (ea < 2 ? 0.5236 : 1.0472) * ((ea & 1) != 0 ? -1.0 : 1.0);
+                float ca = cos(ang), sa = sin(ang);
+                float2 dA = float2(fDirMM.x * ca - fDirMM.y * sa, fDirMM.x * sa + fDirMM.y * ca);
+                float2 sA = float2(-dA.y, dA.x) * rmm;
+                float cA = 0.5 * (r2DefectC(pMM + dA * rmm + sA, rmm) + r2DefectC(pMM + dA * rmm - sA, rmm));
+                float mA = fUnit * ca - pinN0 * max(1.0 + cA, 0.05);
+                if (mA > bestM) { bestM = mA; bestD = dA; }
+            }
+            if (bestM > 0.0) {
+                // same friction law: (F - Fpin) / (friction r), F and Fpin in units of the unit pinning force 2 gamma r dcos
+                float vE = bestM * gR2SurfaceTension * 2.0 * gR2PinCoat / max(gR2Friction, 1e-4);   // m/s (r cancels)
+                vt = bestD * (vE * 1000.0) / (gR2CellSizeMM * gR2Cells);
+                speed = vE;
+                drive = 1.0 / (1.0 + bestM);
+            }
+        }
         // rev48-U2 birth sticking (U1 review: splats 'bounced' off at speed): a fresh splat is a lamella spreading /
         // recoiling on the wall, not yet a drop the air can take -- the air / gravity drive ramps 0 -> 1 over 3 tau
         // (no launch while it ramps), then the pinning takes over. Its residual walks downstream by the splat shift
@@ -1110,6 +1256,14 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     // F5: diffusion-limited evaporation of the cap, 4 r D drho / rho_w (Picknett & Bexon; ~ r: small drops go first)
     // + the stagnation layer on its wetted area (init.lua fineBudget)
     vol -= gR2Dt * (gR2EvapDiff * rmm + gR2EvapConv * R2_PI * rmm * rmm);
+    // M1 -> M3 AERODYNAMIC BREAKUP OF A WALL DROP (docs/RAINFX_V2_SPRAY_RAIN_REF.md sections 10, 15). M1 trimmed every drop
+    // above We_c (Pilch & Erdman 1987: a FREE drop in a gas stream) to the stable radius, the excess leaving as invisible
+    // mist -- every running drop ended at the same size there (M1 review: one uniform ceiling, smaller than the reference,
+    // no trail water). A drop on the wall in shear air runs back and loses water from its pinned REAR (tail pinch-off /
+    // residue left behind, Milne & Amirfazli 2009; Podgorski et al. 2001), not as a bag. M3: above We_c a running drop
+    // sheds a piece BEHIND it (E8 split machinery below) at 1 / aeroBreakTau events per s, share 0.15-0.40 (random): mass
+    // stays on the visor as a row of small drops (the reference trail), sizes stay mixed, a large drop can overshoot.
+    float vCaero = (gR2AeroWeC > 0.0 && vol > 0.0) ? r2AeroMaxVol(t) : 1e9;
     // Keep the destination inside the 5x5 gather window (merged drops may sit off-cell).
     float2 dest = float2(cell) + clamp(s.xy + dc, -1.99, 2.99);
     if (gone || r2Valid(dest / gR2Cells) < 0.5) return o;  // gone / absorbing boundary / hole
@@ -1125,7 +1279,37 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     // rev48-R2b (R2 review: split pieces popped out of fresh impact drops, overlapping them): a splat's recoil walk is
     // no slide -- no tail split while it recoils / sticks (4 tau)
     bool splatRamp = L.w < -9.5 && L.x < 4.0 * r2SplatTau(rmm);
-    if (gR2ShpOn > 0.5 && gR2ShpSplitRate > 0.0 && L.y <= 0.0 && L.z <= 0.0 && e8 > 1e-3 && !splatRamp
+    bool shed = false;
+    if (vol > vCaero && L.y <= 0.0 && L.z <= 0.0 && !splatRamp) {
+        bool placed = false;
+        uint fa = (uint)gR2Frame * 8u + (uint)gR2Sub;
+        if (dot(dcMM, dcMM) > 25.0 * gR2Dt * gR2Dt) {                       // running (> 5 mm/s): the rear pinches off
+            if (r2Rand(uint3((uint)cell.x, (uint)cell.y, fa + 7300u)) < gR2Dt / max(gR2AeroBreakTau, 1e-3)) {
+                // J1: the piece is a pearl of the pinched tail -- radius 0.25-0.45 of the parent (tail width; Plateau-Rayleigh
+                // drop ~2x the thread) -> share 0.016-0.09 (M3 0.15-0.40 made large pieces that ran the same line: comb wipes)
+                float rfA = 0.25 + 0.2 * r2Rand(uint3((uint)cell.y, (uint)cell.x, fa + 7301u));
+                float fsA = rfA * rfA * rfA;
+                float rcA = rmm * pow(fsA, 0.3333);
+                float csA = r2CapScale(r2UnpackSeed(s.w), max(max(r2UnpackBF(sh.w).y, gR2BaseSpread), 1.0));
+                float distA = gR2CoalesceK * csA * (rmm * pow(1.0 - fsA, 0.3333) + rcA) + 0.12;
+                float2 tbA = -normalize(dcMM);                                  // behind the run
+                float2 cdA = dest + tbA * distA / gR2CellSizeMM;
+                int2 ccA = int2(floor(cdA)) - cell;
+                if (rcA >= 1.2 * gR2MinRadiusMM && all(abs(ccA) <= int2(2, 2)) && any(int2(floor(cdA)) != int2(floor(dest)))
+                    && r2Valid(cdA / gR2Cells) > 0.5) {
+                    o.cDest = cdA;
+                    o.cVol = fsA * vol;
+                    o.cPhi = atan2(tbA.y, tbA.x);
+                    vol -= o.cVol;
+                    placed = true;
+                }
+                shed = true;                                                    // one child per substep
+                // M3b (2026-11-07): no fallback trim -- no room behind = no event; a held drop does not shrink (the M1 trim
+                // made every drop above We_c the same size without any visible piece)
+            }
+        }
+    }
+    if (!shed && gR2ShpOn > 0.5 && gR2ShpSplitRate > 0.0 && L.y <= 0.0 && L.z <= 0.0 && e8 > 1e-3 && !splatRamp
         && dot(dcMM, dcMM) > 25.0 * gR2Dt * gR2Dt && rmm >= gR2ShpSplitRMin) {   // > 5 mm/s (F8: F7's pearling gate reverted -- not evidenced)
         float A8 = sqrt((0.5 + e8) / max(0.5 - e8, 0.05));
         float2 lastMove8 = r2UnpackMove(s.w);
@@ -1138,7 +1322,9 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
         uint fk = (uint)gR2Frame * 8u + (uint)gR2Sub;
         if ((cA || cB) && r2Rand(uint3((uint)cell.x, (uint)cell.y, fk + 7100u)) < gR2ShpSplitRate * gR2Dt) {
             float h8 = r2Rand(uint3((uint)cell.y, (uint)cell.x, fk + 7101u));
-            float fs = cA ? 0.12 + 0.1 * saturate((A8 - gR2ShpSplitA) / gR2ShpSplitA) + 0.08 * h8 : 0.06 + 0.08 * h8;
+            // J1: tail-width pearl, radius 0.3-0.5 of the parent (stretched tail) / 0.25-0.4 (snap) -- was share 0.12-0.30 / 0.06-0.14
+            float rf8 = cA ? 0.3 + 0.1 * saturate((A8 - gR2ShpSplitA) / gR2ShpSplitA) + 0.1 * h8 : 0.25 + 0.15 * h8;
+            float fs = rf8 * rf8 * rf8;
             float rc = rmm * pow(max(fs, 1e-4), 0.3333);
             float eP = 0.55 * e8;                                   // the parent after losing its tail
             float AP = sqrt((0.5 + eP) / (0.5 - eP));
@@ -1170,4 +1356,26 @@ float r2SegDist(float2 p, float2 a, float2 b) {
     float l2 = dot(ab, ab);
     float k = l2 > 1e-10 ? saturate(dot(p - a, ab) / l2) : 0.0;
     return length(p - (a + ab * k));
+}
+
+// H1 HAZE SWEEP (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 17): the share of field texel f covered this frame by a drop
+// of radius rmm at b (cells) that moved by mv (cells) -- its contact disc swept along the segment b - mv -> b. Four
+// sub-samples at +-1/4 texel (an unbiased estimate of the covered area). The cells pass (the drop takes up the haze
+// water G under it) and the field pass (G removed there) evaluate THIS function with the same S_next geometry, so the
+// water a drop gains is the water the field loses (rev S1b took / cleared a whole 1.16 mm cell: blocky wipes).
+float r2SweepFrac(int2 f, float2 b, float2 mv, float rmm) {
+    float2 tc = (float2(f) + 0.5) / gR2FieldSize * gR2Cells;
+    float2 q = 0.25 * gR2Cells / gR2FieldSize;
+    float2 aMM = (b - mv) * gR2CellSizeMM, bMM = b * gR2CellSizeMM;
+    // exact early outs: every sub-sample lies within |q| (mm) of the texel centre
+    float qL = length(q * gR2CellSizeMM);
+    float d0 = r2SegDist(tc * gR2CellSizeMM, aMM, bMM);
+    if (d0 - qL > rmm) return 0.0;
+    if (d0 + qL <= rmm) return 1.0;
+    float n = 0;
+    [unroll] for (int j = 0; j < 4; ++j) {
+        float2 o = float2((j & 1) != 0 ? 1.0 : -1.0, (j & 2) != 0 ? 1.0 : -1.0);
+        n += r2SegDist((tc + o * q) * gR2CellSizeMM, aMM, bMM) <= rmm ? 1.0 : 0.0;
+    }
+    return 0.25 * n;
 }

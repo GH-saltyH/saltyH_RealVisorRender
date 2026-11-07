@@ -40,6 +40,7 @@ P.DEFAULTS = {
   -- flow over the visor runs down and out), buffeting wander of the stagnation point (deg at 250 km/h)
   aeroKU = 0.8, helmetR = 0.13,   -- rev47c 0.35 compensated the 18x drag (Cd 1); F1 0.5; F1b 0.8 (F1 review: at 0.5 the air-only critical radius was 0.6-1.2 mm at 200-250 km/h (sin theta, BL, pin spread), few drops ran) -> 1.15 mm @100, 0.44 @200, 0.34 @250 km/h (theta 45) = reference S1 / S2
   stagElevDeg = 35.0, buffetDeg = 4.0, buffetHz = 1.5,   -- rev47b 8/3 -> 4/1.5; rev48-M1 stagnation 12 -> 35 deg (MOTION_REVIEW s7)
+  turbI = 0.15, turbHz = 4.0, turbMM = 15.0,   -- T1 (2026-11-06): cockpit turbulence u' = turbI kU U, frozen eddies turbMM drifting at turbHz (SPRAY_RAIN_REF s15)
   -- rev47b runback: drops blown loose slide with the air (speed runbackK x air at the drop top, between
   -- vMax and runbackMax), lift off only above liftMM; sliding inertia slideTau; impact splash share
   -- rev47c (REV47B_REVIEW: 0.5 m/s = ~250 px per frame at the visor scale; references show visible flow of a
@@ -53,7 +54,8 @@ P.DEFAULTS = {
   -- losses
   -- rev9: 0.02 removed ~2%/mm from a 0.5 mm drop (half its volume across the visor),
   -- drops shrank below the kinetic threshold and stopped mid-way. Hydrophobic coat: ~0.25.
-  minRadiusMM = 0.04, maxRadiusMM = 3.0,   -- rev48-R7a: 3.0 (R3b 1.9 clipped merged pairs: 'a drop that ate another kept its size'); the big-drop window draws it;   -- rev41: 0.08 / 2.2 (rev40 review: many more small drops, max much smaller)
+  minRadiusMM = 0.04, maxRadiusMM = 3.0,   -- SZ2 (2026-11-06): back to 3.0 -- SZ1's 0.5 cap made one uniform size and blocked merges / sheet joins (sheetConnA)
+    -- rev48-R7a: 3.0 (R3b 1.9 clipped merged pairs: 'a drop that ate another kept its size'); the big-drop window draws it;   -- rev41: 0.08 / 2.2 (rev40 review: many more small drops, max much smaller)
   pinMM = 4.0,              -- rev41: pinning heterogeneity feature size (smooth field, was white noise per cell)
   coalesceK = 1.0,
   windK = 1.0,              -- ambient wind reaching the visor (CSP wind ignores pits/cockpit shelter)

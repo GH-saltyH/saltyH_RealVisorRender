@@ -57,6 +57,8 @@ local DEFAULTS = {
   filmCollect = 0.3,   -- F1: nucM / nucRate (haze nucleation) replaced by the fine coalescence
   -- rev21 CSP adoption: lateral kicks from surface noise (6 mm features), trail following
   trailFollow = 1.5,   -- C-clean: rev21 meander removed (replaced by the defect field F1, rev48-S6)
+  strongK = 2.0, strongThr = 0.74, strongMM = 0.4, escape = true,   -- J1 (2026-11-07, SPRAY_RAIN_REF s19-21): sparse strong defects + escape (F2 review: 4 froze the centre)
+  blGrowth = true, dynRet = true, pgradK = 1.0,   -- F2 (s21): boundary-layer growth from the stagnation point, dynamic retention
   defMM = 1.2, defK = 5.0, defPin = 0.35,              -- rev48-S6 F1 surface defects: scale, gradient steering, stick-slip pinning
   -- sheetDrain rev14 0.5 -> 0.1: drainage dominated the film balance (eq ~ supply), now edge
   -- outflow does (eq ~ supply^(1/2..1/3)), compressing light..heavy into the cover window.
@@ -83,7 +85,7 @@ local DEFAULTS = {
   apertureMM = 0.0,        -- entrance pupil A (rev23: 0 until the final whole-visor defocus step)
   focusM = 0.12,           -- focus distance zf (left visor ~ in focus, near-lens right blurred)
   defocusDA = true,        -- rev19: D-A stochastic colour gather (4 taps where CoC > 1 px); off = D-C
-  housingM = 0.20,         -- frame pixels closer than this (linear m) are helmet housing (rev27: UI slider)
+  housingM = 0.05,         -- frame pixels closer than this (linear m) are helmet housing (rev27: UI slider)
   sourceScale = 0.5,       -- refraction source resolution (fraction of the frame)
   -- rev22: symmetric rim loss 0.75 -> 0.35; the one-sided rim shading now comes from the far lens
   glint = 0.45,
@@ -143,8 +145,10 @@ local DEFAULTS = {
   shpMotionK = 0.6, shpMotionV = 0.04,   -- rev48-S4 motion morph (aspect 1 + k v/V); R1: arrest from theta_r (shpArrest removed)
   trailSlopeMax = 0.45,                      -- rev47k: rivulet edge slope 2 h0 / hw <= 0.45 (~24 deg; rev47j 0.8 drew glass rods)
   trailPinMM = 0.02, trailFlowK = 1.0,       -- rev47k: rivulets deeper than this run along themselves (film law x flowK)
-  wetHaze = 1.5,        -- wetness from field G (F9: G is always 0)
-  pearlMM = 0.006, pearlRate = 0.6,          -- rev47k: every rivulet section beads up, 0.6 /s per cell (rev47j 0.03 / 0.1: thin trails never broke)
+  wetHaze = 0.0,        -- H1 (2026-11-07): 0 -- the haze G is separate micro caps (dropwise), not a wetting film (was 1.5 while G was ~0)
+  hazeK = 1.0, hazeAMM = 0.015, hazePhiMax = 0.55, hazeExpo = 0.9, hazeRMaxMM = 0.08,   -- H1 haze: scatter gain, micro cap radius mm, breath-figure coverage, impact exposure, finest fragments held as haze
+  sprayVRelK = 0.8, sprayAeroDn = true, sprayAeroC = 0.39,            -- SP1 spray impact speed / SpeedRel; SP0 torn-spray median
+  pearlMM = 0.006, pearlRate = 0.0,   -- PL1 (2026-11-07): delayed trail pearling off (green / blue streams born seconds later from invisible trail water); was 0.6;          -- rev47k: every rivulet section beads up, 0.6 /s per cell (rev47j 0.03 / 0.1: thin trails never broke)
   filmBeadMM = 0.04, dewetRate = 4.0,        -- rev47j: film >= 0.04 mm in a cell gathers into a bead, 4 /s per cell
   -- rev47 T-layer: trail water lives in field R (depth / trailMaxMM), pinned (no diffusion / advection),
   -- evaporates at trailEvapMMs (thin trails vanish first), collected by later drops
@@ -174,7 +178,9 @@ local STORED = { enabled = true, rainExposure = DEFAULTS.exposure, wfRefraction 
   scatterK = DEFAULTS.scatterK,
   debug = DEFAULTS.debug, invertSide = false,
   windDirOffsetDeg = 180, windDirCalibrated = false,
-  airTFix = false, airTFixC = 22.1 }   -- M-REF: replay air temperature (CSP replays do not record it)   -- rev48: compass -> game-space wind convention (calibrated live)
+  airTFix = false, airTFixC = 22.1,
+  intensityFix = false, intensityFixV = 0.10,
+  roadFix = false, roadFixWater = 0.35, roadFixWet = 0.12 }   -- M-REF3: reference road water / wetness for the spray estimate   -- M-REF2: RainFX rain supply at a fixed intensity (CSP road water / spray unchanged)   -- M-REF: replay air temperature (CSP replays do not record it)   -- rev48: compass -> game-space wind convention (calibrated live)
 
 
 -- rev40: truncated power law of the fragment size factor X, pdf ~ X^-(1+a) on [lo, hi].
@@ -223,6 +229,14 @@ local function sceneValuesImpl(self, v)
   v.gR2Dt = self.h or 0
   v.gR2Frame = self.frameSeed or 0
   v.gR2Sub = self.sub or 0
+  v.gR2SubN = p.substeps or 1                       -- S1: the last substep takes the fine deposit (cells), field clears it
+  v.gR2SprayFineOn = p.sprayFine ~= false and 1 or 0
+  v.gR2FineMaxMM = 0.01                              -- G scale (mm of water at G = 1); the reservoir stays ~1e-3 of it
+  v.gR2FineNucRMM = p.fineNucRMM or 0.08             -- a cell's micro droplets form a drawn drop at this radius (d 0.16 mm)
+  do   -- micro droplet evaporation: dV/dt = evapDiff r (diffusion-limited), V = shapeK r^3 -> k = evapDiff / (shapeK r^2)
+    local rf = p.hazeAMM or 0.015                    -- H1: the micro caps of the haze
+    v.gR2FineEvapK = math.min((self.evapDiff or 0) / math.max((p.shapeK or 1) * rf * rf, 1e-6), 5.0)
+  end
   v.gR2ObjToWorld = self.objToWorld
   v.gR2AccelW = self.accelW
   v.gR2AirW = self.airW
@@ -237,11 +251,34 @@ local function sceneValuesImpl(self, v)
   v.gR2ResA = p.resA
   v.gR2ResB = p.resB
   v.gR2FineRMM = p.fineRMM   -- F9: satellite mist radius
-  v.gR2SprayFineMMs = self.store.freezeRain and 0 or (st.sprayMMs or 0)
+  do   -- S1b spray droplet size distribution: lognormal number DSD (median st.sprayDnMM (SP0), sigma_g sprayDsdSigma)
+    local Dn, sg = st.sprayDnMM or p.sprayDiamMM or 0.09, math.max(p.sprayDsdSigma or 2.0, 1.05)
+    local sl = math.log(sg)
+    local Dmin = (6 * (p.shapeK or 1) / math.pi) ^ (1 / 3) * (p.minRadiusMM or 0.04)   -- sphere whose cap radius = minRadiusMM
+    local zmin = math.log(Dmin / Dn) / sl
+    local function Phi(z) return 1 / (1 + math.exp(-1.702 * z)) end                    -- same approximation as cells.hlsl
+    local mms = self.store.freezeRain and 0 or (st.sprayMMs or 0)
+    local EV = math.pi / 6 * Dn ^ 3 * math.exp(4.5 * sl * sl)                          -- mean droplet volume (mm^3)
+    local fVis = 1 - Phi(zmin)                                                            -- visible-size count share
+    v.gR2SprayVisRate = mms / EV * fVis                                                   -- visible-size droplets / mm^2 / s (events)
+    v.gR2SprayVisVolMM3 = st.sprayPieceMM3 or 0                                           -- SP1: mean drawn piece of an event
+    v.gR2SprayFineMMs = mms * (st.sprayHazeShare or 0)                                    -- SP1: sub-visible stuck water -> G
+    v.gR2SprayLnDn, v.gR2SprayS, v.gR2SprayZmin = math.log(Dn), sl, zmin
+    v.gR2SprayDMaxMM = p.sprayDMaxMM or 0.8
+  end
+  v.gR2SprayVRelK = p.sprayVRelK or 0.8                    -- SP1 spray impact speed / SpeedRel (wake slows the droplets)
+  v.gR2RainHazeMMs = self.store.freezeRain and 0 or (st.hazeMMs or 0)   -- H1 rain sub-visible stuck water -> G
   v.gR2FilmCollect = p.filmCollect
   v.gR2ClearMaxMM = p.clearMaxMM
   v.gR2ClearK = p.clearK
   v.gR2DefInvMM, v.gR2DefK, v.gR2DefPin = 1.0 / math.max(p.defMM, 0.05), p.defK, p.defPin   -- rev48-S6 F1
+  v.gR2StrongK = p.strongK or 2.0            -- J1 strong defects: pinning x (1 + strongK S)
+  v.gR2BLGrowth = p.blGrowth == false and 0 or 1   -- F2a boundary-layer growth from the stagnation point
+  v.gR2DynRet = p.dynRet == false and 0 or 1       -- F2b dynamic retention (Cox-Voinov)
+  v.gR2PGradK = p.pgradK or 1.0                   -- F3 stagnation pressure-gradient push (x V rho u_e du_e/ds)
+  v.gR2StrongThr = p.strongThr or 0.74       -- J1: noise level of a strong defect (0.74 = 15 % of the area)
+  v.gR2StrongInvMM = 1.0 / math.max(p.strongMM or 0.4, 0.05)
+  v.gR2Escape = p.escape == false and 0 or 1 -- J1: a held drop advances where its contact line is free
   v.gR2TrailFollow = p.trailFollow
   v.gR2Exposure = p.exposure
   v.gR2ExposureFloor = p.exposureFloor
@@ -264,6 +301,11 @@ local function sceneValuesImpl(self, v)
   v.gR2Friction = p.friction
   v.gR2ShedU10, v.gR2ShedBeta = p.shedU10 or 20, p.shedBeta or 0.1   -- rev48-F4
   v.gR2RhoAir = p.rhoAir
+  v.gR2AeroWeC = p.aeroWeC or 12          -- M1: aerodynamic breakup Weber number of a drop top (0 = off)
+  v.gR2AeroBreakTau = p.aeroBreakTau or 0.05
+  v.gR2TurbI = p.turbI or 0.15            -- T1 cockpit turbulence intensity u' / (kU U)
+  v.gR2TurbHz = p.turbHz or 4.0           -- T1 frozen-turbulence drift rate
+  v.gR2TurbMM = p.turbMM or 15.0          -- T1 eddy size on the visor
   v.gR2AirSurface = p.airSurface
   v.gR2VMax = p.vMax
   v.gR2SurfaceTension = p.surfaceTension
@@ -641,20 +683,54 @@ function R2:updateInputs(sim)
   -- rev48-P2 ROAD SPRAY (spray.lua): LWC of the fine spray cloud at the helmet (g/m^3) -> water flux on the visor
   -- = LWC x the helmet's speed through the cloud x impingement (90 um drops: Stokes ~10 at speed, eta ~0.9); the
   -- ballistic tread drops (1-4 mm, only close behind) join the raindrop supply as rare big impacts (weather.lua)
+  p.wheelProbe = (self.store.metrics or self.recording) and true or false   -- PUD-1: car scan for the probe only when measuring
+  p.roadFixWater = self.store.roadFix and self.store.roadFixWater or nil   -- M-REF3: reference road state for spray
+  p.roadFixWet = self.store.roadFix and self.store.roadFixWet or nil
   local spray, info = self.spray.estimate(sim, p, self.sprayInfo)
   self.sprayInfo = info
   spray = spray * p.sprayK
   local vOwn = math.max(inp.carSpeed or 0, 1)
-  local dS = p.sprayDiamMM * 1e-3
+  -- SP0 (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 17): tyre spray is torn as it is made -- water thrown off the tread at road
+  -- speed into air moving at ~the car speed breaks until the aerodynamic Weber number rho_a v^2 d / gamma <= 12 (Pilch &
+  -- Erdman 1987: a free drop in a gas stream, here it applies). Number median = sprayAeroC x that largest stable size
+  -- (0.39: 0.09 mm at 200 km/h = the measured 70-90 um road spray), at most the source size sprayDMaxMM at low speed.
+  local DnS = p.sprayDiamMM or 0.09
+  if p.sprayAeroDn ~= false then
+    DnS = math.min(math.max((p.sprayAeroC or 0.39) * 12 * 0.072 / (1.2 * vOwn * vOwn) * 1000, 0.02), p.sprayDMaxMM or 0.8)
+  end
+  local dS = DnS * 1e-3
   local stS = 1000 * dS * dS * vOwn / (18 * 1.8e-5 * 0.13)
   local etaS = (stS / (stS + 0.25)) ^ 2
   local sprayMMs = spray * 1e-3 * vOwn * etaS                -- g/m^3 -> m^3/m^3 (1e-6) x m/s -> mm/s (1e3)
   local splashMMs = (info.splash or 0) * p.sprayLWC0 * p.sprayK * 1e-3 * vOwn * p.splashShare
-  self.weather.compute({ rainIntensity = sim.rainIntensity, weatherType = sim.weatherType, speedRel = speedRel,
+  local intensity = self.store.intensityFix and self.store.intensityFixV or sim.rainIntensity   -- M-REF2: measurement override
+  self.weather.compute({ rainIntensity = intensity, weatherType = sim.weatherType, speedRel = speedRel,
                          splashMMs = splashMMs, airT = self.fineT, airRH = self.fineRH, p = p }, self.stats)
   self.stats.speedRel = speedRel
   local st = self.stats
   st.spray, st.sprayMMs, st.splashMMs = spray, sprayMMs, splashMMs
+  -- SP1 / H1: the spray droplets' impact outcome in expectation (same law as cells.hlsl, W.impactKeep): over the lognormal
+  -- (median DnS, sigma_g sprayDsdSigma, <= sprayDMaxMM) -> the mean drawn piece of a visible-size event (cells) and the
+  -- stuck water in sub-visible fragments (-> haze G); the splashed rest leaves with the air.
+  do
+    local sl = math.log(math.max(p.sprayDsdSigma or 2.0, 1.05))
+    local dMax = p.sprayDMaxMM or 0.8
+    local Dmin = (6 * (p.shapeK or 1) / math.pi) ^ (1 / 3) * (p.minRadiusMM or 0.04)
+    local vI = math.max(speedRel * (p.sprayVRelK or 0.8) * (p.hazeExpo or 0.9), 0.3)
+    local EV, Es, nV, epV, wS = 0, 0, 0, 0, 0
+    for i = 1, 24 do
+      local z = -3.5 + (i - 0.5) * 7 / 24
+      local w = math.exp(-0.5 * z * z)
+      local d = math.min(DnS * math.exp(sl * z), dMax)
+      local _, eK, hK = self.weather.impactKeep(d, vI, p)
+      EV = EV + w * math.pi / 6 * d * d * d
+      Es, wS = Es + w * hK, wS + w
+      if d >= Dmin then nV, epV = nV + w, epV + w * eK end
+    end
+    st.sprayDnMM = DnS
+    st.sprayHazeShare = EV > 0 and Es / EV or 0
+    st.sprayPieceMM3 = nV > 0 and epV / nV or 0
+  end
   -- rev11 film supply: rain that does not stick as resolved drops + the fine road spray (all of it: 70-90 um drops are
   -- far below a cell -- they join the film / haze, the W1 sheet regime makes the 'following in spray' water sheet)
   local rainFilm = math.max((st.fluxMMs or 0) - (st.splashFluxMMs or 0), 0) * (1 - (st.stickFrac or 0.6)) * p.filmRainK
@@ -1079,6 +1155,8 @@ function R2:drawParams(depth)
   v.gR2ScatterFilm = p.scatterFilm * p.scatterK
   v.gR2ScatterSpray = p.scatterSpray * p.scatterK
   v.gR2ScatterMax = p.scatterMax
+  v.gR2HazeK, v.gR2HazeAMM, v.gR2HazePhiMax = p.hazeK or 1.0, p.hazeAMM or 0.015, p.hazePhiMax or 0.55   -- H1 haze
+  v.gR2FineMaxMM = 0.01                              -- H1: G scale (same as the simulation)
   v.gR2ScatterMip = p.scatterMip
   v.gR2ScatterSky = p.scatterSky
   v.gR2ScatterGain = p.scatterGain
@@ -1228,6 +1306,15 @@ function R2:offscreenTestUI()
   end
 end
 
+-- UI-1: one collapsible section with a fixed gap before it (layout policy, R2:ui)
+local UI_GAP = 8
+-- UI-1b: information lines carry a marker so they read apart from checkboxes / sliders
+local function uiInfo(t) ui.text('> ' .. t) end
+local function uiSection(title, open, fn)
+  ui.offsetCursorY(UI_GAP)
+  ui.treeNode(title .. '###rfx2sec_' .. title:sub(1, 12), open and ui.TreeNodeFlags.DefaultOpen or 0, fn)
+end
+
 function R2:ui()
   local s = self.store
   ui.text('RainFX v2 (cell-gather): ' .. (self.err and 'ERROR' or self.status))
@@ -1239,207 +1326,254 @@ function R2:ui()
   end
   if ui.checkbox('Enable RainFX v2 (turns legacy RainFX off)', s.enabled) then s.enabled = not s.enabled end
   if not s.enabled then return end
-  s.rainExposure = ui.slider('##rfx2exp', s.rainExposure, 0, 1.5, 'Rain exposure (1 = physical): %.2f')
-  self.p.rainSpreadDeg = ui.slider('##rfx2rsd', self.p.rainSpreadDeg, 0, 40, 'Rain direction spread (gusts): %.0f deg')
-  self.p.crownMM = ui.slider('##rfx2cr', self.p.crownMM, 0, 60, 'Helmet crown runoff over the visor top (at rest): %.0f mm catch')
-  -- rev23 look lab: judge the drop look alone (reference: 물방울형태및흐름 video)
-  if ui.checkbox('Look lab: static reference-sized drops, all other effects off', self.lookLab == true) then
-    self.lookLab = not self.lookLab
-    self.labSeeded = false
-  end
-  if self.lookLab then
-    ui.sameLine()
-    if ui.button('New drop set') then self.labRequest = true end
-    local p = self.p
-    local v1, c1 = ui.slider('##rfx2lo', p.labOcc, 0.05, 0.8, 'Lab occupancy per cell: %.2f')
-    local v2, c2 = ui.slider('##rfx2lr', p.labRMaxMM, 0.5, 3.0, 'Lab largest radius: %.2f mm')
-    p.labOcc, p.labRMaxMM = v1, v2
-    if c1 or c2 then self.labRequest = true end
-  end
-  self.p.perfProbe = ui.slider('##rfx2pp', self.p.perfProbe or 0, 0, 2, 'Visor cost probe: %.0f (0 off | 1 setup only | 2 + drop union, no lens) -- diagnostics', true)
-  if ui.checkbox('Drop records (PERF-9: candidates computed once per drop)', self.p.useRec ~= false) then self.p.useRec = self.p.useRec == false end
-  if ui.checkbox('Candidate mask (PERF-10: only drops that reach the cell)', self.p.useMask ~= false) then self.p.useMask = self.p.useMask == false end
-  self.p.tightReach = ui.slider('##rfx2tr', self.p.tightReach or 1, 0, 2, 'Tight drop support: %.0f (0 legacy | 1 on | 2 verify: red = skipped drop contributed)', true)
-  if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
-    self.p.lensPhys = DEFAULTS.lensPhys
-    s.apertureMM, s.focusM, s.wfRefraction, s.wfSceneMip = DEFAULTS.apertureMM, DEFAULTS.focusM, DEFAULTS.wfRefraction, DEFAULTS.wfSceneMip
-    s.contactDeg, s.wobbleAmp = DEFAULTS.contactDeg, DEFAULTS.wobbleAmp
-    s.defocusDA = DEFAULTS.defocusDA
-    s.filmRefract, s.filmVeil, s.scatterK = DEFAULTS.filmRefract, DEFAULTS.filmVeil, DEFAULTS.scatterK
-  end
-  -- rev34 UI: WF lens (main) first, then defocus (C-clean: the CSP comparison is removed).
-  ui.separator()
-  ui.text('Drops: WF lens, surface-based (main)')
-  self.p.lensPhys = ui.slider('##rfx2lp', self.p.lensPhys, 0, 1.5, 'Lens strength (1 = physical water cap, one image): %.2f')
-  s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Contact angle: %.0f deg (rim curl; normal 40-60)')
-  s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Image blur in the drop (scene mip): %.1f')
-  s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Wobble in airflow: %.2f')
-  self.p.housingM = ui.slider('##rfx2hm', self.p.housingM, 0.05, 0.6, 'Refraction source: remove housing closer than %.2f m')
-  if ui.checkbox('Hide water behind the helmet housing (depth test)', self.p.depthTest) then self.p.depthTest = not self.p.depthTest end
-  ui.separator()
-  ui.text('Drop sizes and stagnation (step 2; check: Metrics -> drops by radius)')
-  self.p.fragA = ui.slider('##rfx2fa', self.p.fragA, 0.3, 2.0, 'Size law exponent (0.88 = reference, x0.7 per 1.5x size): %.2f')
-  self.p.fragHi = ui.slider('##rfx2fh', self.p.fragHi, 1.0, 6.0, 'Largest new drop (x typical fragment): %.1f')
-  self.p.fragMax = ui.slider('##rfx2fm', self.p.fragMax, 1, 30, 'Small drops per raindrop impact (max): %.0f')
-  self.p.clusterK = ui.slider('##rfx2ck', self.p.clusterK, 0, 1, 'Drop groups (clustered births): %.2f')
-  self.p.vMax = ui.slider('##rfx2vm', self.p.vMax, 0.005, 0.2, 'Motion stretch reference speed (visor only, R6): %.3f m/s')
-  ui.text('Helmet airflow (rev47: sphere flow, boundary layer, pressure gradient)')
-  self.p.aeroKU = ui.slider('##rfx2ku', self.p.aeroKU, 0.1, 1.2, 'Air speed at the helmet (x car speed, cockpit shielding): %.2f')
-  self.p.stagElevDeg = ui.slider('##rfx2se', self.p.stagElevDeg, -40, 40, 'Stagnation point above the visor centre: %.0f deg')
-  self.p.buffetDeg = ui.slider('##rfx2bd', self.p.buffetDeg, 0, 25, 'Helmet buffeting (stagnation wander at 250 km/h): %.1f deg')
-  self.p.buffetHz = ui.slider('##rfx2bh', self.p.buffetHz, 0.5, 8, 'Buffeting frequency: %.1f Hz')
-  ui.text('Car / head jolts (rev47)')
-  self.p.neckHz = ui.slider('##rfx2nh', self.p.neckHz, 0.5, 15, 'Neck low-pass of accelerations: %.1f Hz')
-  self.p.headAccK = ui.slider('##rfx2hk', self.p.headAccK, 0, 1, 'Head motion (visor transform) acceleration share: %.2f')
-  self.p.dropTau = ui.slider('##rfx2dt', self.p.dropTau, 0.0, 0.2, 'Drop inertia (speed follows the force over): %.3f s')
-  self.p.runbackMax = ui.slider('##rfx2rm', self.p.runbackMax, 0.01, 0.5, 'Rivulet flow top speed (trail water): %.2f m/s')
-  self.p.impactLoss = ui.slider('##rfx2il', self.p.impactLoss, 0, 1, 'Impact on a small drop: share splashed off %.2f')
-  self.p.trailEvapMMs = ui.slider('##rfx2te', self.p.trailEvapMMs, 0.0, 0.05, 'Trail water evaporation: %.4f mm/s')
-  ui.separator()
-  ui.text('Trails and drop life cycle (step 3)')
-  self.p.trailThetaRDeg = ui.slider('##rfx2tr', self.p.trailThetaRDeg, 5, 60, 'Receding contact angle (dry coat; trails from Ca > Ca*): %.1f deg')
-  self.p.trailWetK = ui.slider('##rfx2twk', self.p.trailWetK, 0, 0.8, 'Wet surface lowers the receding angle by: %.2f')
-  self.p.trailLL = ui.slider('##rfx2tll', self.p.trailLL, 0, 20, 'Trail depth (x r Ca^2/3): %.1f')
-  self.p.trailWidthK = ui.slider('##rfx2tw', self.p.trailWidthK, 0.1, 1.0, 'Trail width at high speed (x head radius): %.2f')
-  self.p.pearlRate = ui.slider('##rfx2pr', self.p.pearlRate, 0, 2, 'Trail beading into small drops (per cell): %.2f /s')
-  self.p.trailSlopeMax = ui.slider('##rfx2ts2', self.p.trailSlopeMax, 0.1, 1.5, 'Trail edge slope max (rivulet height / width): %.2f')
-  self.p.trailPinMM = ui.slider('##rfx2tp', self.p.trailPinMM, 0.0, 0.1, 'Trail runs along itself above: %.3f mm (below: pinned residue)')
-  self.p.trailFlowK = ui.slider('##rfx2tf', self.p.trailFlowK, 0.0, 5.0, 'Trail flow speed (x film law): %.2f')
-  ui.text('Thin film dewetting (rev47j, mass-conserving: the unresolved rain gathers into beads)')
-  self.p.filmBeadMM = ui.slider('##rfx2fb', self.p.filmBeadMM, 0.01, 0.2, 'Film gathers into a bead from: %.3f mm')
-  self.p.dewetRate = ui.slider('##rfx2dw', self.p.dewetRate, 0, 20, 'Dewetting rate (per cell): %.1f /s')
-  self.p.fadeTime = ui.slider('##rfx2fd', self.p.fadeTime, 0.0, 0.3, 'Swept drops fade out over %.2f s')
-  self.p.growTime = ui.slider('##rfx2gt', self.p.growTime, 0.0, 0.3, 'New drops grow in over %.2f s')
-  ui.separator()
-  ui.text('Drop shapes (rev48-S1 shape state; S1 = random birth classes, look lab: Reseed)')
-  if ui.checkbox('Shape state (off = rev47 seeded ellipse)', self.p.shpOn) then self.p.shpOn = not self.p.shpOn end
-  self.p.shpDefShape = ui.slider('##rfx2ds', self.p.shpDefShape or 1.0, 0, 3, 'Birth contour from surface defects (x defect pinning): %.2f')
-  self.p.shpRelaxStill = ui.slider('##rfx2sr', self.p.shpRelaxStill, 0.1, 60, 'Pinned shape is held for: %.1f s (r >= 0.3 mm)')
-  self.p.shpBoK = ui.slider('##rfx2bo', self.p.shpBoK, 0, 3, 'Gravity sag of pinned drops (aspect 1 + k Bo): %.2f')
-  self.p.shpTearK = ui.slider('##rfx2tk', self.p.shpTearK, 0, 0.3, 'Torn rims of splashing impacts: %.2f')
-  self.p.shpSlugTau = ui.slider('##rfx2sg', self.p.shpSlugTau, 0.05, 3, 'Elongated drop keeps its length when it starts to slide: %.2f s')
-  self.p.shpAirK = ui.slider('##rfx2sak', self.p.shpAirK, 0, 0.3, 'Air stretches pinned drops (x We_air): %.2f')
-  ui.text('Flow on a rough surface (rev48-S6): defects steer the head, turns bend the drop')
-  self.p.defMM = ui.slider('##rfx2dmm', self.p.defMM, 0.3, 5, 'Surface defect size: %.2f mm')
-  self.p.defK = ui.slider('##rfx2dk', self.p.defK, 0, 15, 'Defects steer the head (zig-zag, x pinning asymmetry): %.1f')
-  self.p.defPin = ui.slider('##rfx2dp', self.p.defPin, 0, 0.8, 'Defects hold the head (stick-slip): %.2f')
-  self.p.shpTailTau = ui.slider('##rfx2tt', self.p.shpTailTau, 0.03, 1, 'Pinned tail follows a turn over: %.2f s')
-  self.p.shpTailStretch = ui.slider('##rfx2ts', self.p.shpTailStretch, 0, 0.4, 'Head-tail stretch in a turn: %.2f')
-  self.p.shpHookK = ui.slider('##rfx2ck', self.p.shpHookK, 0, 4, 'Head bends onto the new heading (hook, x tan): %.2f')
-  self.p.shpFrontK = ui.slider('##rfx2fk', self.p.shpFrontK, 0, 3, 'Thick front moves to the outer side: %.2f')
-  self.p.shpSnapDeg = ui.slider('##rfx2sd', self.p.shpSnapDeg, 10, 90, 'Tail lets go above: %.0f deg')
-  self.p.shpSplitA = ui.slider('##rfx2spa', self.p.shpSplitA, 1.5, 4.5, 'Sliding drop sheds its tail above aspect: %.2f')
-  self.p.shpSplitRate = ui.slider('##rfx2spr', self.p.shpSplitRate, 0, 20, 'Tail split events (while stretched / snapping): %.1f /s')
-  self.p.shpSplitRMin = ui.slider('##rfx2spm', self.p.shpSplitRMin, 0.2, 1.5, 'Only drops above this radius split: %.2f mm')
-  self.p.shpNeckK = ui.slider('##rfx2nk', self.p.shpNeckK, 0, 3, 'Split piece necks toward its parent: %.2f')
-  self.p.shpNeckT = ui.slider('##rfx2nt', self.p.shpNeckT, 0.02, 0.5, 'Neck retracts over: %.2f s')
-  if ui.checkbox('Highlight split pieces (cyan, 1.5 s)', self.p.hiSplit) then self.p.hiSplit = not self.p.hiSplit end
-  self.p.shedU10 = ui.slider('##rfx2su', self.p.shedU10 or 20, 5, 40, 'Air speed that depins a 10 uL drop (wind tunnel ~10-20): %.0f m/s')
-  self.p.shedBeta = ui.slider('##rfx2sb', self.p.shedBeta or 0.1, 0.0, 0.35, 'Size law U_c ~ V^-beta (small drops need more air): %.2f')
-  do
-    local P = self.physics
-    local function kmh(r) return P.criticalU(self.p, r) / (1.5 * self.p.aeroKU * 0.707) * 3.6 end
-    ui.text(string.format('Depins at (theta 45 deg, pin 1): r0.1 %.0f  r0.2 %.0f  r0.3 %.0f  r0.5 %.0f  r1 %.0f  r2 %.0f km/h',
-      kmh(0.1), kmh(0.2), kmh(0.3), kmh(0.5), kmh(1), kmh(2)))
-  end
-  self.p.fineRMM = ui.slider('##rfx2frm', self.p.fineRMM, 0.1, 0.5, 'Splash satellites below radius %.2f mm leave as mist')
-  if ui.checkbox('Big-drop window (R7a: large / merged drops drawn and touching up to 4 cells away)', self.p.bigOn) then self.p.bigOn = not self.p.bigOn end
-  if ui.checkbox('Cap volume (R3: drop volume = spherical cap of the contact angle; off = rev7 hemisphere)', self.p.capVolume ~= false) then self.p.capVolume = (self.p.capVolume == false) end
-  if ui.checkbox('Highlight impacts (magenta = born by an impact < 0.3 s, yellow = drop hit this frame)', self.p.hiImpact) then self.p.hiImpact = not self.p.hiImpact end
-  self.p.shpSkidK = ui.slider('##rfx2skid', self.p.shpSkidK, 0, 0.05, 'Impact push of a hit drop (newborns stick, U2): %.3f')
-  self.p.shpLamShift = ui.slider('##rfx2lsh', self.p.shpLamShift, 0, 0.5, 'Splat residual walks downstream during recoil (x r (f0-1) aspect): %.2f')
-  self.p.shpRimK = ui.slider('##rfx2rim', self.p.shpRimK or 0.6, 0, 0.85, 'Splat lamella rim share (thick rim, thin interior): %.2f')
-  self.p.shpFingerK = ui.slider('##rfx2fng', self.p.shpFingerK or 0.25, 0, 0.6, 'Splat downstream fingers: %.2f')
-  ui.text('Water sheet (rev48-W1 P1: physics + metrics; Debug 5 shows it; not drawn as a lens yet)')
-  if ui.checkbox('Water sheet: one water for film / sheet, conservative flow', self.p.sheetOn) then self.p.sheetOn = not self.p.sheetOn end
-  self.p.sheetSub = ui.slider('##rfx2wss', self.p.sheetSub, 2, 16, 'Sheet flow substeps per frame: %.0f', true)
-  self.p.sheetUMax = ui.slider('##rfx2wum', self.p.sheetUMax, 0.02, 0.5, 'Sheet speed cap: %.2f m/s')
-  self.p.sheetHJoin = ui.slider('##rfx2wj', self.p.sheetHJoin, 0.04, 0.4, 'Sheet from (drops join it): %.2f mm')
-  self.p.sheetFront = ui.slider('##rfx2wf', self.p.sheetFront, 0.1, 0.6, 'Sheet front advances above: %.2f mm')
-  self.p.sheetAbsorbK = ui.slider('##rfx2wa', self.p.sheetAbsorbK, 0.1, 1, 'Drop joins the sheet per frame: %.2f')
-  self.p.sheetRMax = ui.slider('##rfx2wr', self.p.sheetRMax, 0.8, 1.5, 'Capped puddles above this radius become sheet: %.2f mm')
-  self.p.sheetSmooth = ui.slider('##rfx2wsm', self.p.sheetSmooth, 0, 0.24, 'Sheet surface tension smoothing: %.2f')
-  self.p.sheetSceneMip = ui.slider('##rfx2wsmip', self.p.sheetSceneMip, 0, 4, 'Sheet image blur (scene mip): %.1f')
-  self.p.sheetSlopeK = ui.slider('##rfx2wslk', self.p.sheetSlopeK, 0, 3, 'Sheet interior refraction (slope gain): %.2f')
-  self.p.sheetEdgeK = ui.slider('##rfx2wedk', self.p.sheetEdgeK, 0, 2, 'Sheet edge (meniscus) strength: %.2f')
-  self.p.sheetRidgeK = ui.slider('##rfx2wrk', self.p.sheetRidgeK, 0, 2, 'Sheet front gathers (capillary ridge): %.2f')
-  self.p.sheetTailK = ui.slider('##rfx2wtk', self.p.sheetTailK, 0.1, 1, 'Sheet trailing edge angle x %.2f (lower = longer taper)')
-  self.p.sheetRecedeDeg = ui.slider('##rfx2wtr', self.p.sheetRecedeDeg, 15, 100, 'Visor receding contact angle: %.0f deg (30 dirty, 50 used, 65 new coat, 90 repellent)')
-  ui.text(string.format('  unconnected water dewets %.2f /s -> impact film (all rain x exposure) above %.3f mm/s (now %.3f mm/s x exposure)', sheetThinRate(self.p), sheetThinRate(self.p) * self.p.sheetHJoin, ((self.stats.fluxMMs or 0) * (self.stats.stickFrac or 0)) + (self.stats.filmRate or 0)))
-  self.p.rainWindK = ui.slider('##rfx2rwk', self.p.rainWindK or 0.6, 0, 1, 'Rain drift by the wind (helmet height / shelter): %.2f')
-  self.p.sheetHFed = ui.slider('##rfx2whf', self.p.sheetHFed, 0.01, 0.1, 'Impact-fed sheet from: %.3f mm')
-  self.p.sheetFedTau = ui.slider('##rfx2wft', self.p.sheetFedTau, 0.1, 1.5, 'Impact supply memory (fed regime): %.2f s')
-  self.p.sheetKeepMM = ui.slider('##rfx2wkm', self.p.sheetKeepMM, 0.01, 0.1, 'Residual patch kept (lump) from: %.3f mm')
-  self.p.sheetWaveK = ui.slider('##rfx2wwv', self.p.sheetWaveK, 0, 3, 'Sheet wind waves: %.2f')
-  self.p.impactWaveK = ui.slider('##rfx2wiw', self.p.impactWaveK, 0, 3, 'Impacts on the sheet (crater / ring): %.2f')
-  self.p.sheetWetFrac = ui.slider('##rfx2wwf', self.p.sheetWetFrac, 0.1, 1.5, 'Surface stays wet from supply x %.2f of the sheet threshold')
-  self.p.sheetWetMM = ui.slider('##rfx2wwm', self.p.sheetWetMM, 0, 0.06, 'Wet layer left behind: %.3f mm')
-  self.p.sheetGatherK = ui.slider('##rfx2wgk', self.p.sheetGatherK, 0, 1, 'Drainage gathers into leading flows: %.2f')
-  self.p.sheetPinMM = ui.slider('##rfx2wpin', self.p.sheetPinMM, 0, 1, 'Isolated patch pinned up to: %.2f mm')
-  self.p.patchBeadRate = ui.slider('##rfx2wpb', self.p.patchBeadRate, 0, 10, 'Settled patch beads into a drop: %.1f /s')
-  self.p.sheetFollowK = ui.slider('##rfx2wsf', self.p.sheetFollowK, 0, 2, 'Drops follow the water paths: %.2f')
-  self.p.sheetNucPhi = ui.slider('##rfx2wnp', self.p.sheetNucPhi, 0.2, 0.9, 'Sheet nucleates at drop coverage: %.2f')
-  self.p.sheetConnK = ui.slider('##rfx2wck', self.p.sheetConnK, 0.5, 3, 'Sheet = connected area > largest drop x %.2f')
-  self.p.sheetRetract = ui.slider('##rfx2wrt', self.p.sheetRetract, 0, 60, 'Sheet rear retracts thin water: %.0f /s')
-  self.p.shpMotionK = ui.slider('##rfx2smk', self.p.shpMotionK, 0, 1.5, 'Sliding head elongation: %.2f')
-  self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
-  ui.text('Oblique impact (rev48-S2): aspect = 1 + k Vt/Vn, lamella and fragments stretched downstream')
-  self.p.shpImpactK = ui.slider('##rfx2ik', self.p.shpImpactK, 0, 1, 'Impact stretch k: %.2f')
-  self.p.shpImpactMax = ui.slider('##rfx2im', self.p.shpImpactMax, 1, 4, 'Impact stretch max: %.1f')
-  self.p.baseSpread = ui.slider('##rfx2bs', self.p.baseSpread, 1, 2, 'Resting drop profile (splat rule at f): %.2f  [1 = dome; 1.3-1.5 = mid-recoil look]')
-  self.p.asymK = ui.slider('##rfx2ak', self.p.asymK, 0, 0.6, 'Off-centre apex (thicker downhill / per-drop): %.2f')
-  if ui.checkbox('Merge at the drawn footprint (resting spread x shape)', self.p.footPhys) then self.p.footPhys = not self.p.footPhys end
-  self.p.footPinK = ui.slider('##rfx2fpk', self.p.footPinK, 0, 1, 'Pinning by contact width across the force (Furmidge): %.2f')
-  self.p.shpMergeK = ui.slider('##rfx2mk', self.p.shpMergeK, 0, 1.5, 'Merged footprint elongation: %.2f')
-  self.p.shpWaist = ui.slider('##rfx2mw', self.p.shpWaist, 0, 0.45, 'Merged pair peanut waist: %.2f')
-  self.p.shpMergeTau = ui.slider('##rfx2mt', self.p.shpMergeTau or 0.6, 0.05, 5, 'Merged footprint recedes to theta_r over %.2f s / mm radius')
-  self.p.spreadVarK = ui.slider('##rfx2svk', self.p.spreadVarK, 0, 1.5, 'Per-drop flattening (large drops, seeded): +%.2f')
-  self.p.spreadR1 = ui.slider('##rfx2sr1', self.p.spreadR1, 0.2, 2.0, 'Full flattening from radius: %.2f mm (starts at 0.15 mm)')
-  self.p.spreadWetK = ui.slider('##rfx2swk', self.p.spreadWetK, 0, 1, 'Wet surface flattens more: x(1 + %.2f wet)')
-  if self.p.baseSpread > 1.001 then
-    local f = self.p.baseSpread
-    ui.text(string.format('  -> footprint x%.2f, contact angle %.0f deg, flat top %.2f (visual only; physics radius unchanged)',
-      f, (self.store.contactDeg or 60) / (f * math.sqrt(f)), 0.85 * math.min(f - 1, 1)))
-  end
-  self.p.shpSpreadMin = ui.slider('##rfx2sp0', self.p.shpSpreadMin, 1, 4, 'Impact splat spread min (x final radius): %.2f')
-  self.p.shpSpreadMax = ui.slider('##rfx2sp1', self.p.shpSpreadMax, 1, 5, 'Impact splat spread max: %.2f')
-  self.p.shpRecoilC = ui.slider('##rfx2spt', self.p.shpRecoilC or 3.0, 1, 30, 'Splat recoil: tau = %.1f x sqrt(rho r^3 / gamma) (3 = physical, ~11 ms at 1 mm)')
-  self.p.shpSkidMax = ui.slider('##rfx2sk', self.p.shpSkidMax, 0, 0.15, 'Skid after impact, max: %.3f m/s')
-  ui.separator()
-  ui.text('Defocus (final step, off by default)')
-  s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')
-  s.focusM = ui.slider('##rfx2fz', s.focusM, 0.03, 1.0, 'Focus distance %.3f m')
-  if ui.checkbox('D-A colour gather (4 taps near the lens; off = D-C analytic)', s.defocusDA) then s.defocusDA = not s.defocusDA end
-  if self.cocInfo then ui.text(self.cocInfo) end
-  self:offscreenTestUI()
-  ui.separator()
-  ui.separator()
-  s.substeps = ui.slider('##rfx2sub', s.substeps, 1, 4, 'Min substeps: %.0f (auto up to 4)', true)
-  if ui.checkbox('Invert exposure side (auto: side facing away from the eye)', s.invertSide) then s.invertSide = not s.invertSide end
-  s.debug = ui.slider('##rfx2dbg', s.debug, 0, 10, 'Debug: 10 sheet state (R supply/q_c, G connected, B lamella, white >= 0.3 mm) 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rho, G squeeze, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up): %.0f', true)
-  self:filmUI()
-  self:physicsUI()
-  local st = self.stats
-  ui.text(string.format('Rain %.1f mm/h  mean D %.2f mm  rel. speed %.1f m/s',
-    st.rateMMh or 0, st.meanDiamMM or 0, st.speedRel or 0))
-  ui.text(string.format('Impacts %.0f /m2/s  splash K %.0f  resolved %.2f in %.2f mm fragments  fine spray %.2f um/s',
-    st.impactRate or 0, st.splashK or 0, st.stickFrac or 0, st.fragDiamMM or 0, (st.sprayMMs or 0) * 1000))
-  if st.dq then   -- rev48-P1 supply DSD (constrained gamma) and the impacting-diameter quantiles
-    local sm = ac.getSim()
-    ui.text(string.format('Supply DSD: D0 %.2f mm (family x%.1f)  mu %.1f  Lambda %.1f /mm | impacting D p50 %.2f p90 %.2f p99 %.2f mm',
-      st.dsdD0 or 0, st.familyK or 1, st.dsdMu or 0, st.dsdLambda or 0, st.dq[8] or 0, st.dq[12] or 0, st.dq[15] or 0))
-    ui.text(string.format('CSP weather (P3 log): type %s  intensity %.3f  wetness %.3f  water %.3f',
-      tostring(sm.weatherType), sm.rainIntensity or 0, sm.rainWetness or 0, sm.rainWater or 0))
-    ui.text(string.format('Sub-cloud evaporation (F6): cloud base %.0f m, %.1f %% of the rain mass reaches the ground (%.3f of %.3f mm/h)',
-      st.cloudBaseM or 0, (st.groundShare or 1) * 100, st.groundMMh or 0, st.rateMMh or 0))
-    ui.text(string.format('Air (CSP): RH %.0f %%  T %.0f C (drop evaporation, sub-cloud evaporation)', (self.fineRH or 0) * 100, self.fineT or 0))
-  end
-  if self.sourceErr then ui.text('Refraction source: ' .. self.sourceErr) end
-  ui.text('GPU/CPU cost: Render Stats -> "RainFX2 sim" / "RainFX2 draw".')
+  -- UI-1 (2026-11-07) LAYOUT POLICY: one collapsible section per subject (ui.treeNode, sections ordered input -> forces ->
+  -- motion -> births -> trails / sheet -> look -> tests / metrics / diagnostics); the same gap before every section;
+  -- slider ids are unique (##rfx2 + short key) -- duplicated ids made two sliders share one ImGui state.
+  uiSection('Rain input', false, function()
+    s.rainExposure = ui.slider('##rfx2exp', s.rainExposure, 0, 1.5, 'Rain exposure (1 = physical): %.2f')
+    self.p.rainSpreadDeg = ui.slider('##rfx2rsd', self.p.rainSpreadDeg, 0, 40, 'Rain direction spread (gusts): %.0f deg')
+    self.p.crownMM = ui.slider('##rfx2cr', self.p.crownMM, 0, 60, 'Helmet crown runoff over the visor top (at rest): %.0f mm catch')
+    self.p.rainWindK = ui.slider('##rfx2rwk', self.p.rainWindK or 0.6, 0, 1, 'Rain drift by the wind (helmet height / shelter): %.2f')
+  end)
+  uiSection('Spray and haze (SP0 / SP1 / H1)', true, function()
+    s.sprayK = ui.slider('##rfx2sk', s.sprayK, 0, 5, 'Spray gain (cars ahead / road spray; 0 hides spray): %.2f')
+    local si, st, d = self.sprayInfo or {}, self.stats, self.diag
+    uiInfo(string.format('Wheel water (mm): own front %.2f  rear %.2f | lead %.2f  pack max %.2f  any car <60 m %.2f',
+      si.selfFrontMM or -1, si.selfRearMM or -1, si.leadWaterMM or -1, si.packWaterMM or -1, si.aheadWaterMM or -1))
+    if ui.checkbox('Spray source = each car\'s wheel water (PUD-2; off = global road water / wetness)', self.p.sprayWheelWater ~= false) then
+      self.p.sprayWheelWater = self.p.sprayWheelWater == false
+    end
+    uiInfo(string.format('Own puddle excess %.2f (x hRef %.1f mm)%s', si.selfPuddle or 0, self.p.sprayHRefMM or 1.8,
+      self.store.roadFix and '  -- road override on: legacy global source' or ''))
+    if ui.checkbox('Spray torn by the air as it is made (SP0: median from We 12 at the car speed)', self.p.sprayAeroDn ~= false) then
+      self.p.sprayAeroDn = self.p.sprayAeroDn == false
+    end
+    self.p.sprayAeroC = ui.slider('##rfx2sac', self.p.sprayAeroC or 0.39, 0.1, 1.0, 'Spray median / largest stable size (SP0): %.2f')
+    self.p.sprayVRelK = ui.slider('##rfx2svr', self.p.sprayVRelK or 0.8, 0.3, 1.2, 'Spray impact speed / air speed (SP1): %.2f')
+    local stt = self.stats or {}
+    uiInfo(string.format('Spray median %.3f mm | haze share %.2f, drawn piece %.4f mm3 | rain haze %.4f mm/s',
+      stt.sprayDnMM or 0, stt.sprayHazeShare or 0, stt.sprayPieceMM3 or 0, stt.hazeMMs or 0))
+    self.p.hazeK = ui.slider('##rfx2hzk', self.p.hazeK or 1.0, 0, 1.5, 'Haze of sub-visible micro drops (H1): %.2f')
+    self.p.hazeAMM = ui.slider('##rfx2hza', self.p.hazeAMM or 0.015, 0.005, 0.04, 'Haze micro cap radius (H1): %.3f mm')
+    if si and d then
+      uiInfo(string.format('Spray LWC %.2f g/m3 -> %.3f mm/s on the visor, splash drops %.4f mm/s (road water %.2f, %d cars, nearest %.0f m)  film supply %.3f mm/s',
+        st.spray or 0, st.sprayMMs or 0, st.splashMMs or 0, si.wet or 0, si.cars or 0, si.nearestM or -1, st.filmRate or 0))
+      uiInfo(string.format('Film equilibrium %.3f mm (full exposure), flow %.3f m/s', d.filmEqMM or 0, d.filmVel or 0))
+    end
+  end)
+  uiSection('Helmet air (outer flow, boundary layer, turbulence, depinning law)', true, function()
+    self.p.aeroKU = ui.slider('##rfx2ku', self.p.aeroKU, 0.1, 1.2, 'Air speed at the helmet (x car speed, cockpit shielding): %.2f')
+    self.p.stagElevDeg = ui.slider('##rfx2se', self.p.stagElevDeg, -45, 45, 'Stagnation point above the visor centre: %.0f deg')
+    if ui.checkbox('Boundary layer thickens away from the stagnation point (F2a)', self.p.blGrowth ~= false) then self.p.blGrowth = self.p.blGrowth == false end
+    self.p.pgradK = ui.slider('##rfx2pgk', self.p.pgradK or 1.0, 0, 2, '(%.2f) Stagnation pressure gradient pushes the drop volume (F3, 1 = physical)')
+    self.p.buffetDeg = ui.slider('##rfx2bd', self.p.buffetDeg, 0, 25, 'Helmet buffeting (stagnation wander at 250 km/h): %.1f deg')
+    self.p.buffetHz = ui.slider('##rfx2bh', self.p.buffetHz, 0.5, 8, 'Buffeting frequency: %.1f Hz')
+    self.p.turbI = ui.slider('##rfx2ti', self.p.turbI or 0.15, 0, 0.6, 'Cockpit turbulence intensity (T1, u\' / kU U): %.2f')
+    self.p.turbHz = ui.slider('##rfx2th', self.p.turbHz or 4.0, 0.5, 20, 'Turbulence drift rate (T1): %.1f Hz')
+    self.p.turbMM = ui.slider('##rfx2tm', self.p.turbMM or 15.0, 3, 60, 'Turbulence eddy size (T1): %.0f mm')
+    self.p.shedU10 = ui.slider('##rfx2su', self.p.shedU10 or 20, 5, 40, 'Air speed that depins a 10 uL drop (wind tunnel ~10-20): %.0f m/s')
+    self.p.shedBeta = ui.slider('##rfx2sb', self.p.shedBeta or 0.1, 0.0, 0.35, 'Size law U_c ~ V^-beta (small drops need more air): %.2f')
+    do
+      local P = self.physics
+      local function kmh(r) return P.criticalU(self.p, r) / (1.5 * self.p.aeroKU * 0.707) * 3.6 end
+      uiInfo(string.format('Depins at (theta 45 deg, pin 1): r0.1 %.0f  r0.2 %.0f  r0.3 %.0f  r0.5 %.0f  r1 %.0f  r2 %.0f km/h',
+        kmh(0.1), kmh(0.2), kmh(0.3), kmh(0.5), kmh(1), kmh(2)))
+    end
+  end)
+  uiSection('Drop motion on the surface (pinning, stick-slip, speed law)', true, function()
+    if ui.checkbox('Dynamic retention: a moving contact line is held more (Cox-Voinov, F2b)', self.p.dynRet ~= false) then self.p.dynRet = self.p.dynRet == false end
+    self.p.defMM = ui.slider('##rfx2dmm', self.p.defMM, 0.3, 5, 'Surface defect size: %.2f mm')
+    self.p.defK = ui.slider('##rfx2dk', self.p.defK, 0, 15, 'Defects steer the head (zig-zag, x pinning asymmetry): %.1f')
+    self.p.defPin = ui.slider('##rfx2dp', self.p.defPin, 0, 0.8, 'Defects hold the head (stick-slip): %.2f')
+    self.p.strongK = ui.slider('##rfx2stk', self.p.strongK or 2.0, 0, 10, 'Strong defects hold x(1 + k S) (J1 stick-slip): %.1f')
+    self.p.strongThr = ui.slider('##rfx2st', self.p.strongThr or 0.74, 0.6, 0.95, 'Strong defect level (0.74 = 15 %% of the area): %.2f')
+    if ui.checkbox('Held drop escapes where its contact line is free (J1)', self.p.escape ~= false) then self.p.escape = self.p.escape == false end
+    self.p.footPinK = ui.slider('##rfx2fpk', self.p.footPinK, 0, 1, 'Pinning by contact width across the force (Furmidge): %.2f')
+    self.p.dropTau = ui.slider('##rfx2dt', self.p.dropTau, 0.0, 0.2, 'Drop inertia (speed follows the force over): %.3f s')
+    self.p.neckHz = ui.slider('##rfx2nh', self.p.neckHz, 0.5, 15, 'Neck low-pass of accelerations: %.1f Hz')
+    self.p.headAccK = ui.slider('##rfx2hk', self.p.headAccK, 0, 1, 'Head motion (visor transform) acceleration share: %.2f')
+  end)
+  uiSection('Drop births and sizes (impacts, splats, size law)', false, function()
+    self.p.fragA = ui.slider('##rfx2fa', self.p.fragA, 0.3, 2.0, 'Size law exponent (0.88 = reference, x0.7 per 1.5x size): %.2f')
+    self.p.fragHi = ui.slider('##rfx2fh', self.p.fragHi, 1.0, 6.0, 'Largest new drop (x typical fragment): %.1f')
+    self.p.fragMax = ui.slider('##rfx2fm', self.p.fragMax, 1, 30, 'Small drops per raindrop impact (max): %.0f')
+    self.p.clusterK = ui.slider('##rfx2ck', self.p.clusterK, 0, 1, 'Drop groups (clustered births): %.2f')
+    self.p.maxRadiusMM = ui.slider('##rfx2mxr', self.p.maxRadiusMM, 0.2, 3.0, 'Largest drop on the visor (safety bound, 3.0): %.2f mm')
+    self.p.fineRMM = ui.slider('##rfx2frm', self.p.fineRMM, 0.1, 0.5, 'Splash satellites below radius %.2f mm leave as mist')
+    self.p.impactLoss = ui.slider('##rfx2il', self.p.impactLoss, 0, 1, 'Impact on a small drop: share splashed off %.2f')
+    if ui.checkbox('Cap volume (R3: drop volume = spherical cap of the contact angle; off = rev7 hemisphere)', self.p.capVolume ~= false) then self.p.capVolume = (self.p.capVolume == false) end
+    self.p.shpImpactK = ui.slider('##rfx2ik', self.p.shpImpactK, 0, 1, 'Impact stretch k: %.2f')
+    self.p.shpImpactMax = ui.slider('##rfx2im', self.p.shpImpactMax, 1, 4, 'Impact stretch max: %.1f')
+    self.p.shpSpreadMin = ui.slider('##rfx2sp0', self.p.shpSpreadMin, 1, 4, 'Impact splat spread min (x final radius): %.2f')
+    self.p.shpSpreadMax = ui.slider('##rfx2sp1', self.p.shpSpreadMax, 1, 5, 'Impact splat spread max: %.2f')
+    self.p.shpRecoilC = ui.slider('##rfx2spt', self.p.shpRecoilC or 3.0, 1, 30, 'Splat recoil: tau = %.1f x sqrt(rho r^3 / gamma) (3 = physical, ~11 ms at 1 mm)')
+    self.p.shpSkidMax = ui.slider('##rfx2skm', self.p.shpSkidMax, 0, 0.15, 'Skid after impact, max: %.3f m/s')
+    self.p.shpSkidK = ui.slider('##rfx2skid', self.p.shpSkidK, 0, 0.05, 'Impact push of a hit drop (newborns stick, U2): %.3f')
+    self.p.shpLamShift = ui.slider('##rfx2lsh', self.p.shpLamShift, 0, 0.5, 'Splat residual walks downstream during recoil (x r (f0-1) aspect): %.2f')
+    self.p.shpRimK = ui.slider('##rfx2rim', self.p.shpRimK or 0.6, 0, 0.85, 'Splat lamella rim share (thick rim, thin interior): %.2f')
+    self.p.shpFingerK = ui.slider('##rfx2fng', self.p.shpFingerK or 0.25, 0, 0.6, 'Splat downstream fingers: %.2f')
+    self.p.shpTearK = ui.slider('##rfx2tk', self.p.shpTearK, 0, 0.3, 'Torn rims of splashing impacts: %.2f')
+  end)
+  uiSection('Tail split, turns and sliding shape', false, function()
+    self.p.shpSplitA = ui.slider('##rfx2spa', self.p.shpSplitA, 1.5, 4.5, 'Sliding drop sheds its tail above aspect: %.2f')
+    self.p.shpSplitRate = ui.slider('##rfx2spr', self.p.shpSplitRate, 0, 20, 'Tail split events (while stretched / snapping): %.1f /s')
+    self.p.shpSplitRMin = ui.slider('##rfx2spm', self.p.shpSplitRMin, 0.2, 1.5, 'Only drops above this radius split: %.2f mm')
+    self.p.shpNeckK = ui.slider('##rfx2nk', self.p.shpNeckK, 0, 3, 'Split piece necks toward its parent: %.2f')
+    self.p.shpNeckT = ui.slider('##rfx2nt', self.p.shpNeckT, 0.02, 0.5, 'Neck retracts over: %.2f s')
+    self.p.shpTailTau = ui.slider('##rfx2tt', self.p.shpTailTau, 0.03, 1, 'Pinned tail follows a turn over: %.2f s')
+    self.p.shpTailStretch = ui.slider('##rfx2tst', self.p.shpTailStretch, 0, 0.4, 'Head-tail stretch in a turn: %.2f')
+    self.p.shpHookK = ui.slider('##rfx2hok', self.p.shpHookK, 0, 4, 'Head bends onto the new heading (hook, x tan): %.2f')
+    self.p.shpFrontK = ui.slider('##rfx2frk', self.p.shpFrontK, 0, 3, 'Thick front moves to the outer side: %.2f')
+    self.p.shpSnapDeg = ui.slider('##rfx2sd', self.p.shpSnapDeg, 10, 90, 'Tail lets go above: %.0f deg')
+    self.p.shpMotionK = ui.slider('##rfx2smk', self.p.shpMotionK, 0, 1.5, 'Sliding head elongation: %.2f')
+    self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
+  end)
+  uiSection('Trails and thin film', false, function()
+    self.p.trailThetaRDeg = ui.slider('##rfx2ttr', self.p.trailThetaRDeg, 5, 60, 'Receding contact angle (dry coat; trails from Ca > Ca*): %.1f deg')
+    self.p.trailWetK = ui.slider('##rfx2twk', self.p.trailWetK, 0, 0.8, 'Wet surface lowers the receding angle by: %.2f')
+    self.p.trailLL = ui.slider('##rfx2tll', self.p.trailLL, 0, 20, 'Trail depth (x r Ca^2/3): %.1f')
+    self.p.trailWidthK = ui.slider('##rfx2tw', self.p.trailWidthK, 0.1, 1.0, 'Trail width at high speed (x head radius): %.2f')
+    self.p.pearlRate = ui.slider('##rfx2pr', self.p.pearlRate, 0, 2, 'Trail beading into small drops (per cell): %.2f /s')
+    self.p.trailSlopeMax = ui.slider('##rfx2ts2', self.p.trailSlopeMax, 0.1, 1.5, 'Trail edge slope max (rivulet height / width): %.2f')
+    self.p.trailPinMM = ui.slider('##rfx2tp', self.p.trailPinMM, 0.0, 0.1, 'Trail runs along itself above: %.3f mm (below: pinned residue)')
+    self.p.trailFlowK = ui.slider('##rfx2tf', self.p.trailFlowK, 0.0, 5.0, 'Trail flow speed (x film law): %.2f')
+    self.p.runbackMax = ui.slider('##rfx2rm', self.p.runbackMax, 0.01, 0.5, 'Rivulet flow top speed (trail water): %.2f m/s')
+    self.p.trailEvapMMs = ui.slider('##rfx2te', self.p.trailEvapMMs, 0.0, 0.05, 'Trail water evaporation: %.4f mm/s')
+    self.p.filmBeadMM = ui.slider('##rfx2fb', self.p.filmBeadMM, 0.01, 0.2, 'Film gathers into a bead from: %.3f mm')
+    self.p.dewetRate = ui.slider('##rfx2dw', self.p.dewetRate, 0, 20, 'Dewetting rate (per cell): %.1f /s')
+  end)
+  uiSection('Water sheet (films form only here: FM1)', false, function()
+    if ui.checkbox('Water sheet: one water for film / sheet, conservative flow', self.p.sheetOn) then self.p.sheetOn = not self.p.sheetOn end
+    self.p.sheetSub = ui.slider('##rfx2wss', self.p.sheetSub, 2, 16, 'Sheet flow substeps per frame: %.0f', true)
+    self.p.sheetUMax = ui.slider('##rfx2wum', self.p.sheetUMax, 0.02, 0.5, 'Sheet speed cap: %.2f m/s')
+    self.p.sheetHJoin = ui.slider('##rfx2wj', self.p.sheetHJoin, 0.04, 0.4, 'Sheet from (drops join it): %.2f mm')
+    self.p.sheetFront = ui.slider('##rfx2wf', self.p.sheetFront, 0.1, 0.6, 'Sheet front advances above: %.2f mm')
+    self.p.sheetAbsorbK = ui.slider('##rfx2wa', self.p.sheetAbsorbK, 0.1, 1, 'Drop joins the sheet per frame: %.2f')
+    self.p.sheetRMax = ui.slider('##rfx2wr', self.p.sheetRMax, 0.8, 1.5, 'Capped puddles above this radius become sheet: %.2f mm')
+    self.p.sheetSmooth = ui.slider('##rfx2wsm', self.p.sheetSmooth, 0, 0.24, 'Sheet surface tension smoothing: %.2f')
+    self.p.sheetSceneMip = ui.slider('##rfx2wsmip', self.p.sheetSceneMip, 0, 4, 'Sheet image blur (scene mip): %.1f')
+    self.p.sheetSlopeK = ui.slider('##rfx2wslk', self.p.sheetSlopeK, 0, 3, 'Sheet interior refraction (slope gain): %.2f')
+    self.p.sheetEdgeK = ui.slider('##rfx2wedk', self.p.sheetEdgeK, 0, 2, 'Sheet edge (meniscus) strength: %.2f')
+    self.p.sheetRidgeK = ui.slider('##rfx2wrk', self.p.sheetRidgeK, 0, 2, 'Sheet front gathers (capillary ridge): %.2f')
+    self.p.sheetTailK = ui.slider('##rfx2wtk', self.p.sheetTailK, 0.1, 1, 'Sheet trailing edge angle x %.2f (lower = longer taper)')
+    self.p.sheetRecedeDeg = ui.slider('##rfx2wtr', self.p.sheetRecedeDeg, 15, 100, 'Visor receding contact angle: %.0f deg (30 dirty, 50 used, 65 new coat, 90 repellent)')
+    self.p.sheetHFed = ui.slider('##rfx2whf', self.p.sheetHFed, 0.01, 0.1, 'Impact-fed sheet from: %.3f mm')
+    self.p.sheetFedTau = ui.slider('##rfx2wft', self.p.sheetFedTau, 0.1, 1.5, 'Impact supply memory (fed regime): %.2f s')
+    self.p.sheetKeepMM = ui.slider('##rfx2wkm', self.p.sheetKeepMM, 0.01, 0.1, 'Residual patch kept (lump) from: %.3f mm')
+    self.p.sheetWaveK = ui.slider('##rfx2wwv', self.p.sheetWaveK, 0, 3, 'Sheet wind waves: %.2f')
+    self.p.impactWaveK = ui.slider('##rfx2wiw', self.p.impactWaveK, 0, 3, 'Impacts on the sheet (crater / ring): %.2f')
+    self.p.sheetWetFrac = ui.slider('##rfx2wwf', self.p.sheetWetFrac, 0.1, 1.5, 'Surface stays wet from supply x %.2f of the sheet threshold')
+    self.p.sheetWetMM = ui.slider('##rfx2wwm', self.p.sheetWetMM, 0, 0.06, 'Wet layer left behind: %.3f mm')
+    self.p.sheetGatherK = ui.slider('##rfx2wgk', self.p.sheetGatherK, 0, 1, 'Drainage gathers into leading flows: %.2f')
+    self.p.sheetPinMM = ui.slider('##rfx2wpin', self.p.sheetPinMM, 0, 1, 'Isolated patch pinned up to: %.2f mm')
+    self.p.patchBeadRate = ui.slider('##rfx2wpb', self.p.patchBeadRate, 0, 10, 'Settled patch beads into a drop: %.1f /s')
+    self.p.sheetFollowK = ui.slider('##rfx2wsf', self.p.sheetFollowK, 0, 2, 'Drops follow the water paths: %.2f')
+    self.p.sheetNucPhi = ui.slider('##rfx2wnp', self.p.sheetNucPhi, 0.2, 0.9, 'Sheet nucleates at drop coverage: %.2f')
+    self.p.sheetConnK = ui.slider('##rfx2wck', self.p.sheetConnK, 0.5, 3, 'Sheet = connected area > largest drop x %.2f')
+    self.p.sheetRetract = ui.slider('##rfx2wrt', self.p.sheetRetract, 0, 60, 'Sheet rear retracts thin water: %.0f /s')
+    uiInfo(string.format('  unconnected water dewets %.2f /s -> impact film (all rain x exposure) above %.3f mm/s (now %.3f mm/s x exposure)', sheetThinRate(self.p), sheetThinRate(self.p) * self.p.sheetHJoin, ((self.stats.fluxMMs or 0) * (self.stats.stickFrac or 0)) + (self.stats.filmRate or 0)))
+    s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Rain film supply gain (unresolved rain; keep 1): %.2f')
+  end)
+  uiSection('Drop look (lens, shape, spread, film / scatter veil)', false, function()
+    self.p.lensPhys = ui.slider('##rfx2lp', self.p.lensPhys, 0, 1.5, 'Lens strength (1 = physical water cap, one image): %.2f')
+    s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Contact angle: %.0f deg (rim curl; normal 40-60)')
+    s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Image blur in the drop (scene mip): %.1f')
+    s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Wobble in airflow: %.2f')
+    self.p.housingM = ui.slider('##rfx2hm', self.p.housingM, 0.05, 0.6, 'Refraction source: remove housing closer than %.2f m')
+    if ui.checkbox('Hide water behind the helmet housing (depth test)', self.p.depthTest) then self.p.depthTest = not self.p.depthTest end
+    if ui.checkbox('Shape state (off = rev47 seeded ellipse)', self.p.shpOn) then self.p.shpOn = not self.p.shpOn end
+    self.p.shpDefShape = ui.slider('##rfx2ds', self.p.shpDefShape or 1.0, 0, 3, 'Birth contour from surface defects (x defect pinning): %.2f')
+    self.p.shpRelaxStill = ui.slider('##rfx2sr', self.p.shpRelaxStill, 0.1, 60, 'Pinned shape is held for: %.1f s (r >= 0.3 mm)')
+    self.p.shpBoK = ui.slider('##rfx2bo', self.p.shpBoK, 0, 3, 'Gravity sag of pinned drops (aspect 1 + k Bo): %.2f')
+    self.p.shpSlugTau = ui.slider('##rfx2sg', self.p.shpSlugTau, 0.05, 3, 'Elongated drop keeps its length when it starts to slide: %.2f s')
+    self.p.shpAirK = ui.slider('##rfx2sak', self.p.shpAirK, 0, 0.3, 'Air stretches pinned drops (x We_air): %.2f')
+    self.p.baseSpread = ui.slider('##rfx2bs', self.p.baseSpread, 1, 2, 'Resting drop profile (splat rule at f): %.2f  [1 = dome; 1.3-1.5 = mid-recoil look]')
+    if self.p.baseSpread > 1.001 then
+      local f = self.p.baseSpread
+      uiInfo(string.format('  -> footprint x%.2f, contact angle %.0f deg, flat top %.2f (visual only; physics radius unchanged)',
+        f, (self.store.contactDeg or 60) / (f * math.sqrt(f)), 0.85 * math.min(f - 1, 1)))
+    end
+    self.p.asymK = ui.slider('##rfx2ak', self.p.asymK, 0, 0.6, 'Off-centre apex (thicker downhill / per-drop): %.2f')
+    if ui.checkbox('Merge at the drawn footprint (resting spread x shape)', self.p.footPhys) then self.p.footPhys = not self.p.footPhys end
+    self.p.shpMergeK = ui.slider('##rfx2mk', self.p.shpMergeK, 0, 1.5, 'Merged footprint elongation: %.2f')
+    self.p.shpWaist = ui.slider('##rfx2mw', self.p.shpWaist, 0, 0.45, 'Merged pair peanut waist: %.2f')
+    self.p.shpMergeTau = ui.slider('##rfx2mt', self.p.shpMergeTau or 0.6, 0.05, 5, 'Merged footprint recedes to theta_r over %.2f s / mm radius')
+    self.p.spreadVarK = ui.slider('##rfx2spv', self.p.spreadVarK, 0, 1.5, 'Per-drop flattening (large drops, seeded): +%.2f')
+    self.p.spreadR1 = ui.slider('##rfx2sr1', self.p.spreadR1, 0.2, 2.0, 'Full flattening from radius: %.2f mm (starts at 0.15 mm)')
+    self.p.spreadWetK = ui.slider('##rfx2swk', self.p.spreadWetK, 0, 1, 'Wet surface flattens more: x(1 + %.2f wet)')
+    self.p.vMax = ui.slider('##rfx2vm', self.p.vMax, 0.005, 0.2, 'Motion stretch reference speed (visor only, R6): %.3f m/s')
+    self.p.fadeTime = ui.slider('##rfx2fd', self.p.fadeTime, 0.0, 0.3, 'Swept drops fade out over %.2f s')
+    self.p.growTime = ui.slider('##rfx2gt', self.p.growTime, 0.0, 0.3, 'New drops grow in over %.2f s')
+    if ui.checkbox('Big-drop window (R7a: large / merged drops drawn and touching up to 4 cells away)', self.p.bigOn) then self.p.bigOn = not self.p.bigOn end
+    s.filmRefract = ui.slider('##rfx2fr', s.filmRefract, 0, 40, 'Film refraction (wave gain): %.1f')
+    s.filmVeil = ui.slider('##rfx2fv', s.filmVeil, 0, 1, 'Film veil: %.2f')
+    s.scatterK = ui.slider('##rfx2sc', s.scatterK, 0, 3, 'Scatter veil (haze/film/spray): %.2f')
+    if ui.button('Reset look to defaults (lens, defocus, film, scatter)') then
+      self.p.lensPhys = DEFAULTS.lensPhys
+      s.apertureMM, s.focusM, s.wfRefraction, s.wfSceneMip = DEFAULTS.apertureMM, DEFAULTS.focusM, DEFAULTS.wfRefraction, DEFAULTS.wfSceneMip
+      s.contactDeg, s.wobbleAmp = DEFAULTS.contactDeg, DEFAULTS.wobbleAmp
+      s.defocusDA = DEFAULTS.defocusDA
+      s.filmRefract, s.filmVeil, s.scatterK = DEFAULTS.filmRefract, DEFAULTS.filmVeil, DEFAULTS.scatterK
+    end
+  end)
+  uiSection('Defocus (final step, off by default)', false, function()
+    s.apertureMM = ui.slider('##rfx2ap', s.apertureMM, 0, 4, 'Aperture %.2f mm (0 = sharp)')
+    s.focusM = ui.slider('##rfx2fz', s.focusM, 0.03, 1.0, 'Focus distance %.3f m')
+    if ui.checkbox('D-A colour gather (4 taps near the lens; off = D-C analytic)', s.defocusDA) then s.defocusDA = not s.defocusDA end
+    if self.cocInfo then uiInfo(self.cocInfo) end
+  end)
+  uiSection('Physics test and readouts', false, function()
+    self:physicsUI()
+    local st = self.stats
+    uiInfo(string.format('Rain %.1f mm/h  mean D %.2f mm  rel. speed %.1f m/s',
+      st.rateMMh or 0, st.meanDiamMM or 0, st.speedRel or 0))
+    uiInfo(string.format('Impacts %.0f /m2/s  splash K %.0f  resolved %.2f in %.2f mm fragments  fine spray %.2f um/s',
+      st.impactRate or 0, st.splashK or 0, st.stickFrac or 0, st.fragDiamMM or 0, (st.sprayMMs or 0) * 1000))
+    if st.dq then   -- rev48-P1 supply DSD (constrained gamma) and the impacting-diameter quantiles
+      local sm = ac.getSim()
+      uiInfo(string.format('Supply DSD: D0 %.2f mm (family x%.1f)  mu %.1f  Lambda %.1f /mm | impacting D p50 %.2f p90 %.2f p99 %.2f mm',
+        st.dsdD0 or 0, st.familyK or 1, st.dsdMu or 0, st.dsdLambda or 0, st.dq[8] or 0, st.dq[12] or 0, st.dq[15] or 0))
+      uiInfo(string.format('CSP weather (P3 log): type %s  intensity %.3f  wetness %.3f  water %.3f',
+        tostring(sm.weatherType), sm.rainIntensity or 0, sm.rainWetness or 0, sm.rainWater or 0))
+      uiInfo(string.format('Sub-cloud evaporation (F6): cloud base %.0f m, %.1f %% of the rain mass reaches the ground (%.3f of %.3f mm/h)',
+        st.cloudBaseM or 0, (st.groundShare or 1) * 100, st.groundMMh or 0, st.rateMMh or 0))
+      uiInfo(string.format('Air (CSP): RH %.0f %%  T %.0f C (drop evaporation, sub-cloud evaporation)', (self.fineRH or 0) * 100, self.fineT or 0))
+    end
+    if self.sourceErr then uiInfo('Refraction source: ' .. self.sourceErr) end
+  end)
+  uiSection('Measurement and metrics (M-REF, CSV, replay)', false, function()
+    self:metricsUI()
+  end)
+  uiSection('Diagnostics and performance', false, function()
+    s.debug = ui.slider('##rfx2dbg', s.debug, 0, 10, 'Debug: 10 sheet state (R supply/q_c, G connected, B lamella, white >= 0.3 mm) 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rho, G squeeze, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up): %.0f', true)
+    if ui.checkbox('Highlight impacts (magenta = born by an impact < 0.3 s, yellow = drop hit this frame)', self.p.hiImpact) then self.p.hiImpact = not self.p.hiImpact end
+    if ui.checkbox('Highlight split pieces (cyan, 1.5 s)', self.p.hiSplit) then self.p.hiSplit = not self.p.hiSplit end
+    self.p.perfProbe = ui.slider('##rfx2pp', self.p.perfProbe or 0, 0, 2, 'Visor cost probe: %.0f (0 off | 1 setup only | 2 + drop union, no lens) -- diagnostics', true)
+    if ui.checkbox('Drop records (PERF-9: candidates computed once per drop)', self.p.useRec ~= false) then self.p.useRec = self.p.useRec == false end
+    if ui.checkbox('Candidate mask (PERF-10: only drops that reach the cell)', self.p.useMask ~= false) then self.p.useMask = self.p.useMask == false end
+    self.p.tightReach = ui.slider('##rfx2tr', self.p.tightReach or 1, 0, 2, 'Tight drop support: %.0f (0 legacy | 1 on | 2 verify: red = skipped drop contributed)', true)
+    if ui.checkbox('Look lab: static reference-sized drops, all other effects off', self.lookLab == true) then
+      self.lookLab = not self.lookLab
+      self.labSeeded = false
+    end
+    if self.lookLab then
+      ui.sameLine()
+      if ui.button('New drop set') then self.labRequest = true end
+      local p = self.p
+      local v1, c1 = ui.slider('##rfx2lo', p.labOcc, 0.05, 0.8, 'Lab occupancy per cell: %.2f')
+      local v2, c2 = ui.slider('##rfx2lr', p.labRMaxMM, 0.5, 3.0, 'Lab largest radius: %.2f mm')
+      p.labOcc, p.labRMaxMM = v1, v2
+      if c1 or c2 then self.labRequest = true end
+    end
+    s.substeps = ui.slider('##rfx2sub', s.substeps, 1, 4, 'Min substeps: %.0f (auto up to 4)', true)
+    if ui.checkbox('Invert exposure side (auto: side facing away from the eye)', s.invertSide) then s.invertSide = not s.invertSide end
+    self:offscreenTestUI()
+    uiInfo('GPU/CPU cost: Render Stats -> "RainFX2 sim" / "RainFX2 draw".')
+  end)
 end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
-local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,dropDepthUM,residenceS,stagElevDeg,nBand0,p99Band0MM,nBand1,p99Band1MM,nBand2,p99Band2MM,simTimeS,replay,replayFrame,replayRate,sceneTag,fps,airT,airRH,cspAirT,windDirDeg,cloudBaseM,groundShare,rateMMh,groundMMh,impactRate,meanDiamMM,stickFrac,speedRel,sprayMMs,splashMMs,roadWet,leadKmh,leadLatM,dropsPerCm2,filmRateRain\n'
+local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,dropDepthUM,residenceS,stagElevDeg,nBand0,p99Band0MM,nBand1,p99Band1MM,nBand2,p99Band2MM,simTimeS,replay,replayFrame,replayRate,sceneTag,fps,airT,airRH,cspAirT,windDirDeg,cloudBaseM,groundShare,rateMMh,groundMMh,impactRate,meanDiamMM,stickFrac,speedRel,sprayMMs,splashMMs,roadWet,leadKmh,leadLatM,dropsPerCm2,filmRateRain,selfFrontWaterMM,selfRearWaterMM,leadWaterMM,packWaterMM,aheadWaterMM,selfPuddle,wheelMode\n'
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -1565,6 +1699,9 @@ function R2:metricsWrite(sim)
     st.cloudBaseM or 0, st.groundShare or 0, st.rateMMh or 0, st.groundMMh or 0, st.impactRate or 0, st.meanDiamMM or 0,
     st.stickFrac or 0, st.speedRel or 0, st.sprayMMs or 0, st.splashMMs or 0, si.wet or 0, si.nearestKmh or -1,
     si.nearestLatM or -1, (h.total or 0) / (area * 0.01), st.rainFilm or 0)
+  line = line:sub(1, -2) .. string.format(',%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n',   -- PUD-1 probe: wheel water (mm, -1 n/a)
+    si.selfFrontMM or -1, si.selfRearMM or -1, si.leadWaterMM or -1, si.packWaterMM or -1, si.aheadWaterMM or -1,
+    si.selfPuddle or 0, (self.p.sprayWheelWater ~= false and not self.store.roadFix) and 1 or 0)
   local ok = pcall(function()
     local f = io.open(self.recordPath, 'a')
     if f then f:write(line); f:close() end
@@ -1584,16 +1721,16 @@ function R2:metricsUI()
   end
   local m = self.metrics
   if m then
-    ui.text(string.format('Film cover %.1f %%  drop cover %.2f %%', m.film * 100, m.drops * 100))
+    uiInfo(string.format('Film cover %.1f %%  drop cover %.2f %%', m.film * 100, m.drops * 100))
   end
   local h = self.sizeHist
   if h and h.total > 0 then
     local b0, parts = self.p.sizeBin0MM, {}
     for k = 1, 10 do parts[k] = string.format('%.2f:%d', b0 * 1.5 ^ (k - 1), h.counts[k]) end
-    ui.text('Drops by radius (mm, 1.5x bins): ' .. table.concat(parts, '  '))
-    ui.text(string.format('Radius p50 %.2f mm  p90/p50 %.1f  p99/p50 %.1f  bin ratio %.2f  (reference: 3-3.5, >= 10, 0.70)',
+    uiInfo('Drops by radius (mm, 1.5x bins): ' .. table.concat(parts, '  '))
+    uiInfo(string.format('Radius p50 %.2f mm  p90/p50 %.1f  p99/p50 %.1f  bin ratio %.2f  (reference: 3-3.5, >= 10, 0.70)',
       h.p50, h.p90 / math.max(h.p50, 1e-6), h.p99 / math.max(h.p50, 1e-6), h.ratio))
-    ui.text(string.format('Water budget: rain in %.3f mm/s (x exposure)  standing as drops %.1f um  -> residence %.2f s  | film supply %.3f mm/s%s',
+    uiInfo(string.format('Water budget: rain in %.3f mm/s (x exposure)  standing as drops %.1f um  -> residence %.2f s  | film supply %.3f mm/s%s',
       (self.stats.fluxMMs or 0) * self.p.exposure, h.depthUM or 0, h.residence or 0, self.stats.filmRate or 0,
       (self.store.filmK or 1) <= 0 and '  (Rain film supply gain 0: unresolved rain is dropped)' or ''))
   end
@@ -1601,39 +1738,31 @@ function R2:metricsUI()
   if ui.button('Clear visor water (start a measured segment empty)') then self.clearRequest = true end
   self.sceneTag = math.floor(ui.slider('##rfx2tag', self.sceneTag or 0, 0, 9, 'Scene tag (CSV): %.0f  (e.g. 1 stop, 2 solo fast, 3 pack fast, 4 pack slow)') + 0.5)
   if ui.checkbox('Fix air temperature (replays do not record it)', self.store.airTFix) then self.store.airTFix = not self.store.airTFix end
+  if ui.checkbox('Fix rain intensity for RainFX supply (measurement; CSP road water / spray unchanged)', self.store.intensityFix) then self.store.intensityFix = not self.store.intensityFix end
+  if self.store.intensityFix then self.store.intensityFixV = ui.slider('##rfx2ifx', self.store.intensityFixV * 100, 0, 40, 'Rain intensity: %.1f %%') / 100 end
+  if ui.checkbox('Fix road water / wetness for the spray estimate (reference: water 30-40 %, wetness 10-15 %)', self.store.roadFix) then self.store.roadFix = not self.store.roadFix end
+  if self.store.roadFix then
+    self.store.roadFixWater = ui.slider('##rfx2rfw', self.store.roadFixWater * 100, 0, 100, 'Road water: %.0f %%') / 100
+    self.store.roadFixWet = ui.slider('##rfx2rfe', self.store.roadFixWet * 100, 0, 100, 'Road wetness: %.0f %%') / 100
+  end
   if self.store.airTFix then self.store.airTFixC = ui.slider('##rfx2atc', self.store.airTFixC, -10, 45, 'Air temperature: %.1f C') end
   local s0 = ac.getSim()
-  ui.text(string.format('Replay %s  frame %d  rate %.2f  | air %.1f C (CSP %.1f)  RH %.0f %%',
+  uiInfo(string.format('Replay %s  frame %d  rate %.2f  | air %.1f C (CSP %.1f)  RH %.0f %%',
     s0.isReplayActive and 'on' or 'off', s0.replayCurrentFrame or -1, s0.replayPlaybackRate or 0,
     self.fineT or 0, self.cspT or -99, (self.fineRH or 0) * 100))
-  if self.recording then ui.text('Recording: ' .. tostring(self.recordPath)) end
-  if self.metricsErr then ui.text('Metrics: ' .. self.metricsErr) end
+  if self.recording then uiInfo('Recording: ' .. tostring(self.recordPath)) end
+  if self.metricsErr then uiInfo('Metrics: ' .. self.metricsErr) end
 end
 
 -- Water film / spray panel (rev11).
-function R2:filmUI()
-  local s, st, d, si = self.store, self.stats, self.diag, self.sprayInfo
-  ui.separator()
-  ui.text('Water film (A regime) / spray')
-  s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Rain film supply gain (unresolved rain; keep 1): %.2f')
-  s.sprayK = ui.slider('##rfx2sk', s.sprayK, 0, 5, 'Spray gain (cars ahead / road spray; 0 hides spray): %.2f')
-  s.filmRefract = ui.slider('##rfx2fr', s.filmRefract, 0, 40, 'Film refraction (wave gain): %.1f')
-  s.filmVeil = ui.slider('##rfx2fv', s.filmVeil, 0, 1, 'Film veil: %.2f')
-  s.scatterK = ui.slider('##rfx2sc', s.scatterK, 0, 3, 'Scatter veil (haze/film/spray): %.2f')
-  if si and d then
-    ui.text(string.format('Spray LWC %.2f g/m3 -> %.3f mm/s on the visor, splash drops %.4f mm/s (road water %.2f, %d cars, nearest %.0f m)  film supply %.3f mm/s',
-      st.spray or 0, st.sprayMMs or 0, st.splashMMs or 0, si.wet or 0, si.cars or 0, si.nearestM or -1, st.filmRate or 0))
-    ui.text(string.format('Film equilibrium %.3f mm (full exposure), flow %.3f m/s', d.filmEqMM or 0, d.filmVel or 0))
-  end
-  self:metricsUI()
-end
+-- UI-1: filmUI split into the Spray / Water sheet / Look sections of R2:ui
 
 -- Physics review panel (rev7): inputs breakdown, analytic thresholds, test tools.
 function R2:physicsUI()
   local s, p, i, d = self.store, self.p, self.inp, self.diag
   local P = self.physics
   ui.separator()
-  ui.text('Physics (rainfx2/physics.lua, docs/RAINFX_V2_CORE.md section 14)')
+  uiInfo('Physics (rainfx2/physics.lua, docs/RAINFX_V2_CORE.md section 14)')
   if ui.checkbox('Freeze rain (no new drops / haze)', s.freezeRain) then s.freezeRain = not s.freezeRain end
   self.timeScale = ui.slider('##rfx2ts', self.timeScale or 1, 0.05, 1, 'Physics time scale: %.2f (slow motion, not saved)')
   s.windK = ui.slider('##rfx2wk', s.windK, 0, 1, 'Ambient wind reaching the visor: %.2f')
@@ -1641,37 +1770,37 @@ function R2:physicsUI()
     self.ladderRequest = true
     s.freezeRain = true
   end
-  ui.text('Debug 4: pinned = blue residue/merged, cyan split piece, white satellite | green <0.1 | yellow <0.3 | orange <0.6 | red >=0.6 m/s | magenta step-limited')
+  uiInfo('Debug 4: pinned = blue residue/merged, cyan split piece, white satellite | green <0.1 | yellow <0.3 | orange <0.6 | red >=0.6 m/s | magenta step-limited')
   if not i or not d then return end
-  ui.text(string.format('Car %.1f m/s  wind %.1f m/s (sim windSpeedKmh %.1f m/s, from %s)  air rel. %.1f m/s  accel %.2f g',
+  uiInfo(string.format('Car %.1f m/s  wind %.1f m/s (sim windSpeedKmh %.1f m/s, from %s)  air rel. %.1f m/s  accel %.2f g',
     i.carSpeed, i.windSpeed, i.windSpeedSim, i.windSource or '?', i.airSpeed, i.accelG))
   local rd = self.rainDirW
   if rd then
-    ui.text(string.format('Rain direction (world, relative to the visor): x %.2f y %.2f z %.2f -> %.0f deg from vertical (Debug 2 follows this)',
+    uiInfo(string.format('Rain direction (world, relative to the visor): x %.2f y %.2f z %.2f -> %.0f deg from vertical (Debug 2 follows this)',
       rd.x, rd.y, rd.z, math.deg(math.acos(math.max(-1, math.min(1, -rd.y))))))
   end
-  ui.text(string.format('Wind direction convention: offset %.0f deg (%s). Calibrates itself while a live session has wind.',
+  uiInfo(string.format('Wind direction convention: offset %.0f deg (%s). Calibrates itself while a live session has wind.',
     p.windDirOffsetDeg or s.windDirOffsetDeg or 180, s.windDirCalibrated and 'calibrated' or 'default: meteorological from'))
   if ui.button('Flip wind convention (180 deg)') then
     p.windDirOffsetDeg = ((p.windDirOffsetDeg or 180) + 180) % 360
     s.windDirOffsetDeg = p.windDirOffsetDeg
   end
   local function rc(v) return v == math.huge and 'never' or string.format('%.2f mm', v) end
-  ui.text(string.format('Slides by gravity from r = %s (coat), %s (glass), keeps sliding from %s; with air (coat) %s',
+  uiInfo(string.format('Slides by gravity from r = %s (coat), %s (glass), keeps sliding from %s; with air (coat) %s',
     rc(d.rcGravCoat), rc(d.rcGravGlass), rc(d.rcGravCoatKin), rc(d.rcAllCoat)))
-  ui.text(string.format('Speed (coat, forces aligned, R6 uncapped): r0.5 %.2f  r1 %.2f  r2 %.2f m/s',
+  uiInfo(string.format('Speed (coat, forces aligned, R6 uncapped): r0.5 %.2f  r1 %.2f  r2 %.2f m/s',
     d.v05, d.v10, d.v20))
   local U = i.airSpeed or 0
-  ui.text(string.format('Helmet air: outer flow %.1f m/s, boundary layer %.2f mm | swept alone from r = %s (2 deg) %s (20 deg) %s (50 deg)',
+  uiInfo(string.format('Helmet air: outer flow %.1f m/s, boundary layer %.2f mm | swept alone from r = %s (2 deg) %s (20 deg) %s (50 deg)',
     self.aeroU or 0, self.aeroDelta or 0, rc(P.aeroCritical(p, U, math.rad(2), p.pinCoat)),
     rc(P.aeroCritical(p, U, math.rad(20), p.pinCoat)), rc(P.aeroCritical(p, U, math.rad(50), p.pinCoat))))
-  ui.text(string.format('Acceleration (car + head): raw %.2f g -> neck-filtered %.2f g', i.accRawG or 0, i.accFiltG or 0))
+  uiInfo(string.format('Acceleration (car + head): raw %.2f g -> neck-filtered %.2f g', i.accRawG or 0, i.accFiltG or 0))
   local hl = self.helmetUpLocal
-  ui.text(string.format('Helmet axes from the visor transform (not the camera): local up (%d,%d,%d), up . world up = %.2f',
+  uiInfo(string.format('Helmet axes from the visor transform (not the camera): local up (%d,%d,%d), up . world up = %.2f',
     hl and hl.x or 0, hl and hl.y or 0, hl and hl.z or 0, self.helmetUpY or 0))
   ui.sameLine()
   if ui.button('Re-pick helmet up') then self.helmetUpLocal = nil end
-  ui.text(string.format('Substeps %d -> step limit %.2f m/s (faster drops are speed-limited)',
+  uiInfo(string.format('Substeps %d -> step limit %.2f m/s (faster drops are speed-limited)',
     p.substeps or 0, d.vGather))
 end
 

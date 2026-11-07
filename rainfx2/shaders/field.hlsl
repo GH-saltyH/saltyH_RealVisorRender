@@ -1,6 +1,7 @@
 // P2: surface field update. Target: F_next (RGBA16_UNorm), reads F_prev and S_next.
 //   R = trail rivulet: centre-line water depth / gR2TrailMaxMM (rev47 T-layer; rev47j geometry in TG)
-//   G = unused (rev48-F9: the F1-F8 fine layer was removed; always 0)
+//   G = S1 fine spray deposit: sub-visible micro droplets (70-90 um road spray) / gR2FineMaxMM, mm of water. Never drawn;
+//       the cells pass turns it into real drops (absorbed by the cell's drop, or nucleated once a cell holds r >= fineNucRMM)
 //   B = water film W (rev11): thickness / gR2FilmMaxMM. Semi-Lagrangian advection with
 //       r2FilmVelocity, surface-tension smoothing (5-tap), stochastic 3x3 splash supply
 //       (rain that does not stick as drops + spray from cars ahead), drainage.
@@ -42,6 +43,7 @@ float4 main(PS_IN pin) {
     R2TrailHit tr = r2TrailNone();   // rev47j: rivulet left this frame (centre-line depth)
     float texMM = 0.5 * (gR2CellSizeMM.x * gR2Cells.x / gR2FieldSize.x + gR2CellSizeMM.y * gR2Cells.y / gR2FieldSize.y);
     float sheetAdd = 0;                // rev48-W1: water handed to the sheet by drops on it (mm)
+    float sweepG = 0;                  // H1: share of this texel swept by drops this frame (haze G taken up, r2SweepFrac)
     float2 texMM2 = gR2CellSizeMM * gR2Cells / gR2FieldSize;
     float2 pMM = pc * gR2CellSizeMM;
     // rev48-W1j IMPACT LAMELLAE (W1i review: real sheets form from impacts all over the exposed face, overlapping before
@@ -82,6 +84,7 @@ float4 main(PS_IN pin) {
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
             float2 b = float2(s) + st.xy;
+            if (F.g > 0) sweepG += r2SweepFrac(f, b, r2UnpackMove(st.w), r2RadiusMM(st.z));
             // rev48-W1: absorption into the sheet as the drop's own cap profile (same rule as merge.hlsl)
             if (gR2SheetOn > 0.5) {
                 int2 fb = r2FieldTexelAt(b);
@@ -134,10 +137,20 @@ float4 main(PS_IN pin) {
             }
         }
     }
-    // rev48-F9 (F8 review, Debug 4 vs 8: the background pattern was the fine layer -- G drawn as hashed micro-grid droplets
-    // that are no drops, never move and kept accumulating, even at 0 % intensity): the fine layer is REMOVED. G stays 0.
-    // Sub-entity splash satellites leave as mist with the helmet air (cells); the fine road spray (70-90 um) joins the film W.
-    M = 0.0;
+    // H1 HAZE G (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 17): sub-visible micro droplets on the coat, mm of water / gR2FineMaxMM.
+    // Supply = the expected sub-visible stuck share of every impact (rain: weather.lua hazeMMs; spray: SP1 + the droplets
+    // below the drawn size, init.lua) x exposure, + the expected water of the 2nd, 3rd ... visible spray droplet of a cell
+    // in one frame (cells takes one event per frame). Loss = evaporation of the micro caps, and the water under the discs
+    // that drops swept this frame (sweepG, the same r2SweepFrac the cells pass used to give it to those drops).
+    // (S1b cleared the whole 1.16 mm cell of any drop -- blocky wipes.)
+    {
+        float gMM = F.g * gR2FineMaxMM * (1.0 - saturate(sweepG));
+        float cellA = gR2CellSizeMM.x * gR2CellSizeMM.y;
+        float lamS = gR2SprayVisRate * exposure * cellA * gR2Dt;
+        gMM = gMM * exp(-gR2FineEvapK * gR2Dt) + (gR2SprayFineMMs + gR2RainHazeMMs) * exposure * gR2Dt
+            + max(lamS - (1.0 - exp(-lamS)), 0.0) * gR2SprayVisVolMM3 / cellA;
+        M = gMM / max(gR2FineMaxMM, 1e-6);
+    }
     // rev47 T-LAYER (docs/RAINFX_V2_REV46_REVIEW.md section 1): R = trail water depth / trailMaxMM.
     // rev45-46 put it into the film W, whose 5-tap diffusion (0.6 / frame) spread a one-texel trail below
     // the visible threshold in 2-3 frames. Trail water on the hydrophobic coat stays pinned: no diffusion,
@@ -171,9 +184,6 @@ float4 main(PS_IN pin) {
     hT = max(hT, trailMM);
     T = hT / max(gR2TrailMaxMM, 1e-4);
     // ---- film W ----
-    float hPrev = W * gR2FilmMaxMM;
-    float2 tb = t - r2FilmVelocity(t, hPrev) * gR2Dt;     // back-trace (field runs once per frame)
-    float2 tx = 1.0 / gR2FieldSize;
     if (gR2SheetOn > 0.5) {
         // rev48-W1: the sheet pass moves the water (conservative fluxes, substeps); here only sources / sinks
         W += sheetAdd / gR2FilmMaxMM;
@@ -202,23 +212,16 @@ float4 main(PS_IN pin) {
             }
             W += 0.25 * gR2FilmDiffuse * ex / gR2FilmMaxMM;
         }
-    } else if (r2Valid(tb) > 0.5) {
-        float cC = txR2Field.SampleLevel(samLinearClamp, tb, 0).b;
-        float c4 = (txR2Field.SampleLevel(samLinearClamp, tb + float2(tx.x, 0), 0).b
-                  + txR2Field.SampleLevel(samLinearClamp, tb - float2(tx.x, 0), 0).b
-                  + txR2Field.SampleLevel(samLinearClamp, tb + float2(0, tx.y), 0).b
-                  + txR2Field.SampleLevel(samLinearClamp, tb - float2(0, tx.y), 0).b) * 0.25;
-        W = lerp(cC, c4, gR2FilmDiffuse);
-    } else {
-        W = 0;                                               // inflow from outside the mesh
     }
+    // FM1 (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 19): with the sheet off there is no film transport -- a thin film on the
+    // coat is unstable and dewets where it lies (no invisible water drifting at the film speed and beading elsewhere,
+    // the 'fountain' of section 16). W keeps its F_prev value here; only the crown runoff feeds it (below) and it beads in
+    // place (dewet event). Films form only on the sheet path, from drops (nuc.hlsl) or overlapping lamellae (fed regime).
     // rev47j DEWETTING (rev47i review: a 0.1 mm rain film covered the visor -- and the drops -- at speed):
     // on the partially wetting visor a thin unresolved sheet is not stable; it gathers into beads. The
     // cells pass turned the film of an event cell (mean depth >= gR2FilmBeadMM) into a bead or fed it to
     // the drop there; its texels give the water up here (same hash, same F_prev mean).
     if (r2DewetEvent(c0) && r2DewetFilmOK(r2CellFilmMM(c0), c0)) W = 0;
-    // Supply: gR2FilmRate mm/s at full exposure, in splashes of gR2FilmSplashMM each.
-    float rate = gR2FilmRate * exposure;
     if (gR2SheetOn > 0.5) {
         // rev48-W1d (W1c review: medium drops of one size took over at rest): the unresolved rain is spread micro
         // water (fragments below the resolved radius), not a raindrop-sized puddle -- the 3x3 splash stamp put
@@ -229,22 +232,11 @@ float4 main(PS_IN pin) {
         // that (q > sheetThinRate * sheetHJoin, the lamellae of successive impacts overlap faster than they break
         // up) the water connects into a sheet and flows -- the impact-fed sheet of torrential rain at speed.
         W = max(W + stampU / gR2FilmMaxMM, 0.0);                        // W1j/W1k: discrete lamellae + recoil
-    } else if (rate > 0) {
-        float lam = rate * gR2Dt / max(gR2FilmSplashMM, 1e-6);   // splashes per texel per frame
-        float pHit = min(lam, 1.0);
-        float dep = rate * gR2Dt / max(pHit, 1e-6);
-        float add = 0;
-        uint fr = (uint)gR2Frame;
-        [unroll] for (int sy = -1; sy <= 1; ++sy) {
-            [unroll] for (int sx = -1; sx <= 1; ++sx) {
-                uint2 q = uint2(f + int2(sx, sy));
-                float w = (sx == 0 ? 2.0 : 1.0) * (sy == 0 ? 2.0 : 1.0) / 16.0;
-                if (r2Rand(uint3(q.x, q.y, fr * 3u + 7u)) < pHit) add += w;
-            }
-        }
-        W += add * dep / gR2FilmMaxMM;
     }
-    W += gR2SprayFineMMs * exposure * gR2Dt / gR2FilmMaxMM;   // F9: fine road spray -> film (was the fine layer F1-F8)
+    // FM1: no dry-coat film supply with the sheet off (rev11 laid the SPLASHED rain share, flux x (1 - stickFrac), into W as
+    // 3x3 stamps -- airborne water made into visor water). Impact water that is not a drop is haze (G) or leaves (H1 / SP1).
+    // S1: the fine road spray lands as micro droplets (G above), not as film water (F9 put it into W: following a pack the
+    // sliding drops swept it into thick trails / very large drops -- 2026-11-06 review)
     // rev47b CROWN RUNOFF (rev47 review: at rest the visor only saw the little rain that reaches a near-
     // vertical face): rain caught on the helmet crown drains over the top edge of the visor. A texel within
     // gR2CrownBandMM of the upper edge (one step up the surface leaves the visor) receives the crown catch
