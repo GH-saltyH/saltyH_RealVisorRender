@@ -909,14 +909,136 @@ float4 main(PS_IN pin) {
     // radius a and volume shapeK a^3 placed at random cover phi = 1 - exp(-pi h / (shapeK a)) of the surface (Poisson),
     // up to the coalescence saturation of dropwise condensation (breath figures, ~0.55). Each micro cap bends light over a
     // wide cone -> the covered share is scattered (the same surface-scatter ambient as the film). Not over drops (below).
+    // H3 MICRO LAYER (docs/RAINFX_V2_H3_ATLAS_SPEC.md sections 3, 3.5b, 8f). Haze water: R = G_f fresh fine (white veil),
+    // G = G_c coarsened = the pieces of the baked layered atlas (txR2Micro, 25.6 mm tile: R G normal, B signed distance to
+    // the piece outline, A rank = area share of the pieces sorted largest first; a gap carries its nearest piece's rank).
+    //   size:   a_eff = hazeAMM x max(G_c / G_sat, 1) (self-similar coarsening) -> octave L = log2(a_eff / a50), two octaves,
+    //           the coarse one on top, each with a fixed rotation / offset;
+    //   exists: rank < min(coverage share of this octave, A_res). A_res = 1 - (r_min / (r_max s))^(1/q) is the rank whose
+    //           piece radius equals the smallest RESOLVED radius r_min (resPx pixels / the defocus CoC): a piece is either
+    //           drawn solid or not at all (H3-2c: sub-pixel pieces were the 'half-transparent noise');
+    //   edge:   signed distance / pixel size (crisp at any magnification, no mip coverage);
+    //   halo:   an existing piece keeps the veil off a band just outside its rim (signed distance > -halo);
+    //   veil:   fresh fine water + the unresolved share of the coarse water, only off the pieces and their halos.
+    // Pieces are clear water (plano-convex lens, r2SheetLens). N3 verify: the haze pass writes R = -1 -> red.
+    float microD = 0.0;
+    float3 cMicro = float3(0, 0, 0);
+    float blurU = 0.0;                                               // V2: unresolved coarse water as blurred scene
+    float3 cBlur = float3(0, 0, 0);
+    bool hazeMiss = false;
     if (gR2LookLab < 0.5 && gR2HazeK > 0.0) {
-        float phiH = min(1.0 - exp(-3.14159265 * Fd.g * gR2FineMaxMM / max(gR2ShapeK * gR2HazeAMM, 1e-6)), gR2HazePhiMax);
-        scat = 1.0 - (1.0 - scat) * (1.0 - gR2HazeK * phiH);
+        float2 gH = txR2Haze.SampleLevel(samLinearClamp, t, 0).rg;   // H1c / H3-3: 2x-resolution haze layer (fine, coarse)
+        hazeMiss = gR2HazeMaskMode > 1.5 && gH.x < -0.5;              // returned after the lens (uniform flow for ddx)
+        float2 hMM = max(gH, 0.0) * gR2FineMaxMM;
+        float kPhi = 3.14159265 / max(gR2ShapeK * gR2HazeAMM, 1e-6);
+        float phiF = min(1.0 - exp(-kPhi * hMM.x), gR2HazePhiMax);
+        float aC = max(gR2CoarseInRMM, hMM.y * gR2HazeAMM / max(gR2HazeSatMM, 1e-9));   // H3-3b: arrival / saturation size
+        float phiC = min(1.0 - exp(-3.14159265 * hMM.y / max(gR2ShapeK * aC, 1e-6)), gR2HazePhiMax);
+        float phiU = phiC, haloAcc = 0.0;                            // without pieces all coarse water is unresolved
+        float rUnres = aC;                                           // radius of that unresolved water
+        // H3-3b (2026-11-13 review: draw 0.89 -> 1.64 ms; pieces of rank ~0 drawn with no water; no wipe / halo seen):
+        // only where coarse water exists (divergent branch: explicit-gradient / level samples only, no ddx inside),
+        // existence strictly rank < threshold, and a cheap CSP lens (one scene tap + one cube tap on steep rims).
+        if (gR2MicroOn > 0.5 && phiC > 0.002) {
+            float aEff = aC * exp2(gR2MicroBias);
+            float rMin = gR2MicroResPx * max(pixMM, 2.0 * cocMM);        // smallest piece radius drawn as a drop
+            float L = clamp(log2(aEff / max(gR2MicroA50MM, 1e-6)), -8.0, 0.0);
+            float L0 = floor(L), fL = L - L0;
+            float2 pMMv = t * gR2TexMM;
+            float2 gxMM = dtx * gR2TexMM, gyMM = dty * gR2TexMM;
+            float relC = saturate(phiC / max(gR2HazePhiMax, 1e-3));
+            float Dacc = 0.0, resSum = 0.0;
+            float2 slope = float2(0, 0);
+            [unroll] for (int k = 1; k >= 0; --k) {
+                float Lk = L0 + (float)k;
+                float wk = k == 1 ? fL : 1.0 - fL;
+                float sK = exp2(Lk);
+                float aRes = 1.0 - pow(saturate(rMin / max(gR2MicroRMaxMM * sK, 1e-6)), 1.0 / max(gR2MicroRankQ, 0.05));
+                float thr = min(relC * wk, aRes);
+                resSum += max(thr, 0.0);
+                if (thr < 0.002) continue;                                   // nothing of this octave exists / resolves
+                float sc = sK * gR2MicroTileMM;
+                float ang = Lk * 2.39996;                                    // golden angle per octave
+                float2 cs = float2(cos(ang), sin(ang));
+                float2x2 R = float2x2(cs.x, -cs.y, cs.y, cs.x);
+                float2 off = frac(Lk * float2(0.3719, 0.6180));
+                float2 uvA = mul(R, pMMv) / sc + off;
+                float2 ga = mul(R, gxMM) / sc * 0.5, gb = mul(R, gyMM) / sc * 0.5;   // one mip sharper
+                float4 m = txR2Micro.SampleGrad(samLinear, uvA, ga, gb);    // H3-2d: one sample (rank blends only on edges)
+                float rk = m.a;
+                float sdMM = (m.b - 0.5) * 2.0 * gR2MicroSdfMM * sK;         // + inside the piece (range 0.6 mm: never clipped
+                                                                             //   below a pixel -- 0.1 mm made every piece 25-75 %)
+                float ex = saturate((thr - rk) / 0.003);                     // strictly below the threshold (no rank-0 ghosts)
+                float add = ex * saturate(sdMM / pixMM + 0.5) * (1.0 - Dacc);
+                float3 n = float3(m.xy * 2.0 - 1.0, 0.0);
+                n.z = sqrt(saturate(1.0 - dot(n.xy, n.xy)));
+                float2 g = -n.xy / max(n.z, 0.15);                           // height gradient (atlas axes)
+                slope += add * mul(g, R);                                    // back to visor u / v axes (R^T g)
+                Dacc += add;
+                // H3-2d halo: distance to the nearest EXISTING piece -- the halo atlas holds the smallest rank within 4 radii
+                // (the per-texel rank only knows the nearest piece, existing or not: the halo reached only the 0.025 mm gaps)
+                float hW = max(gR2MicroHaloK * aEff, gR2MicroHaloPx * pixMM);
+                haloAcc = max(haloAcc, ex * saturate(1.0 + sdMM / hW));
+                float4 hl = txR2MicroHalo.SampleGrad(samPoint, uvA, ga * 2.0, gb * 2.0);
+                haloAcc = max(haloAcc, (hl.x < thr ? 1.0 : 0.0) * saturate(1.0 - 0.03 * sK / hW));
+                haloAcc = max(haloAcc, (hl.y < thr ? 1.0 : 0.0) * saturate(1.0 - 0.06 * sK / hW));
+                haloAcc = max(haloAcc, (hl.z < thr ? 1.0 : 0.0) * saturate(1.0 - 0.12 * sK / hW));
+                haloAcc = max(haloAcc, (hl.w < thr ? 1.0 : 0.0) * saturate(1.0 - 0.24 * sK / hW));   // radii = bake HALO_R
+            }
+            microD = saturate(Dacc) * (1.0 - cov);
+            if (microD > 0.0) {
+                // R1 (2026-11-13: the CSP prism / cube-rim lens looked foreign next to the cell drops): the SAME plano-convex
+                // lens as r2DropLens -- enter the flat contact face, leave through the cap (normal = visor normal tilted by
+                // the piece slope), project the exit direction with the real camera, compress continuously into the frame,
+                // TIR dims the same image, sky glint on the up-facing rim. No ddx (divergent branch): the scene mip comes
+                // from the piece size -- the refracted image sweeps ~0.6 screen heights across a piece of rPx pixels.
+                slope = slope / max(Dacc, 1e-4) * gR2MicroRefract;
+                float3 sW = slope.x * vw.Tu + slope.y * vw.Tv;
+                sW -= vw.n * dot(sW, vw.n);
+                float capS = min(length(sW), 7.0);
+                float3 dUp = capS > 1e-6 ? sW / max(length(sW), 1e-9) : float3(0, 0, 0);
+                float3 N = normalize(vw.n - capS * dUp);
+                float3 Vw = refract(vw.V, -vw.n, 1.0 / 1.333);
+                float ci = dot(Vw, N);
+                float kd = 1.0 - 1.333 * 1.333 * (1.0 - ci * ci);
+                float3 Vp = normalize(1.333 * Vw + (sqrt(max(kd, 0.0)) - 1.333 * ci) * N);
+                float tir = smoothstep(0.04, -0.04, kd);
+                float3 Vo = normalize(lerp(vw.V, Vp, gR2LensPhys));
+                float2 dpx = (r2Proj(Vo, vw) - r2Proj(vw.V, vw)) * vw.sgn * gR2FovK;
+                float2 uvA = sp + dpx * float2(aspect, 1.0) - 0.5;
+                if (dot(Vo, vw.look) < 0.05) uvA = (sp - 0.5) + normalize(dpx * float2(aspect, 1.0) + 1e-6) * 4.0;
+                float2 xa = abs(uvA) / 0.49;
+                float2 uvW = uvA / sqrt(sqrt(1.0 + xa * xa * xa * xa)) + 0.5;
+                float rPx = max(aEff / max(pixMM, 1e-5), 0.5);
+                float mipFW = log2(max(0.6 / (gR2InvRT.y * rPx), 1.0));
+                float mipW = clamp(gR2WFSceneMip + max(mipFW - 1.0, 0.0) + 0.5 * log2(1.0 + cocPx), 0.0, 7.0);
+                cMicro = r2Scene(saturate(uvW), mipW) * lerp(1.0, 0.35, tir);
+                float up = saturate(dot(-dUp, float3(0, 1, 0)));
+                cMicro += gR2VeilColor * (gR2Glint * up * up * up * up * smoothstep(0.8, 2.0, capS) * (1.0 - tir));
+            }
+            phiU = phiC * saturate(1.0 - resSum / max(relC, 1e-4));          // coarse water too small to resolve
+            rUnres = min(aEff, 0.5 * rMin);
+        }
+        // V2 (section 8j / 8m): unresolved lenses are still lenses -- each refracts the scene of its cone; a pixel holding many
+        // averages them = the blurred scene (gR2MicroBlurK of their area); the rest (steep / TIR rims) scatters toward the
+        // veil colour. Blur level: the R1 rule (image of ~0.6 screen heights across a lens of rPx pixels), rPx < 1 here.
+        float veil = (1.0 - (1.0 - phiF) * (1.0 - (1.0 - gR2MicroBlurK) * phiU)) * (1.0 - haloAcc);
+        blurU = gR2MicroBlurK * phiU * (1.0 - haloAcc) * (1.0 - microD);
+        if (blurU > 0.002) {
+            float rPxU = max(rUnres / max(pixMM, 1e-5), 0.25);
+            float mipU = clamp(gR2WFSceneMip + max(log2(max(0.6 / (gR2InvRT.y * rPxU), 1.0)) - 1.0, 0.0) + 0.5 * log2(1.0 + cocPx), 0.0, 7.0);
+            cBlur = r2Scene(sp, mipU);
+        }
+        veil *= 1.0 - microD;
+        scat = 1.0 - (1.0 - scat) * (1.0 - gR2HazeK * veil);
     }
+    if (hazeMiss) return float4(8.0, 0.0, 0.0, 1.0);
+    // H3: the scatter (film / spray / veil) is not drawn over a micro piece either
+    scat *= 1.0 - microD;
     // rev47j (rev47i review: the veil covered the drops at speed): micro haze and film lie BETWEEN the
     // drops on the surface -- a drop has absorbed what was under it -- so their scatter is not drawn over drops.
     scat *= 1.0 - cov;
-    clip(gR2Debug > 0.5 ? 1.0 : max(a, scat) - 0.003);
+    clip(gR2Debug > 0.5 ? 1.0 : max(max(a, scat), max(microD, blurU)) - 0.003);
 
     // F2: ONE veil colour -- the surface scatter's ambient (scene behind at the scatter mip, toward the sky veil) is also
     // what a thick, aerated film turns to (F1 had a second 'haze' veil = blurred scene / veil mix with its own strength)
@@ -930,6 +1052,16 @@ float4 main(PS_IN pin) {
     cFilm = cFilm * (1.0 - 0.35 * rimF) + gR2VeilColor * (0.25 * rimF * upF * upF * upF * upF);
     if (sheetMode) cFilm = cSheet;                                   // rev48-P2: the sheet lens replaces the film overlay
     float3 col = (cDrop * cov + cFilm * aFilm) / max(a, 1e-4);
+    if (microD > 0.0) {                                              // H3 pieces lie under the cell drops / film
+        float aM = microD * (1.0 - saturate(a));
+        col = (col * saturate(a) + cMicro * aM) / max(saturate(a) + aM, 1e-4);
+        a = saturate(a) + aM;
+    }
+    if (blurU > 0.002) {                                             // V2: the unresolved lens layer, under drops / film / pieces
+        float aB = blurU * (1.0 - saturate(a));
+        col = (col * saturate(a) + cBlur * aB) / max(saturate(a) + aB, 1e-4);
+        a = saturate(a) + aB;
+    }
     // Composite the scatter over everything below (alpha blending: out = src*A + dst*(1-A)).
     // Wanted: (col*a + dst*(1-a))*(1-s) + amb*s  ->  A = a + s - a*s, src = (col*a*(1-s) + amb*s) / A.
     a = saturate(a);
@@ -1021,7 +1153,7 @@ float4 main(PS_IN pin) {
     // rev48-S6c: 'Highlight split pieces' -- E8 tail pieces younger than 1.5 s in cyan (review aid)
     if (gR2HiSplit > 0.5 && splitMark > 0.0) { col = lerp(col, float3(0.0, 1.0, 1.0), 0.8); a = max(a, 0.85); }
     // U1: magenta = impact-born splat (< 0.3 s), yellow = an existing drop hit by an impact this frame (merge)
-    if (gR2HiImpact > 0.5 && impMark > 0.0) { col = lerp(col, impMark > 4.5 ? float3(0.1, 0.35, 1.0) : impMark > 3.5 ? float3(0.0, 1.0, 0.2) : (impMark > 2.5 ? float3(1.0, 0.25, 0.0) : (impMark > 1.5 ? float3(1.0, 0.9, 0.0) : float3(1.0, 0.0, 1.0))), 0.8); a = max(a, 0.85); }
+    if (gR2HiImpact > 0.5 && impMark > 0.0) { col = lerp(col, impMark > 5.5 ? float3(0.95, 0.95, 0.95) : impMark > 4.5 ? float3(0.1, 0.35, 1.0) : impMark > 3.5 ? float3(0.0, 1.0, 0.2) : (impMark > 2.5 ? float3(1.0, 0.25, 0.0) : (impMark > 1.5 ? float3(1.0, 0.9, 0.0) : float3(1.0, 0.0, 1.0))), 0.8); a = max(a, 0.85); }
     return float4(col, saturate(a));
 #endif
 }

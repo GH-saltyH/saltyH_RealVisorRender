@@ -71,7 +71,7 @@ local DEFAULTS = {
   -- radius dark (thick rim on close drops), 55 deg -> 8 % (thin rim like the reference)
   capVolume = true,
   shedU10 = 25.0,   -- rev48-F4b: outer air speed (m/s) that depins a 10 uL drop on the coat (R6b 20; F4b fit to the dryFlow reference frames)
-  shedBeta = 0.08,  -- rev48-F4b: U_c(V) = shedU10 (V / 10 uL)^-shedBeta (reference: r 0.6 / 0.25 / 0.15 mm move from ~150 / 177 / 205 km/h)
+  shedBeta = 0.11,  -- 2026-11-07 (SPRAY_RAIN_REF s23, user fix with stagnation 24 deg + F2 / F3); rev48-F4b 0.08: U_c(V) = shedU10 (V / 10 uL)^-shedBeta (reference: r 0.6 / 0.25 / 0.15 mm move from ~150 / 177 / 205 km/h)
   bigOn = true, bigRMM = 0.8,   -- rev48-R7a: drops >= bigRMM drawn / touching in a +-4 cell window (largest per 4 x 4 tile)   -- rev48-R3: drop volume = spherical cap of contactDeg (false: rev7 hemisphere 2.094)
   contactDeg = 60, contactSpread = 8,   -- rev35: 60 (user: stronger curl looked better; normal 40-60); R5b: spread only on the sheet edge (drops: flatness)
   hysteresisDeg = 20, wetFlatten = 0.5,
@@ -146,7 +146,8 @@ local DEFAULTS = {
   trailSlopeMax = 0.45,                      -- rev47k: rivulet edge slope 2 h0 / hw <= 0.45 (~24 deg; rev47j 0.8 drew glass rods)
   trailPinMM = 0.02, trailFlowK = 1.0,       -- rev47k: rivulets deeper than this run along themselves (film law x flowK)
   wetHaze = 0.0,        -- H1 (2026-11-07): 0 -- the haze G is separate micro caps (dropwise), not a wetting film (was 1.5 while G was ~0)
-  hazeK = 1.0, hazeAMM = 0.015, hazePhiMax = 0.55, hazeExpo = 0.9, hazeRMaxMM = 0.08,   -- H1 haze: scatter gain, micro cap radius mm, breath-figure coverage, impact exposure, finest fragments held as haze
+  hazeK = 1.0, hazeAMM = 0.015, hazePhiMax = 0.55, hazeExpo = 0.9, hazeRMaxMM = 0.08, hazeRes = 2, hazeNuc = true, hazeNucTau = 0.3, hazeNucSite = true, hazeMask = 1, haloK = 0.5, haloInMM = 0.1, haloOutMM = 0.4, microOn = true, microBias = 0, microRefract = 1.0, microResPx = 2.0, microHaloK = 0.5, microHaloPx = 1.5, microAMaxMM = 0.3, hazeCoarsenTau = 0.5, hazeNucPMax = 0.02, hazeOverrunK = 1.0, hazeWetMM = 0.02, microBlurK = 0.7,   -- 8l I1 lamella sweep, 8m S1 water layer, V2 unresolved-lens blur share
+    -- H1 haze: scatter gain, micro cap radius mm, breath-figure coverage, impact exposure, finest fragments held as haze; N1 defect sites, N3 reach mask (0 off | 1 on | 2 verify), N2 wipe halo (section 27)
   sprayVRelK = 0.8, sprayAeroDn = true, sprayAeroC = 0.39,            -- SP1 spray impact speed / SpeedRel; SP0 torn-spray median
   pearlMM = 0.006, pearlRate = 0.0,   -- PL1 (2026-11-07): delayed trail pearling off (green / blue streams born seconds later from invisible trail water); was 0.6;          -- rev47k: every rivulet section beads up, 0.6 /s per cell (rev47j 0.03 / 0.1: thin trails never broke)
   filmBeadMM = 0.04, dewetRate = 4.0,        -- rev47j: film >= 0.04 mm in a cell gathers into a bead, 4 /s per cell
@@ -219,6 +220,28 @@ local DQ_NAMES = {}   -- PERF-11: 'gR2DQ' .. i built once (was 16 new strings pe
 for i = 0, 15 do DQ_NAMES[i] = 'gR2DQ' .. i end
 -- PERF-11 CPU probe (profiler on only): Lua time in sceneValues and in pass submission (updateWithShader) per frame
 local SIM_CPU = { sv = 0, run = 0, n = 0 }
+-- N1 (section 27): <w> of the nucleation site weight w = ((v - thr) / (1 - thr))^2 over the strong-defect value noise
+-- (smoothstep-bilinear of 4 iid uniforms; the hash does not matter for the mean). Monte Carlo once per threshold
+-- (thr 0.74 -> 0.0257, 15.3 % of the area > 0; checked against 2 M numpy samples).
+local SITE_MEAN = {}
+local function siteMean(thr)
+  local key = math.floor(thr * 1000 + 0.5)
+  local m = SITE_MEAN[key]
+  if m then return m end
+  local x, n, sum = 12345, 40000, 0
+  local function rnd() x = (1103515245 * x + 12345) % 2147483648; return x / 2147483648 end
+  for _ = 1, n do
+    local a, b, c, d, fx, fy = rnd(), rnd(), rnd(), rnd(), rnd(), rnd()
+    local sx, sy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    local v = (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy
+    local e = math.max(0, (v - thr) / math.max(1 - thr, 1e-3))
+    sum = sum + e * e
+  end
+  m = sum / n
+  SITE_MEAN[key] = m
+  return m
+end
+
 local function sceneValuesImpl(self, v)
   -- Shared constant set for P1-P3 (one cbuffer layout; unused entries are harmless).
   local p, st = self.p, self.stats
@@ -232,6 +255,33 @@ local function sceneValuesImpl(self, v)
   v.gR2SubN = p.substeps or 1                       -- S1: the last substep takes the fine deposit (cells), field clears it
   v.gR2SprayFineOn = p.sprayFine ~= false and 1 or 0
   v.gR2FineMaxMM = 0.01                              -- G scale (mm of water at G = 1); the reservoir stays ~1e-3 of it
+  do   -- H1c / H1b haze layer: size, breath-figure saturation depth (phi = hazePhiMax), coalescence nucleus
+    local a, phi = p.hazeAMM or 0.015, math.min(p.hazePhiMax or 0.55, 0.95)
+    local sat = -math.log(1 - phi) * (p.shapeK or 1) * a / math.pi
+    v.gR2HazeSize = self.hazeSize or self.fieldSize
+    v.gR2HazeSatMM = sat
+    v.gR2HazeAMM, v.gR2HazePhiMax = a, phi            -- H3-3: the haze pass needs the coverage law too (phi(G_f), phi(G_c))
+    v.gR2HazeCapMM = 2 * sat
+    v.gR2HazeNucOn = p.hazeNuc == false and 0 or 1
+    -- H3-3 (docs/RAINFX_V2_H3_ATLAS_SPEC.md 4, 8f): coarse water G_c grows the atlas pieces up to the top octave (area
+    -- median a50 at scale 1 <-> G_top = sat x a50 / a_min); a cell drop is born only from the excess above it and only
+    -- at a_max or larger (smaller drops are atlas pieces)
+    local mic = self.microAtlas and self:microAtlas() or nil
+    v.gR2HazeTopMM = sat * ((mic and mic.a50 or 0.212) / a)
+    v.gR2MicroCover = mic and mic.cover or 0.76
+    v.gR2HazeCoarsenTau = p.hazeCoarsenTau or 0.5
+    v.gR2HazeNucVolMM3 = (p.shapeK or 1) * (p.microAMaxMM or 0.3) ^ 3
+    v.gR2HazeNucPMax = p.hazeNucPMax or 0.02
+    v.gR2HazeNucTau = p.hazeNucTau or 0.3
+    v.gR2HazeWetMM = p.hazeWetMM or 0.02              -- S1: water layer (film / sheet / rivulet) that takes the haze in
+    v.gR2HazeMinMM = 1e-3 * sat                       -- N3: texels below are skipped by the haze sweep AND the cells take-up
+    v.gR2HazeMaskMode = p.hazeMask or 1               -- N3: 0 = 25-record loop | 1 = reach mask | 2 = verify (visor red)
+    v.gR2HazeNucSite = p.hazeNucSite == false and 0 or 1   -- N1: nucleate on the J1 strong-defect sites
+    v.gR2HazeNucWInv = 1 / math.max(siteMean(p.strongThr or 0.74), 1e-4)
+    v.gR2HaloK = p.haloK or 0.5                       -- N2 wipe halo: weight 1 to r + haloIn, 0 at r (1 + haloK) + haloOut
+    v.gR2HaloInMM = p.haloInMM or 0.1
+    v.gR2HaloOutMM = p.haloOutMM or 0.4
+  end
   v.gR2FineNucRMM = p.fineNucRMM or 0.08             -- a cell's micro droplets form a drawn drop at this radius (d 0.16 mm)
   do   -- micro droplet evaporation: dV/dt = evapDiff r (diffusion-limited), V = shapeK r^3 -> k = evapDiff / (shapeK r^2)
     local rf = p.hazeAMM or 0.015                    -- H1: the micro caps of the haze
@@ -263,6 +313,10 @@ local function sceneValuesImpl(self, v)
     v.gR2SprayVisRate = mms / EV * fVis                                                   -- visible-size droplets / mm^2 / s (events)
     v.gR2SprayVisVolMM3 = st.sprayPieceMM3 or 0                                           -- SP1: mean drawn piece of an event
     v.gR2SprayFineMMs = mms * (st.sprayHazeShare or 0)                                    -- SP1: sub-visible stuck water -> G
+    v.gR2HazeOverrun = mms * (st.sprayAperV or 0) * (p.hazeOverrunK or 1.0)              -- I1: lamella overruns / s (x exposure)
+    v.gR2SprayCoarseMMs = mms * (st.sprayCoarseShare or 0)                                -- H3-3: pieces < a_max -> G_c (atlas)
+    v.gR2MicroSplitMM = p.microSplitMM or 0                                               -- H3-3: cells births only >= this radius
+    v.gR2CoarseInRMM = math.max(st.coarseInRMM or 0, p.hazeAMM or 0.015)                  -- H3-3b: arrival size of G_c pieces
     v.gR2SprayLnDn, v.gR2SprayS, v.gR2SprayZmin = math.log(Dn), sl, zmin
     v.gR2SprayDMaxMM = p.sprayDMaxMM or 0.8
   end
@@ -354,6 +408,7 @@ local function sceneValuesImpl(self, v)
   v.gR2FragHiP = fl.hiP
   v.gR2FragInvA = fl.invA
   v.gR2FragM3 = fl.m3
+  v.gR2HazeNucM3Inv = 1 / math.max(fl.m3, 1e-3)      -- N1: nucleus radius fineNucRMM x X -> mean volume V_nuc <X^3>
   v.gR2Time = self.wobbleT or 0
   v.gR2SizeBin0MM = p.sizeBin0MM
   v.gR2FilmFullMM = p.filmFullMM
@@ -426,7 +481,7 @@ local PASS_NAMES = setmetatable({}, { __mode = 'k' })   -- PERF-2: pass table ->
 -- PERF-5 TEXTURE BUDGET: CSP's ui.fx template (scene include) reserves t14 for its shadow array -> a simulation pass may
 -- bind at most 14 textures (t0..t13), and this shared table has exactly 14. Adding one more rebinds the shadow array
 -- for the draws that follow (PERF-4: E7 glitch). docs/tools/check_rainfx2_shaders.py reads this table and fails then.
-local function newPass(self, shader, name)
+local function newPass(self, shader, name, haze)   -- haze: true = cells / hzv, 'hzm' = hzm, 'mask' = the haze pass
   local root = self.ctx.surface.root
   local pass = {
     async = true,
@@ -439,6 +494,23 @@ local function newPass(self, shader, name)
     values = sceneValues(self, {}),
     shader = shader,
   }
+  if haze then   -- H1c: cells / haze bind the haze layer in the claims slot (claims are merge-only) -> still 14 textures
+    pass.textures.txR2Claim = nil
+    pass.textures.txR2Haze = false
+  end
+  if haze == 'mask' then   -- N3: the haze pass binds its cell data in the prediction slot (predict -> cells only) -> 14
+    pass.textures.txR2Pred = nil
+    pass.textures.txR2HzMask = false
+    pass.textures.txR2Big = nil      -- T1: the substep wipe mask in the big-drop slot (visor only) -> still 14
+    pass.textures.txR2Wm = false
+  elseif haze == 'hzm' then   -- H3-P2: hzm binds the static validity class in the prediction slot -> 14
+    pass.textures.txR2Pred = nil
+    pass.textures.txR2HzValid = false
+  end
+  if haze == 'wm' then   -- T1: the substep wipe mask reads its previous substep in the prediction slot -> 14
+    pass.textures.txR2Pred = nil
+    pass.textures.txR2Wm = false
+  end
   if name then PASS_NAMES[pass] = 'RainFX2 sim/' .. name end
   return pass
 end
@@ -485,6 +557,17 @@ function R2:ensureResources()
   local h16 = render.TextureFormat.R16G16B16A16.Float
   self.TG = { canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail A'), canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail B') }
   self.ti = 1
+  -- H1c haze layer (2x the field: 0.29 mm texels), G in units of fineMaxMM, ping-pong
+  local hr = math.max(1, math.floor(p.hazeRes or 2))
+  self.hazeSize = vec2(p.fieldU * hr, p.fieldV * hr)
+  self.HZ = { canvas(p.fieldU * hr, p.fieldV * hr, 1, render.TextureFormat.R16G16.Float, 'RainFX2 haze A'),   -- H3-3: R fine, G coarse
+              canvas(p.fieldU * hr, p.fieldV * hr, 1, render.TextureFormat.R16G16.Float, 'RainFX2 haze B') }
+  self.hi = 1
+  self.HZM = canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 haze reach mask')   -- N3 (hzm.hlsl)
+  self.HZV = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16.Float, 'RainFX2 haze validity')   -- H3-P2 (hzv.hlsl, once)
+  self.WM = { canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 haze wipe mask A'), canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 haze wipe mask B') }   -- T1 (wm.hlsl)
+  self.wmi, self.wmValid = 1, false
+  self.hzvValid = false
   self.si, self.fi = 1, 1
   self.cells = vec2(p.cellsU, p.cellsV)
   self.fieldSize = vec2(p.fieldU, p.fieldV)
@@ -494,7 +577,11 @@ function R2:ensureResources()
   self.cellSizeMM = vec2(602.0 / p.cellsU, 146.3 / p.cellsV)
   self.cellMM = (self.cellSizeMM.x + self.cellSizeMM.y) * 0.5
   self.texMM = vec2(602.0, 146.3)
-  self.passCells = newPass(self, self.src.cells, 'cells')
+  self.passCells = newPass(self, self.src.cells, 'cells', true)
+  self.passHzm = newPass(self, self.src.hzm, 'hzm', 'hzm')     -- N3 reach mask + N1 nucleus ratio
+  self.passHzv = newPass(self, self.src.hzv, 'hzv', true)      -- H3-P2 static validity class
+  self.passHaze = newPass(self, self.src.haze, 'haze', 'mask')   -- H1c
+  self.passWm = newPass(self, self.src.wm, 'wm', 'wm')           -- T1 substep wipe mask
   self.passPredict = newPass(self, self.src.predict, 'predict')   -- PERF-3
   self.PR = canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop prediction')
   self.REC = canvas(6 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop records')   -- PERF-9 visor candidates (rec.hlsl)
@@ -717,19 +804,32 @@ function R2:updateInputs(sim)
     local dMax = p.sprayDMaxMM or 0.8
     local Dmin = (6 * (p.shapeK or 1) / math.pi) ^ (1 / 3) * (p.minRadiusMM or 0.04)
     local vI = math.max(speedRel * (p.sprayVRelK or 0.8) * (p.hazeExpo or 0.9), 0.3)
-    local EV, Es, nV, epV, wS = 0, 0, 0, 0, 0
+    local EV, Es, Ec, Er, nV, epV, wS, EA = 0, 0, 0, 0, 0, 0, 0, 0
+    -- H3-3: with the micro-drop atlas, drawn pieces below a_max are atlas water (haze G_c), only larger ones cell drops
+    p.microSplitMM = (self.p.microOn ~= false and self.microAtlas and self:microAtlas()) and (p.microAMaxMM or 0.3) or 0
     for i = 1, 24 do
       local z = -3.5 + (i - 0.5) * 7 / 24
       local w = math.exp(-0.5 * z * z)
       local d = math.min(DnS * math.exp(sl * z), dMax)
-      local _, eK, hK = self.weather.impactKeep(d, vI, p)
+      local _, eK, hK, eS, eR = self.weather.impactKeep(d, vI, p)
       EV = EV + w * math.pi / 6 * d * d * d
-      Es, wS = Es + w * hK, wS + w
-      if d >= Dmin then nV, epV = nV + w, epV + w * eK end
+      Es, Ec, Er, wS = Es + w * hK, Ec + w * (eS or 0), Er + w * (eR or 0), wS + w
+      -- I1 (H3 spec 8l): impact lamella area, beta_max = 0.87 Re^0.2 - 0.40 Re^0.4 We^-0.5 (Roisman 2009), d in mm
+      local Re, We = 1000 * vI * d, 1000 * vI * vI * d * 1e-3 / 0.072
+      local bm = math.max(0.87 * Re ^ 0.2 - 0.40 * Re ^ 0.4 * We ^ -0.5, 1.0)
+      EA = EA + w * math.pi / 4 * (bm * d) ^ 2
+      if d >= Dmin then nV, epV = nV + w, epV + w * (eK - (eS or 0)) end
     end
     st.sprayDnMM = DnS
     st.sprayHazeShare = EV > 0 and Es / EV or 0
-    st.sprayPieceMM3 = nV > 0 and epV / nV or 0
+    st.sprayAperV = EV > 0 and EA / EV or 0                      -- I1: lamella area per mm^3 of impacting spray (/mm)
+    st.sprayCoarseShare = EV > 0 and Ec / EV or 0                -- H3-3: small drawn pieces -> atlas water G_c
+    -- H3-3b: their volume-weighted radius = the size at which coarse water ARRIVES (smoothed, ~3 s: the coat keeps its
+    -- pieces when the spray changes); coverage / size of G_c follow the cap law at max(arrival, saturation) size
+    local aIn = Ec > 0 and Er / Ec or (p.hazeAMM or 0.015)
+    local kS = 1 - math.exp(-(self.frameDt or 1 / 60) / 3.0)
+    st.coarseInRMM = (st.coarseInRMM or aIn) + (aIn - (st.coarseInRMM or aIn)) * kS
+    st.sprayPieceMM3 = nV > 0 and epV / nV or 0                   -- mean cell-drop piece (>= a_max) of a visible event
   end
   -- rev11 film supply: rain that does not stick as resolved drops + the fine road spray (all of it: 70-90 um drops are
   -- far below a cell -- they join the film / haze, the W1 sheet regime makes the 'following in spray' water sheet)
@@ -796,13 +896,13 @@ function R2:simulate(sim)
   if self.clearRequest then   -- M-REF: empty visor for repeatable replay segments (clear, no resource churn)
     self.clearRequest = false
     local z = rgbm(0, 0, 0, 0)
-    for _, k in ipairs({ 'S', 'F', 'TG', 'LM' }) do
+    for _, k in ipairs({ 'S', 'F', 'TG', 'LM', 'HZ' }) do
       for _, c in ipairs(self[k] or {}) do c:clear(z) end
     end
-    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'FS', 'SK', 'NM', 'BM', 'BG' }) do
+    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'FS', 'SK', 'NM', 'BM', 'BG' }) do
       if self[k] then self[k]:clear(z) end
     end
-    self.recValid, self.mskValid = false, false
+    self.recValid, self.mskValid, self.hzmValid = false, false, false
   end
   -- rev23 look lab (docs/RAINFX_V2_DROP_PIPELINE_PLAN.md step 1): static reference-distributed
   -- drop set, physics / births / film / haze / scatter / wobble / defocus off. Works while paused.
@@ -835,7 +935,7 @@ function R2:simulate(sim)
   -- Substeps: enough that the fastest expected drop (2 mm, forces aligned) stays in the
   -- gather window; faster than that it is speed-limited (r2Predict), not deleted.
   local P = self.physics
-  local vExp = P.speed(p, 2.0, self.inp.accelG * 9.81, self.inp.airSpeed, p.pinCoat)
+  local vExp = P.speedLegacySubsteps(p, 2.0, self.inp.accelG * 9.81, self.inp.airSpeed, p.pinCoat)   -- PHYS-UI: substeps unchanged
   p.substeps = P.substeps(p, dt, self.cellMM, userSub, vExp)
   self.frameSeed = sim.frame % 1048576
   self.h = dt / p.substeps
@@ -914,15 +1014,54 @@ function R2:simulate(sim)
     pc.textures.txR2SheetNuc = self.NM          -- rev48-W1k: drops collect isolated remnants only
     pc.textures.txR2Bead = self.BM              -- rev48-W1t
     pc.textures.txR2Lam = self.LM[self.li]      -- rev48-W1u residual drops
+    pc.textures.txR2Haze = self.HZ[self.hi]     -- H1c haze layer (HZ_prev)
     sceneValues(self, pc.values)
     if not run(self.S[3 - self.si], pc) then self.status = 'compiling cells'; return end
     self.si = 3 - self.si
+    do   -- T1 (H3 spec 8m): this substep's sweep of the haze texels, united with the earlier substeps of the frame
+      local pw = self.passWm
+      pw.textures.txR2State = self.S[self.si]
+      pw.textures.txR2Wm = self.WM[self.wmi]
+      sceneValues(self, pw.values)
+      if run(self.WM[3 - self.wmi], pw) then
+        self.wmi = 3 - self.wmi
+        self.wmValid = (i == 1) or self.wmValid
+      elseif i == 1 then
+        self.wmValid = false
+      end
+    end
   end
   do   -- rev48-R7a: big-drop tiles of the final state (visor now, claim / merge next frame)
     local pg = self.passBig
     pg.textures.txR2State = self.S[self.si]
     sceneValues(self, pg.values)
     if not p.bigOn or not run(self.BG, pg) then self.BG:clear(rgbm(0, 0, 0, 0)) end
+  end
+  do   -- H1c / H1b: haze layer on S_next (sweep, coalescence, supply); cells read HZ_prev this frame
+    -- N3: reach mask + N1 nucleus ratio first (S_next, HZ_prev: the same inputs as the haze pass / the cells event)
+    if not self.hzvValid then   -- H3-P2: static (geometry only), once per resource set
+      local pv = self.passHzv
+      sceneValues(self, pv.values)
+      self.hzvValid = run(self.HZV, pv) and true or false
+    end
+    local pm = self.passHzm
+    pm.textures.txR2HzValid = self.HZV
+    pm.textures.txR2State = self.S[self.si]
+    pm.textures.txR2Haze = self.HZ[self.hi]
+    sceneValues(self, pm.values)
+    self.hzmValid = self.hzvValid and run(self.HZM, pm)
+    if self.hzmValid then
+      local ph = self.passHaze
+      ph.textures.txR2State = self.S[self.si]
+      ph.textures.txR2Haze = self.HZ[self.hi]
+      ph.textures.txR2HzMask = self.HZM
+      ph.textures.txR2Wm = self.WM[self.wmi]          -- T1
+      ph.textures.txR2Field = self.F[self.fi]         -- S1: F_prev water layers
+      sceneValues(self, ph.values)
+      ph.values.gR2Dt = self.frameDt
+      if not self.wmValid then ph.values.gR2HazeMaskMode = 0 end   -- T1 mask not built: legacy gather
+      if run(self.HZ[3 - self.hi], ph) then self.hi = 3 - self.hi end
+    end
   end
   do
     -- rev47j: trail geometry first (reads F_prev, TG_prev); the field then still sees TG_prev, the same
@@ -1056,12 +1195,32 @@ function R2:recUpdate()
   end
 end
 
+-- H3-1: the baked atlas texture/RAINFX_MicroDrops.dds (+ .json from docs/tools/rainfx2_bake_microdrops.py: piece p50 at
+-- octave 0, tile size). Looked up once; missing -> the micro layer is off (H1 veil only).
+function R2:microAtlas()
+  if self.micro == nil then
+    local base = (self.ctx.folder or '.') .. '/texture/RAINFX_MicroDrops'
+    local js = readFile(base .. '.json')
+    if js and io.fileExists and not (io.fileExists(base .. '.dds') and io.fileExists(base .. '_Halo.dds')) then js = nil end
+    if js then
+      local function num(key, def) return tonumber(js:match('"' .. key .. '"%s*:%s*([%d%.eE%-]+)')) or def end
+      self.micro = { path = base .. '.dds', halo = base .. '_Halo.dds', tile = num('tileMM', 25.6),
+        a50 = num('pieceR_a50', 0.212),      -- area-weighted median piece radius at octave 0 (the octave reference)
+        rmax = num('pieceR_max', 0.30), q = num('rankQ', 0.5),   -- radius(rank) ~ rmax (1 - rank)^q
+        sdf = num('sdfRangeMM', 0.1), cover = num('coverage', 0.76) }
+    else
+      self.micro = false
+    end
+  end
+  return self.micro or nil
+end
+
 function R2:drawParams(depth)
   local key = depth and 'paramsDepth' or 'paramsColour'
   local t = self[key]
   if not t then
     t = { mesh = self.mesh, transform = 'original', async = true,
-      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Rec = false, txR2Msk = false, txR2Mask = self.ctx.maskPath },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9/10 10 / 13
+      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Rec = false, txR2Msk = false, txR2Mask = self.ctx.maskPath, txR2Haze = false, txR2Micro = false, txR2MicroHalo = false },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9/10 10 / 13; H1c 11 / 13; H3 12 / 13 (atlas; the N3 mask moved out: verify = G -1 in the haze pass); H3-2d 13 / 13 (halo atlas)
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
@@ -1156,6 +1315,10 @@ function R2:drawParams(depth)
   v.gR2ScatterSpray = p.scatterSpray * p.scatterK
   v.gR2ScatterMax = p.scatterMax
   v.gR2HazeK, v.gR2HazeAMM, v.gR2HazePhiMax = p.hazeK or 1.0, p.hazeAMM or 0.015, p.hazePhiMax or 0.55   -- H1 haze
+  do   -- H3: saturation depth of the finest caps (same as sceneValues) -> coarsening a_eff = hazeAMM x G / G_sat
+    local a, phi = p.hazeAMM or 0.015, math.min(p.hazePhiMax or 0.55, 0.95)
+    v.gR2HazeSatMM = -math.log(1 - phi) * (p.shapeK or 1) * a / math.pi
+  end
   v.gR2FineMaxMM = 0.01                              -- H1: G scale (same as the simulation)
   v.gR2ScatterMip = p.scatterMip
   v.gR2ScatterSky = p.scatterSky
@@ -1241,6 +1404,24 @@ function R2:draw(src, viewKey, depth)
   t.textures.txR2Lam = self.LM and self.LM[self.li] or false   -- rev48-P4 impacts on the sheet
   t.textures.txR2SheetNuc = self.NM or false                    -- rev48-W1v Debug 10
   t.textures.txR2Big = self.BG or false                         -- rev48-R7a
+  t.textures.txR2Haze = self.HZ and self.HZ[self.hi] or false   -- H1c haze layer
+  t.values.gR2HazeMaskMode = self.hzmValid and (self.p.hazeMask or 1) or 0   -- N3 verify: the haze pass writes G = -1 (red)
+  local mic = self:microAtlas()                                  -- H3 micro-drop atlas (docs/RAINFX_V2_H3_ATLAS_SPEC.md)
+  t.textures.txR2Micro = mic and mic.path or false
+  t.textures.txR2MicroHalo = mic and mic.halo or false            -- H3-2d: nearest existing piece (halo)
+  t.values.gR2MicroOn = (mic and self.p.microOn ~= false) and 1 or 0
+  t.values.gR2MicroA50MM = mic and mic.a50 or 0.212
+  t.values.gR2CoarseInRMM = math.max((self.stats and self.stats.coarseInRMM) or 0, self.p.hazeAMM or 0.015)   -- H3-3b
+  t.values.gR2MicroRMaxMM = mic and mic.rmax or 0.30
+  t.values.gR2MicroRankQ = mic and mic.q or 0.5
+  t.values.gR2MicroSdfMM = mic and mic.sdf or 0.1
+  t.values.gR2MicroTileMM = mic and mic.tile or 25.6
+  t.values.gR2MicroBias = self.p.microBias or 0                  -- octaves (debug only: H3-3 sizes come from G_c)
+  t.values.gR2MicroRefract = self.p.microRefract or 1.0
+  t.values.gR2MicroResPx = self.p.microResPx or 2.0              -- smallest piece radius drawn as a drop (px)
+  t.values.gR2MicroHaloK = self.p.microHaloK or 0.5              -- veil-free band outside a piece (x a_eff)
+  t.values.gR2MicroHaloPx = self.p.microHaloPx or 1.5            -- ... at least this many pixels (H3-2d)
+  t.values.gR2MicroBlurK = self.p.microBlurK or 0.7              -- V2: unresolved lenses drawn as blurred scene (area share)
   t.values.gR2PerfProbe = self.p.perfProbe or 0                -- PERF-6 cost probe (0 off)
   t.values.gR2TightReach = self.p.tightReach or 1              -- PERF-7 tight drop support (0 legacy | 1 on | 2 verify)
   -- PERF-9: records only if they were built from exactly the textures this draw binds (else the per-pixel path)
@@ -1353,8 +1534,34 @@ function R2:ui()
     local stt = self.stats or {}
     uiInfo(string.format('Spray median %.3f mm | haze share %.2f, drawn piece %.4f mm3 | rain haze %.4f mm/s',
       stt.sprayDnMM or 0, stt.sprayHazeShare or 0, stt.sprayPieceMM3 or 0, stt.hazeMMs or 0))
+    uiInfo(string.format('H3: spray pieces < a_max -> micro layer %.3f of the spray water, arriving r %.3f mm (cell drops >= %.2f mm)',
+      stt.sprayCoarseShare or 0, stt.coarseInRMM or 0, self.p.microSplitMM or 0))
     self.p.hazeK = ui.slider('##rfx2hzk', self.p.hazeK or 1.0, 0, 1.5, 'Haze of sub-visible micro drops (H1): %.2f')
     self.p.hazeAMM = ui.slider('##rfx2hza', self.p.hazeAMM or 0.015, 0.005, 0.04, 'Haze micro cap radius (H1): %.3f mm')
+    if ui.checkbox('Saturated haze coalesces into drops (H1b)', self.p.hazeNuc ~= false) then self.p.hazeNuc = self.p.hazeNuc == false end
+    self.p.hazeNucTau = ui.slider('##rfx2hnt', self.p.hazeNucTau or 0.3, 0.05, 3, 'Haze coalescence time (H1b): %.2f s')
+    if ui.checkbox('Coalescence on surface defect sites (N1; off = every saturated cell alike -> lattice)', self.p.hazeNucSite ~= false) then
+      self.p.hazeNucSite = self.p.hazeNucSite == false
+    end
+    self.p.haloK = ui.slider('##rfx2hlk', self.p.haloK or 0.5, 0, 1.5, 'Wipe halo: outer edge at r x (1 + %.2f) + outer offset (N2)')
+    self.p.haloInMM = ui.slider('##rfx2hli', self.p.haloInMM or 0.1, 0, 0.5, 'Wipe halo: fully clean to r + %.2f mm (N2)')
+    self.p.haloOutMM = ui.slider('##rfx2hlo', self.p.haloOutMM or 0.4, 0, 1.0, 'Wipe halo: outer offset %.2f mm (N2)')
+    local mic = self:microAtlas()
+    if ui.checkbox('Micro-drop layer (H3 atlas; off = flat H1 veil)', self.p.microOn ~= false) then self.p.microOn = self.p.microOn == false end
+    if not mic then uiInfo('H3 atlas missing: texture/RAINFX_MicroDrops.dds + .json (docs/tools/rainfx2_bake_microdrops.py)') end
+    self.p.microBias = ui.slider('##rfx2mib', self.p.microBias or 0, -3, 4, 'Micro size bias (DEBUG, 0 = physical): %.1f octaves')
+    self.p.microRefract = ui.slider('##rfx2mir', self.p.microRefract or 1.0, 0, 2, 'Micro lens slope gain: %.2f')
+    self.p.microResPx = ui.slider('##rfx2mip', self.p.microResPx or 2.0, 0.5, 4, 'Smallest micro drop drawn (radius): %.1f px')
+    self.p.microHaloK = ui.slider('##rfx2mih', self.p.microHaloK or 0.5, 0, 2, 'Micro drop wipe halo: %.2f x size')
+    self.p.microHaloPx = ui.slider('##rfx2mhp', self.p.microHaloPx or 1.5, 0, 6, 'Micro drop wipe halo, at least: %.1f px')
+    self.p.hazeCoarsenTau = ui.slider('##rfx2hct', self.p.hazeCoarsenTau or 0.5, 0.1, 5, 'Fine -> micro drops time at full coverage (E2): %.2f s')
+    self.p.hazeNucPMax = ui.slider('##rfx2hnp', self.p.hazeNucPMax or 0.02, 0.002, 0.2, 'Cell-drop births from haze, max per cell and frame: %.3f')
+    local hm = math.floor(self.p.hazeMask or 1)
+    local hmNames = { [0] = 'off (frame-end 25-record gather, A/B)', 'on (T1 substep wipe mask)' }
+    if ui.button('Haze wipe (T1): ' .. (hmNames[math.min(hm, 1)] or '?') .. '##rfx2hzm') then self.p.hazeMask = hm >= 1 and 0 or 1 end
+    self.p.hazeOverrunK = ui.slider('##rfx2hov', self.p.hazeOverrunK or 1.0, 0, 2, 'Spray lamellae gather fine caps (I1): x %.2f')
+    self.p.hazeWetMM = ui.slider('##rfx2hwm', self.p.hazeWetMM or 0.02, 0.005, 0.1, 'Water layer that absorbs haze (S1): %.3f mm')
+    self.p.microBlurK = ui.slider('##rfx2mbk', self.p.microBlurK or 0.7, 0, 1, 'Unresolved micro drops as blurred scene (V2): %.2f')
     if si and d then
       uiInfo(string.format('Spray LWC %.2f g/m3 -> %.3f mm/s on the visor, splash drops %.4f mm/s (road water %.2f, %d cars, nearest %.0f m)  film supply %.3f mm/s',
         st.spray or 0, st.sprayMMs or 0, st.splashMMs or 0, si.wet or 0, si.cars or 0, si.nearestM or -1, st.filmRate or 0))
@@ -1375,7 +1582,7 @@ function R2:ui()
     self.p.shedBeta = ui.slider('##rfx2sb', self.p.shedBeta or 0.1, 0.0, 0.35, 'Size law U_c ~ V^-beta (small drops need more air): %.2f')
     do
       local P = self.physics
-      local function kmh(r) return P.criticalU(self.p, r) / (1.5 * self.p.aeroKU * 0.707) * 3.6 end
+      local function kmh(r) return P.depinKmh(self.p, r, math.rad(45)) end   -- PHYS-UI: full shader law (BL, T1 RMS, F3)
       uiInfo(string.format('Depins at (theta 45 deg, pin 1): r0.1 %.0f  r0.2 %.0f  r0.3 %.0f  r0.5 %.0f  r1 %.0f  r2 %.0f km/h',
         kmh(0.1), kmh(0.2), kmh(0.3), kmh(0.5), kmh(1), kmh(2)))
     end
@@ -1808,18 +2015,22 @@ function R2:dispose()
   -- PERF-1 / LIFE-1: release EVERY GPU resource; each release is guarded and every field is cleared even if one
   -- fails, so a later ensureResources / ensureMesh always rebuilds from a clean state.
   local function free(c) if c then pcall(c.dispose, c) end end
-  for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {} }) do
+  for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {}, self.HZ or {} }) do
     for _, c in ipairs(list) do free(c) end
   end
-  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'HZV', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
     free(self[k]); self[k] = nil
   end
   self.sceneTex = nil
-  self.S, self.F, self.TG, self.LM, self.ready, self.opticsReady = nil, nil, nil, nil, false, false
+  self.S, self.F, self.TG, self.LM, self.HZ, self.ready, self.opticsReady = nil, nil, nil, nil, nil, false, false
   self.paramsColour, self.paramsDepth, self.passSource, self.passSeed = nil, nil, nil, nil
   self.simFrame, self.colourViewKey, self.depthViewKey = nil, nil, nil
   self.recValid, self.recS, self.recLM, self.passRec = false, nil, nil, nil   -- PERF-9
   self.mskValid, self.passMsk = false, nil   -- PERF-10
+  self.hzmValid, self.passHzm = false, nil   -- N3
+  self.hzvValid, self.passHzv = false, nil   -- H3-P2
+  if self.WM then free(self.WM[1]); free(self.WM[2]) end
+  self.WM, self.wmValid, self.passWm = nil, false, nil   -- T1
   self.drawW, self.drawH, self.sizeKey, self.sizeVotes = nil, nil, nil, 0
   self.metricsBusy, self.sizesBusy = false, false   -- a readback in flight on a disposed canvas never returns
   self.labSeeded = false
@@ -1853,7 +2064,7 @@ return function(ctx)
   local common = readFile(dir .. 'common.hlsl')
   local cand = readFile(dir .. 'cand.hlsl')   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big', 'rec', 'msk' }) do
+  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -1861,7 +2072,11 @@ return function(ctx)
   end
   if not self.err then
     self.src = {
-      cells = common .. '\n' .. src.cells,
+      cells = common .. '\n' .. src.hazenuc .. '\n' .. src.cells,
+      haze = src.wmalias .. '\n' .. common .. '\n' .. src.hazenuc .. '\n' .. src.haze,   -- T1: txR2Big slot holds the wipe mask
+      hzm = common .. '\n' .. src.hazenuc .. '\n' .. src.hzm,   -- N3
+      hzv = common .. '\n' .. src.hazenuc .. '\n' .. src.hzv,   -- H3-P2
+      wm = common .. '\n' .. src.hazenuc .. '\n' .. src.wm,     -- T1
       predict = common .. '\n' .. src.predict,
       field = common .. '\n' .. src.field,
       trail = common .. '\n' .. src.trail,

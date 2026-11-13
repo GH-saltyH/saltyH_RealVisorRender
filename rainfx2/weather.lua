@@ -100,27 +100,32 @@ function W.impactKeep(d, v, p)
   local vmin = (p.shapeK or 2.0944) * (p.minRadiusMM or 0.04) ^ 3
   local K = math.sqrt(13.8889 * v * v * d) * math.max(1000 * v * d, 1e-3) ^ 0.25
   local K0 = p.splashK0 or 58
+  -- H3-3 4th value: the drawn water in pieces SMALLER than the cell-drop threshold a_max (p.microSplitMM; 0 = none):
+  -- with the micro-drop atlas those pieces are atlas water (haze G_c), not cell drops (docs/RAINFX_V2_H3_ATLAS_SPEC.md 8g)
+  local vsp = (p.shapeK or 2.0944) * (p.microSplitMM or 0) ^ 3
   if K <= K0 then
-    if V >= vmin then return V, V, 0 end
-    return V, 0, V
+    local sm = V >= vmin and V < vsp
+    if V >= vmin then return V, V, 0, sm and V or 0, sm and V * (V / (p.shapeK or 2.0944)) ^ (1 / 3) or 0 end
+    return V, 0, V, 0, 0
   end
   local kr = K0 / K
   local st = kr ^ (p.resA or 0.5) * V
   local dr = d * kr ^ (p.resB or 0.4)
   local vhz = (p.shapeK or 2.0944) * (p.hazeRMaxMM or 0.08) ^ 3
-  local q, e, eh = fragQ(p), 0, 0
+  local q, e, eh, es, er = fragQ(p), 0, 0, 0, 0
   for i = 1, 8 do
     local dc = dr * q[i]
     local vp = math.min(math.pi / 6 * dc * dc * dc, st)
     if vp >= vmin then
       e = e + vp
       if vp < vhz then eh = eh + vp end
+      if vp < vsp then es = es + vp; er = er + vp * (vp / (p.shapeK or 2.0944)) ^ (1 / 3) end
     end
   end
   local a = math.max(p.fragA or 0.88, 0.05)
   local xHz = (6 * vhz / math.pi) ^ (1 / 3) / math.max(dr, 1e-6)
   local fm = (math.min(math.max(xHz, q.lo), q.hi) ^ (3 - a) - q.l3) / math.max(q.h3 - q.l3, 1e-12)
-  return st, e / 8, math.max(st * math.min(math.max(fm, 0), 1) - eh / 8, 0)
+  return st, e / 8, math.max(st * math.min(math.max(fm, 0), 1) - eh / 8, 0), es / 8, er / 8   -- er: sum vp r over the small pieces
 end
 
 function W.supply(R, speedRel, p, out)

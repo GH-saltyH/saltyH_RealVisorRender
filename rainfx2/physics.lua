@@ -39,7 +39,7 @@ P.DEFAULTS = {
   -- shielding), helmet radius, stagnation point elevation above the visor centre (deg, + = above ->
   -- flow over the visor runs down and out), buffeting wander of the stagnation point (deg at 250 km/h)
   aeroKU = 0.8, helmetR = 0.13,   -- rev47c 0.35 compensated the 18x drag (Cd 1); F1 0.5; F1b 0.8 (F1 review: at 0.5 the air-only critical radius was 0.6-1.2 mm at 200-250 km/h (sin theta, BL, pin spread), few drops ran) -> 1.15 mm @100, 0.44 @200, 0.34 @250 km/h (theta 45) = reference S1 / S2
-  stagElevDeg = 35.0, buffetDeg = 4.0, buffetHz = 1.5,   -- rev47b 8/3 -> 4/1.5; rev48-M1 stagnation 12 -> 35 deg (MOTION_REVIEW s7)
+  stagElevDeg = 24.0, buffetDeg = 4.0, buffetHz = 1.5,   -- 2026-11-07 user fix 24 deg (reference diagonal flow, SPRAY_RAIN_REF s23); rev48-M1 35; rev47b buffet 4/1.5
   turbI = 0.15, turbHz = 4.0, turbMM = 15.0,   -- T1 (2026-11-06): cockpit turbulence u' = turbI kU U, frozen eddies turbMM drifting at turbHz (SPRAY_RAIN_REF s15)
   -- rev47b runback: drops blown loose slide with the air (speed runbackK x air at the drop top, between
   -- vMax and runbackMax), lift off only above liftMM; sliding inertia slideTau; impact splash share
@@ -150,8 +150,8 @@ end
 -- rev47 helmet aerodynamics (docs/RAINFX_V2_REV46_REVIEW.md section 3, docs/tools/rainfx2_helmet_aero.py):
 -- helmet ~ sphere R_h; outer flow u_e = 1.5 kU U sin(theta) away from the stagnation point; laminar
 -- stagnation boundary layer delta = 2.4 sqrt(nu / a), a = 1.5 kU U / R_h; the drop top (0.6 r) sees
--- u_e f(0.6 r / delta), f = x (2 - x) below 1; pressure gradient V rho u_e du_e/ds pushes outward.
--- Mirrored by common.hlsl r2DropVelocity.
+-- u_e f(0.6 r / delta), f = x (2 - x) below 1; pressure gradient V rho u_e du_e/ds pushes outward (F3).
+-- Mirrored by common.hlsl r2DropVelocity (PHYS-UI below).
 P.NU_AIR = 1.5e-5
 function P.aeroScales(p, U)
   local ue = 1.5 * p.aeroKU * U
@@ -168,13 +168,46 @@ function P.airLoad(p, rMM, u)
   local Uc = P.criticalU(p, rMM)
   return p.surfaceTension * 2 * rMM * 1e-3 * p.pinCoat * (u / Uc) ^ 2
 end
+-- PHYS-UI (2026-11-07, SPRAY_RAIN_REF s24): the UI / substep diagnostics follow the shader law (common.hlsl r2DropVelocity):
+-- air load = coat pinning x (u / U_c(V))^2 with u^2 = u_e^2 + u'^2 (T1 RMS), x the boundary-layer growth factor (F2a,
+-- R2_BLT, calibrated at 45 deg), + the stagnation pressure gradient (F3); the sliding speed solves the dynamic retention
+-- (F2b). Before, P.forces used the legacy surface air (relative air x airSurface 0.15) and no F2 / F3 / T1.
+local BLT = { 1.0, 0.733, 0.766, 0.826, 0.928, 1.10, 1.42, 2.49 }   -- = common.hlsl R2_BLT
+local function blDeltaRatio(thetaRad)
+  local x = math.min(math.max(math.deg(thetaRad) / 15, 0), 6.999)
+  local i = math.floor(x)
+  return BLT[i + 1] + (BLT[i + 2] - BLT[i + 1]) * (x - i)
+end
+local function blProfile(x) return x < 1 and x * (2 - x) or 1 end
+function P.blLoad(p, rMM, U, thetaRad)
+  if p.blGrowth == false then return 1 end
+  local _, _, delta = P.aeroScales(p, U)
+  local q = blProfile(0.6 * rMM / math.max(delta * blDeltaRatio(thetaRad), 1e-3)) / math.max(blProfile(0.6 * rMM / math.max(delta * 0.826, 1e-3)), 1e-4)
+  return q * q
+end
+-- air force on a drop at theta from the stagnation point (N): drag (BL, T1 RMS) + pressure gradient
 function P.aeroForces(p, rMM, U, thetaRad, pinCos)
   local r = rMM * 1e-3
-  local ue0, a, delta = P.aeroScales(p, U)
-  local ue = ue0 * math.sin(thetaRad)
-  local Fd = P.airLoad(p, rMM, ue)   -- rev48-F4 size law (common.hlsl r2DropVelocity)
-  local Fp = 0   -- F5: pressure-gradient push removed (inside U_c(V))
+  local ue0, a = P.aeroScales(p, U)
+  local s, c = math.sin(thetaRad), math.cos(thetaRad)
+  local w = math.min(math.max((c + 0.1) / 0.3, 0), 1); w = w * w * (3 - 2 * w)      -- windward weight (smoothstep -0.1..0.2)
+  local ue = ue0 * s * w
+  local ut = (p.turbI or 0.15) * ue0 / 1.5 * 1.0 * w                                  -- T1 RMS (unit-RMS noise)
+  local Fd = P.airLoad(p, rMM, math.sqrt(ue * ue + ut * ut)) * P.blLoad(p, rMM, U, thetaRad)
+  local Fp = 0
+  if (p.pgradK or 1) > 0 and c > 0 then
+    Fp = (p.pgradK or 1) * p.shapeK * rMM ^ 3 * 1e-9 * (p.rhoAir or 1.2) * ue0 * a * s * c * w   -- F3
+  end
   return Fd + Fp, p.surfaceTension * 2 * r * pinCos
+end
+-- the largest air force over the windward face (the worst case of P.forces / substeps)
+function P.airMax(p, rMM, U)
+  local best = 0
+  for deg = 0, 90, 5 do
+    local F = P.aeroForces(p, rMM, U, math.rad(deg), 0)
+    if F > best then best = F end
+  end
+  return best
 end
 -- Smallest radius (mm) swept by the air alone at angle theta from the stagnation point.
 function P.aeroCritical(p, U, thetaRad, pinCos)
@@ -188,31 +221,72 @@ function P.aeroCritical(p, U, thetaRad, pinCos)
   end
   return hi
 end
+-- Car speed (km/h) at which a drop of radius rMM depins on the air alone at theta (pin factor 1)
+function P.depinKmh(p, rMM, thetaRad)
+  local function moves(U) local F, Fp = P.aeroForces(p, rMM, U, thetaRad, p.pinCoat); return F > Fp end
+  local lo, hi = 0.5, 150
+  if not moves(hi) then return math.huge end
+  for _ = 1, 40 do
+    local m = 0.5 * (lo + hi)
+    if moves(m) then hi = m else lo = m end
+  end
+  return hi * 3.6
+end
 
--- Forces for one drop radius (mm) on a surface whose tangential gravity and air
--- are the full magnitudes (worst case, = vertical surface facing the air stream).
-function P.forces(p, rMM, gTan, airTan, pinCos, noise)
+-- Forces for one drop radius (mm): full tangential gravity gTan and the worst windward air of the helmet at relative
+-- air speed U (m/s) -- the upper bound used by the substep count and the UI.
+function P.forces(p, rMM, gTan, U, pinCos, noise)
   local r = rMM * 1e-3
   local mass = 1e-6 * p.shapeK * rMM * rMM * rMM
   local Fg = mass * gTan
-  local u = airTan * p.airSurface
-  local Fa = P.airLoad(p, rMM, u)
+  local Fa = (U and U > 0) and P.airMax(p, rMM, U) or 0
   local Fpin = p.surfaceTension * 2 * r * pinCos * (noise or 1)
   return Fg, Fa, Fpin
 end
 
--- Quasi-steady speed (m/s) with the forces aligned (upper bound).
-function P.speed(p, rMM, gTan, airTan, pinCos)
-  local Fg, Fa, Fpin = P.forces(p, rMM, gTan, airTan, pinCos)
+-- F2b dynamic retention / (2 gamma r) at speed v (= common.hlsl r2DynRetUnit)
+local function dynRetUnit(p, v, rMM)
+  local K = 9 * math.log(math.max(rMM * 1e6, 10))
+  local ca = v / 72
+  local thr = math.rad(p.trailThetaRDeg or 28)
+  local tha = math.acos(math.min(math.max(math.cos(thr) - p.pinCoat, -1), 1))
+  local tr3 = thr ^ 3 - K * ca
+  local thrD = tr3 > 0 and tr3 ^ (1 / 3) or 0
+  local thaD = math.min((tha ^ 3 + K * ca) ^ (1 / 3), 3)
+  return (math.cos(thrD) - math.cos(thr)) + (math.cos(tha) - math.cos(thaD))
+end
+-- Quasi-steady speed (m/s) with the forces aligned (upper bound); friction law + dynamic retention (bisection)
+function P.speed(p, rMM, gTan, U, pinCos)
+  local Fg, Fa, Fpin = P.forces(p, rMM, gTan, U, pinCos)
   local F = Fg + Fa
   if F <= Fpin then return 0 end
-  return (F - Fpin) / (p.friction * rMM * 1e-3)   -- rev48-R6: the force balance (no display cap / shed sentinel)
+  local fr = p.friction * rMM * 1e-3
+  local v = (F - Fpin) / fr
+  if p.dynRet ~= false then
+    local lo, hi, kR = 0, v, p.surfaceTension * 2 * rMM * 1e-3
+    for _ = 1, 20 do
+      local m = 0.5 * (lo + hi)
+      if (F - Fpin - kR * dynRetUnit(p, m, rMM)) / fr > m then lo = m else hi = m end
+    end
+    v = lo
+  end
+  return v
+end
+
+-- Legacy estimate kept ONLY for the auto substep count (init.lua): the surface air = relative air x airSurface. The shader
+-- law (P.speed) would raise the auto substeps at speed (2-4x cells cost) -- a performance change to decide on its own.
+function P.speedLegacySubsteps(p, rMM, gTan, airTan, pinCos)
+  local Fa = P.airLoad(p, rMM, airTan * p.airSurface)
+  local F = 1e-6 * p.shapeK * rMM ^ 3 * gTan + Fa
+  local Fpin = p.surfaceTension * 2 * rMM * 1e-3 * pinCos
+  if F <= Fpin then return 0 end
+  return (F - Fpin) / (p.friction * rMM * 1e-3)
 end
 
 -- Smallest radius (mm) that moves, by bisection on F(r) - Fpin(r) (monotone in r).
-function P.criticalRadius(p, gTan, airTan, pinCos)
+function P.criticalRadius(p, gTan, U, pinCos)
   local lo, hi = 0.02, 6.0
-  local function moves(r) local Fg, Fa, Fpin = P.forces(p, r, gTan, airTan, pinCos); return Fg + Fa > Fpin end
+  local function moves(r) local Fg, Fa, Fpin = P.forces(p, r, gTan, U, pinCos); return Fg + Fa > Fpin end
   if not moves(hi) then return math.huge end
   if moves(lo) then return lo end
   for _ = 1, 40 do

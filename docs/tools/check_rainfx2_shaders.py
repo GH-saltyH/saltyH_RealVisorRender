@@ -20,7 +20,7 @@ DLL = os.path.join(ROOT, 'lights-patch-v0.3.0-preview728', 'dwrite.dll')
 SRC = os.path.join(ROOT, 'rainfx2', 'shaders')
 OUT = os.path.join(ROOT, 'tmp', 'rainfx2_shaders')
 
-FLOAT2 = {'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
+FLOAT2 = {'gR2MeanderScale', 'gR2Cells', 'gR2FieldSize', 'gR2HazeSize', 'gR2CellSizeMM', 'gR2InvRT', 'gR2TexMM', 'gR2ScreenUp'}
 FLOAT3 = {'gR2AccelW', 'gR2AirW', 'gR2RainDirW', 'gR2VeilColor', 'gR2CamPos', 'gR2CamLook', 'gR2CamSide', 'gR2CamUp'}
 MATRIX = {'gR2ObjToWorld'}
 
@@ -47,13 +47,21 @@ def init_textures(anchor):
 
 
 SCENE_TEXTURES = init_textures('local function newPass(self, shader')
+HAZE_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2Haze']   # H1c: cells / hzm (newPass haze = true)
+HAZEPASS_TEXTURES = [t for t in HAZE_TEXTURES if t not in ('txR2Pred', 'txR2Big')] + ['txR2HzMask', 'txR2Wm']   # N3 / T1: haze pass ('mask')
+HZM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2HzValid']   # H3-P2: hzm (newPass haze = 'hzm')
+WM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2Wm']   # T1: substep wipe mask (newPass haze = 'wm')
 VISOR_TEXTURES = init_textures('function R2:drawParams(depth)')
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 REC_TEXTURES = init_textures('function R2:recUpdate()')   # PERF-9 drop records (own table)
 MSK_TEXTURES = init_textures('  if self.recValid and self.MSK')   # PERF-10 candidate mask (own table)
 
 PASSES = [  # name, template, files, textures, defines
-    ('cells', 'ui.fx', ['common.hlsl', 'cells.hlsl'], SCENE_TEXTURES, ''),
+    ('cells', 'ui.fx', ['common.hlsl', 'hazenuc.hlsl', 'cells.hlsl'], HAZE_TEXTURES, ''),
+    ('haze', 'ui.fx', ['wmalias.hlsl', 'common.hlsl', 'hazenuc.hlsl', 'haze.hlsl'], HAZEPASS_TEXTURES, ''),
+    ('hzm', 'ui.fx', ['common.hlsl', 'hazenuc.hlsl', 'hzm.hlsl'], HZM_TEXTURES, ''),
+    ('wm', 'ui.fx', ['common.hlsl', 'hazenuc.hlsl', 'wm.hlsl'], WM_TEXTURES, ''),
+    ('hzv', 'ui.fx', ['common.hlsl', 'hazenuc.hlsl', 'hzv.hlsl'], HAZE_TEXTURES, ''),
     ('predict', 'ui.fx', ['common.hlsl', 'predict.hlsl'], SCENE_TEXTURES, ''),
     ('claim', 'ui.fx', ['common.hlsl', 'claim.hlsl'], SCENE_TEXTURES, ''),
     ('merge', 'ui.fx', ['common.hlsl', 'merge.hlsl'], SCENE_TEXTURES, ''),
@@ -114,6 +122,13 @@ def lua_assigned(*anchors):
 # PERF-9: a gR2 value a shader reads but its Lua table never sets is silently 0 in game (no compile error).
 # pass -> the Lua functions that fill that pass's values table
 VALUE_SOURCES = {
+    # H3-3 (2026-11-13): a sim value read but not set (gR2HazeAMM in haze.hlsl) failed only in game -> sim passes checked too
+    'cells': ('local function sceneValuesImpl(self, v)',),
+    'haze': ('local function sceneValuesImpl(self, v)',),
+    'hzm': ('local function sceneValuesImpl(self, v)',),
+    'hzv': ('local function sceneValuesImpl(self, v)',),
+    'wm': ('local function sceneValuesImpl(self, v)',),
+    'field': ('local function sceneValuesImpl(self, v)',),
     'rec': ('local function candValues(self, v)',),
     'msk': ('local function candValues(self, v)',),
     'visor': ('local function candValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
@@ -195,7 +210,7 @@ def main():
             code = re.sub(r'//[^\n]*', '', ''.join(open(os.path.join(SRC, f), encoding='utf-8').read() for f in files))
             used = set(re.findall(r'\bgR2[A-Za-z0-9]+\b', code))
             have = lua_assigned(*VALUE_SOURCES[name])
-            have |= {'gR2DQ%d' % i for i in range(16)} if 'function R2:drawParams(depth)' in VALUE_SOURCES[name] else set()
+            have |= {'gR2DQ%d' % i for i in range(16)}   # set through DQ_NAMES (sceneValues) / drawParams
             missing = sorted(used - have)
             if missing:
                 print('%-12s FAILED  values read but never set in init.lua: %s' % (name, ', '.join(missing)))

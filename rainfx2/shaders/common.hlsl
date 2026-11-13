@@ -1363,19 +1363,30 @@ float r2SegDist(float2 p, float2 a, float2 b) {
 // sub-samples at +-1/4 texel (an unbiased estimate of the covered area). The cells pass (the drop takes up the haze
 // water G under it) and the field pass (G removed there) evaluate THIS function with the same S_next geometry, so the
 // water a drop gains is the water the field loses (rev S1b took / cleared a whole 1.16 mm cell: blocky wipes).
-float r2SweepFrac(int2 f, float2 b, float2 mv, float rmm) {
-    float2 tc = (float2(f) + 0.5) / gR2FieldSize * gR2Cells;
-    float2 q = 0.25 * gR2Cells / gR2FieldSize;
+// N2 WIPE HALO (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 27): a drop takes up the micro drops a little beyond its visible
+// rim -- the depletion zone around a large drop of a breath figure (micro drops touching its rim or the meniscus foot coalesce
+// at once) and the wobbling / bulging contact line of a moving drop. Weight 1 up to r + haloIn, smoothly to 0 at
+// r (1 + haloK) + haloOut. haloK = haloIn = haloOut = 0 gives the former binary disc (1 um ramp).
+float r2HaloIn(float rmm) { return rmm + gR2HaloInMM; }
+float r2HaloOut(float rmm) { return max(rmm * (1.0 + gR2HaloK) + gR2HaloOutMM, r2HaloIn(rmm) + 1e-3); }
+float r2SweepFrac(int2 f, float2 gridSize, float2 b, float2 mv, float rmm) {   // H1c: grid = the haze texture size
+    float2 tc = (float2(f) + 0.5) / gridSize * gR2Cells;
+    float2 q = 0.25 * gR2Cells / gridSize;
     float2 aMM = (b - mv) * gR2CellSizeMM, bMM = b * gR2CellSizeMM;
-    // exact early outs: every sub-sample lies within |q| (mm) of the texel centre
+    float rIn = r2HaloIn(rmm), rOut = r2HaloOut(rmm);
+    // exact early outs: every sub-sample lies within |q| (mm) of the texel centre (N3 hzm.hlsl uses the same bound)
     float qL = length(q * gR2CellSizeMM);
     float d0 = r2SegDist(tc * gR2CellSizeMM, aMM, bMM);
-    if (d0 - qL > rmm) return 0.0;
-    if (d0 + qL <= rmm) return 1.0;
+    if (d0 - qL >= rOut) return 0.0;
+    if (d0 + qL <= rIn) return 1.0;
+    // H3-P1 (2026-11-13: the N2 halo widened the ramp where all 4 sub-samples ran -> haze pass 0.25-0.30 ms with many
+    // resting drops): a ramp wider than 4 sub-sample spreads is smooth across the texel -> its centre value is the
+    // average to < 1 %. The same function serves cells (take-up) and haze (removal): mass stays consistent.
+    if (rOut - rIn > 4.0 * qL) return 1.0 - smoothstep(rIn, rOut, d0);
     float n = 0;
     [unroll] for (int j = 0; j < 4; ++j) {
         float2 o = float2((j & 1) != 0 ? 1.0 : -1.0, (j & 2) != 0 ? 1.0 : -1.0);
-        n += r2SegDist((tc + o * q) * gR2CellSizeMM, aMM, bMM) <= rmm ? 1.0 : 0.0;
+        n += 1.0 - smoothstep(rIn, rOut, r2SegDist((tc + o * q) * gR2CellSizeMM, aMM, bMM));
     }
     return 0.25 * n;
 }

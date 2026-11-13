@@ -4,10 +4,7 @@
 // Output w = volume-weighted displacement of this step (cells), packed by r2PackMove,
 // so the field pass can draw the swept segment without re-running r2Predict.
 
-// rev40: inverse CDF of the fragment size law, X = (lo^-a + u (hi^-a - lo^-a))^(-1/a).
-float r2FragX(float u) {
-    return exp2(log2(max(lerp(gR2FragLoP, gR2FragHiP, u), 1e-6)) * gR2FragInvA);
-}
+// rev40 r2FragX (fragment size law) lives in hazenuc.hlsl (included before this file; N1 uses it too)
 
 float4 main(PS_IN pin) {
     // rev45: the target is twice the cell width; the second third writes the life cycle L of the same
@@ -302,6 +299,7 @@ float4 main(PS_IN pin) {
     // = SpeedRel x sprayVRelK x exposure): it keeps at most its stuck share fRes (resA) and the piece left is d (K0/K)^resB X
     // (one fragment law). A piece below the drawn size is haze (Lua puts its expectation into G); the splashed rest leaves.
     // H1: the haze G a drop takes up is the water under its swept contact disc (r2SweepFrac, same function as the field).
+    // N2: + the wipe halo; N3: texels below gR2HazeMinMM are skipped here AND in the haze pass (same set).
     if (gR2Sub > gR2SubN - 0.5 && r2Valid(t) > 0.5) {
         float lamS = gR2SprayFineOn > 0.5 ? gR2SprayVisRate * r2Exposure(t) * gR2Exposure * gR2CellSizeMM.x * gR2CellSizeMM.y * gR2SimDt : 0.0;
         uint ks = (uint)gR2Frame * 8u + 9301u;
@@ -318,7 +316,7 @@ float4 main(PS_IN pin) {
                 float dC = dS * pow(abs(krS), gR2ResB) * r2FragX(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 6u)));   // FXC X3571
                 vS = min(0.5235988 * dC * dC * dC, pow(abs(krS), gR2ResA) * vS);
             }
-            if (r2RadiusMM(vS) >= gR2MinRadiusMM) {
+            if (r2RadiusMM(vS) >= max(gR2MinRadiusMM, gR2MicroSplitMM)) {   // H3-3: smaller pieces are atlas water (haze G_c)
                 float2 pE = float2(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 2u)), r2Rand(uint3((uint)c.y, (uint)c.x, ks + 3u)));
                 if (accV > 0) {
                     p = (p * accV + pE * vS) / (accV + vS);                           // coalescence: the centre moves
@@ -333,24 +331,63 @@ float4 main(PS_IN pin) {
                 }
             }
         }
-        if (accV > 0) {
-            // H1: haze under the drop's swept disc this frame (field texels of the 5x5-cell window the field gathers from)
+        // H1b / N1: haze above the breath-figure saturation coalesces into a drawn drop on a defect site (hazenuc.hlsl;
+        // the haze pass removes the same water through the hzm ratio). Before the take-up below: a drop born here sweeps
+        // its disc in the haze pass this frame (S_next) and so takes up the same water here.
+        {
+            float4 nz = r2HazeNucleus(c);
+            float vB = nz.x;
+            if (vB > 0.0) {
+                uint kn = (uint)gR2Frame * 8u + 9611u;
+                float2 pN = nz.zw;
+                if (accV > 0) {
+                    p = (p * accV + pN * vB) / (accV + vB);
+                    accV += vB;
+                } else {
+                    accV = vB;
+                    p = pN;
+                    seed = floor(r2Rand(uint3((uint)c.x, (uint)c.y, kn + 2u)) * R2_SEEDS);
+                    shape = r2ShapeBirth(uint2(c), kn + 3u, r2RadiusMM(vB), t, wetB);
+                    disp = float2(0, 0);
+                    life = float4(0, 0, 0, -4.0);                                     // grows in; -4 = haze coalescence (marker)
+                }
+            }
+        }
+        if (accV > 0 && third == 0) {                                                // N2b: only the drop third needs vG
+            // H1c: haze under the drop's swept disc this frame, on the haze grid (2x field) -- the texels of the 5x5-cell
+            // window the haze pass gathers from; the haze pass removes the same water (r2SweepFrac, same S_next geometry)
             float2 bC = float2(c) + min(saturate(p), 0.9995);
             float2 mvC = r2UnpackMove(r2PackMove(disp, seed));
             float rS = r2RadiusMM(accV);
-            float2 texC = gR2FieldSize / gR2Cells;                                    // texels per cell
-            float2 lo = (min(bC, bC - mvC) - rS / gR2CellSizeMM) * texC;
-            float2 hi = (max(bC, bC - mvC) + rS / gR2CellSizeMM) * texC;
+            float2 texC = gR2HazeSize / gR2Cells;                                     // haze texels per cell
+            float rH = r2HaloOut(rS);                                                 // N2: the wipe halo reach
+            float2 lo = (min(bC, bC - mvC) - rH / gR2CellSizeMM) * texC;
+            float2 hi = (max(bC, bC - mvC) + rH / gR2CellSizeMM) * texC;
             int2 f0 = max(int2(floor(lo)), max((c - 2) * int2(texC), int2(0, 0)));
-            int2 f1 = min(int2(floor(hi)), min((c + 3) * int2(texC) - 1, int2(gR2FieldSize) - 1));
+            int2 f1 = min(int2(floor(hi)), min((c + 3) * int2(texC) - 1, int2(gR2HazeSize) - 1));
             float2 texMM2 = gR2CellSizeMM / texC;
             float vG = 0;
             [loop] for (int fy = f0.y; fy <= f1.y; ++fy) {
                 [loop] for (int fx = f0.x; fx <= f1.x; ++fx) {
-                    float g = txR2Field.Load(int3(fx, fy, 0)).g;
-                    if (g > 0) vG += g * r2SweepFrac(int2(fx, fy), bC, mvC, rS);
+                    float2 g2 = max(txR2Haze.Load(int3(fx, fy, 0)).rg, 0.0);   // H3-3: fine + coarse
+                    float g = g2.x + g2.y;
+                    if (g * gR2FineMaxMM > gR2HazeMinMM) vG += g * r2SweepFrac(int2(fx, fy), gR2HazeSize, bC, mvC, rS);
                 }
             }
+            // T1 (H3 spec 8m): the haze pass removes the WHOLE path (substep wipe mask); this window sees only the part of a
+            // long path within +-2 cells -> scale by (full / seen) swept length (mass of the haze water, << the drop)
+            float2 wLo = float2(c - 2), wHi = float2(c + 3);
+            float2 pA = bC - mvC, dAB = mvC;
+            float u0 = 0.0, u1 = 1.0;
+            [unroll] for (int ax = 0; ax < 2; ++ax) {
+                if (abs(dAB[ax]) > 1e-6) {
+                    float v0 = (wLo[ax] - pA[ax]) / dAB[ax], v1 = (wHi[ax] - pA[ax]) / dAB[ax];
+                    u0 = max(u0, min(v0, v1)); u1 = min(u1, max(v0, v1));
+                }
+            }
+            float lenF = length(mvC * gR2CellSizeMM);
+            float lenIn = max(u1 - u0, 0.0) * lenF;
+            vG *= (lenF + 2.0 * rH) / max(lenIn + 2.0 * rH, 1e-4);
             accV += vG * gR2FineMaxMM * texMM2.x * texMM2.y;                          // micro droplets join the drop
         }
     }

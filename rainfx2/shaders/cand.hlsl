@@ -92,6 +92,7 @@ bool r2CandCore(int2 s, out R2Cand c, out float rLeg, out bool win) {
     if (abs(L.w + 8.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 1.0;   // SP1: spray impact birth < 0.3 s (magenta, as rain)
     if (abs(L.w + 3.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 4.0;   // FW1 review: born from field water, no impact (green)
     if (abs(L.w + 2.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 5.0;   // PL1 review: born from trail water (pearl, blue)
+    if (abs(L.w + 4.0) < 0.5 && L.y <= 0 && L.x < 0.3) c.imp = 6.0;   // H1b: haze coalescence birth (white)
     float thN = (L.w + 5.0) * 31.4159265;                          // direction to the parent at the split
     c.nk = float2(cos(thN), sin(thN));
     float vis = (splat || child) ? 1.0 : lerp(0.35, 1.0, smoothstep(0.0, max(gR2GrowTime, 1e-3), L.x));

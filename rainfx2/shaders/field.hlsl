@@ -43,7 +43,6 @@ float4 main(PS_IN pin) {
     R2TrailHit tr = r2TrailNone();   // rev47j: rivulet left this frame (centre-line depth)
     float texMM = 0.5 * (gR2CellSizeMM.x * gR2Cells.x / gR2FieldSize.x + gR2CellSizeMM.y * gR2Cells.y / gR2FieldSize.y);
     float sheetAdd = 0;                // rev48-W1: water handed to the sheet by drops on it (mm)
-    float sweepG = 0;                  // H1: share of this texel swept by drops this frame (haze G taken up, r2SweepFrac)
     float2 texMM2 = gR2CellSizeMM * gR2Cells / gR2FieldSize;
     float2 pMM = pc * gR2CellSizeMM;
     // rev48-W1j IMPACT LAMELLAE (W1i review: real sheets form from impacts all over the exposed face, overlapping before
@@ -84,7 +83,6 @@ float4 main(PS_IN pin) {
             float4 st = txR2State.Load(int3(s, 0));
             if (st.z <= 0) continue;
             float2 b = float2(s) + st.xy;
-            if (F.g > 0) sweepG += r2SweepFrac(f, b, r2UnpackMove(st.w), r2RadiusMM(st.z));
             // rev48-W1: absorption into the sheet as the drop's own cap profile (same rule as merge.hlsl)
             if (gR2SheetOn > 0.5) {
                 int2 fb = r2FieldTexelAt(b);
@@ -137,20 +135,8 @@ float4 main(PS_IN pin) {
             }
         }
     }
-    // H1 HAZE G (docs/RAINFX_V2_SPRAY_RAIN_REF.md section 17): sub-visible micro droplets on the coat, mm of water / gR2FineMaxMM.
-    // Supply = the expected sub-visible stuck share of every impact (rain: weather.lua hazeMMs; spray: SP1 + the droplets
-    // below the drawn size, init.lua) x exposure, + the expected water of the 2nd, 3rd ... visible spray droplet of a cell
-    // in one frame (cells takes one event per frame). Loss = evaporation of the micro caps, and the water under the discs
-    // that drops swept this frame (sweepG, the same r2SweepFrac the cells pass used to give it to those drops).
-    // (S1b cleared the whole 1.16 mm cell of any drop -- blocky wipes.)
-    {
-        float gMM = F.g * gR2FineMaxMM * (1.0 - saturate(sweepG));
-        float cellA = gR2CellSizeMM.x * gR2CellSizeMM.y;
-        float lamS = gR2SprayVisRate * exposure * cellA * gR2Dt;
-        gMM = gMM * exp(-gR2FineEvapK * gR2Dt) + (gR2SprayFineMMs + gR2RainHazeMMs) * exposure * gR2Dt
-            + max(lamS - (1.0 - exp(-lamS)), 0.0) * gR2SprayVisVolMM3 / cellA;
-        M = gMM / max(gR2FineMaxMM, 1e-6);
-    }
+    // H1c (section 25): the haze lives in its own 2x-resolution layer (haze.hlsl); field G stays 0.
+    M = 0.0;
     // rev47 T-LAYER (docs/RAINFX_V2_REV46_REVIEW.md section 1): R = trail water depth / trailMaxMM.
     // rev45-46 put it into the film W, whose 5-tap diffusion (0.6 / frame) spread a one-texel trail below
     // the visible threshold in 2-3 frames. Trail water on the hydrophobic coat stays pinned: no diffusion,
@@ -195,6 +181,10 @@ float4 main(PS_IN pin) {
         // U1: rain on a connected sheet outside the fed regime joins it (expectation; cells bears no drop there)
         if (!r2ImpactFilm(t) && F.b * gR2FilmMaxMM >= hcHere && r2SheetConnected(r2SheetNucAt(c0)))
             W += (gR2SheetResMMs + gR2FilmRate) * exposure * gR2Dt / gR2FilmMaxMM;
+        // S1 (H3 spec 8m): the sub-visible spray / rain fragments (haze supply) landing on a water layer join it -- the haze
+        // pass drops its G there under the same test (F_prev): mass kept in the water, not in a veil under the sheet
+        if (F.b * gR2FilmMaxMM + F.r * gR2TrailMaxMM >= gR2HazeWetMM || r2WetTx(txR2Field, t))
+            W += (gR2SprayFineMMs + gR2RainHazeMMs + gR2SprayCoarseMMs) * exposure * gR2Dt / gR2FilmMaxMM;
         // rev48-W1c (W1b review: at rest the visor filled with dense, equal medium drops): thin film below the
         // sheet threshold is spread micro water, not a coherent patch -- rev11-47 smoothed it every frame
         // (filmDiffuse 0.6); without that each splash deposit stayed a blob, crossed the bead threshold and
