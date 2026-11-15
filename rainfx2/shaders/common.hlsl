@@ -359,7 +359,7 @@ float2 r2Steer(float2 t, float2 vt, float drive, float2 defSteer) {
     float2 vm = vt * texMM;                                   // mm/s on the visor
     float sp = length(vm);
     float2 res = vt;
-    if (sp > 1e-3 && (gR2TrailFollow > 0 || gR2DefK > 0 || gR2SheetOn > 0.5)) {   // C-clean: meander (rev21) removed
+    if (sp > 1e-3 && (gR2TrailFollow > 0 || gR2DefK > 0 || gR2FilmOn > 0.5)) {   // C-clean: meander (rev21) removed
         float2 dir = vm / sp;
         float2 side = float2(-dir.y, dir.x);
         float2 ahead = t + dir * (1.5 / texMM);
@@ -369,7 +369,7 @@ float2 r2Steer(float2 t, float2 vt, float drive, float2 defSteer) {
         // drop turns toward the thicker sheet / film beside its path -- drainage gathers into the existing flows
         float bl = txR2Field.SampleLevel(samLinearClamp, ahead + side * (2.0 / texMM), 0).b;
         float br = txR2Field.SampleLevel(samLinearClamp, ahead - side * (2.0 / texMM), 0).b;
-        float wf = gR2SheetOn > 0.5 ? gR2SheetFollowK * (bl - br) * gR2FilmMaxMM / 0.1 : 0.0;
+        float wf = gR2FilmOn > 0.5 ? gR2FilmFollowK * (bl - br) * gR2FilmMaxMM / 0.1 : 0.0;
         float lat = clamp((dot(defSteer, side) + gR2TrailFollow * (tl - tr) + wf) * saturate(drive), -0.5, 0.5);
         res = normalize(dir + side * lat) * sp / texMM;
     }
@@ -575,7 +575,7 @@ float4 r2ImpactGeom(float2 t) {
 // receding angle drives the receding line more weakly (Cox-Voinov ~ theta^3 -> x (50 / theta_r)^1.5).
 float r2SplatTau(float rmm) {
     float tc = sqrt(1000.0 * pow(max(rmm, 0.05) * 1e-3, 3.0) / 0.072);
-    return clamp(gR2ShpRecoilC * tc * pow(50.0 / clamp(gR2SheetRecedeDeg, 15.0, 100.0), 1.5), 0.004, 0.3);
+    return clamp(gR2ShpRecoilC * tc * pow(50.0 / clamp(gR2FilmRecedeDeg, 15.0, 100.0), 1.5), 0.004, 0.3);
 }
 // The residual's downstream travel over the recoil (mm): an oblique lamella carries its mass in the downstream rim
 // (Vt stretched), so the drop that gathers from it sits downstream of the impact point.
@@ -600,7 +600,7 @@ float4 r2ShapeImpact(uint2 c, uint k, float rmm, float2 t, float4 ig, float wet,
     // wide splats, a fresh coat recoils to compact drops. The cap volume (R3) turns the kept flatness into a WIDER
     // footprint of the same water.
     float pinN = r2VNoise(t * gR2PinScale + 53.1);
-    float thRl = clamp(gR2SheetRecedeDeg * (1.25 - 0.5 * pinN), 10.0, 100.0);
+    float thRl = clamp(gR2FilmRecedeDeg * (1.25 - 0.5 * pinN), 10.0, 100.0);
     float fA = clamp(pow(max(gR2ContactDeg / thRl, 1e-3), 2.0 / 3.0), fEq, max(f0, fEq));
     float ar = saturate((fA - fEq) / max(f0 - fEq, 1e-3));          // kept share of the spread (0 recoiled .. 1 none)
     // R5: the arrested footprint keeps (0.3 + 0.7 ar) of the lamella's Vt elongation, and its contour follows the
@@ -802,7 +802,7 @@ float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt, float2 dirMM, f
         float fMove = 1.0 + 0.5 * (fEq - 1.0);
         // rev48-M1b (M1 review: a sliding drop that ate another shrank first, then grew): a flat footprint (merged
         // union) recedes to the receding-angle limit over shpMergeTau x r while sliding too, not in shpRelaxMove
-        float fLimM = pow(abs(gR2ContactDeg) / clamp(gR2SheetRecedeDeg, 10.0, 100.0), 2.0 / 3.0);
+        float fLimM = pow(abs(gR2ContactDeg) / clamp(gR2FilmRecedeDeg, 10.0, 100.0), 2.0 / 3.0);
         bool flatM = bf.y > max(fLimM, fMove);
         float fTM = flatM ? max(fLimM, fMove) : fMove;
         float kfM = flatM ? 1.0 - exp(-dt / max(gR2ShpMergeTau * rmm, 1e-3)) : k;
@@ -824,7 +824,7 @@ float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt, float2 dirMM, f
         // rev48-M1: a flat footprint (merged union, arrested splat) recedes only while its angle is below the receding
         // angle, i.e. down to fLim = (contactDeg / theta_r)^(2/3), over shpMergeTau x r (contact-line friction: Andrieu
         // 2002 t_c ~ R / u); a drop already above that limit relaxes to its equilibrium as before
-        float fLim = pow(abs(gR2ContactDeg) / clamp(gR2SheetRecedeDeg, 10.0, 100.0), 2.0 / 3.0);
+        float fLim = pow(abs(gR2ContactDeg) / clamp(gR2FilmRecedeDeg, 10.0, 100.0), 2.0 / 3.0);
         float fT = bf.y > fLim ? max(fLim, fEq) : fEq;
         float kf = bf.y > fLim ? exp(-dt / max(gR2ShpMergeTau * rmm, 1e-3)) : k;
         res = float4(mg + (sh.xy - mg) * k, r2PackHarm3(hm.x * k * k, hm.y * k * k * k, r2UnpackHarmPh(sh.z)), r2PackBFM(bf.x * k, fT + (bf.y - fT) * kf, r2UnpackBMode(sh.w)));   // S6b: a stopped hook stays a hook
@@ -1013,7 +1013,7 @@ bool r2DewetFilmOK(float hC, int2 c) {
 // rev48-W1 sheet velocity coefficients at t (world law -> field uv / s): v(h) = A h + B h^2 (h in mm),
 // air shear tau h / (2 mu) with the helmet outer flow (same u_e as r2DropVelocity, Cf = gR2FilmCf) and
 // gravity rho g_t h^2 / (3 mu).
-float4 r2SheetCoef(float2 t) {
+float4 r2FilmCoef(float2 t) {
     float3 du = r2ToWorld(r2Tap(txR2Du, t).xyz);
     float3 dv = r2ToWorld(r2Tap(txR2Dv, t).xyz);
     float3 n = r2Normal(t);
@@ -1064,7 +1064,7 @@ float r2FilmJoinRadiusMM(float vol) {                                    // cap 
 }
 bool r2FilmJoin(float4 st, float4 L, Texture2D tx, float2 cellPos) {
     bool j = false;
-    if (gR2SheetOn > 0.5 && st.z > 0 && L.y <= 0 && L.z <= 0) {
+    if (gR2FilmOn > 0.5 && st.z > 0 && L.y <= 0 && L.z <= 0) {
         float rr = r2FilmJoinRadiusMM(st.z);
         float hU = r2FilmUnder(tx, cellPos, rr);
         float peak = hU + 1.5 * st.z / (3.14159265 * rr * rr);         // cap height of the laid volume (2/3 pi r^2 h0)
@@ -1122,7 +1122,7 @@ float r2CellFilmMaxMM(int2 c) {
 // retreat (no receiver) and never capped because the next speckle sat in a neighbour cell (game test: hinge-plate edges).
 bool r2FilmCapCell(int2 c, out float vol) {                    // FXC: no return inside the loops
     vol = 0.0;
-    float mC = gR2SheetOn > 0.5 ? r2CellFilmMaxMM(c) : 0.0;
+    float mC = gR2FilmOn > 0.5 ? r2CellFilmMaxMM(c) : 0.0;
     bool cap = mC >= gR2FilmWetMM;
     if (cap && mC < gR2FilmThickMM) {                           // thick: cap at once; thin: only a body inside the cell
         int2 k = r2FieldPerCell();

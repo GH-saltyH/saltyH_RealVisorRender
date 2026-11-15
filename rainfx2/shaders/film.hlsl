@@ -7,7 +7,7 @@
 // a texel that receives water from a mobile body becomes part of it for the rest of the frame (the decision travels with the
 // water -- a per-texel test every substep tore moving bodies into pinned pieces). Water leaving the visor drains.
 float r2FilmShare(float4 K, float h, int2 d) {                 // share of h crossing face d this substep
-    float2 cour = (K.xy * h + K.zw * (h * h)) * gR2SheetDt * gR2FieldSize;     // texels per substep
+    float2 cour = (K.xy * h + K.zw * (h * h)) * gR2FilmDt * gR2FieldSize;     // texels per substep
     float cd = max(dot(cour, float2(d)), 0.0);
     float tot = abs(cour.x) + abs(cour.y);
     return cd * (tot > 1.0 ? 1.0 / tot : 1.0);
@@ -43,7 +43,7 @@ float4 main(PS_IN pin) {
         float hN = h;
         bool got = false;
         if (mob && h > 0.0) {
-            float4 K = txR2SheetK.Load(int3(f, 0));
+            float4 K = txR2FilmK.Load(int3(f, 0));
             [unroll] for (int k = 0; k < 4; ++k) hN -= r2FilmShare(K, h, r2Nb4(k)) * h;   // lost off the visor (drainage)
         }
         [unroll] for (int k = 0; k < 4; ++k) {
@@ -53,7 +53,7 @@ float4 main(PS_IN pin) {
                 float4 Fg = txR2Field.Load(int3(g, 0));
                 float hg = Fg.b * gR2FilmMaxMM;
                 if (Fg.a >= 1.5 && hg > 0.0) {                         // F4: dry / pinned neighbours cost one load
-                    float q = r2FilmShare(txR2SheetK.Load(int3(g, 0)), hg, -d) * hg;
+                    float q = r2FilmShare(txR2FilmK.Load(int3(g, 0)), hg, -d) * hg;
                     hN += q;
                     got = got || q > 0.0;
                 }

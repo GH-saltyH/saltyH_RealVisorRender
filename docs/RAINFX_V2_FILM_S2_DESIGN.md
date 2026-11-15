@@ -267,3 +267,25 @@
   - 지도는 그대로 F / M / B를 보여 주지만 'film blocks' 수는 F 또는 M 블록 수이고, 게이트는 M만 본다.
   - 새로 mobile이 된 몸체는 요약이 도착할 때까지(1–3 프레임) 기다렸다가 움직인다. 튀는 일은 없다.
   - F4c 결과에서 film 비용은 막 면적보다 서브스텝당 고정 비용(전체 field 쓰기와 패스 전환)이 크다. 게이트가 닫히는 것이 실제 절감 수단이다.
+- **게임 테스트 8 (F4d):** 고속 추종(F 2곳)과 정지(F 약 20/256) 모두 게이트 closed, film 0.000 ms. Heavy Rain에서 M은 한 건도 없었다.
+- **다음 비용:**
+  - cells: B2 켬 0.269, 끔 0.248 ms. B2 몫은 약 0.02 ms이고, 본체는 서브스텝(고속 4회)이다.
+  - haze: H2로 진행한다(docs/RAINFX_V2_H3_ATLAS_SPEC.md 8p).
+
+## 13. 정리 (2026-11-16)
+
+- **V3:** 사용자 결정으로 기본 켬을 유지한다(첨부 비교에서 강한 품질 저하를 해결). 고속 추종 draw는 켬 1.53–1.62, 끔 1.57–1.66 ms였다.
+- **죽은 값 제거 (init.lua):** 셰이더가 읽지 않는 Lua 값 43줄을 지웠다.
+  - rev48-W1 sheet 값 31개: SheetHJoin, Front, Smooth, AbsorbK, RMax, UMax, ThinRate, NucPhi, HFed, QMax, WetFrac, WetMM, GatherK, PinMM, FedTau, ConnA, Retract, ResMMs, LumpK, KeepMM, WaveK, SceneMip, SlopeK, EdgeK, RidgeK, TailK 등
+  - ContactSpread, DsdM3, FilmDiffuse, FilmSplashMM, FineNucRMM, MeanDiamMM, MicroCollect, PatchBeadRate, ReflK
+  - 그 기본값과 sheetThinRate(), physics.filmDiffuse도 지웠다. gR2FilmTauPa는 substep 계산용 지역 변수가 됐다.
+- **이름 정리 (sheet → film):**
+  - gR2SheetOn / Dt / Drain / FollowK / RecedeDeg → gR2FilmOn / FilmDt / FilmDrain / FilmFollowK / FilmRecedeDeg
+  - txR2SheetK → txR2FilmK, r2SheetCoef → r2FilmCoef, passSheetK → passFilmK, sheetcoef.hlsl → filmcoef.hlsl(패스 이름 filmcoef)
+  - Lua p.sheetOn → filmOn, sheetFilmMaxMM → filmStoreMaxMM, sheetHJoin → filmDrawMinMM, sheetRecedeDeg → filmRecedeDeg, sheetFollowK → filmFollowK, sheetDrain → filmDrain(physics.lua 포함)
+  - 저장 설정(STORED)에는 sheet 키가 없어서 사용자 설정은 유지된다.
+  - UI 체크박스: 'Film S2 water model (film rules, transport, caps)'.
+- **체커:** 패스 sheetcoef → filmcoef, V5 항목 제거. DXC 23 패스 OK.
+- **장치에서 지울 파일(로드되지 않음):** rainfx2\shaders\sheetcoef.hlsl, rainfx2\shaders\veil.hlsl.
+- 셰이더 주석의 'sheet' 기록(rev48 이력)은 남긴다.
+- **검증 (게임):** 스크립트 오류 없음, Film S2 UI 정상(새 체크박스 이름 포함), 전체 주행 구간의 장면이 정리 전과 같음.

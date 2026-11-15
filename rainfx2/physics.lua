@@ -64,7 +64,6 @@ P.DEFAULTS = {
   -- water film W (rev11): lubrication-theory film, see P.filmVelocity
   filmCf = 0.005,           -- skin-friction coefficient of the air over the film
   filmFlowK = 1.0,          -- gain on the film velocity
-  filmDiffuse = 0.6,        -- surface-tension smoothing per frame (5-tap blend)
   filmMaxMM = 0.5,          -- W = 1 thickness
   sprayDiamMM = 0.09,       -- rev48-P2: fine tyre spray, number mean 70-90 um (Shearman; Borg & Vevang)
   splashShare = 0.05,       -- rev48-P2: ballistic tread drops (1-4 mm) as a share of the near-field spray water
@@ -329,7 +328,7 @@ function P.diagnose(p, inp, h, cellMM, out)
   local lo, hi = 0, p.filmMaxMM
   for _ = 1, 30 do
     local m = 0.5 * (lo + hi)
-    local out_ = m * 1e-3 * P.filmVelocity(p, m, g, a) + (p.sheetDrain or 0.5) * m * 1e-3 * 0.1
+    local out_ = m * 1e-3 * P.filmVelocity(p, m, g, a) + (p.filmDrain or 0.5) * m * 1e-3 * 0.1
     if out_ > q then hi = m else lo = m end
   end
   out.filmEqMM = hi

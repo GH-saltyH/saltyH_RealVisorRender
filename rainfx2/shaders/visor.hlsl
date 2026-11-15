@@ -74,13 +74,59 @@ float r2FilmBSpline(float2 t, out float2 grad) {
 float r2Lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 // Housing-free scene: premultiplied (rgb*w, w) mips, composited fine over coarse
 // (push-pull hole fill). mip is in source (half-resolution) levels.
-float3 r2Scene(float2 uv, float mip) {
-    float4 a = txR2Scene.SampleLevel(samLinearClamp, uv, mip);
-    float4 b = txR2Scene.SampleLevel(samLinearClamp, uv, mip + 2.5);
-    float4 c = txR2Scene.SampleLevel(samLinearClamp, uv, mip + 6.0);
-    float3 cc = c.a > 1e-3 ? c.rgb / c.a : gR2VeilColor;
-    return a.rgb + (1.0 - a.a) * (b.rgb + (1.0 - b.a) * cc);
+// V3 (2026-11-15): coarse mips (>= 2.5: the half-resolution frame at <= 1/6) are read with a cubic B-spline (4 bilinear taps per
+// level, Sigg & Hadwiger 2005; both levels of a fractional mip). Bilinear on a 12 x 7 texel mip spread a bright light into a
+// texel-aligned square pyramid that jumped a whole texel (~130 px) as the camera moved (game test: the green board in the
+// white veil scatter = straight-edged blocks stepping with the view). The B-spline is C2: round, continuous falloff.
+float4 r2BSplineLevel(float2 uv, float lev) {
+    uint w = 1u, h = 1u, n = 1u;
+    txR2Scene.GetDimensions((uint)lev, w, h, n);
+    float2 size = float2((float)w, (float)h);
+    float2 p = uv * size - 0.5;
+    float2 fl = floor(p);
+    float2 f = p - fl;
+    float2 f2 = f * f, f3 = f2 * f;
+    float2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    float2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    float2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    float2 w3 = f3 / 6.0;
+    float2 g0 = w0 + w1, g1 = w2 + w3;
+    float2 t0 = (fl - 0.5 + w1 / max(g0, 1e-6)) / size;          // texel centres: (i + 0.5) / size
+    float2 t1 = (fl + 1.5 + w3 / max(g1, 1e-6)) / size;
+    return g0.y * (g0.x * txR2Scene.SampleLevel(samLinearClamp, float2(t0.x, t0.y), lev)
+                 + g1.x * txR2Scene.SampleLevel(samLinearClamp, float2(t1.x, t0.y), lev))
+         + g1.y * (g0.x * txR2Scene.SampleLevel(samLinearClamp, float2(t0.x, t1.y), lev)
+                 + g1.x * txR2Scene.SampleLevel(samLinearClamp, float2(t1.x, t1.y), lev));
 }
+float4 r2SceneTap(float2 uv, float mip, bool smooth) {
+    float4 r = float4(0, 0, 0, 0);
+    if (!smooth || gR2SceneBicubic < 0.5 || mip < 2.5) {
+        r = txR2Scene.SampleLevel(samLinearClamp, uv, mip);
+    } else {
+        uint w = 1u, h = 1u, n = 1u;
+        txR2Scene.GetDimensions(0u, w, h, n);
+        float top = (float)n - 1.0;
+        float l0 = min(floor(mip), top);
+        float k = mip - floor(mip);
+        r = r2BSplineLevel(uv, l0);
+        if (k > 0.02 && l0 < top) r = lerp(r, r2BSplineLevel(uv, l0 + 1.0), k);
+    }
+    return r;
+}
+// V3b (game: +0.17 ms draw with every read smoothed): only the wide light spreads (scatter veil, V2 blur) use the B-spline;
+// drop lenses, micro lenses and the film keep bilinear (their mips are fine or the area is a lens image anyway).
+float3 r2SceneS(float2 uv, float mip, bool smooth) {
+    float4 a = r2SceneTap(uv, mip, smooth);
+    float3 r = a.rgb;
+    if (a.a < 0.999) {                                            // V3: the hole fill only where the fine level has holes
+        float4 b = r2SceneTap(uv, mip + 2.5, smooth);
+        float4 c = txR2Scene.SampleLevel(samLinearClamp, uv, mip + 6.0);   // ~1-2 texels: flat
+        float3 cc = c.a > 1e-3 ? c.rgb / c.a : gR2VeilColor;
+        r = a.rgb + (1.0 - a.a) * (b.rgb + (1.0 - b.a) * cc);
+    }
+    return r;
+}
+float3 r2Scene(float2 uv, float mip) { return r2SceneS(uv, mip, false); }
 
 // Value noise (sheet edge angle / impact rag).
 // rev33: integer hash. frac(sin(x) * 43758) with x ~ 1e5 (visor mm / 0.6 R) loses precision on GPUs and
@@ -862,7 +908,7 @@ float4 main(PS_IN pin) {
         if (blurU > 0.002) {
             float rPxU = max(rUnres / max(pixMM, 1e-5), 0.25);
             float mipU = clamp(gR2WFSceneMip + max(log2(max(0.6 / (gR2InvRT.y * rPxU), 1.0)) - 1.0, 0.0) + 0.5 * log2(1.0 + cocPx), 0.0, 7.0);
-            cBlur = r2Scene(sp, mipU);
+            cBlur = r2SceneS(sp, mipU, true);
         }
         veil *= 1.0 - microD;
         scat = 1.0 - (1.0 - scat) * (1.0 - gR2HazeK * veil);
@@ -877,7 +923,7 @@ float4 main(PS_IN pin) {
 
     // F2: ONE veil colour -- the surface scatter's ambient (scene behind at the scatter mip, toward the sky veil) is also
     // what a thick, aerated film turns to (F1 had a second 'haze' veil = blurred scene / veil mix with its own strength)
-    float3 amb = lerp(r2Scene(sp, gR2ScatterMip), gR2VeilColor, gR2ScatterSky) * gR2ScatterGain;
+    float3 amb = lerp(r2SceneS(sp, gR2ScatterMip, true), gR2VeilColor, gR2ScatterSky) * gR2ScatterGain;
     float3 cFilm = r2Scene(saturate(sp + offF), filmMip);
     cFilm = lerp(cFilm, amb, gR2FilmVeil * filmCov * thickK);
     // rev46 edge cues of a rivulet (legacy T4): steep sides lose light (thin dark line), the side

@@ -62,7 +62,7 @@ local DEFAULTS = {
   defMM = 1.2, defK = 5.0, defPin = 0.35,              -- rev48-S6 F1 surface defects: scale, gradient steering, stick-slip pinning
   -- sheetDrain rev14 0.5 -> 0.1: drainage dominated the film balance (eq ~ supply), now edge
   -- outflow does (eq ~ supply^(1/2..1/3)), compressing light..heavy into the cover window.
-  sweepWidth = 0.9, sheetDrain = 0.1,
+  sweepWidth = 0.9, filmDrain = 0.1,   -- film drainage /s with the film model OFF (legacy path)
   -- drop lens (rev18): legacy Water Field rule, docs/RAINFX_V2_WF_LENS_PLAN.md
   kernelScale = 1.24, threshold = 0.35,     -- dome 1-(d/1.24R)^2, silhouette at U = 0.35 (= R)
   -- rev20 drop surface: contact angle of an impact-deposited drop (~ receding angle on polycarbonate
@@ -73,7 +73,7 @@ local DEFAULTS = {
   shedU10 = 25.0,   -- rev48-F4b: outer air speed (m/s) that depins a 10 uL drop on the coat (R6b 20; F4b fit to the dryFlow reference frames)
   shedBeta = 0.11,  -- 2026-11-07 (SPRAY_RAIN_REF s23, user fix with stagnation 24 deg + F2 / F3); rev48-F4b 0.08: U_c(V) = shedU10 (V / 10 uL)^-shedBeta (reference: r 0.6 / 0.25 / 0.15 mm move from ~150 / 177 / 205 km/h)
   bigOn = true, bigRMM = 0.8,   -- rev48-R7a: drops >= bigRMM drawn / touching in a +-4 cell window (largest per 4 x 4 tile)   -- rev48-R3: drop volume = spherical cap of contactDeg (false: rev7 hemisphere 2.094)
-  contactDeg = 60, contactSpread = 8,   -- rev35: 60 (user: stronger curl looked better; normal 40-60); R5b: spread only on the sheet edge (drops: flatness)
+  contactDeg = 60,   -- rev35: 60 (user: stronger curl looked better; normal 40-60)
   hysteresisDeg = 20, wetFlatten = 0.5,
   -- rev20 wobble of pinned drops in airflow (amplitude ~ drag/pinning), visible-rate tones
   wobbleAmp = 0.08, wobbleHz = 8.0,   -- rev21: 0.12 -> 0.08 (user: 0.07-0.09 best at speed)
@@ -97,7 +97,6 @@ local DEFAULTS = {
   -- gravity sag of pinned drops (thick toward gravity, thin tail above)
   sagK = 0.25,
   -- rev28 CSP windscreen drop shading (docs/RAINFX_V2_CSP_DROP_SHADING.md)
-  reflK = 1.0,   -- sheet lens reflection
   -- rev29 full CSP windscreen port (docs/RAINFX_V2_CSP_DROP_SHADING.md section 5)
   depthTest = true,   -- rev32: back on (user: needed so the helmet housing hides the water; no effect on the pattern)
   clearMaxMM = 0.3, clearK = 1.0,                     -- rev22 impact clearing of small pinned drops
@@ -111,7 +110,7 @@ local DEFAULTS = {
   trailWidthK = 0.5,
   -- trail water (rule_trail; rev47j width 0.35 -> 0.5 r: reference ~1/4 of the head)
   surfThetaRDeg = 40.0,   -- FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md): ONE receding angle of the coat (user 2026-11-13); trailThetaRDeg,
-                          -- sheetRecedeDeg and hysteresisDeg are derived from it every frame (R2:syncSurface)
+                          -- filmRecedeDeg and hysteresisDeg are derived from it every frame (R2:syncSurface)
   trailThetaRDeg = 28.0, trailWetK = 0.35, trailLL = 5.0,   -- rev47l trail rule (Ca vs Ca*, docs/RAINFX_V2_TRAIL_RULES.md)
   -- rev48-S1 shape state (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 6): birth class shares, relaxation
   shpImpactK = 0.15, shpImpactMax = 1.8,   -- rev48-S2' (birth events: splats spread nearly evenly; was 0.35 / 3)
@@ -130,19 +129,13 @@ local DEFAULTS = {
   shpBoK = 1.2, shpTearK = 0.12,
   shpSlugTau = 0.6, shpAirK = 0.08, shpAirMax = 1.6,   -- rev48-S5 E3 slug length memory, E6 air stretch of pinned drops
   shpTailTau = 0.25, shpTailStretch = 0.2, shpHookK = 2.0, shpFrontK = 1.2, shpSnapDeg = 40.0,   -- rev48-S6 F2 turns (S6b: head hook)
-  -- rev48-W1 water sheet (docs/RAINFX_V2_WATER_SHEET_PLAN.md): off until verified (P1: physics + metrics only)
-  sheetOn = true, sheetSub = 8,   -- FILM-UNIFY (2026-11-13, user): the water sheet is on by default
-  sheetHJoin = 0.10, sheetFront = 0.22, sheetSmooth = 0.12, sheetAbsorbK = 0.5,
-  sheetRMax = 1.5, sheetUMax = 0.25, sheetFilmMaxMM = 2.0, sheetRecedeDeg = 50,   -- W1h: visor receding contact angle; unconnected water dewets at 2.3 (theta_r / 60)^3 /s (Cox-Voinov theta^3)
-  sheetSceneMip = 0.0, sheetSlopeK = 1.0, sheetEdgeK = 0.6, sheetRidgeK = 0.8, sheetTailK = 0.35,   -- P2d edge profile
-    -- rev48-P2b sheet lens: sharp scene (CSP bias -2), interior slope gain (2 mm blurred h)
-  sheetHFed = 0.03, sheetFedTau = 0.4, sheetLumpK = 1.3, sheetKeepMM = 0.04, sheetWaveK = 1.0, sheetWetFrac = 0.5, sheetWetMM = 0.02, sheetGatherK = 0.15, sheetPinMM = 0.3, patchBeadRate = 6.0, sheetFollowK = 0.5,   -- W1t patch -> drop, drops follow water paths
-    -- W1r wetted surface / drainage gathering
+  -- FILM S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md; cleanup 2026-11-16: the rev48-W1 sheet parameters are gone, sheet* -> film*)
+  filmOn = true,                 -- FILM-UNIFY (2026-11-13, user): the water film model is on by default
+  filmStoreMaxMM = 2.0,          -- field B scale with the film on (B = h / 2 mm); F3 caps films at filmThickMM long before
+  filmDrawMinMM = 0.10,          -- the drawn film starts here (the rev11 overlay until S2-3); F1 joins from filmJoinMM
+  filmRecedeDeg = 50,            -- coat receding angle used by the film rules (R2:syncSurface sets it from surfThetaRDeg)
+  filmFollowK = 0.5,             -- drops follow the water paths (cells)
   impactWaveK = 1.0,   -- P4 sheet waves / impact crater + ring
-    -- W1j: fed regime from the local lamella supply averaged over 0.4 s
-    -- rev48-W1i: impact-fed sheared film counts as sheet from 0.03 mm
-  sheetNucPhi = 0.5, sheetConnK = 1.3, sheetRetract = 8.0,   -- W1f: connected sheet > 1.3 x largest drop footprint in 5x5 cells; rear retraction /s
-                          -- rev48-W1d: sheet nucleates from dense drop clusters (coverage) hit by an impact
   shpSplitA = 2.6, shpSplitRate = 6.0, shpSplitRMin = 0.45, shpNeckK = 1.5, shpNeckT = 0.12, hiSplit = false, hiImpact = false,   -- rev48-S6c E8 tail split (aspect, events / s, min parent radius mm)
   shpOn = true, shpDefShape = 1.0, shpRelaxMove = 0.12, shpRelaxStill = 10.0,   -- rev48-S5 E7 replaces the random sag class (shpSagP 0)
   shpMotionK = 0.6, shpMotionV = 0.04,   -- rev48-S4 motion morph (aspect 1 + k v/V); R1: arrest from theta_r (shpArrest removed)
@@ -198,13 +191,6 @@ local function fragLaw(p, out)
   out.m3 = C * (hi ^ (3 - a) - lo ^ (3 - a)) / (3 - a)
   out.m1 = math.abs(1 - a) < 1e-6 and C * math.log(hi / lo) or C * (hi ^ (1 - a) - lo ^ (1 - a)) / (1 - a)
   return out
-end
-
--- rev48-W1h: unconnected water on the visor dewets (gathers into beads, swept by drops) at a rate ~ the dewetting
--- speed, which scales as theta_r^3 (Cox-Voinov / de Gennes); calibrated 2.3 /s at theta_r 60 deg (W1g).
-local function sheetThinRate(p)
-  local k = (p.sheetRecedeDeg or 50) / 60
-  return 2.3 * k * k * k
 end
 
 -- rev48-R3 (docs/RAINFX_V2_PHYSICS_AUDIT.md C): spherical-cap volume factor V = K(theta) r^3 of the drawn contact
@@ -266,6 +252,8 @@ local function sceneValuesImpl(self, v)
     v.gR2HazeAMM, v.gR2HazePhiMax = a, phi            -- H3-3: the haze pass needs the coverage law too (phi(G_f), phi(G_c))
     v.gR2HazeCapMM = 2 * sat
     v.gR2HazeNucOn = p.hazeNuc == false and 0 or 1
+    v.gR2HazeHalf = p.hazeHalf == true and 1 or 0    -- H2: slow layer law on half the texels per frame (2 x dt); default OFF
+                                                       -- since H2b (game: on 0.342 / off 0.317 ms -- no gain once building texels run every frame)
     -- H3-3 (docs/RAINFX_V2_H3_ATLAS_SPEC.md 4, 8f): coarse water G_c grows the atlas pieces up to the top octave (area
     -- median a50 at scale 1 <-> G_top = sat x a50 / a_min); a cell drop is born only from the excess above it and only
     -- at a_max or larger (smaller drops are atlas pieces)
@@ -285,7 +273,6 @@ local function sceneValuesImpl(self, v)
     v.gR2HaloInMM = p.haloInMM or 0.1
     v.gR2HaloOutMM = p.haloOutMM or 0.4
   end
-  v.gR2FineNucRMM = p.fineNucRMM or 0.08             -- a cell's micro droplets form a drawn drop at this radius (d 0.16 mm)
   do   -- micro droplet evaporation: dV/dt = evapDiff r (diffusion-limited), V = shapeK r^3 -> k = evapDiff / (shapeK r^2)
     local rf = p.hazeAMM or 0.015                    -- H1: the micro caps of the haze
     v.gR2FineEvapK = math.min((self.evapDiff or 0) / math.max((p.shapeK or 1) * rf * rf, 1e-6), 5.0)
@@ -295,9 +282,7 @@ local function sceneValuesImpl(self, v)
   v.gR2AirW = self.airW
   v.gR2RainDirW = self.rainDirW
   v.gR2ImpactRate = self.store.freezeRain and 0 or (st.impactRate or 0)
-  v.gR2MeanDiamMM = st.meanDiamMM or 0.3
   for i = 0, 15 do v[DQ_NAMES[i]] = (st.dq and st.dq[i + 1]) or 0.3 end   -- rev48-P1 impact diameter inverse CDF
-  v.gR2DsdM3 = st.dsdM3 or 0.162
   v.gR2TerminalSpeed = p.terminalSpeed   -- rev48-R4: reference fall speed inside SpeedRel (per-drop V_t(d) replaces it)
   v.gR2SpeedRel = st.speedRel or p.terminalSpeed
   v.gR2SplashK0 = p.splashK0
@@ -374,9 +359,8 @@ local function sceneValuesImpl(self, v)
   v.gR2MinRadiusMM = p.minRadiusMM
   v.gR2MaxRadiusMM = p.maxRadiusMM
   v.gR2CoalesceK = p.coalesceK
-  v.gR2MicroCollect = p.microCollect
   v.gR2SweepWidth = p.sweepWidth
-  v.gR2SheetDrain = p.sheetDrain
+  v.gR2FilmDrain = p.filmDrain
   v.gR2FilmCf = p.filmCf
   do   -- FILM S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md): water layer depth, edge-retreat reference width, air shear, substeps
     v.gR2FilmWetMM = p.hazeWetMM or 0.02           -- film = water >= this (the haze pass's water-layer depth, S1)
@@ -384,38 +368,21 @@ local function sceneValuesImpl(self, v)
     v.gR2FilmJoinMM = p.filmJoinMM or 0.10         -- F1: a drop joins only a real (visible) film ...
     v.gR2FilmThickMM = p.filmThickMM or 0.30       -- F1/F3: ... that stays thin; a cell film this thick becomes a drop
     local ue = self.aeroU or 0
-    v.gR2FilmTauPa = 0.5 * 1.2 * (p.filmCf or 0.005) * ue * ue
+    local tauPa = 0.5 * 1.2 * (p.filmCf or 0.005) * ue * ue      -- air shear (Pa) for the substep count only
     -- substeps: Courant <= 1 at the speed of a 0.3 mm film (shear + gravity), even, 2..4
-    local vmax = 0.5 * v.gR2FilmTauPa * 0.3 + 3.27 * 0.09
+    local vmax = 0.5 * tauPa * 0.3 + 3.27 * 0.09
     local cour = vmax * 1000 * (self.frameDt or 1 / 60) / (602.0 / p.fieldU)
     self.filmSub = math.min(4, math.max(2, 2 * math.ceil(math.min(cour, 4) / 2)))
   end
   v.gR2FilmFlowK = p.filmFlowK
-  v.gR2FilmDiffuse = p.filmDiffuse
-  v.gR2FilmMaxMM = p.sheetOn and p.sheetFilmMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
-  v.gR2SheetOn = p.sheetOn and 1 or 0
-  v.gR2SheetHJoin, v.gR2SheetFront, v.gR2SheetSmooth = p.sheetHJoin, p.sheetFront, p.sheetSmooth
-  v.gR2SheetAbsorbK, v.gR2SheetRMax, v.gR2SheetUMax = p.sheetAbsorbK, p.sheetRMax, p.sheetUMax
-  v.gR2SheetThinRate = sheetThinRate(p)   -- rev48-W1h: from the visor wettability
-  v.gR2SheetNucPhi = p.sheetNucPhi
-  v.gR2SheetRecedeDeg = p.sheetRecedeDeg or 50
-  v.gR2SheetHFed = p.sheetHFed or 0.03
-  v.gR2SheetQMax = 1.0
-  v.gR2SheetWetFrac = p.sheetWetFrac or 0.5
-  v.gR2SheetWetMM = p.sheetWetMM or 0.02
-  v.gR2SheetGatherK = p.sheetGatherK or 0.15
-  v.gR2SheetPinMM = p.sheetPinMM or 0.3
-  v.gR2PatchBeadRate = p.patchBeadRate or 6
+  v.gR2FilmMaxMM = p.filmOn and p.filmStoreMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
+  v.gR2FilmOn = p.filmOn and 1 or 0
+  v.gR2FilmRecedeDeg = p.filmRecedeDeg or 50
   v.gR2GrowTime = p.growTime   -- rev48-W1t: cells uses it for patch beads (was a visor-only value)
-  v.gR2SheetFollowK = p.sheetFollowK or 0.5
-  v.gR2SheetFedTau = p.sheetFedTau or 0.4
-  v.gR2SheetConnA = (p.sheetConnK or 1.3) * math.pi * math.min(p.maxRadiusMM, 1.9) ^ 2 / (25 * (self.cellSizeMM and self.cellSizeMM.x * self.cellSizeMM.y or 1.344))
-  v.gR2SheetRetract = p.sheetRetract
-  v.gR2SheetDt = (self.frameDt or 1 / 60) / math.max(p.sheetSub or 8, 1)
-  v.gR2SheetResMMs = ((self.stats and self.stats.fluxMMs) or 0) * ((self.stats and self.stats.stickFrac) or 0)
+  v.gR2FilmFollowK = p.filmFollowK or 0.5
+  v.gR2FilmDt = (self.frameDt or 1 / 60) / math.max(self.filmSub or 2, 1)   -- the film call sets frameDt / substeps
   v.gR2FilmRate = self.store.freezeRain and 0 or (st.filmRate or 0)
-  v.gR2FilmSplashMM = st.filmSplashMM or 0.1
-  v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
+  v.gR2FilmMinMM = p.filmOn and p.filmDrawMinMM or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
   do   -- E1 / F6' (docs/RAINFX_V2_FILM_S2_DESIGN.md section 10): film supply vs the fed limit (r2FedRate, the edge-retreat law)
     local function fedMMs(h)   -- supply (mm/s) that holds a layer of depth h (body width filmRefWMM) against its edges' retreat
       local wet = math.min(h / math.max(p.filmFullMM or 0.2, 1e-4), 1)
@@ -426,7 +393,7 @@ local function sceneValuesImpl(self, v)
     local q = ((v.gR2FilmRate or 0) + (v.gR2SprayFineMMs or 0) + (v.gR2RainHazeMMs or 0) + (v.gR2SprayCoarseMMs or 0)) * (p.exposure or 1)
     local qf = fedMMs(v.gR2FilmWetMM or 0.02)
     self.e1 = { q = q, qFed = qf, qVis = fedMMs(v.gR2FilmJoinMM or 0.1) }
-    v.gR2FilmNucOn = (p.sheetOn and p.filmNuc ~= false and q >= qf) and 1 or 0   -- F6': off below the fed limit (no change)
+    v.gR2FilmNucOn = (p.filmOn and p.filmNuc ~= false and q >= qf) and 1 or 0   -- F6': off below the fed limit (no change)
     v.gR2FilmTile = 0                                                             -- F4c: set by the film call (block summary)
   end
   v.gR2BeadMoveRMM = (p.beadDrops ~= false and self.beadMoveR) or 1e3   -- B2: bead radius that moves (P.criticalRadius)
@@ -473,8 +440,6 @@ local function sceneValuesImpl(self, v)
   v.gR2TrailFlowK = p.trailFlowK
   v.gR2FilmBeadMM = p.filmBeadMM
   v.gR2DewetRate = p.dewetRate
-  v.gR2SheetLumpK = p.sheetLumpK or 1.3
-  v.gR2SheetKeepMM = p.sheetKeepMM or 0.04
   v.gR2FrameDt = self.frameDt or 1 / 60
   v.gR2FadeTime = p.fadeTime
   v.gR2FragMax = p.fragMax
@@ -516,7 +481,7 @@ local function newPass(self, shader, name, haze)   -- haze: true = cells / hzv, 
     async = true,
     blendMode = render.BlendMode.Opaque,
     textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2Trail = false,
-      txR2FieldOld = false, txR2SheetK = false, txR2Lam = false,   -- F_prev of last frame (merge: S2 film join), film coefficients (S2), impact registry (U1)
+      txR2FieldOld = false, txR2FilmK = false, txR2Lam = false,   -- F_prev of last frame (merge: S2 film join), film coefficients (S2), impact registry (U1)
       txR2Big = false,   -- rev48-R7a big-drop tiles
       txR2Pred = false,  -- PERF-3 per-drop prediction (predict.hlsl -> cells)
       txR2Du = root .. 'du.dds', txR2Dv = root .. 'dv.dds', txR2Mask = self.ctx.maskPath },
@@ -553,13 +518,13 @@ local function newPass(self, shader, name, haze)   -- haze: true = cells / hzv, 
 end
 
 -- FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md section 1): one surface. The coat's receding angle theta_r drives the trail
--- threshold / drop dynamic retention (trailThetaRDeg), the sheet meniscus / thin-film rate (sheetRecedeDeg) and, with the
+-- threshold / drop dynamic retention (trailThetaRDeg), the sheet meniscus / thin-film rate (filmRecedeDeg) and, with the
 -- fitted Furmidge contact-angle hysteresis dcos = pinCoat (drop depinning, F4b), the advancing angle
 -- theta_a = acos(cos theta_r - pinCoat) -> hysteresisDeg = theta_a - theta_r (sheet fronts).
 function R2:syncSurface()
   local p = self.p
   local th = p.surfThetaRDeg or 40
-  p.trailThetaRDeg, p.sheetRecedeDeg = th, th
+  p.trailThetaRDeg, p.filmRecedeDeg = th, th
   local ca = math.cos(math.rad(th)) - (p.pinCoat or 0.18)
   p.hysteresisDeg = math.deg(math.acos(math.max(math.min(ca, 1), -1))) - th
 end
@@ -634,7 +599,7 @@ function R2:ensureResources()
   self.REC = canvas(6 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop records')   -- PERF-9 visor candidates (rec.hlsl)
   self.MSK = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R32G32.Float, 'RainFX2 candidate mask')   -- PERF-10 (msk.hlsl)
   self.passField = newPass(self, self.src.field, 'field', 'field')
-  self.passSheetK = newPass(self, self.src.sheetcoef, 'sheetcoef')
+  self.passFilmK = newPass(self, self.src.filmcoef, 'filmcoef')
   self.passFilm = newPass(self, self.src.film, 'film', 'film')    -- FILM S2-1 (F4c: block summary bound)
   self.passLam = newPass(self, self.src.lam, 'lam')               -- rev48-W1q
   self.passTrail = newPass(self, self.src.trail, 'trail')
@@ -1002,7 +967,7 @@ function R2:simulate(sim)
   -- rev13: coalescence runs FIRST (on last frame's state). The merge may leave a drop
   -- centre off its cell (centroid); the P1 substeps that follow relocate it, so the visor
   -- never sees off-cell drops (rev12: drops cut by the 5x5 draw window along cell edges).
-  if p.coalesceK > 0 or p.sheetOn then   -- rev48-W1: the merge pass also removes the sheet-absorbed share
+  if p.coalesceK > 0 or p.filmOn then   -- rev48-W1: the merge pass also removes the sheet-absorbed share
     local pk, pm = self.passClaim, self.passMerge
     pk.textures.txR2State = self.S[self.si]
     pk.textures.txR2Field = self.F[self.fi]        -- rev48-S3b: wetness for the footprint radius
@@ -1123,24 +1088,24 @@ function R2:simulate(sim)
     pf.values.gR2Dt = self.frameDt                 -- field integrates the whole frame
     -- F5: sheet coefficients BEFORE the field (front rule + body mobility read them); geometry and scene only
     local skOK = false
-    if p.sheetOn then
-      local pkc = self.passSheetK
+    if p.filmOn then
+      local pkc = self.passFilmK
       sceneValues(self, pkc.values)
       skOK = run(self.SK, pkc)
     end
-    pf.textures.txR2SheetK = self.SK
+    pf.textures.txR2FilmK = self.SK
     pf.textures.txR2HzMask = self.HZM                  -- F6': nucleation per cell (hzm, this frame)
     if not self.hzmValid then pf.values.gR2FilmNucOn = 0 end
     if run(self.F[3 - self.fi], pf) then
       -- FILM S2-1 transport (film.hlsl): an even number of substeps (scratch ping-pong)
-      if p.sheetOn then
+      if p.filmOn then
         if skOK and self:filmGate() then   -- F4b: no film on the visor (readback, 1-3 frames old) -> no transport
           local nsub = self.filmSub or 2
           local a, b = self.F[3 - self.fi], self.FS
           local pfm = self.passFilm
           sceneValues(self, pfm.values)
-          pfm.values.gR2SheetDt = self.frameDt / nsub
-          pfm.textures.txR2SheetK = self.SK
+          pfm.values.gR2FilmDt = self.frameDt / nsub
+          pfm.textures.txR2FilmK = self.SK
           pfm.textures.txR2FilmAny = self.FAc
           -- F4c: skip dry blocks once a summary exists (FAc on the GPU = the last gate pass, <= 3 frames old)
           pfm.values.gR2FilmTile = (p.filmTile ~= false and (self.filmGateSent or 0) > 0) and 1 or 0
@@ -1152,7 +1117,7 @@ function R2:simulate(sim)
         end
       end
       self.fi = 3 - self.fi
-      if p.sheetOn then self:filmGateUpdate() end
+      if p.filmOn then self:filmGateUpdate() end
     end
   end
   self:metricsUpdate(sim)
@@ -1188,7 +1153,7 @@ local function candValues(self, v)
   v.gR2Frame = self.frameSeed or 0
   v.gR2MinDrawMM = p.minDrawMM
   v.gR2SagK = p.sagK
-  v.gR2SheetRecedeDeg = p.sheetRecedeDeg or 50
+  v.gR2FilmRecedeDeg = p.filmRecedeDeg or 50
   v.gR2SimDt = self.frameDt or (1 / 60)   -- packed move = displacement of the whole frame
   v.gR2GrowTime = p.growTime
   v.gR2FadeTime = p.fadeTime
@@ -1287,7 +1252,6 @@ function R2:drawParams(depth)
   v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
   v.gR2WetHaze = p.wetHaze
   v.gR2Threshold = p.threshold
-  v.gR2ContactSpread = p.contactSpread
   v.gR2Hysteresis = p.hysteresisDeg
   v.gR2WetFlatten = p.wetFlatten
   v.gR2WobbleHz = p.wobbleHz
@@ -1298,10 +1262,8 @@ function R2:drawParams(depth)
   v.gR2Time = self.wobbleT or 0
   -- rev48-P4 sheet surface
   v.gR2FrameDt = self.frameDt or 1 / 60
-  v.gR2MeanDiamMM = (self.stats and self.stats.meanDiamMM) or 0.3
   for i = 0, 15 do v[DQ_NAMES[i]] = (self.stats and self.stats.dq and self.stats.dq[i + 1]) or 0.3 end   -- rev48-P1 (PERF-11 names)
   v.gR2SpeedRel = (self.stats and self.stats.speedRel) or p.terminalSpeed
-  v.gR2SheetWaveK = p.sheetWaveK or 1
   v.gR2RainDirW = self.rainDirW or vec3(0, -1, 0)   -- rev48-P4b impact direction
   v.gR2ImpactWaveK = p.impactWaveK or 1
   v.gR2WFSceneMip = p.wfSceneMip
@@ -1310,7 +1272,6 @@ function R2:drawParams(depth)
   v.gR2FrameNoise = self.drawCount                -- D-A tap rotation (TAA/DLSS resolves it)
   v.gR2Glint = p.glint
   v.gR2LensPhys = p.lensPhys
-  v.gR2ReflK = p.reflK
   self.camLook = self.camLook or vec3(); self.camSide = self.camSide or vec3(); self.camUp = self.camUp or vec3()
   self.camLook:set(simNow.cameraLook or vec3(0, 0, 1))
   self.camSide:set(simNow.cameraSide or vec3(1, 0, 0))
@@ -1320,29 +1281,13 @@ function R2:drawParams(depth)
   v.gR2VeilColor = self.veil or vec3(0.5, 0.5, 0.5)
   v.gR2DepthCoverage = p.depthCoverage
   v.gR2FieldSize = self.fieldSize
-  v.gR2FilmMaxMM = p.sheetOn and p.sheetFilmMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
+  v.gR2FilmMaxMM = p.filmOn and p.filmStoreMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
   v.gR2TrailMaxMM = p.trailMaxMM
-  v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
+  v.gR2FilmMinMM = p.filmOn and p.filmDrawMinMM or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
   v.gR2FilmWetMM = p.hazeWetMM or 0.02   -- debug 5: film layer depth (= field / film passes)
-  v.gR2SheetOn = p.sheetOn and 1 or 0   -- rev48-P2 sheet lens
-  v.gR2SheetSceneMip = p.sheetSceneMip or 0
-  v.gR2SheetSlopeK = p.sheetSlopeK or 1
-  v.gR2SheetEdgeK = p.sheetEdgeK or 0.6
-  v.gR2SheetHFed = p.sheetHFed or 0.03   -- rev48-W1i fed-sheet contour (visor)
-  v.gR2SheetQMax = 1.0
-  v.gR2SheetWetFrac = p.sheetWetFrac or 0.5
-  v.gR2SheetWetMM = p.sheetWetMM or 0.02
-  v.gR2SheetGatherK = p.sheetGatherK or 0.15
-  v.gR2SheetPinMM = p.sheetPinMM or 0.3
-  v.gR2PatchBeadRate = p.patchBeadRate or 6
-  v.gR2SheetFollowK = p.sheetFollowK or 0.5
-  v.gR2SheetKeepMM = p.sheetKeepMM or 0.04   -- W1o visor contour of remnants
-  v.gR2SheetHJoin = p.sheetHJoin
-  v.gR2SheetThinRate = sheetThinRate(p)
-  v.gR2SheetResMMs = ((self.stats and self.stats.fluxMMs) or 0) * ((self.stats and self.stats.stickFrac) or 0)
+  v.gR2FilmOn = p.filmOn and 1 or 0   -- rev48-P2 sheet lens
+  v.gR2FilmFollowK = p.filmFollowK or 0.5
   v.gR2FilmRate = self.store.freezeRain and 0 or ((self.stats and self.stats.filmRate) or 0)
-  v.gR2SheetRidgeK = p.sheetRidgeK or 0.8
-  v.gR2SheetTailK = p.sheetTailK or 0.35
   v.gR2FilmFullMM = p.filmFullMM
   v.gR2TrailMinMM = p.trailMinMM
   v.gR2TrailFullMM = p.trailFullMM
@@ -1360,6 +1305,7 @@ function R2:drawParams(depth)
   end
   v.gR2FineMaxMM = 0.01                              -- H1: G scale (same as the simulation)
   v.gR2ScatterMip = p.scatterMip
+  v.gR2SceneBicubic = p.sceneBicubic == false and 0 or 1   -- V3: B-spline reads of the coarse scene mips (veil, blur, film)
   v.gR2ScatterSky = p.scatterSky
   v.gR2ScatterGain = p.scatterGain
   v.gR2Spray = self.store.freezeRain and 0 or (self.stats.spray or 0)
@@ -1376,6 +1322,13 @@ function R2:prepareSource(src)
   local size = render.getRenderTargetSize()
   local w = math.max(16, math.floor(size.x * p.sourceScale))
   local h = math.max(16, math.floor(size.y * p.sourceScale))
+  -- V4 (2026-11-15): power-of-two source so every mip is an exact 2 x 2 box of the one below. An odd size (810 x 456 ->
+  -- 405, 202.5 ...) makes the hardware mip chain skip texel rows / columns: a small bright light (the green board) vanished
+  -- from the coarse veil mips and came back while panning. Next power of two up (1620 x 912 frame: 1024 x 512).
+  if p.sourcePot ~= false then
+    w = math.floor(2 ^ math.ceil(math.log(w) / math.log(2) - 1e-6) + 0.5)
+    h = math.floor(2 ^ math.ceil(math.log(h) / math.log(2) - 1e-6) + 0.5)
+  end
   if not self.source or self.sourceW ~= w or self.sourceH ~= h then
     if self.source then self.source:dispose() end
     self.source = ui.ExtraCanvas(vec2(w, h), math.floor(math.log(math.max(w, h)) / math.log(2)) + 1,
@@ -1688,13 +1641,16 @@ function R2:ui()
     self.p.dewetRate = ui.slider('##rfx2dw', self.p.dewetRate, 0, 20, 'Dewetting rate (per cell): %.1f /s')
   end)
   uiSection('Water film S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md)', false, function()
-    if ui.checkbox('Film S2 (rebuild in progress: S2-0 = rev48 sheet removed)', self.p.sheetOn) then self.p.sheetOn = not self.p.sheetOn end
-    self.p.sheetFollowK = ui.slider('##rfx2wsf', self.p.sheetFollowK, 0, 2, 'Drops follow the water paths: %.2f')
+    if ui.checkbox('Film S2 water model (film rules, transport, caps)', self.p.filmOn) then self.p.filmOn = not self.p.filmOn end
+    self.p.filmFollowK = ui.slider('##rfx2wsf', self.p.filmFollowK, 0, 2, 'Drops follow the water paths: %.2f')
     s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Rain film supply gain (unresolved rain; keep 1): %.2f')
     self.p.filmJoinMM = ui.slider('##rfx2fjm', self.p.filmJoinMM or 0.10, 0.02, 0.3, 'Drops join a film from (F1): %.2f mm')
     self.p.filmThickMM = ui.slider('##rfx2ftm', self.p.filmThickMM or 0.30, 0.15, 1.0, 'Film this thick becomes a drop (F1/F3): %.2f mm')
     if ui.checkbox('Film forms from connected haze water under a holding supply (F6\')', self.p.filmNuc ~= false) then self.p.filmNuc = self.p.filmNuc == false end
     if ui.checkbox('Trail beads that can move become drops (B2)', self.p.beadDrops ~= false) then self.p.beadDrops = self.p.beadDrops == false end
+    if ui.checkbox('Haze layer law on half the texels per frame, 2 x step (H2 cost)', self.p.hazeHalf == true) then self.p.hazeHalf = self.p.hazeHalf ~= true end
+    if ui.checkbox('Smooth (B-spline) coarse scene mips: veil / blur light (V3)', self.p.sceneBicubic ~= false) then self.p.sceneBicubic = self.p.sceneBicubic == false end
+    if ui.checkbox('Power-of-two refraction source (exact mips: lights do not drop out of the veil, V4)', self.p.sourcePot ~= false) then self.p.sourcePot = self.p.sourcePot == false end
     local e = self.e1
     if e then
       ui.text(string.format('E1 supply %.4f mm/s | holds a 0.02 mm layer from %.3f, a 0.10 mm film from %.3f mm/s (x%.2f)',
@@ -2134,7 +2090,7 @@ return function(ctx)
   local common = tgs and readFile(dir .. 'common.hlsl') and (tgs .. '\n' .. readFile(dir .. 'common.hlsl')) or nil
   local cand = tgs and readFile(dir .. 'cand.hlsl') and (tgs .. '\n' .. readFile(dir .. 'cand.hlsl')) or nil   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheetcoef', 'film', 'filmany', 'lam', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
+  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'filmcoef', 'film', 'filmany', 'lam', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -2155,7 +2111,7 @@ return function(ctx)
       seed = common .. '\n' .. src.seed,
       metrics = common .. '\n' .. src.metrics,
       sizes = common .. '\n' .. src.sizes,
-      sheetcoef = common .. '\n' .. src.sheetcoef,
+      filmcoef = common .. '\n' .. src.filmcoef,
       film = common .. '\n' .. src.film,   -- FILM S2-1
       filmany = common .. '\n' .. src.filmany,   -- F4b film gate
       lam = common .. '\n' .. src.lam,

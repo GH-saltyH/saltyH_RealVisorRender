@@ -235,7 +235,7 @@ float4 main(PS_IN pin) {
         float2 pBead = float2(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9003u)),
                               r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9004u)));
         float vCapF;
-        if (gR2SheetOn > 0.5) {
+        if (gR2FilmOn > 0.5) {
             // FILM S2-2: a film body shrunk into this cell (none in the 8 around) becomes one cap at its centroid (field: same test)
             if (r2FilmCapCell(c, vCapF)) { vBead += vCapF; pBead = r2CellFilmCentroid(c, pBead); }
         } else if (r2DewetEvent(c)) {

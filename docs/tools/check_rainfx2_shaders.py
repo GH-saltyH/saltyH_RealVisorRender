@@ -71,7 +71,7 @@ PASSES = [  # name, template, files, textures, defines
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
     ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], FIELD_TEXTURES, ''),
     ('trail', 'ui.fx', ['common.hlsl', 'trail.hlsl'], SCENE_TEXTURES, ''),
-    ('sheetcoef', 'ui.fx', ['common.hlsl', 'sheetcoef.hlsl'], SCENE_TEXTURES, ''),
+    ('filmcoef', 'ui.fx', ['common.hlsl', 'filmcoef.hlsl'], SCENE_TEXTURES, ''),
     ('film', 'ui.fx', ['common.hlsl', 'film.hlsl'], FILM_TEXTURES, ''),
     ('filmany', 'ui.fx', ['common.hlsl', 'filmany.hlsl'], SCENE_TEXTURES, ''),
     ('lam', 'ui.fx', ['common.hlsl', 'lam.hlsl'], SCENE_TEXTURES, ''),

@@ -52,21 +52,35 @@ float4 main(PS_IN pin) {
         G *= 1.0 - saturate(sweep);
         G.y = max(G.y - max(G.y - gR2HazeTopMM, 0.0) * hm.z, 0.0);   // H3-3: the cell's nucleus takes its share of the excess
     }
+    // H2 HALF-RATE (docs/RAINFX_V2_H3_ATLAS_SPEC.md section 8p, 2026-11-15): the losses that other passes realise THIS frame (drop
+    // sweeps = the water the cells gave those drops, the nucleus share = the cells event, S1 / F6' absorption above) apply every
+    // frame; the slow layer law (supply, evaporation, coarsening tau 0.3-12 s, lamella overrun) runs on half the texels per frame
+    // (checkerboard, alternating) with twice the step -- same rates, ~half the transcendental work.
+    float nStep = gR2HazeHalf > 0.5 ? 2.0 : 1.0;
+    // H2b (game test: wiped zones re-grew as a texel checkerboard -- while the coverage is far below saturation one step of
+    // supply is a visible share, so the two parities differ): a texel still building its layer (G_f + G_c < saturation
+    // depth) runs every frame; only saturated texels (the steady veil, where a step is invisible) alternate.
+    bool building = G.x + G.y < gR2HazeSatMM;
+    float nStep2 = building ? 1.0 : nStep;
+    if (gR2HazeHalf > 0.5 && !building && (((uint)(f.x + f.y) + (uint)gR2Frame) & 1u) != 0u)
+        return float4(G / max(gR2FineMaxMM, 1e-6), 0, 0);
+    nStep = nStep2;
+    float dt = gR2Dt * nStep;
     float kPhi = 3.14159265 / max(gR2ShapeK * gR2HazeAMM, 1e-6);
     float exposure = hm.w * gR2Exposure;                           // N3b: cell exposure (hzm)
     float cellA = gR2CellSizeMM.x * gR2CellSizeMM.y;
-    float lamS = gR2SprayVisRate * exposure * cellA * gR2Dt;
-    float sup = (gR2SprayFineMMs + gR2RainHazeMMs) * exposure * gR2Dt;          // sub-visible fragments: fine caps
+    float lamS = gR2SprayVisRate * exposure * cellA * gR2Dt;        // per FRAME (the cells pass realises one event per frame)
+    float sup = (gR2SprayFineMMs + gR2RainHazeMMs) * exposure * dt;              // sub-visible fragments: fine caps
     // H3-3 (8g): drawn spray pieces below a_max are atlas water, not cell drops (they made the small-drop lattice), +
     // the expected large pieces of the 2nd, 3rd ... event of a cell in one frame (the cells pass realises one event)
-    float supC = gR2SprayCoarseMMs * exposure * gR2Dt + max(lamS - (1.0 - exp(-lamS)), 0.0) * gR2SprayVisVolMM3 / cellA;
+    float supC = gR2SprayCoarseMMs * exposure * dt + nStep * max(lamS - (1.0 - exp(-lamS)), 0.0) * gR2SprayVisVolMM3 / cellA;
     // H3-3b cap law of the coarse water: its pieces ARRIVE at gR2CoarseInRMM (spray pieces < a_max, Lua) and grow once
     // they saturate the coverage (a = G_c / (G_sat / a_min)); coverage = 1 - exp(-pi G_c / (shapeK a)) up to phi_max
     float aC = max(gR2CoarseInRMM, G.y * gR2HazeAMM / max(gR2HazeSatMM, 1e-9));
     // evaporation (diffusion-limited caps: k ~ 1 / a^2)
     float aRel = aC / max(gR2HazeAMM, 1e-6);
-    G.x *= exp(-gR2FineEvapK * gR2Dt);
-    G.y *= exp(-gR2FineEvapK * gR2Dt / (aRel * aRel));
+    G.x *= exp(-gR2FineEvapK * dt);
+    G.y *= exp(-gR2FineEvapK * dt / (aRel * aRel));
     // supply: onto the pieces -> G_c, onto the free surface -> G_f
     float relC = min(1.0 - exp(-3.14159265 * G.y / max(gR2ShapeK * aC, 1e-6)), gR2HazePhiMax) / max(gR2HazePhiMax, 1e-3);
     float onP = relC * gR2MicroCover;
@@ -74,13 +88,13 @@ float4 main(PS_IN pin) {
     G.x += sup * (1.0 - onP);
     // E2 coarsening
     float relF = min(1.0 - exp(-kPhi * G.x), gR2HazePhiMax) / max(gR2HazePhiMax, 1e-3);
-    float dC = G.x * (1.0 - exp(-gR2Dt / max(gR2HazeCoarsenTau, 1e-3) * relF * relF));
+    float dC = G.x * (1.0 - exp(-dt / max(gR2HazeCoarsenTau, 1e-3) * relF * relF));
     G.x -= dC;
     G.y += dC;
     // I1 IMPACT LAMELLA SWEEP (section 8l): every spray impact spreads to beta_max d (Roisman 2009) and gathers the fine caps
     // under it into its own deposit; the coat is overrun gR2HazeOverrun x exposure times per second (spray mm/s x lamella
     // area per mm^3 of the DSD, Lua) -> fine water becomes coarse pieces (2-36 / s at 200-240 km/h behind cars)
-    float dI = G.x * (1.0 - exp(-gR2HazeOverrun * exposure * gR2Dt));
+    float dI = G.x * (1.0 - exp(-gR2HazeOverrun * exposure * dt));
     G.x -= dI;
     G.y += dI;
     G.x = min(G.x, gR2HazeCapMM);                                   // fine runoff above twice the saturation

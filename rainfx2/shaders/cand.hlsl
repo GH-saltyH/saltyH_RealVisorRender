@@ -17,7 +17,7 @@ float r2VCapScale(float seed, float f) {
 // rev48-R1 = common r2SplatTau (capillary-inertial recoil, ~1 frame)
 float r2VSplatTau(float rmm) {
     float tc = sqrt(1000.0 * pow(max(rmm, 0.05) * 1e-3, 3.0) / 0.072);
-    return clamp(gR2ShpRecoilC * tc * pow(50.0 / clamp(gR2SheetRecedeDeg, 15.0, 100.0), 1.5), 0.004, 0.3);
+    return clamp(gR2ShpRecoilC * tc * pow(50.0 / clamp(gR2FilmRecedeDeg, 15.0, 100.0), 1.5), 0.004, 0.3);
 }
 float r2VisorSeed(float w) { return floor(w / 262144.0); }    // = r2UnpackSeed (rev40: 64 seeds)
 float2 r2UnpackBF(float w) {                                     // = common.hlsl (rev48-S4 bend + resting spread)

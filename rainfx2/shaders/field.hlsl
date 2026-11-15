@@ -118,7 +118,7 @@ float4 main(PS_IN pin) {
     float nbB = txR2Field.Load(int3(min(f + int2(1, 0), int2(gR2FieldSize) - 1), 0)).b + txR2Field.Load(int3(max(f - int2(1, 0), int2(0, 0)), 0)).b
               + txR2Field.Load(int3(min(f + int2(0, 1), int2(gR2FieldSize) - 1), 0)).b + txR2Field.Load(int3(max(f - int2(0, 1), int2(0, 0)), 0)).b;
     float mobOut = 0.0;                                             // F5: body decision for the film substeps (A += 2)
-    if (gR2SheetOn > 0.5 && (F.b > 0.0 || nbB > 0.0 || filmAdd > 0.0 || gR2FilmNucOn > 0.5)) {   // dry: cheap exit
+    if (gR2FilmOn > 0.5 && (F.b > 0.0 || nbB > 0.0 || filmAdd > 0.0 || gR2FilmNucOn > 0.5)) {   // dry: cheap exit
         float hPrev = F.b * gR2FilmMaxMM;
         // S2-2 edge retreat / thin water joining film: r2FilmShedH of me and my 4 neighbours (gather, exact exchange) from the
         // 13-texel diamond loaded once (FXC: five texture-reading calls overflowed the /O3 compiler stack)
@@ -131,7 +131,7 @@ float4 main(PS_IN pin) {
         float hSE = r2FilmH(txR2Field, f + int2(1, -1)), hSW = r2FilmH(txR2Field, f - int2(1, 1));
         float qS = (gR2FilmRate + gR2SprayFineMMs + gR2RainHazeMMs + gR2SprayCoarseMMs) * gR2Exposure;
         float invTex = 1.0 / min(texMM2.x, texMM2.y);
-        float4 K = txR2SheetK.Load(int3(f, 0));
+        float4 K = txR2FilmK.Load(int3(f, 0));
         float2 flow = r2FilmFlowTex(K, max(hPrev, 0.1));            // F5 front rule (last frame's body decision, F.a >= 2)
         // r2Nb4 order: 0 = +x, 1 = -x, 2 = +y, 3 = -y; a neighbour sends to me when its receiver points back at me
         float shedOut = r2FilmShedH(hPrev, hE, hW, hN, hS, qS, invTex, F.a >= 1.5 ? 1.0 : 0.0, flow).x * hPrev;
@@ -160,7 +160,7 @@ float4 main(PS_IN pin) {
     } else if (r2DewetEvent(c0) && r2DewetFilmOK(r2CellFilmMM(c0), c0)) W = 0;
     // F2 (section 9): S1 water landing on TRAIL water (no film under it) joins the trail (the haze pass removed it there, same
     // water-layer test); 2026-11-13 game test: counted as film it grew sheets along the trails that the next drop joined.
-    if (gR2SheetOn > 0.5 && F.b * gR2FilmMaxMM < gR2FilmWetMM && F.r * gR2TrailMaxMM >= gR2HazeWetMM)
+    if (gR2FilmOn > 0.5 && F.b * gR2FilmMaxMM < gR2FilmWetMM && F.r * gR2TrailMaxMM >= gR2HazeWetMM)
         T += (gR2SprayFineMMs + gR2RainHazeMMs + gR2SprayCoarseMMs) * exposure * gR2Dt / max(gR2TrailMaxMM, 1e-4);
     // FM1: no dry-coat film supply with the sheet off (rev11 laid the SPLASHED rain share, flux x (1 - stickFrac), into W as
     // 3x3 stamps -- airborne water made into visor water). Impact water that is not a drop is haze (G) or leaves (H1 / SP1).
@@ -186,7 +186,7 @@ float4 main(PS_IN pin) {
             }
         }
     }
-    if (gR2SheetOn < 0.5) W *= exp(-gR2Dt * gR2SheetDrain);       // S2: no constant loss (drainage = transport off the visor)
+    if (gR2FilmOn < 0.5) W *= exp(-gR2Dt * gR2FilmDrain);       // S2: no constant loss (drainage = transport off the visor)
     // rev21: drops sweeping through THIN water take it with them (S2: film >= wet is the drop's to join, not to collect)
     if (W * gR2FilmMaxMM < gR2FilmWetMM) W *= 1.0 - coverM * gR2FilmCollect;   // W1u: drops do not wipe a wet layer   // rev22: pinned drops do not drain the film; W1g: nor a sheet
     float aOut = exposureRaw + 2.0 * mobOut;                        // A = exposure (debug view 2) + 2 x F5 body mobile
