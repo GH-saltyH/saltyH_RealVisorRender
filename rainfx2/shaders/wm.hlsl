@@ -13,6 +13,20 @@ float4 main(PS_IN pin) {
     int2 size = int2(gR2Cells);
     int2 k = min(r2HazePerCell(), int2(4, 4));
     float4 prev = gR2Sub > 1.5 ? txR2Wm.Load(int3(c0, 0)) : float4(0, 0, 0, 0);
+    // H3-P5 exact skips: (1) static class 0 (no valid haze texel: the haze pass returns 0 there; HZV is bound in the txR2Big
+    // slot, unused here); (2) every haze texel of the cell at or below gR2HazeMinMM in HZ_prev (txR2Haze) -- the haze pass
+    // applies no sweep to such texels; (3) every slot already fully wiped (the union stays 1).
+    if (txR2Big.Load(int3(c0, 0)).r < 0.5) return float4(0, 0, 0, 0);
+    bool need = false, full = true;
+    [unroll] for (int j0 = 0; j0 < 16; ++j0) {
+        int2 o = int2(j0 & 3, j0 >> 2);
+        if (o.x < k.x && o.y < k.y) {
+            float2 g = max(txR2Haze.Load(int3(c0 * k + o, 0)).rg, 0.0);
+            need = need || (g.x + g.y) * gR2FineMaxMM > gR2HazeMinMM;
+            full = full && r2WmGet(prev, j0) > 0.999;
+        }
+    }
+    if (!need || full) return prev;
     float2 lo = float2(c0) * gR2CellSizeMM, hi = lo + gR2CellSizeMM;
     float qL = length(0.25 * gR2Cells / gR2HazeSize * gR2CellSizeMM);
     float add[16];
@@ -27,9 +41,14 @@ float4 main(PS_IN pin) {
         float rmm = r2RadiusMM(st.z);
         if (r2SegBoxDist((b - mv) * gR2CellSizeMM, b * gR2CellSizeMM, lo, hi) > (r2HaloOut(rmm) + qL) * 1.001 + 1e-4) continue;
         hit = true;
+        // (4) texel centres outside the segment box grown by the reach get r2SweepFrac's exact 0 -- skip them first
+        float2 rC = (r2HaloOut(rmm) + qL) / gR2CellSizeMM;
+        float2 bLo = min(b, b - mv) - rC, bHi = max(b, b - mv) + rC;
         [unroll] for (int j = 0; j < 16; ++j) {
             int2 o = int2(j & 3, j >> 2);
-            if (o.x < k.x && o.y < k.y && add[j] < 1.0) add[j] += r2SweepFrac(c0 * k + o, gR2HazeSize, b, mv, rmm);
+            float2 pc = (float2(c0 * k + o) + 0.5) / float2(k);    // texel centre in cell units
+            bool inB = all(pc >= bLo) && all(pc <= bHi);
+            if (o.x < k.x && o.y < k.y && inB && add[j] < 1.0) add[j] += r2SweepFrac(c0 * k + o, gR2HazeSize, b, mv, rmm);
         }
     }
     if (!hit) return prev;

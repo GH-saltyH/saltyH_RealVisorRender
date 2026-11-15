@@ -19,6 +19,6 @@ float4 main(PS_IN pin) {
     float prev = (o.y > 0.5 && gR2Frame - (floor(o.y) - 1.0) <= R2_LAM_LIFE) ? o.y : 0.0;
     uint sk = (uint)gR2Frame * 8u + 9200u;
     if (r2Rand(uint3((uint)c.x, (uint)c.y, sk)) < lam)
-        return float4(gR2Frame + 1.0 + ((gR2SheetOn > 0.5 && r2FedTx(txR2Field, t)) ? 0.25 : 0.0), cur, 0, 0);
+        return float4(gR2Frame + 1.0, cur, 0, 0);   // FILM S2-0: the fed-water flag (+0.25) is gone
     return float4(cur, prev, 0, 0);
 }

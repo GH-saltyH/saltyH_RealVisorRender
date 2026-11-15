@@ -3,6 +3,8 @@
 -- through the user's 0 -> 250 km/h runs (acceleration from t = 12 s; speeds and wheel water at 14 / 16 / 18 / 20 s).
 -- Usage: texlua rainfx2_h3_chase_sim.lua DEFAULTS_LUA RAINFX2_DIR [RH] [variant]
 --   variant 'now' = the current build, 'fix' = the proposed H3-3c rules (printed side by side by the caller),
+--   'i2' = i1 + section 8n raindrop lamella circles (expectation: G_f, G_c x exp(-n pi Rs^2 dt)),
+--   'i2a' = i2 with the contact footprint = the deposited share of the lamella (area x fRes: a splashing lamella lifts off),
 --   'i1' = section 8l impact lamella sweep (every spray impact gathers the fine caps under its beta_max d lamella -> G_c).
 math.pow = math.pow or function(a, b) return a ^ b end
 local DEF, ROOT, RH, VAR = arg[1], arg[2], tonumber(arg[3] or '0.95'), arg[4] or 'now'
@@ -82,7 +84,14 @@ local function supply(rI, windKmh, kmh, hL, hP, hA)
     local bm = math.max(0.87 * Re ^ 0.2 - 0.40 * Re ^ 0.4 * We ^ -0.5, 1.0)
     EA = EA + w * math.pi / 4 * (bm * d) ^ 2
   end
-  return { rainHaze = out.hazeMMs or 0, rainFlux = out.fluxMMs or 0, spray = mms, fine = mms * Es / EV, coarse = mms * Ec / EV,
+  local dR = out.meanDiamMM or 1; local vR = rel * E
+  local ReR, WeR = 1000 * vR * dR, 13.8889 * vR * vR * dR
+  local PR = WeR * ReR ^ -0.4
+  local RsR = 0.5 * dR * ReR ^ 0.2 * math.sqrt(PR) / (1.24 + math.sqrt(PR))   -- Laan 2014 (common.hlsl r2ImpactOutcome)
+  local KR = math.sqrt(WeR) * ReR ^ 0.25
+  local fRes = KR > (p.splashK0 or 58) and ((p.splashK0 or 58) / KR) ^ (p.resA or 0.5) or 1   -- deposited share (Mundo)
+  local kA = VAR == 'i2a' and fRes or 1                     -- i2a: only the deposited lamella stays in contact (splash lift-off)
+  return { rainOverrun = (out.impactRate or 0) * 1e-6 * E * math.pi * RsR * RsR * kA, rainHaze = out.hazeMMs or 0, rainFlux = out.fluxMMs or 0, spray = mms, fine = mms * Es / EV, coarse = mms * Ec / EV,
            aIn = Ec > 0 and Er / Ec or a, DnS = DnS,
            AperV = EV > 0 and EA / EV or 0 }
 end
@@ -129,7 +138,8 @@ for _, sc in ipairs(SCEN) do
     Gc = Gc + sup * onP + supC; Gf = Gf + sup * (1 - onP)
     local relF = math.min(1 - math.exp(-math.pi * Gf / (p.shapeK * a)), phimax) / phimax
     local dC = Gf * (1 - math.exp(-dt / tau * relF * relF)); Gf = Gf - dC; Gc = Gc + dC
-    if VAR == 'i1' then                                        -- 8l I1: lamella overrun rate nA = impacting spray x A / V
+    if VAR == 'i2' or VAR == 'i2a' then local k = math.exp(-s.rainOverrun * dt); Gf = Gf * k; Gc = Gc * k end
+    if VAR == 'i1' or VAR == 'i2' or VAR == 'i2a' then                                        -- 8l I1: lamella overrun rate nA = impacting spray x A / V
       local dI = Gf * (1 - math.exp(-s.spray * E * s.AperV * dt)); Gf = Gf - dI; Gc = Gc + dI
     end
     Gf = math.min(Gf, 2 * sat); Gc = math.min(Gc, top)

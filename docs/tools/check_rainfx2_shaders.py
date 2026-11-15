@@ -51,6 +51,8 @@ HAZE_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2Haze']  
 HAZEPASS_TEXTURES = [t for t in HAZE_TEXTURES if t not in ('txR2Pred', 'txR2Big')] + ['txR2HzMask', 'txR2Wm']   # N3 / T1: haze pass ('mask')
 HZM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2HzValid']   # H3-P2: hzm (newPass haze = 'hzm')
 WM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2Wm']   # T1: substep wipe mask (newPass haze = 'wm')
+FIELD_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2HzMask']   # F6': field reads hzm (newPass haze = 'field')
+FILM_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2FilmAny']   # F4c (newPass haze = 'film')
 VISOR_TEXTURES = init_textures('function R2:drawParams(depth)')
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
 REC_TEXTURES = init_textures('function R2:recUpdate()')   # PERF-9 drop records (own table)
@@ -67,13 +69,12 @@ PASSES = [  # name, template, files, textures, defines
     ('merge', 'ui.fx', ['common.hlsl', 'merge.hlsl'], SCENE_TEXTURES, ''),
     ('seed', 'ui.fx', ['common.hlsl', 'seed.hlsl'], SCENE_TEXTURES, ''),
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
-    ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], SCENE_TEXTURES, ''),
+    ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], FIELD_TEXTURES, ''),
     ('trail', 'ui.fx', ['common.hlsl', 'trail.hlsl'], SCENE_TEXTURES, ''),
-    ('sheet', 'ui.fx', ['common.hlsl', 'sheet.hlsl'], SCENE_TEXTURES, ''),
     ('sheetcoef', 'ui.fx', ['common.hlsl', 'sheetcoef.hlsl'], SCENE_TEXTURES, ''),
-    ('nuc', 'ui.fx', ['common.hlsl', 'nuc.hlsl'], SCENE_TEXTURES, ''),
+    ('film', 'ui.fx', ['common.hlsl', 'film.hlsl'], FILM_TEXTURES, ''),
+    ('filmany', 'ui.fx', ['common.hlsl', 'filmany.hlsl'], SCENE_TEXTURES, ''),
     ('lam', 'ui.fx', ['common.hlsl', 'lam.hlsl'], SCENE_TEXTURES, ''),
-    ('bead', 'ui.fx', ['common.hlsl', 'bead.hlsl'], SCENE_TEXTURES, ''),
     ('big', 'ui.fx', ['common.hlsl', 'big.hlsl'], SCENE_TEXTURES, ''),
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
@@ -129,6 +130,9 @@ VALUE_SOURCES = {
     'hzv': ('local function sceneValuesImpl(self, v)',),
     'wm': ('local function sceneValuesImpl(self, v)',),
     'field': ('local function sceneValuesImpl(self, v)',),
+    'film': ('local function sceneValuesImpl(self, v)',),
+    'filmany': ('local function sceneValuesImpl(self, v)',),
+    'merge': ('local function sceneValuesImpl(self, v)',),
     'rec': ('local function candValues(self, v)',),
     'msk': ('local function candValues(self, v)',),
     'visor': ('local function candValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
@@ -156,6 +160,8 @@ def reserved_registers(text):
 
 
 def assemble(tpl, name, files, textures, defines):
+    # TR0 / TR2b: init.lua prepends tgshared.hlsl to common.hlsl and cand.hlsl
+    files = [x for f in files for x in (['tgshared.hlsl', f] if f in ('common.hlsl', 'cand.hlsl') else [f])]
     code = defines + ''.join(open(os.path.join(SRC, f), encoding='utf-8').read() + '\n' for f in files)
     tex = '\n'.join('Texture2D %s : register(t%d);' % (t, i) for i, t in enumerate(textures))
     text = tpl[name]
@@ -232,6 +238,14 @@ def main():
         ok = r.returncode == 0
         failed += not ok
         log = (r.stdout or '') + (r.stderr or '')
+        if not ok and not log.strip():
+            # FXC that dies without a message (crash / stack overflow) leaves an empty log: record the exit code and
+            # retry without /O3, which tells an optimiser crash from a real source problem.
+            log = 'exit code 0x%08X (no compiler output)\n' % (r.returncode & 0xFFFFFFFF)
+            if not a.dxc:
+                r2 = subprocess.run([c for c in cmd if c != '/O3'] + ['/Od'], capture_output=True, text=True)
+                log += '/Od retry: exit 0x%08X %s\n%s%s' % (r2.returncode & 0xFFFFFFFF, 'OK' if r2.returncode == 0 else 'FAILED',
+                                                           r2.stdout or '', r2.stderr or '')
         warnings = [l for l in log.splitlines() if 'warning' in l.lower()]
         print('%-12s %s%s' % (name, 'OK' if ok else 'FAILED', ('  (%d warnings)' % len(warnings)) if warnings else ''))
         if not ok or warnings:

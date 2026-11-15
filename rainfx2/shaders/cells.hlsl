@@ -99,8 +99,6 @@ float4 main(PS_IN pin) {
         float sqA = sqrt(ig.z);
         float bestV = 0.0, bestK = 1.0, bestD = 0.0, bestVI = 0.5;
         bool bestWhole = false;
-        bool onSheet = gR2SheetOn > 0.5 && ((txR2Field.SampleLevel(samLinearClamp, t, 0).b * gR2FilmMaxMM >= gR2SheetHJoin
-                                             && r2SheetConnected(r2SheetNucAt(c))) || r2ImpactFilm(t));
         bool swept = false;
         float2 bestP = float2(0.5, 0.5);
         [loop] for (int ey = -2; ey <= 2; ++ey) {
@@ -119,7 +117,6 @@ float4 main(PS_IN pin) {
                 dl *= float2(1.0 / sqA, sqA);
                 bool impactCell = all(int2(floor(im.ip)) == c);
                 if (!impactCell && dot(dl, dl) > Rs * Rs) continue;                 // lamella misses c
-                if (onSheet || im.fed) continue;                                     // the sheet takes it (field)
                 float dmA = dot(dm, ig.xy);
                 float Kside = dmA >= 0.0 ? Kdn : Kup;                                // R2: this cell's half of the lamella
                 if (Kside > gR2SplashK0 && accV > 0 && r2RadiusMM(accV) < gR2ClearMaxMM && !impactCell
@@ -237,15 +234,19 @@ float4 main(PS_IN pin) {
         bool pearlB = false;                                                   // review marker: -2 = trail pearl
         float2 pBead = float2(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9003u)),
                               r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9004u)));
-        if (r2DewetEvent(c)) {
+        float vCapF;
+        if (gR2SheetOn > 0.5) {
+            // FILM S2-2: a film body shrunk into this cell (none in the 8 around) becomes one cap at its centroid (field: same test)
+            if (r2FilmCapCell(c, vCapF)) { vBead += vCapF; pBead = r2CellFilmCentroid(c, pBead); }
+        } else if (r2DewetEvent(c)) {
             float hC = r2CellFilmMM(c);
             if (r2DewetFilmOK(hC, c)) {
                 vBead += hC * gR2CellSizeMM.x * gR2CellSizeMM.y;
-                if (gR2SheetOn > 0.5) pBead = r2CellFilmCentroid(c, pBead);   // W1m: the residual beads where it lies
             }
         }
         // pearl event (per line: rate grows as the rivulet narrows); cheap reject at the highest rate first
-        if (r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * 6.0 * gR2SimDt) {
+        // B2: mobile beads (r2BeadMobile) are born every frame where the bead radius allows; the random pearl event otherwise
+        if (gR2BeadMoveRMM < 50.0 || r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * 6.0 * gR2SimDt) {
             int2 k = r2FieldPerCell();
             float best = 0, vT = 0;
             [loop] for (int fy = -1; fy <= k.y; ++fy) {
@@ -255,25 +256,16 @@ float4 main(PS_IN pin) {
                     float h0 = txR2Field.Load(int3(f, 0)).r * gR2TrailMaxMM;
                     if (h0 < gR2PearlMM || h0 <= best) continue;
                     float4 g = txR2Trail.Load(int3(f, 0));
-                    if (any(r2TrailCell(f, g) != c) || !r2PearlEvent(c, g.w)) continue;
+                    if (any(r2TrailCell(f, g) != c) || !(r2PearlEvent(c, r2TgHw(g)) || r2BeadMobile(h0, r2TgHw(g)))) continue;
                     best = h0;
-                    vT = 1.3333 * h0 * g.w * gR2CellMM;
+                    vT = 1.3333 * h0 * r2TgHw(g) * gR2CellMM;
                     pBead = saturate((float2(f) + 0.5) / gR2FieldSize * gR2Cells + g.xy / gR2CellSizeMM - float2(c));
                 }
             }
             vBead += vT;
             if (vT > 0) pearlB = true;
         }
-        // rev48-W1t: the isolated patch around this cell beads into one drop (bead.hlsl, same frame, field removes it)
-        bool patchBead = false;
-        if (gR2SheetOn > 0.5) {
-            float4 bm = txR2Bead.Load(int3(c, 0));
-            if (bm.w > 0.5 && bm.x > 0) {
-                vBead += bm.x;
-                pBead = clamp(bm.yz, float2(0, 0), float2(0.9995, 0.9995));
-                patchBead = true;
-            }
-        }
+        bool patchBead = false;                                  // FILM S2-0: patch beads (bead.hlsl) removed
         if (vBead > 0) {
             if (accV > 0) {
                 accV += vBead;

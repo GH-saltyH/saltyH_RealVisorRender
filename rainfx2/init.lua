@@ -110,6 +110,8 @@ local DEFAULTS = {
   growTime = 0.06, fadeTime = 0.10,          -- s: newborn drops grow in, swept drops fade out
   trailWidthK = 0.5,
   -- trail water (rule_trail; rev47j width 0.35 -> 0.5 r: reference ~1/4 of the head)
+  surfThetaRDeg = 40.0,   -- FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md): ONE receding angle of the coat (user 2026-11-13); trailThetaRDeg,
+                          -- sheetRecedeDeg and hysteresisDeg are derived from it every frame (R2:syncSurface)
   trailThetaRDeg = 28.0, trailWetK = 0.35, trailLL = 5.0,   -- rev47l trail rule (Ca vs Ca*, docs/RAINFX_V2_TRAIL_RULES.md)
   -- rev48-S1 shape state (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 6): birth class shares, relaxation
   shpImpactK = 0.15, shpImpactMax = 1.8,   -- rev48-S2' (birth events: splats spread nearly evenly; was 0.35 / 3)
@@ -129,7 +131,8 @@ local DEFAULTS = {
   shpSlugTau = 0.6, shpAirK = 0.08, shpAirMax = 1.6,   -- rev48-S5 E3 slug length memory, E6 air stretch of pinned drops
   shpTailTau = 0.25, shpTailStretch = 0.2, shpHookK = 2.0, shpFrontK = 1.2, shpSnapDeg = 40.0,   -- rev48-S6 F2 turns (S6b: head hook)
   -- rev48-W1 water sheet (docs/RAINFX_V2_WATER_SHEET_PLAN.md): off until verified (P1: physics + metrics only)
-  sheetOn = false, sheetSub = 8, sheetHJoin = 0.10, sheetFront = 0.22, sheetSmooth = 0.12, sheetAbsorbK = 0.5,
+  sheetOn = true, sheetSub = 8,   -- FILM-UNIFY (2026-11-13, user): the water sheet is on by default
+  sheetHJoin = 0.10, sheetFront = 0.22, sheetSmooth = 0.12, sheetAbsorbK = 0.5,
   sheetRMax = 1.5, sheetUMax = 0.25, sheetFilmMaxMM = 2.0, sheetRecedeDeg = 50,   -- W1h: visor receding contact angle; unconnected water dewets at 2.3 (theta_r / 60)^3 /s (Cox-Voinov theta^3)
   sheetSceneMip = 0.0, sheetSlopeK = 1.0, sheetEdgeK = 0.6, sheetRidgeK = 0.8, sheetTailK = 0.35,   -- P2d edge profile
     -- rev48-P2b sheet lens: sharp scene (CSP bias -2), interior slope gain (2 mm blurred h)
@@ -375,6 +378,18 @@ local function sceneValuesImpl(self, v)
   v.gR2SweepWidth = p.sweepWidth
   v.gR2SheetDrain = p.sheetDrain
   v.gR2FilmCf = p.filmCf
+  do   -- FILM S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md): water layer depth, edge-retreat reference width, air shear, substeps
+    v.gR2FilmWetMM = p.hazeWetMM or 0.02           -- film = water >= this (the haze pass's water-layer depth, S1)
+    v.gR2FilmRefWMM = p.filmRefWMM or 5.0          -- body width in the dewetting / fed law (log term; lamella-patch scale)
+    v.gR2FilmJoinMM = p.filmJoinMM or 0.10         -- F1: a drop joins only a real (visible) film ...
+    v.gR2FilmThickMM = p.filmThickMM or 0.30       -- F1/F3: ... that stays thin; a cell film this thick becomes a drop
+    local ue = self.aeroU or 0
+    v.gR2FilmTauPa = 0.5 * 1.2 * (p.filmCf or 0.005) * ue * ue
+    -- substeps: Courant <= 1 at the speed of a 0.3 mm film (shear + gravity), even, 2..4
+    local vmax = 0.5 * v.gR2FilmTauPa * 0.3 + 3.27 * 0.09
+    local cour = vmax * 1000 * (self.frameDt or 1 / 60) / (602.0 / p.fieldU)
+    self.filmSub = math.min(4, math.max(2, 2 * math.ceil(math.min(cour, 4) / 2)))
+  end
   v.gR2FilmFlowK = p.filmFlowK
   v.gR2FilmDiffuse = p.filmDiffuse
   v.gR2FilmMaxMM = p.sheetOn and p.sheetFilmMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
@@ -401,6 +416,20 @@ local function sceneValuesImpl(self, v)
   v.gR2FilmRate = self.store.freezeRain and 0 or (st.filmRate or 0)
   v.gR2FilmSplashMM = st.filmSplashMM or 0.1
   v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
+  do   -- E1 / F6' (docs/RAINFX_V2_FILM_S2_DESIGN.md section 10): film supply vs the fed limit (r2FedRate, the edge-retreat law)
+    local function fedMMs(h)   -- supply (mm/s) that holds a layer of depth h (body width filmRefWMM) against its edges' retreat
+      local wet = math.min(h / math.max(p.filmFullMM or 0.2, 1e-4), 1)
+      local th = math.rad(p.trailThetaRDeg or 40) * (1 - (p.trailWetK or 0.35) * wet)
+      local W = v.gR2FilmRefWMM or 5
+      return h * 2 * (72000 * th ^ 3 / (9 * math.log(math.max(W * 1e6, 10)))) / W
+    end
+    local q = ((v.gR2FilmRate or 0) + (v.gR2SprayFineMMs or 0) + (v.gR2RainHazeMMs or 0) + (v.gR2SprayCoarseMMs or 0)) * (p.exposure or 1)
+    local qf = fedMMs(v.gR2FilmWetMM or 0.02)
+    self.e1 = { q = q, qFed = qf, qVis = fedMMs(v.gR2FilmJoinMM or 0.1) }
+    v.gR2FilmNucOn = (p.sheetOn and p.filmNuc ~= false and q >= qf) and 1 or 0   -- F6': off below the fed limit (no change)
+    v.gR2FilmTile = 0                                                             -- F4c: set by the film call (block summary)
+  end
+  v.gR2BeadMoveRMM = (p.beadDrops ~= false and self.beadMoveR) or 1e3   -- B2: bead radius that moves (P.criticalRadius)
   -- rev40 size mix, stagnation turbulence, size histogram
   local fl = fragLaw(p, self.frag or {})
   self.frag = fl
@@ -487,7 +516,7 @@ local function newPass(self, shader, name, haze)   -- haze: true = cells / hzv, 
     async = true,
     blendMode = render.BlendMode.Opaque,
     textures = { txR2State = false, txR2Field = false, txR2Claim = false, txR2Trail = false,
-      txR2FieldOld = false, txR2SheetK = false, txR2SheetNuc = false, txR2Lam = false, txR2Bead = false,   -- rev48-W1 water sheet (W1d nucleation mask, W1q lamella registry)
+      txR2FieldOld = false, txR2SheetK = false, txR2Lam = false,   -- F_prev of last frame (merge: S2 film join), film coefficients (S2), impact registry (U1)
       txR2Big = false,   -- rev48-R7a big-drop tiles
       txR2Pred = false,  -- PERF-3 per-drop prediction (predict.hlsl -> cells)
       txR2Du = root .. 'du.dds', txR2Dv = root .. 'dv.dds', txR2Mask = self.ctx.maskPath },
@@ -507,12 +536,32 @@ local function newPass(self, shader, name, haze)   -- haze: true = cells / hzv, 
     pass.textures.txR2Pred = nil
     pass.textures.txR2HzValid = false
   end
+  if haze == 'field' then   -- F6': the field reads the haze cell data (film nucleation) in the claims slot -> 14
+    pass.textures.txR2Claim = nil
+    pass.textures.txR2HzMask = false
+  end
+  if haze == 'film' then   -- F4c: the film transport reads the F4b block summary in the claims slot -> 14
+    pass.textures.txR2Claim = nil
+    pass.textures.txR2FilmAny = false
+  end
   if haze == 'wm' then   -- T1: the substep wipe mask reads its previous substep in the prediction slot -> 14
     pass.textures.txR2Pred = nil
     pass.textures.txR2Wm = false
   end
   if name then PASS_NAMES[pass] = 'RainFX2 sim/' .. name end
   return pass
+end
+
+-- FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md section 1): one surface. The coat's receding angle theta_r drives the trail
+-- threshold / drop dynamic retention (trailThetaRDeg), the sheet meniscus / thin-film rate (sheetRecedeDeg) and, with the
+-- fitted Furmidge contact-angle hysteresis dcos = pinCoat (drop depinning, F4b), the advancing angle
+-- theta_a = acos(cos theta_r - pinCoat) -> hysteresisDeg = theta_a - theta_r (sheet fronts).
+function R2:syncSurface()
+  local p = self.p
+  local th = p.surfThetaRDeg or 40
+  p.trailThetaRDeg, p.sheetRecedeDeg = th, th
+  local ca = math.cos(math.rad(th)) - (p.pinCoat or 0.18)
+  p.hysteresisDeg = math.deg(math.acos(math.max(math.min(ca, 1), -1))) - th
 end
 
 function R2:enabled()
@@ -543,19 +592,17 @@ function R2:ensureResources()
   self.F = { canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 field A'), canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 field B') }
   -- rev48-W1: sheet substeps ping-pong between the new field and this scratch (the previous field stays intact
   -- for the merge pass of the next frame = txR2FieldOld); sheet velocity coefficients once per frame
-  self.FS = canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 field sheet scratch')   -- F8: same format as the field
-  self.SK = canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 sheet coef')
+  self.SK = canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 film coef')
+  self.FS = canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 film scratch')   -- FILM S2-1 transport ping-pong
   -- rev48-W1d: nucleation mask per cell (made on S_next; read by this frame's field and next frame's merge)
-  self.NM = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 sheet nucleation')
   -- rev48-W1q: lamella registry per cell (birth frame), ping-pong
   self.LM = { canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 lamella A'), canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 lamella B') }
   self.li = 1
-  self.BM = canvas(p.cellsU, p.cellsV, 1, f32, 'RainFX2 patch beads')   -- rev48-W1t
   -- rev48-R7a big-drop tiles (4 x 4 cells -> the largest drop, drawn / touching in a +-4 cell window)
   self.BG = canvas(math.ceil(p.cellsU / 4), math.ceil(p.cellsV / 4), 1, f32, 'RainFX2 big drops')
   -- rev47j trail geometry (line point / direction / half-width per field texel)
   local h16 = render.TextureFormat.R16G16B16A16.Float
-  self.TG = { canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail A'), canvas(p.fieldU, p.fieldV, 1, h16, 'RainFX2 trail B') }
+  self.TG = { canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 trail A'), canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 trail B') }   -- TR0: packed tag / depth (RGBA32F)
   self.ti = 1
   -- H1c haze layer (2x the field: 0.29 mm texels), G in units of fineMaxMM, ping-pong
   local hr = math.max(1, math.floor(p.hazeRes or 2))
@@ -586,15 +633,15 @@ function R2:ensureResources()
   self.PR = canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop prediction')
   self.REC = canvas(6 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop records')   -- PERF-9 visor candidates (rec.hlsl)
   self.MSK = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R32G32.Float, 'RainFX2 candidate mask')   -- PERF-10 (msk.hlsl)
-  self.passField = newPass(self, self.src.field, 'field')
-  self.passSheet = newPass(self, self.src.sheet, 'sheet')            -- rev48-W1
+  self.passField = newPass(self, self.src.field, 'field', 'field')
   self.passSheetK = newPass(self, self.src.sheetcoef, 'sheetcoef')
-  self.passNuc = newPass(self, self.src.nuc, 'nuc')               -- rev48-W1d
+  self.passFilm = newPass(self, self.src.film, 'film', 'film')    -- FILM S2-1 (F4c: block summary bound)
   self.passLam = newPass(self, self.src.lam, 'lam')               -- rev48-W1q
-  self.passBead = newPass(self, self.src.bead, 'bead')             -- rev48-W1t
   self.passTrail = newPass(self, self.src.trail, 'trail')
   self.passClaim = newPass(self, self.src.claim, 'claim')
   self.passMetrics = newPass(self, self.src.metrics, 'metrics')
+  self.passFilmAny = newPass(self, self.src.filmany, 'filmany')   -- F4b
+  self.FAc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 film gate')
   self.Mc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 metrics')
   self.passSizes = newPass(self, self.src.sizes, 'sizes')
   self.Hc = canvas(10, 16, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 size histogram')
@@ -899,7 +946,7 @@ function R2:simulate(sim)
     for _, k in ipairs({ 'S', 'F', 'TG', 'LM', 'HZ' }) do
       for _, c in ipairs(self[k] or {}) do c:clear(z) end
     end
-    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'FS', 'SK', 'NM', 'BM', 'BG' }) do
+    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'SK', 'BG' }) do
       if self[k] then self[k]:clear(z) end
     end
     self.recValid, self.mskValid, self.hzmValid = false, false, false
@@ -935,7 +982,10 @@ function R2:simulate(sim)
   -- Substeps: enough that the fastest expected drop (2 mm, forces aligned) stays in the
   -- gather window; faster than that it is speed-limited (r2Predict), not deleted.
   local P = self.physics
+  self:syncSurface()
   local vExp = P.speedLegacySubsteps(p, 2.0, self.inp.accelG * 9.81, self.inp.airSpeed, p.pinCoat)   -- PHYS-UI: substeps unchanged
+  -- B2: smallest drop that moves this frame (full tangential g + the air speed at the visor; once per frame, bisection)
+  self.beadMoveR = math.min(P.criticalRadius(p, self.inp.accelG * 9.81, self.inp.airSpeed, p.pinCoat), 1e3)
   p.substeps = P.substeps(p, dt, self.cellMM, userSub, vExp)
   self.frameSeed = sim.frame % 1048576
   self.h = dt / p.substeps
@@ -961,8 +1011,7 @@ function R2:simulate(sim)
     if run(self.C, pk) then
       pm.textures.txR2State = self.S[self.si]
       pm.textures.txR2Claim = self.C
-      pm.textures.txR2FieldOld = self.F[3 - self.fi]   -- rev48-W1: F_prev of last frame's field pass
-      pm.textures.txR2SheetNuc = self.NM                -- rev48-W1d: last frame's nucleation (same S)
+      pm.textures.txR2FieldOld = self.F[3 - self.fi]   -- FILM S2-1: F_prev of last frame's field pass (film join)
       pm.textures.txR2Big = self.BG                     -- rev48-R7a (built on this same S last frame)
       sceneValues(self, pm.values)
       if run(self.S[3 - self.si], pm) then self.si = 3 - self.si end
@@ -981,18 +1030,7 @@ function R2:simulate(sim)
     sceneValues(self, pl.values)
     if run(self.LM[3 - self.li], pl) then self.li = 3 - self.li end
   end
-  -- rev48-W1t: isolated patches that bead this frame (F_prev); read by the cells substep 1 and the field pass
-  if p.sheetOn then
-    local pb = self.passBead
-    pb.textures.txR2Field = self.F[self.fi]
-    pb.textures.txR2Lam = self.LM[self.li]
-    pb.textures.txR2SheetNuc = self.NM
-    sceneValues(self, pb.values)
-    if not run(self.BM, pb) then self.BM:clear(rgbm(0, 0, 0, 0)) end
-    self.bmDirty = true
-  elseif self.bmDirty then
-    self.BM:clear(rgbm(0, 0, 0, 0)); self.bmDirty = false
-  end
+  -- FILM S2-0: the rev48-W1t patch-bead pass is removed
   for i = 1, p.substeps do
     self.sub = i
     do   -- PERF-3: each drop's step once (cells gathers the stored results); same textures as the cells pass
@@ -1000,8 +1038,6 @@ function R2:simulate(sim)
       pp.textures.txR2State = self.S[self.si]
       pp.textures.txR2Field = self.F[self.fi]
       pp.textures.txR2Trail = self.TG[self.ti]
-      pp.textures.txR2SheetNuc = self.NM
-      pp.textures.txR2Bead = self.BM
       pp.textures.txR2Lam = self.LM[self.li]
       sceneValues(self, pp.values)
       if not run(self.PR, pp) then self.status = 'compiling predict'; return end
@@ -1011,8 +1047,6 @@ function R2:simulate(sim)
     pc.textures.txR2State = self.S[self.si]
     pc.textures.txR2Field = self.F[self.fi]   -- rev21: haze/film births, trail following
     pc.textures.txR2Trail = self.TG[self.ti]  -- rev47j: pearling reads the rivulet lines
-    pc.textures.txR2SheetNuc = self.NM          -- rev48-W1k: drops collect isolated remnants only
-    pc.textures.txR2Bead = self.BM              -- rev48-W1t
     pc.textures.txR2Lam = self.LM[self.li]      -- rev48-W1u residual drops
     pc.textures.txR2Haze = self.HZ[self.hi]     -- H1c haze layer (HZ_prev)
     sceneValues(self, pc.values)
@@ -1022,13 +1056,26 @@ function R2:simulate(sim)
       local pw = self.passWm
       pw.textures.txR2State = self.S[self.si]
       pw.textures.txR2Wm = self.WM[self.wmi]
+      pw.textures.txR2Haze = self.HZ[self.hi]          -- H3-P5: HZ_prev (skip cells with no haze to wipe)
+      pw.textures.txR2Big = self.HZV                   -- H3-P5: static validity class in the (unused) big-drop slot
       sceneValues(self, pw.values)
-      if run(self.WM[3 - self.wmi], pw) then
+      if self.hzvValid and run(self.WM[3 - self.wmi], pw) then
         self.wmi = 3 - self.wmi
         self.wmValid = (i == 1) or self.wmValid
       elseif i == 1 then
         self.wmValid = false
       end
+    end
+    do   -- TR0 (docs/RAINFX_V2_TRAIL_REVIEW2.md section 6): trail geometry + this frame's depth after EVERY substep (each
+      -- substep end lies within +-2 cells of every point of its path: no unrecorded stretches); the swept segment is the
+      -- move of the frame so far, its duration i x h (the speed of the trail rule)
+      local pt = self.passTrail
+      pt.textures.txR2State = self.S[self.si]
+      pt.textures.txR2Field = self.F[self.fi]
+      pt.textures.txR2Trail = self.TG[self.ti]
+      sceneValues(self, pt.values)
+      pt.values.gR2Dt = self.h * i
+      if run(self.TG[3 - self.ti], pt) then self.ti = 3 - self.ti end
     end
   end
   do   -- rev48-R7a: big-drop tiles of the final state (visor now, claim / merge next frame)
@@ -1048,6 +1095,7 @@ function R2:simulate(sim)
     pm.textures.txR2HzValid = self.HZV
     pm.textures.txR2State = self.S[self.si]
     pm.textures.txR2Haze = self.HZ[self.hi]
+    pm.textures.txR2Field = self.F[self.fi]   -- H3-P4: S1 water-layer class per cell (F_prev)
     sceneValues(self, pm.values)
     self.hzmValid = self.hzvValid and run(self.HZM, pm)
     if self.hzmValid then
@@ -1064,57 +1112,47 @@ function R2:simulate(sim)
     end
   end
   do
-    -- rev47j: trail geometry first (reads F_prev, TG_prev); the field then still sees TG_prev, the same
-    -- lines the cells pass beaded (pearling removes that water), and both swap together.
-    local pt = self.passTrail
-    pt.textures.txR2State = self.S[self.si]
-    pt.textures.txR2Field = self.F[self.fi]
-    pt.textures.txR2Trail = self.TG[self.ti]
-    sceneValues(self, pt.values)
-    pt.values.gR2Dt = self.frameDt                 -- the packed move is the whole frame's
-    local trailOk = run(self.TG[3 - self.ti], pt)
-    -- rev48-W1d: sheet nucleation mask on S_next (this field pass adds, next frame's merge removes)
-    if p.sheetOn then
-      local pn = self.passNuc
-      pn.textures.txR2State = self.S[self.si]
-      pn.textures.txR2Field = self.F[self.fi]        -- W1f: sheet area share from F_prev
-      sceneValues(self, pn.values)
-      pn.values.gR2Dt = self.frameDt
-      if not run(self.NM, pn) then self.NM:clear(rgbm(0, 0, 0, 0)) end
-      self.nmDirty = true
-    elseif self.nmDirty then
-      self.NM:clear(rgbm(0, 0, 0, 0)); self.nmDirty = false
-    end
+    -- TR0: the trail geometry was written after every cells substep (TG[ti] = this frame's lines, tagged); the field
+    -- lays the depth of the lines tagged this frame (no second gather)
     local pf = self.passField
     pf.textures.txR2State = self.S[self.si]
     pf.textures.txR2Field = self.F[self.fi]
     pf.textures.txR2Trail = self.TG[self.ti]
-    pf.textures.txR2SheetNuc = self.NM
     pf.textures.txR2Lam = self.LM[self.li]
-    pf.textures.txR2Bead = self.BM
     sceneValues(self, pf.values)
     pf.values.gR2Dt = self.frameDt                 -- field integrates the whole frame
+    -- F5: sheet coefficients BEFORE the field (front rule + body mobility read them); geometry and scene only
+    local skOK = false
+    if p.sheetOn then
+      local pkc = self.passSheetK
+      sceneValues(self, pkc.values)
+      skOK = run(self.SK, pkc)
+    end
+    pf.textures.txR2SheetK = self.SK
+    pf.textures.txR2HzMask = self.HZM                  -- F6': nucleation per cell (hzm, this frame)
+    if not self.hzmValid then pf.values.gR2FilmNucOn = 0 end
     if run(self.F[3 - self.fi], pf) then
-      -- rev48-W1 WATER SHEET: conservative flux substeps on the new field (B), scratch ping-pong (even count)
+      -- FILM S2-1 transport (film.hlsl): an even number of substeps (scratch ping-pong)
       if p.sheetOn then
-        local pkc, psh = self.passSheetK, self.passSheet
-        sceneValues(self, pkc.values)
-        if run(self.SK, pkc) then
-          local nsub = math.max(2, 2 * math.floor((p.sheetSub or 8) / 2 + 0.5))
+        if skOK and self:filmGate() then   -- F4b: no film on the visor (readback, 1-3 frames old) -> no transport
+          local nsub = self.filmSub or 2
           local a, b = self.F[3 - self.fi], self.FS
-          sceneValues(self, psh.values)
-          psh.values.gR2SheetDt = self.frameDt / nsub
-          psh.textures.txR2SheetK = self.SK
-          psh.textures.txR2SheetNuc = self.NM        -- W1f: retraction into connected sheet only
+          local pfm = self.passFilm
+          sceneValues(self, pfm.values)
+          pfm.values.gR2SheetDt = self.frameDt / nsub
+          pfm.textures.txR2SheetK = self.SK
+          pfm.textures.txR2FilmAny = self.FAc
+          -- F4c: skip dry blocks once a summary exists (FAc on the GPU = the last gate pass, <= 3 frames old)
+          pfm.values.gR2FilmTile = (p.filmTile ~= false and (self.filmGateSent or 0) > 0) and 1 or 0
           for _ = 1, nsub do
-            psh.textures.txR2Field = a
-            if not run(b, psh) then break end
+            pfm.textures.txR2Field = a
+            if not run(b, pfm) then break end
             a, b = b, a
           end
         end
       end
       self.fi = 3 - self.fi
-      if trailOk then self.ti = 3 - self.ti end
+      if p.sheetOn then self:filmGateUpdate() end
     end
   end
   self:metricsUpdate(sim)
@@ -1220,7 +1258,7 @@ function R2:drawParams(depth)
   local t = self[key]
   if not t then
     t = { mesh = self.mesh, transform = 'original', async = true,
-      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2SheetNuc = false, txR2Big = false, txR2Rec = false, txR2Msk = false, txR2Mask = self.ctx.maskPath, txR2Haze = false, txR2Micro = false, txR2MicroHalo = false },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9/10 10 / 13; H1c 11 / 13; H3 12 / 13 (atlas; the N3 mask moved out: verify = G -1 in the haze pass); H3-2d 13 / 13 (halo atlas)
+      textures = { txR2State = false, txR2Field = false, txR2Trail = false, txR2Scene = false, txR2Lam = false, txR2Big = false, txR2Rec = false, txR2Msk = false, txR2Mask = self.ctx.maskPath, txR2Haze = false, txR2Micro = false, txR2MicroHalo = false },   -- PERF-5: mesh.fx allows 13 user textures (t13+ reserved); PERF-9/10 10 / 13; H1c 11 / 13; H3 12 / 13 (atlas; the N3 mask moved out: verify = G -1 in the haze pass); H3-2d 13 / 13 (halo atlas)
       values = {}, shader = depth and self.src.visorDepth or self.src.visor }
     self[key] = t
   end
@@ -1285,6 +1323,7 @@ function R2:drawParams(depth)
   v.gR2FilmMaxMM = p.sheetOn and p.sheetFilmMaxMM or p.filmMaxMM   -- rev48-W1: B holds the sheet (up to 2 mm)
   v.gR2TrailMaxMM = p.trailMaxMM
   v.gR2FilmMinMM = p.sheetOn and p.sheetHJoin or p.filmMinMM   -- rev48-W1e: with the sheet on only a sheet shows
+  v.gR2FilmWetMM = p.hazeWetMM or 0.02   -- debug 5: film layer depth (= field / film passes)
   v.gR2SheetOn = p.sheetOn and 1 or 0   -- rev48-P2 sheet lens
   v.gR2SheetSceneMip = p.sheetSceneMip or 0
   v.gR2SheetSlopeK = p.sheetSlopeK or 1
@@ -1402,7 +1441,6 @@ function R2:draw(src, viewKey, depth)
   t.textures.txR2Field = self.F[self.fi]
   t.textures.txR2Trail = self.TG and self.TG[self.ti] or false
   t.textures.txR2Lam = self.LM and self.LM[self.li] or false   -- rev48-P4 impacts on the sheet
-  t.textures.txR2SheetNuc = self.NM or false                    -- rev48-W1v Debug 10
   t.textures.txR2Big = self.BG or false                         -- rev48-R7a
   t.textures.txR2Haze = self.HZ and self.HZ[self.hi] or false   -- H1c haze layer
   t.values.gR2HazeMaskMode = self.hzmValid and (self.p.hazeMask or 1) or 0   -- N3 verify: the haze pass writes G = -1 (red)
@@ -1636,7 +1674,7 @@ function R2:ui()
     self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
   end)
   uiSection('Trails and thin film', false, function()
-    self.p.trailThetaRDeg = ui.slider('##rfx2ttr', self.p.trailThetaRDeg, 5, 60, 'Receding contact angle (dry coat; trails from Ca > Ca*): %.1f deg')
+    self.p.surfThetaRDeg = ui.slider('##rfx2ttr', self.p.surfThetaRDeg or 40, 5, 90, 'Coat receding contact angle (trails, sheet, drops; FILM-UNIFY): %.1f deg')
     self.p.trailWetK = ui.slider('##rfx2twk', self.p.trailWetK, 0, 0.8, 'Wet surface lowers the receding angle by: %.2f')
     self.p.trailLL = ui.slider('##rfx2tll', self.p.trailLL, 0, 20, 'Trail depth (x r Ca^2/3): %.1f')
     self.p.trailWidthK = ui.slider('##rfx2tw', self.p.trailWidthK, 0.1, 1.0, 'Trail width at high speed (x head radius): %.2f')
@@ -1649,37 +1687,27 @@ function R2:ui()
     self.p.filmBeadMM = ui.slider('##rfx2fb', self.p.filmBeadMM, 0.01, 0.2, 'Film gathers into a bead from: %.3f mm')
     self.p.dewetRate = ui.slider('##rfx2dw', self.p.dewetRate, 0, 20, 'Dewetting rate (per cell): %.1f /s')
   end)
-  uiSection('Water sheet (films form only here: FM1)', false, function()
-    if ui.checkbox('Water sheet: one water for film / sheet, conservative flow', self.p.sheetOn) then self.p.sheetOn = not self.p.sheetOn end
-    self.p.sheetSub = ui.slider('##rfx2wss', self.p.sheetSub, 2, 16, 'Sheet flow substeps per frame: %.0f', true)
-    self.p.sheetUMax = ui.slider('##rfx2wum', self.p.sheetUMax, 0.02, 0.5, 'Sheet speed cap: %.2f m/s')
-    self.p.sheetHJoin = ui.slider('##rfx2wj', self.p.sheetHJoin, 0.04, 0.4, 'Sheet from (drops join it): %.2f mm')
-    self.p.sheetFront = ui.slider('##rfx2wf', self.p.sheetFront, 0.1, 0.6, 'Sheet front advances above: %.2f mm')
-    self.p.sheetAbsorbK = ui.slider('##rfx2wa', self.p.sheetAbsorbK, 0.1, 1, 'Drop joins the sheet per frame: %.2f')
-    self.p.sheetRMax = ui.slider('##rfx2wr', self.p.sheetRMax, 0.8, 1.5, 'Capped puddles above this radius become sheet: %.2f mm')
-    self.p.sheetSmooth = ui.slider('##rfx2wsm', self.p.sheetSmooth, 0, 0.24, 'Sheet surface tension smoothing: %.2f')
-    self.p.sheetSceneMip = ui.slider('##rfx2wsmip', self.p.sheetSceneMip, 0, 4, 'Sheet image blur (scene mip): %.1f')
-    self.p.sheetSlopeK = ui.slider('##rfx2wslk', self.p.sheetSlopeK, 0, 3, 'Sheet interior refraction (slope gain): %.2f')
-    self.p.sheetEdgeK = ui.slider('##rfx2wedk', self.p.sheetEdgeK, 0, 2, 'Sheet edge (meniscus) strength: %.2f')
-    self.p.sheetRidgeK = ui.slider('##rfx2wrk', self.p.sheetRidgeK, 0, 2, 'Sheet front gathers (capillary ridge): %.2f')
-    self.p.sheetTailK = ui.slider('##rfx2wtk', self.p.sheetTailK, 0.1, 1, 'Sheet trailing edge angle x %.2f (lower = longer taper)')
-    self.p.sheetRecedeDeg = ui.slider('##rfx2wtr', self.p.sheetRecedeDeg, 15, 100, 'Visor receding contact angle: %.0f deg (30 dirty, 50 used, 65 new coat, 90 repellent)')
-    self.p.sheetHFed = ui.slider('##rfx2whf', self.p.sheetHFed, 0.01, 0.1, 'Impact-fed sheet from: %.3f mm')
-    self.p.sheetFedTau = ui.slider('##rfx2wft', self.p.sheetFedTau, 0.1, 1.5, 'Impact supply memory (fed regime): %.2f s')
-    self.p.sheetKeepMM = ui.slider('##rfx2wkm', self.p.sheetKeepMM, 0.01, 0.1, 'Residual patch kept (lump) from: %.3f mm')
-    self.p.sheetWaveK = ui.slider('##rfx2wwv', self.p.sheetWaveK, 0, 3, 'Sheet wind waves: %.2f')
-    self.p.impactWaveK = ui.slider('##rfx2wiw', self.p.impactWaveK, 0, 3, 'Impacts on the sheet (crater / ring): %.2f')
-    self.p.sheetWetFrac = ui.slider('##rfx2wwf', self.p.sheetWetFrac, 0.1, 1.5, 'Surface stays wet from supply x %.2f of the sheet threshold')
-    self.p.sheetWetMM = ui.slider('##rfx2wwm', self.p.sheetWetMM, 0, 0.06, 'Wet layer left behind: %.3f mm')
-    self.p.sheetGatherK = ui.slider('##rfx2wgk', self.p.sheetGatherK, 0, 1, 'Drainage gathers into leading flows: %.2f')
-    self.p.sheetPinMM = ui.slider('##rfx2wpin', self.p.sheetPinMM, 0, 1, 'Isolated patch pinned up to: %.2f mm')
-    self.p.patchBeadRate = ui.slider('##rfx2wpb', self.p.patchBeadRate, 0, 10, 'Settled patch beads into a drop: %.1f /s')
+  uiSection('Water film S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md)', false, function()
+    if ui.checkbox('Film S2 (rebuild in progress: S2-0 = rev48 sheet removed)', self.p.sheetOn) then self.p.sheetOn = not self.p.sheetOn end
     self.p.sheetFollowK = ui.slider('##rfx2wsf', self.p.sheetFollowK, 0, 2, 'Drops follow the water paths: %.2f')
-    self.p.sheetNucPhi = ui.slider('##rfx2wnp', self.p.sheetNucPhi, 0.2, 0.9, 'Sheet nucleates at drop coverage: %.2f')
-    self.p.sheetConnK = ui.slider('##rfx2wck', self.p.sheetConnK, 0.5, 3, 'Sheet = connected area > largest drop x %.2f')
-    self.p.sheetRetract = ui.slider('##rfx2wrt', self.p.sheetRetract, 0, 60, 'Sheet rear retracts thin water: %.0f /s')
-    uiInfo(string.format('  unconnected water dewets %.2f /s -> impact film (all rain x exposure) above %.3f mm/s (now %.3f mm/s x exposure)', sheetThinRate(self.p), sheetThinRate(self.p) * self.p.sheetHJoin, ((self.stats.fluxMMs or 0) * (self.stats.stickFrac or 0)) + (self.stats.filmRate or 0)))
     s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Rain film supply gain (unresolved rain; keep 1): %.2f')
+    self.p.filmJoinMM = ui.slider('##rfx2fjm', self.p.filmJoinMM or 0.10, 0.02, 0.3, 'Drops join a film from (F1): %.2f mm')
+    self.p.filmThickMM = ui.slider('##rfx2ftm', self.p.filmThickMM or 0.30, 0.15, 1.0, 'Film this thick becomes a drop (F1/F3): %.2f mm')
+    if ui.checkbox('Film forms from connected haze water under a holding supply (F6\')', self.p.filmNuc ~= false) then self.p.filmNuc = self.p.filmNuc == false end
+    if ui.checkbox('Trail beads that can move become drops (B2)', self.p.beadDrops ~= false) then self.p.beadDrops = self.p.beadDrops == false end
+    local e = self.e1
+    if e then
+      ui.text(string.format('E1 supply %.4f mm/s | holds a 0.02 mm layer from %.3f, a 0.10 mm film from %.3f mm/s (x%.2f)',
+        e.q, e.qFed, e.qVis, e.q / math.max(e.qFed, 1e-9)))
+    end
+    ui.text(string.format('B2 beads move from r = %s | film transport %s', (self.beadMoveR or 1e3) < 50 and string.format('%.2f mm', self.beadMoveR) or 'never (static)',
+      self.filmGateOpen == false and 'idle (no film)' or 'running'))
+    ui.text(string.format('F4b gate: %s | film blocks %d / 256 | reads %d / sent %d%s', self.filmGateOpen == nil and 'unknown' or (self.filmGateOpen and 'open' or 'closed'),
+      self.filmGateBlocks or -1, self.filmGateReads or 0, self.filmGateSent or 0, self.filmGateErr and (' | ' .. self.filmGateErr) or ''))
+    if self.filmGateMap then
+      ui.text('F4b map (F film >= 0.02 mm, M mobile only, B both; 32 x 8 blocks of the field):')
+      for _, r in ipairs(self.filmGateMap) do ui.text(r) end
+    end
   end)
   uiSection('Drop look (lens, shape, spread, film / scatter veil)', false, function()
     self.p.lensPhys = ui.slider('##rfx2lp', self.p.lensPhys, 0, 1.5, 'Lens strength (1 = physical water cap, one image): %.2f')
@@ -1752,7 +1780,7 @@ function R2:ui()
     self:metricsUI()
   end)
   uiSection('Diagnostics and performance', false, function()
-    s.debug = ui.slider('##rfx2dbg', s.debug, 0, 10, 'Debug: 10 sheet state (R supply/q_c, G connected, B lamella, white >= 0.3 mm) 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rho, G squeeze, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up): %.0f', true)
+    s.debug = ui.slider('##rfx2dbg', s.debug, 0, 10, '(%.0f) Debug: 10 sheet state (R supply/q_c, G connected, B lamella, white >= 0.3 mm) 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rho, G squeeze, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up)', true)
     if ui.checkbox('Highlight impacts (magenta = born by an impact < 0.3 s, yellow = drop hit this frame)', self.p.hiImpact) then self.p.hiImpact = not self.p.hiImpact end
     if ui.checkbox('Highlight split pieces (cyan, 1.5 s)', self.p.hiSplit) then self.p.hiSplit = not self.p.hiSplit end
     self.p.perfProbe = ui.slider('##rfx2pp', self.p.perfProbe or 0, 0, 2, 'Visor cost probe: %.0f (0 off | 1 setup only | 2 + drop union, no lens) -- diagnostics', true)
@@ -1781,6 +1809,47 @@ end
 
 -- rev12 evaluation metrics: GPU block reduction (32x8) + async readback at 2 Hz, optional CSV.
 local METRICS_HEADER = 'clock,weatherType,rainIntensity,rainWetness,rainWater,windKmh,carKmh,rainFluxMMs,spray,sprayCars,nearestM,filmRate,filmEqMM,filmCover,dropCover,haze,substeps,apertureMM,focusM,defocusDA,contactDeg,wfRefraction,wfSceneMip,filmRefract,filmVeil,scatterK,drops,sizeP50MM,p90p50,p99p50,binRatio,fragA,fragHi,dropDepthUM,residenceS,stagElevDeg,nBand0,p99Band0MM,nBand1,p99Band1MM,nBand2,p99Band2MM,simTimeS,replay,replayFrame,replayRate,sceneTag,fps,airT,airRH,cspAirT,windDirDeg,cloudBaseM,groundShare,rateMMh,groundMMh,impactRate,meanDiamMM,stickFrac,speedRel,sprayMMs,splashMMs,roadWet,leadKmh,leadLatM,dropsPerCm2,filmRateRain,selfFrontWaterMM,selfRearWaterMM,leadWaterMM,packWaterMM,aheadWaterMM,selfPuddle,wheelMode\n'
+-- F4b FILM GATE (docs/RAINFX_V2_FILM_S2_DESIGN.md section 10): the film substeps run only while the field holds film or a
+-- mobile body somewhere (filmany.hlsl 32x8 summary, async readback). Unknown (first frames, failed read) = open. A gate that
+-- saw film stays open 30 frames (no flapping); new film starts moving 1-3 frames after it appears (no pop: it only waits).
+function R2:filmGate()
+  if self.p.filmGate == false then return true end
+  return self.filmGateOpen ~= false
+end
+function R2:filmGateUpdate()
+  if self.p.filmGate == false or self.filmGateBusy then return end
+  local pg = self.passFilmAny
+  pg.textures.txR2Field = self.F[self.fi]
+  sceneValues(self, pg.values)
+  if not run(self.FAc, pg) then self.filmGateOpen = nil; self.filmGateErr = 'pass not run'; return end
+  self.filmGateBusy = true
+  self.filmGateSent = (self.filmGateSent or 0) + 1
+  local tmp = rgbm()
+  self.FAc:accessData(function(err, data)
+    self.filmGateBusy = false
+    if err or not data then self.filmGateOpen = nil; self.filmGateErr = tostring(err or 'no data'); return end
+    local hit, n, rows = false, 0, {}
+    for y = 0, 7 do
+      local row = {}
+      for x = 0, 31 do
+        data:colorTo(tmp, x, y)
+        local f, m = tmp.rgb.r > 0.5, tmp.rgb.g > 0.5
+        -- F4d (2026-11-15): the transport moves only MOBILE bodies (F5); pinned film is the field's (retreat, caps, sources).
+        -- Gating on film kept the transport running for one pinned spot (game test: 1 / 256 blocks, film 0.265 ms)
+        if m then hit = true end
+        if f or m then n = n + 1 end
+        row[#row + 1] = (f and m) and 'B' or (f and 'F' or (m and 'M' or '.'))
+      end
+      rows[#rows + 1] = table.concat(row)
+    end
+    self.filmGateMap = rows   -- diagnostic: F film >= wet, M mobile flag only, B both (field u -> right, v -> down)
+    data:dispose()
+    self.filmGateBlocks, self.filmGateReads, self.filmGateErr = n, (self.filmGateReads or 0) + 1, nil
+    if hit then self.filmGateHold = 30 else self.filmGateHold = (self.filmGateHold or 0) - 1 end
+    self.filmGateOpen = hit or self.filmGateHold > 0
+  end)
+end
+
 function R2:metricsUpdate(sim)
   if not (self.store.metrics or self.recording) or self.metricsBusy then return end
   local now = os.clock()
@@ -2018,7 +2087,7 @@ function R2:dispose()
   for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {}, self.HZ or {} }) do
     for _, c in ipairs(list) do free(c) end
   end
-  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'HZV', 'FS', 'SK', 'NM', 'BM', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'HZV', 'SK', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
     free(self[k]); self[k] = nil
   end
   self.sceneTex = nil
@@ -2061,10 +2130,11 @@ return function(ctx)
   self.weather = dofile(ctx.folder .. '/rainfx2/weather.lua')
   self.stats = {}
   local dir = ctx.folder .. '/rainfx2/shaders/'
-  local common = readFile(dir .. 'common.hlsl')
-  local cand = readFile(dir .. 'cand.hlsl')   -- PERF-9: candidate code shared by visor and rec
+  local tgs = readFile(dir .. 'tgshared.hlsl')   -- TR0 / TR2b: trail packing + bead rows, shared by sim and visor
+  local common = tgs and readFile(dir .. 'common.hlsl') and (tgs .. '\n' .. readFile(dir .. 'common.hlsl')) or nil
+  local cand = tgs and readFile(dir .. 'cand.hlsl') and (tgs .. '\n' .. readFile(dir .. 'cand.hlsl')) or nil   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheet', 'sheetcoef', 'nuc', 'lam', 'bead', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
+  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'sheetcoef', 'film', 'filmany', 'lam', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -2085,11 +2155,10 @@ return function(ctx)
       seed = common .. '\n' .. src.seed,
       metrics = common .. '\n' .. src.metrics,
       sizes = common .. '\n' .. src.sizes,
-      sheet = common .. '\n' .. src.sheet,
       sheetcoef = common .. '\n' .. src.sheetcoef,
-      nuc = common .. '\n' .. src.nuc,
+      film = common .. '\n' .. src.film,   -- FILM S2-1
+      filmany = common .. '\n' .. src.filmany,   -- F4b film gate
       lam = common .. '\n' .. src.lam,
-      bead = common .. '\n' .. src.bead,
       big = common .. '\n' .. src.big,
       visor = cand .. '\n' .. src.visor,
       rec = cand .. '\n' .. src.rec,

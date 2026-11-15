@@ -22,11 +22,15 @@ float4 main(PS_IN pin) {
     uint hy = (uint)hm.y;
     uint cls = (hy >> 8) & 3u;                                       // N3b: 0 none valid | 1 all valid | 2 mixed
     if (cls == 0u || (cls == 2u && r2Valid(t) < 0.5)) return float4(0, 0, 0, 0);
-    // S1 (section 8m): a water layer here (sheet / film B, rivulet R of F_prev, or the W1r wetted surface) has taken the
+    // S1 (section 8m): a water layer here (film B, rivulet R of F_prev) has taken the
     // micro caps in (water touching water merges) and takes the arriving fragments too -- the field pass adds that supply
     // to B under the same test. The white veil only exists on a dry / dropwise surface.
-    float4 Fw = txR2Field.SampleLevel(samLinearClamp, t, 0);
-    if (Fw.b * gR2FilmMaxMM + Fw.r * gR2TrailMaxMM >= gR2HazeWetMM || r2WetTx(txR2Field, t)) return float4(0, 0, 0, 0);
+    uint wet = (hy >> 10) & 3u;                                     // H3-P4: hzm class (exact) -- sample only where mixed
+    if (wet == 1u || hm.x > 0.5) return float4(0, 0, 0, 0);         // F6': the cell's haze became film (field adds it)
+    if (wet == 2u) {
+        float4 Fw = txR2Field.SampleLevel(samLinearClamp, t, 0);
+        if (Fw.b * gR2FilmMaxMM + Fw.r * gR2TrailMaxMM >= gR2HazeWetMM) return float4(0, 0, 0, 0);
+    }
     float2 G = max(txR2Haze.Load(int3(f, 0)).rg, 0.0) * gR2FineMaxMM;   // (fine, coarse) mm
     if (G.x + G.y > gR2HazeMinMM) {
         float sweep = 0;

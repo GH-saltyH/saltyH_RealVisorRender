@@ -1,0 +1,2 @@
+Connection test from Claude (Cowork) - 2026-11-14
+If you can read this file in saltyH_RealVisorRender, write access works.

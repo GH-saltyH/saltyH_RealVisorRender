@@ -32,10 +32,12 @@ float4 r2Tap(Texture2D tx, float2 t) {
     int2 p = clamp(int2(t * float2((float)w, (float)h)), int2(0, 0), int2((int)w - 1, (int)h - 1));
     return tx.Load(int3(p, 0));
 }
-float r2Valid(float2 t) {
-    if (any(t < float2(0, 0)) || any(t > float2(1, 1))) return 0;
-    if (r2Tap(txR2Du, t).a < 1.0) return 0;
-    return r2Tap(txR2Mask, t).a >= 0.5 ? 1 : 0;
+float r2Valid(float2 t) {                                       // FXC: single return (early returns overflow /O3)
+    float v = 0;
+    if (all(t >= float2(0, 0)) && all(t <= float2(1, 1))) {
+        if (r2Tap(txR2Du, t).a >= 1.0) v = r2Tap(txR2Mask, t).a >= 0.5 ? 1 : 0;
+    }
+    return v;
 }
 float3 r2ToWorld(float3 v) {
     return mul(v, (float3x3)gR2ObjToWorld);
@@ -852,10 +854,24 @@ float r2Wet(float4 F) {
 //                     h0 = trailLL r Ca^(2/3) (Landau-Levich, thicker when faster), at most the edge slope
 //                     2 h0 / hw <= trailSlopeMax.
 // Big heads move faster (force ~ r^2, pinning ~ r) -> they cross the threshold first; small drops flow dry.
+// FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md section 1): ONE receding angle (gR2TrailThetaRDeg = the coat's theta_r,
+// Lua syncSurface) lowered by ONE wetness (r2WetU) for every flat water: trail threshold, dewetting of lines / films, beads.
+float r2RecedeRad(float wet) {
+    return radians(gR2TrailThetaRDeg) * (1.0 - gR2TrailWetK * saturate(wet));
+}
+// receding speed of a contact line on a flat film / line of width wMM (Cox-Voinov / de Gennes, the trail law), mm/s
+float r2DewetSpeedMMs(float wMM, float wet) {
+    float th = r2RecedeRad(wet);
+    return 72000.0 * th * th * th / (9.0 * log(max(wMM * 1e6, 10.0)));
+}
+// supply rate (1/s x h) that holds a film of width wMM against its edges' retreat: q >= h r2FedRate (the W1g fed rule)
+float r2FedRate(float wMM, float wet) {
+    return 2.0 * r2DewetSpeedMMs(wMM, wet) / max(wMM, 1e-3);
+}
 float r2TrailRule(float rmm, float vms, float wet, out float hw) {
     hw = 0.0;
     if (rmm <= gR2MinRadiusMM || vms <= 0.0) return 0.0;
-    float th = radians(gR2TrailThetaRDeg) * (1.0 - gR2TrailWetK * saturate(wet));
+    float th = r2RecedeRad(wet);
     float caS = th * th * th / (9.0 * log(max(rmm * 1e6, 10.0)));   // r / 1 nm
     float ca = vms / 72.0;
     float sR = ca / max(caS, 1e-9);
@@ -923,74 +939,11 @@ float2 r2CellFilmCentroid(int2 c, float2 fallback) {
         }
     return s > 1e-6 ? p / s : fallback;
 }
-// ---------- rev48-W1 WATER SHEET (docs/RAINFX_V2_WATER_SHEET_PLAN.md) ----------
-// With the sheet on, field B is the sheet / film height h (one water, mm / gR2FilmMaxMM). A drop that sits on
-// sheet water (h under its centre >= gR2SheetHJoin) or has grown to gR2SheetRMax hands gR2SheetAbsorbK of its
-// volume to the sheet per frame (all of it below r 0.15 mm): the field pass adds it (S_next, F_prev), the
-// merge pass of the next frame removes it from the drop (same S, F_prev = txR2FieldOld) -- exact exchange.
-// rev48-W1d NUCLEATION (docs/RAINFX_V2_WATER_SHEET_PLAN.md section 7.3): a sheet is born only from drop water --
-// where the drops of a 5x5-cell cluster are dense (coverage >= gR2SheetNucPhi, drop water depth >= sheetHJoin)
-// and an impact lamella bridges them, the nuc pass (nuc.hlsl, S_next) marks the cell; all of that drop joins
-// the sheet at once, spread over r2SheetNucRMM (the bridged puddle), so the cluster's caps overlap into one sheet.
-// NM texel of cell s: R nucleation, G drop coverage, B drop water depth, A sheet area share of the 5x5 cells (W1f).
-float4 r2SheetNucAt(int2 s) {
-    return gR2SheetOn > 0.5 ? txR2SheetNuc.Load(int3(clamp(s, int2(0, 0), int2(gR2Cells) - 1), 0)) : float4(0, 0, 0, 0);
-}
-// rev48-W1f CONNECTED SHEET (W1e review: at heavy the sheet took drops over one by one -- drop-shaped sheet blobs):
-// water is a sheet only where it covers more of the 5x5-cell window than the largest drop could
-// (gR2SheetConnA = sheetConnK * pi rMax^2 / window); a smaller patch is a drop's worth of water, not a sheet.
-bool r2SheetConnected(float4 nm) {
-    return nm.a >= gR2SheetConnA;
-}
-// rev48-W1g IMPACT-FILM REGIME (W1f review: at hurricane the exposed face stayed drops + trails): when ALL the rain
-// landing here (resolved + unresolved, x local exposure) arrives faster than unconnected water breaks up
-// (q >= sheetThinRate * sheetHJoin), successive splashes land on each other's lamellae -- the resolved share does
-// not stay as separate drops either, all of it feeds the water layer (cells: no births; field: adds it).
-// rev48-W1j (W1i review: the fed regime opened like a sliding door -- one straight edge = an iso-line of the smooth
-// exposure): the regime is decided by the LOCAL supply q actually delivered by discrete impact lamellae (field A,
-// exponential average over sheetFedTau of the stamped rain, written by the field pass), not by its expectation.
-// Fed where q >= sheetThinRate x sheetHJoin: the lamellae land on each other before the water breaks up.
-bool r2FedTx(Texture2D tx, float2 t) {
-    return gR2SheetOn > 0.5 && tx.SampleLevel(samLinearClamp, t, 0).a * gR2SheetQMax >= gR2SheetThinRate * gR2SheetHJoin;
-}
-bool r2ImpactFilm(float2 t) {
-    return r2FedTx(txR2Field, t);
-}
-// rev48-W1r WETTED SURFACE (P4 review: the sheet left a dry surface right behind it -- no wetting state; the reference
-// keeps the whole exposed face wet under continuous supply): where the local supply q is >= sheetWetFrac x q_c the
-// surface stays wet -- a deposited layer sheetWetMM (Landau-Levich film left by the moving sheet) does not flow, does not
-// dissolve, is not pulled into the sheet; the next water lands on wet surface (no dry-front pinning).
-bool r2WetTx(Texture2D tx, float2 t) {
-    return gR2SheetOn > 0.5 && tx.SampleLevel(samLinearClamp, t, 0).a * gR2SheetQMax >= gR2SheetWetFrac * gR2SheetThinRate * gR2SheetHJoin;
-}
-// rev48-W1i FED SHEET (P2d review: sheets only ran down from the top edge, never formed on the exposed face):
-// at speed the impact-fed film is THIN -- it is sheared away at up to 0.25 m/s, so h ~ q L / v ~ 0.02-0.08 mm,
-// below sheetHJoin (0.10, the threshold for water that is NOT re-fed) -- and W1f broke it up as unconnected water.
-// Where impacts keep re-feeding it (Gosset 2017: impingement holds a continuous film thinner than h0) the sheet
-// threshold is sheetHFed instead. All sheet tests use r2SheetH (field, sheet, nuc, merge, cells, drops, visor).
-float r2SheetH(float2 t) {
-    return r2ImpactFilm(t) ? gR2SheetHFed : gR2SheetHJoin;
-}
-float r2SheetHTx(Texture2D tx, float2 t) {
-    return r2FedTx(tx, t) ? gR2SheetHFed : gR2SheetHJoin;
-}
-float r2SheetHAtTexel(int2 f) {
-    return r2SheetH((float2(f) + 0.5) / gR2FieldSize);
-}
-float r2SheetNucRMM(float r) {
-    return max(r, 1.8 * min(gR2CellSizeMM.x, gR2CellSizeMM.y));   // stays inside the field pass 5x5 cell window
-}
-float r2SheetAbsorbFrac(float4 st, float4 L, float hUnderMM, float4 nm, float hcAbs, bool wet) {
-    float k = 0.0;
-    if (gR2SheetOn > 0.5 && st.z > 0 && L.y <= 0 && L.z <= 0) {
-        float r = r2RadiusMM(st.z);
-        if (nm.r > 0.5) k = 1.0;
-        else if ((hUnderMM >= hcAbs || r >= gR2SheetRMax) && r2SheetConnected(nm)) k = r < 0.15 ? 1.0 : gR2SheetAbsorbK;
-        // rev48-W1u (W1t review: drops crossing a sheet cut it and pinned drops stayed under sheets for ever): on wetted
-        // surface a drop touching the water layer merges into it (its water adds to the sheet and flows on)
-        else if (wet && hUnderMM >= 0.5 * gR2SheetWetMM) k = r < 0.15 ? 1.0 : gR2SheetAbsorbK;
-    }
-    return k;
+// FILM S2-0 (docs/RAINFX_V2_FILM_S2_DESIGN.md section 2): the rev48-W1..W1w sheet helpers (nucleation mask, connected-sheet
+// test, fed / wetted supply regime, sheet thresholds, conditional absorption) are removed; S2 rebuilds the film on the
+// unified thin-water model. FILM-UNIFY A wetness = the water present (film / trail depth).
+float r2WetU(float4 F, float2 t) {
+    return r2Wet(F);
 }
 // rev41 clustering (rev40 review: the reference shows dense groups of small and large drops, v2 an
 // even spread): birth rates are modulated by a slowly drifting low-frequency field (gR2ClusterK,
@@ -1051,25 +1004,11 @@ int2 r2CellOfTexel(int2 f) {
 int2 r2FieldTexelAt(float2 cellPos) {
     return clamp(int2(floor(cellPos / gR2Cells * gR2FieldSize)), int2(0, 0), int2(gR2FieldSize) - 1);
 }
-// rev48-W1e CONTACT (W1d review: a sheet ran over drops that only blurred): water touching water merges -- the
-// sheet height a drop sees is the highest under its footprint (centre + 4 rim points), not only under its centre.
-// Field (F_prev) and merge (txR2FieldOld = the same F_prev) call it with the same texture and state.
-float r2SheetHUnder(Texture2D tx, float2 cellPos, float rMM) {
-    float2 d = rMM / gR2CellSizeMM;
-    float h = tx.Load(int3(r2FieldTexelAt(cellPos), 0)).b;
-    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos + float2(d.x, 0)), 0)).b);
-    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(d.x, 0)), 0)).b);
-    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos + float2(0, d.y)), 0)).b);
-    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(0, d.y)), 0)).b);
-    return h * gR2FilmMaxMM;
-}
 // Dewetting of THIN film only: a film already thick enough to be a sheet does not bead up (rev48-W1).
 // rev48-W1e: with the sheet on, water below the sheet threshold is unconnected splash water (micro droplets): it
 // breaks up at sheetThinRate (field pass) instead of beading into cell-volume drops of one size (W1b/W1c reviews).
 bool r2DewetFilmOK(float hC, int2 c) {
-    if (gR2SheetOn < 0.5) return hC >= gR2FilmBeadMM;
-    // rev48-W1o / U1: no per-cell beading with the sheet on (a grid of drops); patches bead through bead.hlsl
-    return false;
+    return hC >= gR2FilmBeadMM;   // FILM S2-0: S2-2 replaces this with the edge-retreat rule (r2DewetSpeedMMs)
 }
 // rev48-W1 sheet velocity coefficients at t (world law -> field uv / s): v(h) = A h + B h^2 (h in mm),
 // air shear tau h / (2 mu) with the helmet outer flow (same u_e as r2DropVelocity, Cf = gR2FilmCf) and
@@ -1092,6 +1031,147 @@ float4 r2SheetCoef(float2 t) {
     return float4(A, B) * gR2FilmFlowK;
 }
 
+// ---------- FILM S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md section 3; unified thin-water rules, FILM-UNIFY) ----------
+// Field B = film height h (mm / gR2FilmMaxMM). Water is film where h >= gR2FilmWetMM (wet = water present; the same depth
+// the haze pass treats as a water layer, S1).
+float r2FilmH(Texture2D tx, int2 g) {
+    bool inside = all(g >= int2(0, 0)) && all(g < int2(gR2FieldSize));
+    return inside ? tx.Load(int3(clamp(g, int2(0, 0), int2(gR2FieldSize) - 1), 0)).b * gR2FilmMaxMM : 0.0;   // off the visor: 0
+}
+float4 r2FieldAt(Texture2D tx, int2 g) {                         // bounds-checked field texel (off the texture: dry)
+    bool inside = all(g >= int2(0, 0)) && all(g < int2(gR2FieldSize));
+    float4 v = tx.Load(int3(clamp(g, int2(0, 0), int2(gR2FieldSize) - 1), 0));
+    return inside ? v : float4(0, 0, 0, 0);
+}
+// S2-1 SOURCE (drop -> film), F1 (docs/RAINFX_V2_FILM_S2_DESIGN.md section 9): water touching water merges, the SMALLER body
+// into the larger one's form. A drop joins a film only if (a) the film under its footprint (centre + 4 rim points) is a real
+// film (>= gR2FilmJoinMM, the visible sheet depth), (b) that film around it (disk of twice its radius) holds more water than
+// the drop, and (c) the drop's cap laid on it keeps the film thin (peak < gR2FilmThickMM) -- otherwise the drop stays a drop
+// (a lens with the drop law; game test 1: a 2.5 mm drop laid as a 0.75-0.96 mm flat disk = a flat mirror stuck in place).
+// The field pass lays the volume (S_next, F_prev); the merge pass of the next frame removes the drop (same S,
+// txR2FieldOld = the same F_prev) -- one rule, exact exchange. Flying / fading drops do not join.
+float r2FilmUnder(Texture2D tx, float2 cellPos, float rMM) {
+    float2 d = rMM / gR2CellSizeMM;
+    float h = tx.Load(int3(r2FieldTexelAt(cellPos), 0)).b;
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos + float2(d.x, 0)), 0)).b);
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(d.x, 0)), 0)).b);
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos + float2(0, d.y)), 0)).b);
+    h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(0, d.y)), 0)).b);
+    return h * gR2FilmMaxMM;
+}
+float r2FilmJoinRadiusMM(float vol) {                                    // cap disk the field lays (stays in the 5 x 5 window)
+    return min(r2RadiusMM(vol), 1.9 * min(gR2CellSizeMM.x, gR2CellSizeMM.y));
+}
+bool r2FilmJoin(float4 st, float4 L, Texture2D tx, float2 cellPos) {
+    bool j = false;
+    if (gR2SheetOn > 0.5 && st.z > 0 && L.y <= 0 && L.z <= 0) {
+        float rr = r2FilmJoinRadiusMM(st.z);
+        float hU = r2FilmUnder(tx, cellPos, rr);
+        float peak = hU + 1.5 * st.z / (3.14159265 * rr * rr);         // cap height of the laid volume (2/3 pi r^2 h0)
+        j = hU >= gR2FilmJoinMM && hU * 12.566371 * rr * rr >= st.z && peak < gR2FilmThickMM;
+    }
+    return j;
+}
+// S2-2 EDGE RETREAT (unified rule 2, r2DewetSpeedMMs): a film that is not fed recedes from its edges at V_d; the receding
+// line carries its water inward (into the thickest neighbour) -- the rim gathers, the body shrinks into a cap (r2FilmCapCell).
+// Water thinner than film beside a wet texel joins that body. Returns the share of texel g's water that leaves it this
+// frame and the receiving neighbour (r2Nb4 index; -1 = stays). The field pass evaluates it for itself and
+// its 4 neighbours (gather): exactly conservative.
+int2 r2Nb4(int k) {                                            // +x, -x, +y, -y (no local arrays: FXC-safe)
+    return int2(k == 0 ? 1 : (k == 1 ? -1 : 0), k == 2 ? 1 : (k == 3 ? -1 : 0));
+}
+// x = share of texel g's water that leaves it this frame, y = receiving neighbour 0..3 (r2Nb4), -1 = stays.
+// FXC (0xC00000FD /O3 stack overflow, 2026-11-13): pure function of the five heights (the field pass loads the 13-texel
+// diamond once), single return, pass-constant terms hoisted: q = supply mm/s, invTex = 1 / min texel edge (mm).
+// F5: a MOVING body (mob, last frame's decision) does not retreat at its front: the edge whose receiver lies upstream of the
+// flow (texel axes) is an advancing contact line (theta_a), only the rear recedes; a pinned body dewets on all edges.
+float2 r2FilmShedH(float h, float h0, float h1, float h2, float h3, float q, float invTex, float mob, float2 flow) {
+    float best = h0, dir = 0.0;
+    if (h1 > best) { best = h1; dir = 1.0; }
+    if (h2 > best) { best = h2; dir = 2.0; }
+    if (h3 > best) { best = h3; dir = 3.0; }
+    float mn = min(min(h0, h1), min(h2, h3));
+    float2 r = float2(0.0, -1.0);
+    if (h > 0.0 && best >= gR2FilmWetMM) {                      // no film beside it: stays (thin) or is a cap body (cap rule)
+        if (h < gR2FilmWetMM) r = float2(1.0, dir);             // thin water beside film joins it
+        // G1 (2026-11-15): >= -- a FLAT unfed patch recedes too (game test: '>' kept every uniform patch forever, e.g. the crown
+        // film laid at rest, so the film gate never closed); its edges move into the body, which thickens into a cap (F3)
+        else if (mn < gR2FilmWetMM && best >= h) {              // edge texel (an interior texel has no dry neighbour)
+            float wet = saturate(h / max(gR2FilmFullMM, 1e-4)); // the surface under a receding film is wetted
+            bool front = mob > 0.5 && dot(float2(r2Nb4((int)dir)), flow) < 0.0;
+            if (!front && q < h * r2FedRate(gR2FilmRefWMM, wet)) // unfed: recedes at V_d
+                r = float2(saturate(r2DewetSpeedMMs(gR2FilmRefWMM, wet) * gR2Dt * invTex), dir);
+        }
+    }
+    return r;
+}
+float r2CellFilmMaxMM(int2 c) {
+    int2 k = r2FieldPerCell();
+    float m = 0;
+    [loop] for (int y = 0; y < k.y; ++y)
+        [loop] for (int x = 0; x < k.x; ++x)
+            m = max(m, r2FilmH(txR2Field, c * k + int2(x, y)));
+    return m;
+}
+// S2-2 CAP: a film body that has shrunk into one cell (no film in the 8 cells around) becomes ONE cap (a drop) of its water,
+// at its centroid -- cells births / feeds it, the field removes the cell's film (same F_prev test). No random rate, no grid.
+// F3: a cell whose film reached gR2FilmThickMM is no film any more but a body thick enough to be a drop: it becomes one cap too
+// (lubrication flow and a flat lens hold only for h << body width; the drop law moves it).
+// G2 (2026-11-15): 'isolated' = no film TEXEL in the 4-connected ring around the cell's field block (the body lies inside the cell). The
+// F3/S2-2 test 'no film in the 8 neighbour CELLS' left speckle fields stuck for good: texels with no wet neighbour do not
+// retreat (no receiver) and never capped because the next speckle sat in a neighbour cell (game test: hinge-plate edges).
+bool r2FilmCapCell(int2 c, out float vol) {                    // FXC: no return inside the loops
+    vol = 0.0;
+    float mC = gR2SheetOn > 0.5 ? r2CellFilmMaxMM(c) : 0.0;
+    bool cap = mC >= gR2FilmWetMM;
+    if (cap && mC < gR2FilmThickMM) {                           // thick: cap at once; thin: only a body inside the cell
+        int2 k = r2FieldPerCell();
+        int2 o = c * k;
+        // G3: connected = a film texel of the block and a film texel just outside it share an EDGE (the film exchanges water only
+        // with its 4 neighbours: r2FilmShedH, film.hlsl). Diagonal contacts and film beside a dry block texel are other bodies
+        // (game test: diagonal speckle rows on the folded edges kept each other open forever).
+        float w = gR2FilmWetMM;
+        [loop] for (int i = 0; i < k.x; ++i) {
+            if (r2FilmH(txR2Field, o + int2(i, -1)) >= w && r2FilmH(txR2Field, o + int2(i, 0)) >= w) cap = false;
+            if (r2FilmH(txR2Field, o + int2(i, k.y)) >= w && r2FilmH(txR2Field, o + int2(i, k.y - 1)) >= w) cap = false;
+        }
+        [loop] for (int j = 0; j < k.y; ++j) {
+            if (r2FilmH(txR2Field, o + int2(-1, j)) >= w && r2FilmH(txR2Field, o + int2(0, j)) >= w) cap = false;
+            if (r2FilmH(txR2Field, o + int2(k.x, j)) >= w && r2FilmH(txR2Field, o + int2(k.x - 1, j)) >= w) cap = false;
+        }
+    }
+    if (cap) vol = r2CellFilmMM(c) * gR2CellSizeMM.x * gR2CellSizeMM.y;
+    return cap && vol > 0.0;
+}
+
+// F5 BODY MOBILITY (Furmidge per unit width, once per frame in the field pass, carried with the water through the film
+// substeps in F.a >= 2): the water along the flow axis in a window of +-14 texels (stride 2, gaps included) moves when
+//   tau L + rho g_t A >= gamma pinCoat       (A = sum h dx, L = wet length; tau, g_t from the sheet coefficients K)
+// A per-texel run length tore moving bodies into pieces shorter than L_c that all pinned (prototype: 0.2 mm film 3 mm/s
+// instead of 130). Window 16 mm: bodies up to ~8 mm get one decision for all their texels.
+float2 r2FilmFlowTex(float4 K, float h) {                      // flow direction in texel axes (unit; 0 = none)
+    float2 c = (K.xy * h + K.zw * (h * h)) * gR2FieldSize;
+    return c * rsqrt(max(dot(c, c), 1e-20));
+}
+bool r2FilmMobileWin(Texture2D tx, int2 g, float4 K, float h) {
+    float2 fl = r2FilmFlowTex(K, max(h, 0.1));
+    bool alongX = abs(fl.x) >= abs(fl.y);
+    int2 ax = alongX ? int2(2, 0) : int2(0, 2);
+    float2 texMM = gR2CellSizeMM * gR2Cells / gR2FieldSize;
+    float dx = 2.0 * (alongX ? texMM.x : texMM.y);
+    float A = 0.0, L = 0.0;
+    [loop] for (int i = -7; i <= 7; ++i) {
+        float hi = r2FilmH(tx, g + ax * i);
+        A += hi * dx;
+        L += hi >= gR2FilmWetMM ? dx : 0.0;
+    }
+    float2 totMM = gR2CellSizeMM * gR2Cells;
+    float k = 1e-3 / max(gR2FilmFlowK, 1e-3);
+    float tau = 2.0 * length(K.xy * totMM) * k;                  // Pa (v_A = tau h / (2 mu), mu 1e-3)
+    float gt = 3.0 * length(K.zw * totMM) * k;                   // m/s^2 (v_B = rho g h^2 / (3 mu))
+    return tau * L * 1e-3 + 1000.0 * gt * A * 1e-6 >= 0.072 * gR2PinCoat;
+}
+
 // Dewetting / pearling events of cell c this frame: pure hashes of (cell, frame), so the cells pass
 // (turns the water into a bead) and the field pass (removes the same water) always agree.
 bool r2DewetEvent(int2 c) {
@@ -1102,8 +1182,16 @@ bool r2PearlEvent(int2 c, float hwMM) {
     float k = clamp(0.25 / max(hwMM, 1e-3), 0.5, 6.0);
     return r2Rand(uint3((uint)c.y, (uint)c.x, (uint)gR2Frame * 8u + 9002u)) < gR2PearlRate * k * gR2SimDt;
 }
+// B2 (FILM-UNIFY plan section 6, 2026-11-14): a broken line's Rayleigh-Plateau beads (r2BeadRow, the cap the visor draws)
+// that are large enough to move under this frame's forces (P.criticalRadius in Lua: gravity + air at the visor's air speed,
+// coat pinning) are drop-law water: the cells pass births the line section of the cell as a drop on the line (as a pearl
+// event, deterministic), the field pass removes the same water (same F_prev depth h0, same TG half-width). Smaller beads stay
+// the drawn static caps. At rest r_crit ~ 1.2 mm (no bead moves: the scene does not change); at speed beads of ~0.15 mm move.
+bool r2BeadMobile(float h0, float hwMM) {
+    return h0 >= gR2PearlMM && r2BeadRow(hwMM, h0).y >= gR2BeadMoveRMM;
+}
 // Cell of the centre-line point stored at field texel f (geometry g).
-int2 r2TrailCell(int2 f, float4 g) {
+int2 r2TrailCell(int2 f, float4 g) {   // g.xy = centre-line point (TG)
     float2 pc = (float2(f) + 0.5) / gR2FieldSize * gR2Cells + g.xy / gR2CellSizeMM;
     return int2(floor(pc));
 }
@@ -1242,7 +1330,7 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     float travelMM = length(dc * gR2CellSizeMM);
     // rev45 trail (rule_trail 3): the head loses the water it leaves behind; it collects the haze and
     // film it sweeps (rule_merge 3, rule_trail 11); evaporation as before.
-    float wet = r2Wet(Fs);
+    float wet = r2WetU(Fs, t);   // FILM-UNIFY A: one wetness
     float vms = travelMM * 1e-3 / max(gR2Dt, 1e-5);
     float hwT = 0.0;
     float hT0 = r2TrailRule(rmm, vms, wet, hwT);
@@ -1251,7 +1339,6 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     // inside it; on a sheet the drop is what gets absorbed -- field / merge)
     float hSweep = Fs.b * gR2FilmMaxMM;
     // W1k: an isolated remnant patch is collected like thin water (only a connected sheet absorbs the drop instead)
-    if (gR2SheetOn > 0.5 && ((hSweep >= r2SheetH(t) && r2SheetConnected(r2SheetNucAt(cell))) || r2WetTx(txR2Field, t))) hSweep = 0.0;   // W1u: nor a wet layer
     vol += hSweep * gR2FilmCollect * 2.0 * rmm * travelMM;   // F9: the fine layer is gone
     // F5: diffusion-limited evaporation of the cap, 4 r D drho / rho_w (Picknett & Bexon; ~ r: small drops go first)
     // + the stagnation layer on its wetted area (init.lua fineBudget)
