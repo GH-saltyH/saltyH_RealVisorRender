@@ -19,6 +19,7 @@ float4 main(PS_IN pin) {
     float4 mc = txR2Claim.Load(int3(c, 0));
     // FILM S2-1: a drop the field pass laid into the film last frame (same S, txR2FieldOld = its F_prev, r2FilmJoin) is gone
     if (r2FilmJoin(me, r2Life(c), txR2FieldOld, float2(c) + me.xy)) me.z = 0.0;
+    me.z -= r2SpillMM3(me, r2Life(c));                               // R1: the excess the field laid as film last frame
     // rev48-S4b: position, seed, life and shape follow FOOTPRINT AREA (r2FootW), volume adds
     float accV = 0, accW = 0, bigW = 0, w = r2PackMove(float2(0, 0), 0);
     float2 accP = float2(0, 0);
@@ -41,6 +42,7 @@ float4 main(PS_IN pin) {
             if (cl.z < 0.5 || any(int2(round(cl.xy)) != int2(-x, -y))) continue;
             float4 st = txR2State.Load(int3(s, 0));
             if (r2FilmJoin(st, r2Life(s), txR2FieldOld, float2(s) + st.xy)) st.z = 0.0;   // FILM S2-1 (joined the film)
+            st.z -= r2SpillMM3(st, r2Life(s));                       // R1
             if (st.z <= 0) continue;
             float4 shs = r2Shape(s);
             float wa = r2FootW(st.z, shs);
@@ -58,5 +60,6 @@ float4 main(PS_IN pin) {
     float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
     // the winner (widest footprint) gives seed / life / shape; the motion is the momentum of all of them, so a
     // head that runs into a wider pinned drop carries on from THAT position (the new head) instead of stopping
-    return lifeHalf ? life : float4(p, min(accV, vMax), r2PackMove(accM / accV, r2UnpackSeed(w)));
+    float vOut = (gR2FilmOn > 0.5 && gR2Spill > 0.5) ? accV : min(accV, vMax);   // R1: the excess spills as film (field)
+    return lifeHalf ? life : float4(p, vOut, r2PackMove(accM / accV, r2UnpackSeed(w)));
 }

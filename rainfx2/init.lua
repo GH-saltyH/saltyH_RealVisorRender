@@ -52,7 +52,7 @@ local DEFAULTS = {
   -- rev21 R-size (docs/RAINFX_V2_DROP_SIZE_RESEARCH.md section 3): impact fragmentation
   -- rev41 (rev40 review: at speed far too few visible small drops): resA 0.5 -> 0.3 (resolved share at
   -- 250 km/h 0.11 -> 0.25), resB 0.3 -> 0.4 (fragments 0.18 -> 0.12 mm)
-  splashK0 = 58, resA = 0.5, resB = 0.4,   -- F3: resA 0.3 -> 0.5 (splashed mass ~0.75-0.8 at K/K0 ~ 18: Mundo 1995, SLD Trontin & Villedieu 2016)
+  splashK0 = 58, resA = 0.5, resB = 0.4, stickMin = 0.25,   -- S1 (2026-11-17, docs/RAINFX_V2_S_REVIEW.md): kept-share floor (splashed <= 0.75)   -- F3: resA 0.3 -> 0.5 (splashed mass ~0.75-0.8 at K/K0 ~ 18: Mundo 1995, SLD Trontin & Villedieu 2016)
   -- rev21 growth of visible drops from unresolved water: haze condensation, film head drops
   filmCollect = 0.3,   -- F1: nucM / nucRate (haze nucleation) replaced by the fine coalescence
   -- rev21 CSP adoption: lateral kicks from surface noise (6 mm features), trail following
@@ -131,7 +131,8 @@ local DEFAULTS = {
   shpTailTau = 0.25, shpTailStretch = 0.2, shpHookK = 2.0, shpFrontK = 1.2, shpSnapDeg = 40.0,   -- rev48-S6 F2 turns (S6b: head hook)
   -- FILM S2 (docs/RAINFX_V2_FILM_S2_DESIGN.md; cleanup 2026-11-16: the rev48-W1 sheet parameters are gone, sheet* -> film*)
   filmOn = true,                 -- FILM-UNIFY (2026-11-13, user): the water film model is on by default
-  filmStoreMaxMM = 2.0,          -- field B scale with the film on (B = h / 2 mm); F3 caps films at filmThickMM long before
+  filmStoreMaxMM = 4.0,          -- field B scale with the film on (B = h / 4 mm; R1 puddles reach ~2 mm, the puddle height)
+  filmSpill = true,              -- R1: water beyond the largest stable drop spreads as film (false = discarded, rev1-48)
   filmDrawMinMM = 0.10,          -- the drawn film starts here (the rev11 overlay until S2-3); F1 joins from filmJoinMM
   filmRecedeDeg = 50,            -- coat receding angle used by the film rules (R2:syncSurface sets it from surfThetaRDeg)
   filmFollowK = 0.5,             -- drops follow the water paths (cells)
@@ -252,8 +253,6 @@ local function sceneValuesImpl(self, v)
     v.gR2HazeAMM, v.gR2HazePhiMax = a, phi            -- H3-3: the haze pass needs the coverage law too (phi(G_f), phi(G_c))
     v.gR2HazeCapMM = 2 * sat
     v.gR2HazeNucOn = p.hazeNuc == false and 0 or 1
-    v.gR2HazeHalf = p.hazeHalf == true and 1 or 0    -- H2: slow layer law on half the texels per frame (2 x dt); default OFF
-                                                       -- since H2b (game: on 0.342 / off 0.317 ms -- no gain once building texels run every frame)
     -- H3-3 (docs/RAINFX_V2_H3_ATLAS_SPEC.md 4, 8f): coarse water G_c grows the atlas pieces up to the top octave (area
     -- median a50 at scale 1 <-> G_top = sat x a50 / a_min); a cell drop is born only from the excess above it and only
     -- at a_max or larger (smaller drops are atlas pieces)
@@ -276,6 +275,7 @@ local function sceneValuesImpl(self, v)
   do   -- micro droplet evaporation: dV/dt = evapDiff r (diffusion-limited), V = shapeK r^3 -> k = evapDiff / (shapeK r^2)
     local rf = p.hazeAMM or 0.015                    -- H1: the micro caps of the haze
     v.gR2FineEvapK = math.min((self.evapDiff or 0) / math.max((p.shapeK or 1) * rf * rf, 1e-6), 5.0)
+    self.lastFineEvapK = v.gR2FineEvapK
   end
   v.gR2ObjToWorld = self.objToWorld
   v.gR2AccelW = self.accelW
@@ -287,6 +287,7 @@ local function sceneValuesImpl(self, v)
   v.gR2SpeedRel = st.speedRel or p.terminalSpeed
   v.gR2SplashK0 = p.splashK0
   v.gR2ResA = p.resA
+  v.gR2StickMin = p.stickMin or 0.25
   v.gR2ResB = p.resB
   v.gR2FineRMM = p.fineRMM   -- F9: satellite mist radius
   do   -- S1b spray droplet size distribution: lognormal number DSD (median st.sprayDnMM (SP0), sigma_g sprayDsdSigma)
@@ -300,6 +301,9 @@ local function sceneValuesImpl(self, v)
     local fVis = 1 - Phi(zmin)                                                            -- visible-size count share
     v.gR2SprayVisRate = mms / EV * fVis                                                   -- visible-size droplets / mm^2 / s (events)
     v.gR2SprayVisVolMM3 = st.sprayPieceMM3 or 0                                           -- SP1: mean drawn piece of an event
+    self.lastVals = self.lastVals or {}
+    self.lastVals.visMMs = v.gR2SprayVisRate * v.gR2SprayVisVolMM3                       -- E2 readout: visible spray water mm/s
+    self.lastVals.supFine, self.lastVals.supCoarse = v.gR2SprayFineMMs, v.gR2SprayCoarseMMs   -- E3 haze cap runoff estimate
     v.gR2SprayFineMMs = mms * (st.sprayHazeShare or 0)                                    -- SP1: sub-visible stuck water -> G
     v.gR2HazeOverrun = mms * (st.sprayAperV or 0) * (p.hazeOverrunK or 1.0)              -- I1: lamella overruns / s (x exposure)
     v.gR2SprayCoarseMMs = mms * (st.sprayCoarseShare or 0)                                -- H3-3: pieces < a_max -> G_c (atlas)
@@ -358,6 +362,7 @@ local function sceneValuesImpl(self, v)
   v.gR2EvapDiff, v.gR2EvapConv = self.evapDiff or 0, self.evapConv or 0   -- rev48-F5 drop evaporation (fineBudget)
   v.gR2MinRadiusMM = p.minRadiusMM
   v.gR2MaxRadiusMM = p.maxRadiusMM
+  v.gR2Spill = p.filmSpill == false and 0 or 1   -- R1 overflow -> film
   v.gR2CoalesceK = p.coalesceK
   v.gR2SweepWidth = p.sweepWidth
   v.gR2FilmDrain = p.filmDrain
@@ -393,7 +398,6 @@ local function sceneValuesImpl(self, v)
     local q = ((v.gR2FilmRate or 0) + (v.gR2SprayFineMMs or 0) + (v.gR2RainHazeMMs or 0) + (v.gR2SprayCoarseMMs or 0)) * (p.exposure or 1)
     local qf = fedMMs(v.gR2FilmWetMM or 0.02)
     self.e1 = { q = q, qFed = qf, qVis = fedMMs(v.gR2FilmJoinMM or 0.1) }
-    v.gR2FilmNucOn = (p.filmOn and p.filmNuc ~= false and q >= qf) and 1 or 0   -- F6': off below the fed limit (no change)
     v.gR2FilmTile = 0                                                             -- F4c: set by the film call (block summary)
   end
   v.gR2BeadMoveRMM = (p.beadDrops ~= false and self.beadMoveR) or 1e3   -- B2: bead radius that moves (P.criticalRadius)
@@ -501,10 +505,6 @@ local function newPass(self, shader, name, haze)   -- haze: true = cells / hzv, 
     pass.textures.txR2Pred = nil
     pass.textures.txR2HzValid = false
   end
-  if haze == 'field' then   -- F6': the field reads the haze cell data (film nucleation) in the claims slot -> 14
-    pass.textures.txR2Claim = nil
-    pass.textures.txR2HzMask = false
-  end
   if haze == 'film' then   -- F4c: the film transport reads the F4b block summary in the claims slot -> 14
     pass.textures.txR2Claim = nil
     pass.textures.txR2FilmAny = false
@@ -598,7 +598,7 @@ function R2:ensureResources()
   self.PR = canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop prediction')
   self.REC = canvas(6 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 drop records')   -- PERF-9 visor candidates (rec.hlsl)
   self.MSK = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R32G32.Float, 'RainFX2 candidate mask')   -- PERF-10 (msk.hlsl)
-  self.passField = newPass(self, self.src.field, 'field', 'field')
+  self.passField = newPass(self, self.src.field, 'field')
   self.passFilmK = newPass(self, self.src.filmcoef, 'filmcoef')
   self.passFilm = newPass(self, self.src.film, 'film', 'film')    -- FILM S2-1 (F4c: block summary bound)
   self.passLam = newPass(self, self.src.lam, 'lam')               -- rev48-W1q
@@ -608,6 +608,8 @@ function R2:ensureResources()
   self.passFilmAny = newPass(self, self.src.filmany, 'filmany')   -- F4b
   self.FAc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 film gate')
   self.Mc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 metrics')
+  self.passAudit = newPass(self, self.src.audit, 'audit', true)   -- E3 mass audit (haze in the claims slot)
+  self.AUc = canvas(96, 8, 1, f32, 'RainFX2 mass audit')
   self.passSizes = newPass(self, self.src.sizes, 'sizes')
   self.Hc = canvas(10, 16, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 size histogram')
   self.passMerge = newPass(self, self.src.merge, 'merge')
@@ -1094,8 +1096,6 @@ function R2:simulate(sim)
       skOK = run(self.SK, pkc)
     end
     pf.textures.txR2FilmK = self.SK
-    pf.textures.txR2HzMask = self.HZM                  -- F6': nucleation per cell (hzm, this frame)
-    if not self.hzmValid then pf.values.gR2FilmNucOn = 0 end
     if run(self.F[3 - self.fi], pf) then
       -- FILM S2-1 transport (film.hlsl): an even number of substeps (scratch ping-pong)
       if p.filmOn then
@@ -1121,6 +1121,7 @@ function R2:simulate(sim)
     end
   end
   self:metricsUpdate(sim)
+  self:auditUpdate()
   self:recUpdate()
   self.opticsReady = true
   self.status = 'running'
@@ -1133,6 +1134,7 @@ end
 local function candValues(self, v)
   local p = self.p
   updateShapeK(p)
+  v.gR2MaxRadiusMM = p.maxRadiusMM   -- R1: drawn radius stops at the largest cap (spill water is the field's)
   v.gR2Cells = self.cells
   v.gR2CellSizeMM = self.cellSizeMM
   v.gR2ShapeK = p.shapeK
@@ -1645,12 +1647,24 @@ function R2:ui()
     self.p.filmFollowK = ui.slider('##rfx2wsf', self.p.filmFollowK, 0, 2, 'Drops follow the water paths: %.2f')
     s.filmK = ui.slider('##rfx2fk', s.filmK, 0, 5, 'Rain film supply gain (unresolved rain; keep 1): %.2f')
     self.p.filmJoinMM = ui.slider('##rfx2fjm', self.p.filmJoinMM or 0.10, 0.02, 0.3, 'Drops join a film from (F1): %.2f mm')
-    self.p.filmThickMM = ui.slider('##rfx2ftm', self.p.filmThickMM or 0.30, 0.15, 1.0, 'Film this thick becomes a drop (F1/F3): %.2f mm')
-    if ui.checkbox('Film forms from connected haze water under a holding supply (F6\')', self.p.filmNuc ~= false) then self.p.filmNuc = self.p.filmNuc == false end
+    self.p.filmThickMM = ui.slider('##rfx2ftm', self.p.filmThickMM or 0.30, 0.15, 1.0, 'Drops join a film only while it stays below (F1): %.2f mm')
+    if ui.checkbox('Water beyond the largest drop spreads as film (R1 overflow)', self.p.filmSpill ~= false) then self.p.filmSpill = self.p.filmSpill == false end
+    self.p.stickMin = ui.slider('##rfx2skm', self.p.stickMin or 0.25, 0, 0.5, 'Kept share floor of fast impacts (S1; 0 = old law): %.2f')
+    if ui.checkbox('Mass audit (E3: reservoirs and losses, ~0.5 s readback)', self.p.audit == true) then self.p.audit = self.p.audit ~= true end
+    local au = self.audit
+    if self.p.audit and au then
+      ui.text(string.format('E3 water on the visor (mm3): drops %.1f (%d, %d at the largest cap) | haze fine %.1f coarse %.1f | film %.1f | trail %.1f | total %.1f',
+        au.drops, au.nDrops, au.nCap, au.hf, au.hc, au.film, au.trail, au.total))
+      ui.text(string.format('E3 per second (mm3/s): in ~%.1f | change %s | haze cap runoff ~%.1f (fine at cap %.0f mm2, coarse %.0f mm2) | evaporation ~%.1f | rest %s',
+        au.inflow, au.dTot and string.format('%.1f', au.dTot) or '-', au.capRun, au.capF, au.capC, au.evap, au.rest and string.format('%.1f', au.rest) or '-'))
+    end
     if ui.checkbox('Trail beads that can move become drops (B2)', self.p.beadDrops ~= false) then self.p.beadDrops = self.p.beadDrops == false end
-    if ui.checkbox('Haze layer law on half the texels per frame, 2 x step (H2 cost)', self.p.hazeHalf == true) then self.p.hazeHalf = self.p.hazeHalf ~= true end
     if ui.checkbox('Smooth (B-spline) coarse scene mips: veil / blur light (V3)', self.p.sceneBicubic ~= false) then self.p.sceneBicubic = self.p.sceneBicubic == false end
     if ui.checkbox('Power-of-two refraction source (exact mips: lights do not drop out of the veil, V4)', self.p.sourcePot ~= false) then self.p.sourcePot = self.p.sourcePot == false end
+    local stt = self.stats or {}
+    ui.text(string.format('E2 arriving: rain %.3f mm/s (normal incidence, sticks %.0f %%) | spray %.3f mm/s (fine %.3f, coarse %.3f, visible %.3f)',
+      stt.fluxMMs or 0, 100 * (stt.stickFrac or 0), stt.sprayMMs or 0, (stt.sprayMMs or 0) * (stt.sprayHazeShare or 0),
+      (stt.sprayMMs or 0) * (stt.sprayCoarseShare or 0), (self.lastVals and self.lastVals.visMMs) or 0))
     local e = self.e1
     if e then
       ui.text(string.format('E1 supply %.4f mm/s | holds a 0.02 mm layer from %.3f, a 0.10 mm film from %.3f mm/s (x%.2f)',
@@ -1661,7 +1675,7 @@ function R2:ui()
     ui.text(string.format('F4b gate: %s | film blocks %d / 256 | reads %d / sent %d%s', self.filmGateOpen == nil and 'unknown' or (self.filmGateOpen and 'open' or 'closed'),
       self.filmGateBlocks or -1, self.filmGateReads or 0, self.filmGateSent or 0, self.filmGateErr and (' | ' .. self.filmGateErr) or ''))
     if self.filmGateMap then
-      ui.text('F4b map (F film >= 0.02 mm, M mobile only, B both; 32 x 8 blocks of the field):')
+      ui.text('F4b map (F film >= 0.02 mm, M mobile only, B both, T thick >= filmThickMM; 32 x 8 blocks):')
       for _, r in ipairs(self.filmGateMap) do ui.text(r) end
     end
   end)
@@ -1789,12 +1803,12 @@ function R2:filmGateUpdate()
       local row = {}
       for x = 0, 31 do
         data:colorTo(tmp, x, y)
-        local f, m = tmp.rgb.r > 0.5, tmp.rgb.g > 0.5
+        local f, m, th = tmp.rgb.r > 0.5, tmp.rgb.g > 0.5, tmp.rgb.b > 0.5
         -- F4d (2026-11-15): the transport moves only MOBILE bodies (F5); pinned film is the field's (retreat, caps, sources).
         -- Gating on film kept the transport running for one pinned spot (game test: 1 / 256 blocks, film 0.265 ms)
         if m then hit = true end
         if f or m then n = n + 1 end
-        row[#row + 1] = (f and m) and 'B' or (f and 'F' or (m and 'M' or '.'))
+        row[#row + 1] = th and 'T' or ((f and m) and 'B' or (f and 'F' or (m and 'M' or '.')))
       end
       rows[#rows + 1] = table.concat(row)
     end
@@ -1803,6 +1817,50 @@ function R2:filmGateUpdate()
     self.filmGateBlocks, self.filmGateReads, self.filmGateErr = n, (self.filmGateReads or 0) + 1, nil
     if hit then self.filmGateHold = 30 else self.filmGateHold = (self.filmGateHold or 0) - 1 end
     self.filmGateOpen = hit or self.filmGateHold > 0
+  end)
+end
+
+-- E3 MASS AUDIT (docs/RAINFX_V2_S_REVIEW.md section 7): reservoir totals (audit.hlsl) every ~0.5 s while p.audit is on, and the
+-- per-second balance: inflow (arriving x kept x exposed area) = change of the reservoirs + haze cap runoff + evaporation + rest
+-- (rest = drops leaving the visor, splash of drops hitting drops, losses not modelled here).
+function R2:auditUpdate()
+  if not self.p.audit or self.auditBusy or not self.passAudit then return end
+  local now = os.clock()
+  if self.auditT and now - self.auditT < 0.5 then return end
+  local pa = self.passAudit
+  pa.textures.txR2State = self.S[self.si]
+  pa.textures.txR2Field = self.F[self.fi]
+  pa.textures.txR2Haze = self.HZ and self.HZ[self.hi] or false
+  sceneValues(self, pa.values)
+  if not run(self.AUc, pa) then return end
+  self.auditBusy = true
+  local tmp = rgbm()
+  local tNow = now
+  self.AUc:accessData(function(err, data)
+    self.auditBusy = false
+    if err or not data then self.auditErr = tostring(err); return end
+    local s = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    for y = 0, 7 do
+      for x = 0, 95 do
+        data:colorTo(tmp, x, y)
+        local k = math.floor(x / 32) * 4
+        s[k + 1], s[k + 2], s[k + 3], s[k + 4] = s[k + 1] + tmp.rgb.r, s[k + 2] + tmp.rgb.g, s[k + 3] + tmp.rgb.b, s[k + 4] + tmp.mult
+      end
+    end
+    data:dispose()
+    local a = { drops = s[1], film = s[2], trail = s[3], expA = s[4], hf = s[5], hc = s[6], capF = s[7], capC = s[8],
+      trailA = s[9], nDrops = s[10], nCap = s[11], visA = s[12] }
+    a.total = a.drops + a.film + a.trail + a.hf + a.hc
+    local prev = self.audit
+    if prev and tNow > prev.t then a.dTot = (a.total - prev.total) / (tNow - prev.t) end
+    local st, lv, p = self.stats or {}, self.lastVals or {}, self.p
+    local expAvg = a.visA > 0 and a.expA / a.visA or 0
+    a.inflow = ((st.fluxMMs or 0) + (st.sprayMMs or 0)) * (st.stickFrac or 0) * a.expA
+    a.capRun = (a.capF * ((lv.supFine or 0) + (st.hazeMMs or 0)) + a.capC * (lv.supCoarse or 0)) * expAvg * (p.exposure or 1)
+    a.evap = (self.lastFineEvapK or 0) * a.hf + (p.trailEvapMMs or 0) * a.trailA
+    if a.dTot then a.rest = a.inflow - a.dTot - a.capRun - a.evap end
+    a.t = tNow
+    self.audit = a
   end)
 end
 
@@ -2090,7 +2148,7 @@ return function(ctx)
   local common = tgs and readFile(dir .. 'common.hlsl') and (tgs .. '\n' .. readFile(dir .. 'common.hlsl')) or nil
   local cand = tgs and readFile(dir .. 'cand.hlsl') and (tgs .. '\n' .. readFile(dir .. 'cand.hlsl')) or nil   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'filmcoef', 'film', 'filmany', 'lam', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
+  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'filmcoef', 'film', 'filmany', 'audit', 'lam', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -2114,6 +2172,7 @@ return function(ctx)
       filmcoef = common .. '\n' .. src.filmcoef,
       film = common .. '\n' .. src.film,   -- FILM S2-1
       filmany = common .. '\n' .. src.filmany,   -- F4b film gate
+      audit = common .. '\n' .. src.audit,       -- E3 mass audit
       lam = common .. '\n' .. src.lam,
       big = common .. '\n' .. src.big,
       visor = cand .. '\n' .. src.visor,

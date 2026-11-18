@@ -51,7 +51,6 @@ HAZE_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2Haze']  
 HAZEPASS_TEXTURES = [t for t in HAZE_TEXTURES if t not in ('txR2Pred', 'txR2Big')] + ['txR2HzMask', 'txR2Wm']   # N3 / T1: haze pass ('mask')
 HZM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2HzValid']   # H3-P2: hzm (newPass haze = 'hzm')
 WM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2Wm']   # T1: substep wipe mask (newPass haze = 'wm')
-FIELD_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2HzMask']   # F6': field reads hzm (newPass haze = 'field')
 FILM_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2FilmAny']   # F4c (newPass haze = 'film')
 VISOR_TEXTURES = init_textures('function R2:drawParams(depth)')
 SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
@@ -69,11 +68,12 @@ PASSES = [  # name, template, files, textures, defines
     ('merge', 'ui.fx', ['common.hlsl', 'merge.hlsl'], SCENE_TEXTURES, ''),
     ('seed', 'ui.fx', ['common.hlsl', 'seed.hlsl'], SCENE_TEXTURES, ''),
     ('metrics', 'ui.fx', ['common.hlsl', 'metrics.hlsl'], SCENE_TEXTURES, ''),
-    ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], FIELD_TEXTURES, ''),
+    ('field', 'ui.fx', ['common.hlsl', 'field.hlsl'], SCENE_TEXTURES, ''),
     ('trail', 'ui.fx', ['common.hlsl', 'trail.hlsl'], SCENE_TEXTURES, ''),
     ('filmcoef', 'ui.fx', ['common.hlsl', 'filmcoef.hlsl'], SCENE_TEXTURES, ''),
     ('film', 'ui.fx', ['common.hlsl', 'film.hlsl'], FILM_TEXTURES, ''),
     ('filmany', 'ui.fx', ['common.hlsl', 'filmany.hlsl'], SCENE_TEXTURES, ''),
+    ('audit', 'ui.fx', ['common.hlsl', 'audit.hlsl'], HAZE_TEXTURES, ''),   # E3 mass audit
     ('lam', 'ui.fx', ['common.hlsl', 'lam.hlsl'], SCENE_TEXTURES, ''),
     ('big', 'ui.fx', ['common.hlsl', 'big.hlsl'], SCENE_TEXTURES, ''),
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
@@ -132,6 +132,7 @@ VALUE_SOURCES = {
     'field': ('local function sceneValuesImpl(self, v)',),
     'film': ('local function sceneValuesImpl(self, v)',),
     'filmany': ('local function sceneValuesImpl(self, v)',),
+    'audit': ('local function sceneValuesImpl(self, v)',),
     'merge': ('local function sceneValuesImpl(self, v)',),
     'rec': ('local function candValues(self, v)',),
     'msk': ('local function candValues(self, v)',),

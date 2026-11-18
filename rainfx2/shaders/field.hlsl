@@ -35,13 +35,16 @@ float4 main(PS_IN pin) {
             float2 b = float2(s) + st.xy;
             // FILM S2-1: a drop on film / at the largest cap joins the film as its own cap profile (merge removes it next
             // frame, same test); the disk stays inside the 5 x 5 window (<= 1.9 cells)
-            if (r2FilmJoin(st, r2Life(s), txR2Field, b)) {
+            float spill = r2SpillMM3(st, r2Life(s));                 // R1: water beyond the largest cap spreads as film here
+            bool joinD = r2FilmJoin(st, r2Life(s), txR2Field, b);
+            if (joinD || spill > 0.0) {
+                float vLay = joinD ? st.z : spill;
                 float rr = r2FilmJoinRadiusMM(st.z);
                 if (rr < 0.75 * min(texMM2.x, texMM2.y)) {
-                    filmAdd += all(r2FieldTexelAt(b) == f) ? st.z / (texMM2.x * texMM2.y) : 0.0;
+                    filmAdd += all(r2FieldTexelAt(b) == f) ? vLay / (texMM2.x * texMM2.y) : 0.0;
                 } else {
                     float2 dmJ = pMM - b * gR2CellSizeMM;
-                    filmAdd += st.z * sqrt(max(1.0 - dot(dmJ, dmJ) / (rr * rr), 0.0)) / (2.0943951 * rr * rr);   // cap weight integral 2/3 pi r^2
+                    filmAdd += vLay * sqrt(max(1.0 - dot(dmJ, dmJ) / (rr * rr), 0.0)) / (2.0943951 * rr * rr);   // cap weight integral 2/3 pi r^2
                 }
             }
             float2 a = b - r2UnpackMove(st.w);
@@ -118,7 +121,7 @@ float4 main(PS_IN pin) {
     float nbB = txR2Field.Load(int3(min(f + int2(1, 0), int2(gR2FieldSize) - 1), 0)).b + txR2Field.Load(int3(max(f - int2(1, 0), int2(0, 0)), 0)).b
               + txR2Field.Load(int3(min(f + int2(0, 1), int2(gR2FieldSize) - 1), 0)).b + txR2Field.Load(int3(max(f - int2(0, 1), int2(0, 0)), 0)).b;
     float mobOut = 0.0;                                             // F5: body decision for the film substeps (A += 2)
-    if (gR2FilmOn > 0.5 && (F.b > 0.0 || nbB > 0.0 || filmAdd > 0.0 || gR2FilmNucOn > 0.5)) {   // dry: cheap exit
+    if (gR2FilmOn > 0.5 && (F.b > 0.0 || nbB > 0.0 || filmAdd > 0.0)) {   // dry: cheap exit
         float hPrev = F.b * gR2FilmMaxMM;
         // S2-2 edge retreat / thin water joining film: r2FilmShedH of me and my 4 neighbours (gather, exact exchange) from the
         // 13-texel diamond loaded once (FXC: five texture-reading calls overflowed the /O3 compiler stack)
@@ -149,10 +152,7 @@ float4 main(PS_IN pin) {
         // S2-1 sources: drops joining (above, F1); unresolved rain and sub-visible spray / rain fragments landing on film
         // (S1: the haze pass drops them on a water layer). F2: only FILM water counts -- trail water takes its share below.
         hNew += filmAdd;
-        // F6' (section 10): the cell's haze water became film this frame (hzm: same HZ_prev / F_prev test; haze pass emptied it)
-        float nucX = gR2FilmNucOn > 0.5 ? txR2HzMask.Load(int3(c0, 0)).x : 0.0;
-        if (nucX > 0.5) hNew += nucX - 1.0;
-        if (hPrev >= gR2FilmWetMM || nucX > 0.5)
+        if (hPrev >= gR2FilmWetMM)
             hNew += (gR2FilmRate + gR2SprayFineMMs + gR2RainHazeMMs + gR2SprayCoarseMMs) * exposure * gR2Dt;
         W = max(hNew, 0.0) / gR2FilmMaxMM;
         // F5: one decision per body and frame on the frame-start water (F_prev), carried by the film substeps

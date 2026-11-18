@@ -109,7 +109,7 @@ function W.impactKeep(d, v, p)
     return V, 0, V, 0, 0
   end
   local kr = K0 / K
-  local st = kr ^ (p.resA or 0.5) * V
+  local st = math.max(kr ^ (p.resA or 0.5), p.stickMin or 0.25) * V   -- S1 (docs/RAINFX_V2_S_REVIEW.md): kept-share floor
   local dr = d * kr ^ (p.resB or 0.4)
   local vhz = (p.shapeK or 2.0944) * (p.hazeRMaxMM or 0.08) ^ 3
   local q, e, eh, es, er = fragQ(p), 0, 0, 0, 0
@@ -264,7 +264,7 @@ function W.compute(input, out)
   local v = math.max(speedRel, 0.5)
   out.splashK = math.sqrt(13.8889 * v * v * D) * (1000 * v * D) ^ 0.25
   local kr = math.min(1, (p.splashK0 or 58) / math.max(out.splashK, 1e-3))
-  out.stickFrac = kr ^ (p.resA or 0.5)
+  out.stickFrac = kr < 1 and math.max(kr ^ (p.resA or 0.5), p.stickMin or 0.25) or 1   -- S1 floor
   out.fragDiamMM = D * kr ^ (p.resB or 0.3)
   return out
 end

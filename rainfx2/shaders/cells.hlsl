@@ -306,7 +306,7 @@ float4 main(PS_IN pin) {
             if (KS > gR2SplashK0) {
                 float krS = gR2SplashK0 / KS;
                 float dC = dS * pow(abs(krS), gR2ResB) * r2FragX(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 6u)));   // FXC X3571
-                vS = min(0.5235988 * dC * dC * dC, pow(abs(krS), gR2ResA) * vS);
+                vS = min(0.5235988 * dC * dC * dC, max(pow(abs(krS), gR2ResA), gR2StickMin) * vS);   // S1 floor
             }
             if (r2RadiusMM(vS) >= max(gR2MinRadiusMM, gR2MicroSplitMM)) {   // H3-3: smaller pieces are atlas water (haze G_c)
                 float2 pE = float2(r2Rand(uint3((uint)c.x, (uint)c.y, ks + 2u)), r2Rand(uint3((uint)c.y, (uint)c.x, ks + 3u)));
@@ -386,7 +386,7 @@ float4 main(PS_IN pin) {
     // rev48-F9: F1 fine coalescence removed with the fine layer (it made drops out of the fine water G)
     // Excess beyond the largest stable cap runs off (keeps one-drop-per-cell bounded).
     float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
-    accV = min(accV, vMax);
+    if (!(gR2FilmOn > 0.5 && gR2Spill > 0.5)) accV = min(accV, vMax);   // R1: with the film on the excess spills (field), not lost
     // rev41: clamp, not scale. rev1-rev40 wrote saturate(p) * 0.999: every substep moved every drop
     // 0.1 % of its in-cell position toward the cell origin (-u, -v) -> the slow drift of resting drops
     // toward one offset that the user saw since the first v2 build (~1 mm over a few seconds).

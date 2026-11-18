@@ -95,3 +95,4 @@ float r2WmGet(float4 w, int j) {
     uint sh = 4u * (uint)(j < 6 ? j : (j < 12 ? j - 6 : j - 12));
     return (float)((word >> sh) & 15u) / 15.0;
 }
+

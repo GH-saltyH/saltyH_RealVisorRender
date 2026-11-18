@@ -1,8 +1,9 @@
 // PERF-9 (2026-11-06): drop-candidate code shared by visor.hlsl (per pixel) and rec.hlsl (per drop record).
 // Helpers = common.hlsl copies (rev-tagged where they came from); textures txR2State, txR2Lam, txR2Big.
 
-float r2VisorRadiusMM(float v) {
-    return v > 0 ? exp2(log2(v / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
+float r2VisorRadiusMM(float v) {   // R1: = common r2RadiusMM (a drop carrying spill water is drawn at the largest cap)
+    float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
+    return v > 0 ? exp2(log2(min(v, vMax) / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
 }
 // rev48-R3 = common r2CapK / r2CapScale (cap volume: a flatter / lower-angle drop of the same water is wider)
 float r2VCapK(float deg) {

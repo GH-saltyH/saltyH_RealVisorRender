@@ -101,8 +101,11 @@ float r2CapScale(float seed, float f) {   // R5b: the per-drop seed angle spread
     return clamp(pow(abs(gR2ShapeK / r2CapK(max(thD, 15.0))), 1.0 / 3.0), 0.8, 1.6);
 }
 // Drop radius (mm) from volume (mm^3). gR2ShapeK = V / r^3 for the contact angle.
+// R1 (2026-11-16): a drop may carry water beyond the largest stable cap for one frame (the field lays it as film, the next merge
+// removes it, r2SpillMM3); its size is the largest cap's.
 float r2RadiusMM(float volMM3) {
-    return volMM3 > 0 ? exp2(log2(volMM3 / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
+    float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
+    return volMM3 > 0 ? exp2(log2(min(volMM3, vMax) / gR2ShapeK) * (1.0 / 3.0)) : 0.0;
 }
 
 // Rain exposure of the exterior side: rain travelling against the outward normal.
@@ -972,8 +975,10 @@ R2Outcome r2ImpactOutcome(float d, float exposure, float4 ig) {
     float xi = ig.w * rsqrt(max(o.Re, 1.0));
     o.Kdn = o.K * (1.0 + 2.5 * xi);
     o.Kup = o.K * max(1.0 - 2.5 * xi, 0.0);
-    o.lDn = o.Kdn > gR2SplashK0 ? 1.0 - pow(abs(gR2SplashK0 / o.Kdn), gR2ResA) : 0.0;
-    o.lUp = o.Kup > gR2SplashK0 ? 1.0 - pow(abs(gR2SplashK0 / max(o.Kup, 1e-3)), gR2ResA) : 0.0;
+    // S1 (docs/RAINFX_V2_S_REVIEW.md): the kept share has a floor gR2StickMin (splashed mass saturates ~0.75: O'Rourke-Amsden /
+    // KIVA, LEWICE SLD 0.7) -- (K0/K)^resA alone kept falling to 0.09-0.15 at 250 km/h
+    o.lDn = o.Kdn > gR2SplashK0 ? 1.0 - max(pow(abs(gR2SplashK0 / o.Kdn), gR2ResA), gR2StickMin) : 0.0;
+    o.lUp = o.Kup > gR2SplashK0 ? 1.0 - max(pow(abs(gR2SplashK0 / max(o.Kup, 1e-3)), gR2ResA), gR2StickMin) : 0.0;
     o.fRes = 1.0 - 0.5 * (o.lDn + o.lUp);
     float Pl = o.We * pow(max(o.Re, 1.0), -0.4);
     o.Rs = max(0.5 * d * pow(max(o.Re, 1.0), 0.2) * sqrt(Pl) / (1.24 + sqrt(Pl)), 0.6 * gR2CellMM);
@@ -1059,6 +1064,14 @@ float r2FilmUnder(Texture2D tx, float2 cellPos, float rMM) {
     h = max(h, tx.Load(int3(r2FieldTexelAt(cellPos - float2(0, d.y)), 0)).b);
     return h * gR2FilmMaxMM;
 }
+// R1 OVERFLOW (docs/RAINFX_V2_FILM_S2_DESIGN.md section 14): water beyond the largest stable cap (gR2MaxRadiusMM, ~ the capillary
+// length) is no drop any more: it spreads as a thick water body (puddle / rivulet, film up to the puddle height). cells and merge
+// keep the excess in the drop's volume, the field lays it as a cap-profile film at the drop (same S), the next merge removes it
+// (same S, same rule) -- the rev1-rev48 cap discarded it ('excess runs off'), the water the heaviest supply should show as flows.
+float r2SpillMM3(float4 st, float4 L) {
+    float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
+    return (gR2FilmOn > 0.5 && gR2Spill > 0.5 && st.z > vMax && L.y <= 0 && L.z <= 0) ? st.z - vMax : 0.0;
+}
 float r2FilmJoinRadiusMM(float vol) {                                    // cap disk the field lays (stays in the 5 x 5 window)
     return min(r2RadiusMM(vol), 1.9 * min(gR2CellSizeMM.x, gR2CellSizeMM.y));
 }
@@ -1124,7 +1137,10 @@ bool r2FilmCapCell(int2 c, out float vol) {                    // FXC: no return
     vol = 0.0;
     float mC = gR2FilmOn > 0.5 ? r2CellFilmMaxMM(c) : 0.0;
     bool cap = mC >= gR2FilmWetMM;
-    if (cap && mC < gR2FilmThickMM) {                           // thick: cap at once; thin: only a body inside the cell
+    // R1/F3' (2026-11-16): ONLY a body inside one cell caps, thick or thin. F3 capped every cell >= gR2FilmThickMM at once, which
+    // turned each spreading puddle straight back into drops; a body wider than a cell (~ the capillary length) stays a thick film
+    // and flows (r2FilmMobileWin: its water length A passes the pinning at rest)
+    if (cap) {
         int2 k = r2FieldPerCell();
         int2 o = c * k;
         // G3: connected = a film texel of the block and a film texel just outside it share an EDGE (the film exchanges water only
