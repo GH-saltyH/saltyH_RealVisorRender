@@ -14265,6 +14265,87 @@ render.onSceneReady(function()
         rainDynamicSceneCopyState.nativeHousingScene.status='Housing capture error: '..tostring(err)
     end
 end)
+-- RainFX v2 H-mask (docs/RAINFX_V2_TRAIL_REVIEW3.md sections 41, 59): coverage of the helmet housing ALONE at the main camera
+-- view, for the RainFX2 refraction source (rainfx2/shaders/source.hlsl). Depth alone cannot tell the head-fixed housing from a
+-- car part touching the visor (both 5-15 cm away); the housing copy (nativeCaptureRefs 'housing', no face) is drawn into a
+-- half-resolution RGBA8 shot (alpha = covered). The housing moves with the head, so the shot is retaken only when the camera
+-- relative pose of the housing, the FOV or the target size changes (a few times per second at most while NeckFX moves).
+rainDynamicSceneCopyState.r2HousingMask = {}
+-- H-mask3 (section 59: the KN5 housing COPY drew nothing into the shot -- colour empty, depth all far): draw the LIVE housing
+-- meshes themselves in the shot's opaque callback with a flat shader (the proven E1 depth-capture path, e1SourceDepthDraw),
+-- alpha = 1 where covered. Their main-camera visibility is restored after the draw.
+rainDynamicSceneCopyState.r2HousingMaskDraw = function(st)
+    local restore={}
+    local defs=rainDynamicSceneCopyState.visorLayerDefs().housing
+    local ok,err=pcall(function()
+        render.setCullMode(render.CullMode.None)
+        render.setDepthMode(render.DepthMode.Normal)
+        render.setBlendMode(render.BlendMode.Opaque)
+        st.drawn=0
+        for i,item in ipairs(defs) do
+            local e=rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
+            local m=e and e.visible~=false and e.targetMesh
+            if m and #m>0 then
+                for j=1,#m do restore[#restore+1]={ref=m:at(j),visible=m:isVisible(j)} end
+                st.params=st.params or {}
+                local q=st.params[i] or {transform='original',async=true,values={},textures={},
+                    shader='float4 main(PS_IN pin) { return float4(1, 1, 1, 1); }'}
+                st.params[i]=q
+                q.mesh=m
+                m:setVisible(true,false)
+                if render.mesh(q)~=false then st.drawn=st.drawn+1 end
+            end
+        end
+    end)
+    for _,entry in ipairs(restore) do entry.ref:setVisible(entry.visible,false) end
+    render.setCullMode(render.CullMode.None)
+    render.setDepthMode(render.DepthMode.ReadOnly)
+    render.setBlendMode(render.BlendMode.BlendPremultiplied)
+    if not ok then error(err) end
+end
+rainDynamicSceneCopyState.r2HousingMaskUpdate = function()
+    local st=rainDynamicSceneCopyState.r2HousingMask
+    local core=rainDynamicSceneCopyState.rainfx2Active and rainDynamicSceneCopyState.rainfx2Active()
+    if not core or (core.p and core.p.housingMask==false) then st.ready=false;return end
+    local sim=ac.getSim()
+    if not sim or not axisRollNode then st.ready=false;return end
+    local w=math.max(64,math.floor((rainDynamicSceneCopyState.mainTargetWidth or 1280)*0.5))
+    local h=math.max(64,math.floor((rainDynamicSceneCopyState.mainTargetHeight or 720)*0.5))
+    if st.shot and (st.w~=w or st.h~=h) then st.shot:dispose();st.shot=nil;st.key=nil end
+    if not st.shot then
+        st.shot=ac.GeometryShot({opaque=function() rainDynamicSceneCopyState.r2HousingMaskDraw(st) end},
+            vec2(w,h),1,true,render.AntialiasingMode.None,render.TextureFormat.R8G8B8A8.UNorm)
+        st.shot:setName('RainFX2 housing mask (H-mask)')
+        st.shot:setSky(false);st.shot:setParticles(false);st.shot:setGrass(false)
+        st.shot:setClearColor(rgbm(0,0,0,0))
+        st.shot:setClippingPlanes(0.001,2.0)
+        st.w=w;st.h=h
+    end
+    -- camera-relative pose of the housing (it hangs on axisRollNode) + FOV: unchanged -> keep the shot (cost 0)
+    local pose=axisRollNode:getWorldTransformationRaw()
+    local key
+    if pose then
+        local o=pose:transformPoint(vec3(0,0,0))-sim.cameraPosition
+        local f=pose:transformVector(vec3(0,0,1));local u=pose:transformVector(vec3(0,1,0))
+        local L,U=sim.cameraLook,sim.cameraUp
+        local S=U:cross(L,vec3())   -- cross() rewrites its own vector unless out is given (cameraUp is constant)
+        key=string.format('%.4f %.4f %.4f %.4f %.4f %.4f %.4f %.3f',o:dot(L),o:dot(U),o:dot(S),f:dot(L),f:dot(U),u:dot(L),u:dot(S),sim.cameraFOV)
+    end
+    if key and key==st.key and st.ready then return end
+    if rainDynamicSceneCopyState.captureUpdate(st.shot,sim.cameraPosition,sim.cameraLook,sim.cameraUp,sim.cameraFOV)==false then
+        st.ready=false;return
+    end
+    st.key=key;st.ready=true
+    st.updates=(st.updates or 0)+1
+    st.status=string.format('H-mask %dx%d, retakes %d%s',w,h,st.updates,(st.drawn or 0)==0 and ' (no housing mesh drawn!)' or '')
+end
+render.onSceneReady(function()
+    local ok,err=pcall(rainDynamicSceneCopyState.r2HousingMaskUpdate)
+    if not ok then
+        rainDynamicSceneCopyState.r2HousingMask.ready=false
+        rainDynamicSceneCopyState.r2HousingMask.status='H-mask error: '..tostring(err)
+    end
+end)
 rainDynamicSceneCopyState.nativeHousingSceneDraw = function(item)
     local st=rainDynamicSceneCopyState.nativeHousingScene
     local ed=rainDynamicSceneCopyState.visorLayerEditor(item.mesh)
@@ -14927,6 +15008,11 @@ rainDynamicSceneCopyState.rainfx2Get=function()
         if ok and type(core)=='function' then
             ok,core=pcall(core,{folder=appFolder,targetMesh=function() return rainTargetMesh end,
                 surface=st.surface,maskPath=textureRainBoundaryMask,
+                housingMask=function()   -- H-mask (section 59): housing-only coverage shot at the main view, or nil
+                    local hm=rainDynamicSceneCopyState.r2HousingMask
+                    if not (hm and hm.ready and hm.shot) then return nil,hm and hm.status end
+                    return hm.shot,hm.status,vec2(hm.w,hm.h)   -- H-mask3: colour alpha = covered
+                end,
                 surfaceOffset=cfg.RUNTIME.RAIN_DYNAMIC_SURFACE_TEST_OFFSET_M or 0})
         end
         if ok and type(core)=='table' then st.rainfx2=core

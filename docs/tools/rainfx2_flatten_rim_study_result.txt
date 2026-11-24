@@ -1,0 +1,9 @@
+game th 45 f 1.0: rim 45 deg             upper rim dark   61%  lower rim bright   98%
+game th 45 f 1.4: rim 27 deg             upper rim dark    0%  lower rim bright  100%
+game th 45 f 1.65: rim 21 deg            upper rim dark    0%  lower rim bright  100%
+physical th 45, beta 0.5: rim 45 deg     upper rim dark   49%  lower rim bright   90%
+game th 60 f 1.0: rim 60 deg             upper rim dark  100%  lower rim bright    1%
+game th 60 f 1.4: rim 36 deg             upper rim dark   15%  lower rim bright   95%
+game th 60 f 1.65: rim 28 deg            upper rim dark    0%  lower rim bright  100%
+physical th 60, beta 0.5: rim 60 deg     upper rim dark   97%  lower rim bright    9%
+CSP-like plateau + steep rim             upper rim dark   79%  lower rim bright   28%

@@ -96,3 +96,17 @@ float r2WmGet(float4 w, int j) {
     return (float)((word >> sh) & 15u) / 15.0;
 }
 
+
+// B1b (docs/RAINFX_V2_TRAIL_REVIEW3.md section 15): water fraction of the surface around a drop (HZ_prev micro caps, the visor's
+// coverage law: phi_f, phi_c <= hazePhiMax each, combined 1 - (1 - phi_f)(1 - phi_c)), mean of 4 samples 1.5 r from the centre
+// (outside the head's own wiped disc). Used by the tail onset (r2TailExcess, Cassie). 0 when the tail onset ignores the haze.
+float r2HazePhiMM(float2 hMM) {
+    float kPhi = 3.14159265 / max(gR2ShapeK * gR2HazeAMM, 1e-6);
+    float phiF = min(1.0 - exp(-kPhi * hMM.x), gR2HazePhiMax);
+    float aC = max(gR2CoarseInRMM, hMM.y * gR2HazeAMM / max(gR2HazeSatMM, 1e-9));
+    float phiC = min(1.0 - exp(-3.14159265 * hMM.y / max(gR2ShapeK * aC, 1e-6)), gR2HazePhiMax);
+    return 1.0 - (1.0 - phiF) * (1.0 - phiC);
+}
+float r2HazePhiAround(float2 tHead, float rmm) {   // (cleanup 2026-11-25: B1b haze-wetted tail onset removed -- a drop clears its own halo)
+    return 0.0;
+}

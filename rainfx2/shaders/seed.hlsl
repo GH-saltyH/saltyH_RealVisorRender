@@ -7,6 +7,7 @@
 float4 main(PS_IN pin) {
     int2 c = int2(pin.PosH.xy);
     // rev45: right half = life cycle; static test drops are fully grown (age 10 s)
+    if (c.x >= 3 * (int)gR2Cells.x) return float4(0, 0, 0, 0);   // B1: tail quarter (static test drops: no tail)
     bool shapeThird = c.x >= 2 * (int)gR2Cells.x;   // rev48-S1: shape third, same drop as the left third
     if (shapeThird) c.x -= 2 * (int)gR2Cells.x;
     else if (c.x >= (int)gR2Cells.x) return float4(10, 0, 0, 0);

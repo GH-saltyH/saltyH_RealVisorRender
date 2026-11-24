@@ -1,0 +1,5 @@
+surface                         exact           map 0.05           map 0.15           map 0.30
+cap r 0.30          dark   58% c 0.67  dark   42% c 0.67  dark   29% c 0.58  dark   20% c 0.58
+cap r 0.60          dark   59% c 0.67  dark   52% c 0.67  dark   37% c 0.58  dark   33% c 0.58
+cap r 1.20          dark   58% c 0.67  dark   53% c 0.67  dark   44% c 0.67  dark   33% c 0.58
+teardrop (B 0.05)   dark   38% c 0.67  dark   36% c 0.67  dark   30% c 0.58  dark   26% c 0.58

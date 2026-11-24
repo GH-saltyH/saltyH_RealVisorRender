@@ -1,0 +1,8 @@
+elev 10  theta 25  upper rim dark    0%  lower rim bright  100%  lower rim dark    0%   (TIR needs > 48.6 deg)
+elev 10  theta 35  upper rim dark   12%  lower rim bright   99%  lower rim dark    0%   (TIR needs > 48.6 deg)
+elev 10  theta 45  upper rim dark   53%  lower rim bright   88%  lower rim dark    0%   (TIR needs > 48.6 deg)
+elev 10  theta 60  upper rim dark   91%  lower rim bright   29%  lower rim dark   67%   (TIR needs > 48.6 deg)
+elev 25  theta 25  upper rim dark    0%  lower rim bright  100%  lower rim dark    0%   (TIR needs > 48.6 deg)
+elev 25  theta 35  upper rim dark    0%  lower rim bright  100%  lower rim dark    0%   (TIR needs > 48.6 deg)
+elev 25  theta 45  upper rim dark    0%  lower rim bright  100%  lower rim dark    0%   (TIR needs > 48.6 deg)
+elev 25  theta 60  upper rim dark   74%  lower rim bright   29%  lower rim dark   67%   (TIR needs > 48.6 deg)

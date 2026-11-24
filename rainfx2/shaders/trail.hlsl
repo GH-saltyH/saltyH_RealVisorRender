@@ -17,6 +17,7 @@ float4 main(PS_IN pin) {
     int2 c0 = int2(floor(pc));
     int2 size = int2(gR2Cells);
     float wet = r2WetU(F, t);                                      // FILM-UNIFY A: one wetness
+    r2CoatSet(t, F);                                               // B1d: coat state here (trail rule)
     R2TrailHit h = r2TrailNone();
     [loop] for (int y = -2; y <= 2; ++y) {
         [loop] for (int x = -2; x <= 2; ++x) {

@@ -1,0 +1,13 @@
+cap r 0.6  normal view (sec. 34)        bright   68%  dark   27%
+teardrop   normal view (sec. 34)        bright   82%  dark   11%
+cap r 0.6  oblique 20 deg down          bright   41%  dark   49%
+teardrop   oblique 20 deg down          bright   43%  dark   43%
+cap r 0.6  oblique 40 deg down          bright    1%  dark   95%
+teardrop   oblique 40 deg down          bright    0%  dark   99%
+cap r 0.6  oblique 30 down + 30 side    bright   12%  dark   81%
+teardrop   oblique 30 down + 30 side    bright    3%  dark   86%
+map fidelity, oblique 20 deg down (cap r 0.6 / teardrop):
+  exact      bright  41% dark  49%   bright  43% dark  43%
+  map 0.05   bright  38% dark  43%   bright  42% dark  41%
+  map 0.15   bright  31% dark  30%   bright  37% dark  36%
+  map 0.30   bright  25% dark  22%   bright  31% dark  28%

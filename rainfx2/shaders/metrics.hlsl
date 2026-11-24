@@ -19,7 +19,7 @@ float4 main(PS_IN pin) {
             float4 F = txR2Field.Load(int3(f, 0));
             valid += 1;
             film += F.b * gR2FilmMaxMM >= gR2FilmMinMM ? 1 : 0;
-            haze += F.g;
+            // B1d: field G = wetting memory (not haze)
         }
     }
     float cv = 0, cover = 0;

@@ -22,6 +22,7 @@ float4 main(PS_IN pin) {
     float cover = 0, coverM = 0;   // coverM: moving drops only (rev22 film collect)
     float coverF = 0;              // rev47h: FRONT half of moving heads (collects trail water)
     float wet = r2WetU(F, t);   // FILM-UNIFY A: one wetness
+    r2CoatSet(t, F);            // B1d: coat state here (film retreat / fed rate)
     float texMM = 0.5 * (gR2CellSizeMM.x * gR2Cells.x / gR2FieldSize.x + gR2CellSizeMM.y * gR2Cells.y / gR2FieldSize.y);
     float2 texMM2 = gR2CellSizeMM * gR2Cells / gR2FieldSize;
     float2 pMM = pc * gR2CellSizeMM;
@@ -69,7 +70,13 @@ float4 main(PS_IN pin) {
     float exposure = exposureRaw * gR2Exposure;
     float T = F.r, M = F.g, W = F.b;
     // H1c (section 25): the haze lives in its own 2x-resolution layer (haze.hlsl); field G stays 0.
-    M = 0.0;
+    // B1d WETTING MEMORY (common r2CoatFactor): G = M, 0..1. Water on the coat now (a drop footprint, a film layer, trail water)
+    // raises it over coatTauA, a dry coat recovers over coatTauR. A tear-off clears it (new film).
+    {
+        bool wetNow = cover > 0.3 || F.b * gR2FilmMaxMM >= gR2FilmWetMM || F.r * gR2TrailMaxMM >= gR2TrailMinMM;
+        M = wetNow ? M + (1.0 - M) * (1.0 - exp(-gR2Dt / max(gR2CoatTauA, 1e-3))) : M * exp(-gR2Dt / max(gR2CoatTauR, 1e-3));
+        if (gR2CoatReset > 0.5 || gR2CoatOn < 0.5) M = 0.0;
+    }
     // rev47 T-LAYER (docs/RAINFX_V2_REV46_REVIEW.md section 1): R = trail water depth / trailMaxMM.
     // rev45-46 put it into the film W, whose 5-tap diffusion (0.6 / frame) spread a one-texel trail below
     // the visible threshold in 2-3 frames. Trail water on the hydrophobic coat stays pinned: no diffusion,

@@ -10,8 +10,8 @@ float4 main(PS_IN pin) {
     // rev45: the target is twice the cell width; the second third writes the life cycle L of the same
     // cell (identical gather, so L follows the drop that wins the cell).
     int2 px = int2(pin.PosH.xy);
-    // rev48-S1: three cell widths [drop | life | shape], same gather for all three
-    int third = px.x >= 2 * (int)gR2Cells.x ? 2 : (px.x >= (int)gR2Cells.x ? 1 : 0);
+    // rev48-S1: cell widths [drop | life | shape | tail (B1)], same gather for all four
+    int third = px.x >= 3 * (int)gR2Cells.x ? 3 : (px.x >= 2 * (int)gR2Cells.x ? 2 : (px.x >= (int)gR2Cells.x ? 1 : 0));
     bool lifeHalf = third == 1;
     int2 c = px - int2(third * (int)gR2Cells.x, 0);
     float4 shape = float4(0, 0, r2PackHarm(0, 0), 0);
@@ -24,6 +24,9 @@ float4 main(PS_IN pin) {
     float2 accP = float2(0, 0);
     float2 accD = float2(0, 0);
     float bigV = 0, seed = 0;          // shape seed follows the largest contributor
+    float4 tailW = float4(0, 0, 0, 0);            // B1: the winner's tail, its old centre (cells) and this step's speed
+    float2 tailOld = float2(0, 0);
+    float tailV = 0.0;
     // rev48-S6c: [loop] -- with the E8 split in r2Predict the unrolled 5x5 body exceeded FXC's unroll limit (X3511)
     [loop] for (int y = -2; y <= 2; ++y) {
         [loop] for (int x = -2; x <= 2; ++x) {
@@ -53,6 +56,7 @@ float4 main(PS_IN pin) {
                     float thP = atan2(-sin(m.cPhi), -cos(m.cPhi));   // direction to the parent (visor neck)
                     life = float4(0, 0, 0, -5.0 + 0.1 * thP / 3.14159265);
                     shape = shC; bigMoved = false; bigSplit = false;
+                    tailW = float4(0, 0, 0, 0); tailOld = m.cDest; tailV = 0.0;   // B1: a split piece starts without a tail
                 }
             }
             if (m.alive < 0.5) continue;
@@ -64,7 +68,14 @@ float4 main(PS_IN pin) {
             r2ShapeAccAdd(sacc, shs, m.vol, (m.dest - float2(c)) * gR2CellSizeMM);
             accD += (m.dest - (float2(s) + st.xy)) * m.vol;
             if (gR2Sub > 1.5) accD += r2UnpackMove(st.w) * m.vol;   // accumulate within the frame
-            if (wa > bigV) { bigV = wa; seed = r2UnpackSeed(st.w); life = m.life; shape = shs; bigMoved = m.moved > 1e-3; bigSplit = m.cVol > 0; }
+            if (wa > bigV) {
+                bigV = wa; seed = r2UnpackSeed(st.w); life = m.life; shape = shs; bigMoved = m.moved > 1e-3; bigSplit = m.cVol > 0;
+                if (third == 3) {
+                    tailW = r2Tail(s);
+                    tailOld = float2(s) + st.xy;
+                    tailV = length((m.dest - tailOld) * gR2CellSizeMM) * 1e-3 / max(gR2Dt, 1e-5);   // m/s, this substep
+                }
+            }
         }
     }
     if (third == 2 && accV > 0) shape = r2ShapeCompose(sacc, bigMoved);   // rev48-S4: moving head keeps its shape
@@ -74,7 +85,8 @@ float4 main(PS_IN pin) {
     float2 disp = accV > 0 ? accD / accV : float2(0, 0);
 
     float2 t = (float2(c) + 0.5) / gR2Cells;
-    float wetB = third == 2 ? r2Wet(txR2Field.SampleLevel(samLinearClamp, t, 0)) : 0.0;   // rev48-S4 shape births / equilibrium
+    float wetB = third >= 2 ? r2Wet(txR2Field.SampleLevel(samLinearClamp, t, 0)) : 0.0;   // rev48-S4 shape births / equilibrium
+    if (third == 2) r2CoatSet(t, txR2Field.SampleLevel(samLinearClamp, t, 0));            // S-fix: coat state for the rim angle (f)
     float3 gI = third == 2 ? r2GravInfo(t) : float3(0, 1, 0);                              // rev48-S5 E7 sag target
     // rev44 COUPLED IMPACT EVENTS (rev43 sprint recording: ~2.7 drops appeared and ~2.7 vanished per
     // frame in a 900 x 300 px sky crop, at unrelated places -> 'ticking'). rev22-43 cleared small
@@ -91,7 +103,7 @@ float4 main(PS_IN pin) {
     // spread f0 -> recoil = the lamella and its residual, one entity, no pop); the splashed rest throws satellites
     // (half of it, rim / downstream fan) and leaves as spray / haze. Landing on fed or connected sheet water: the field
     // takes it. Landing on a drop: merges with it (+ push). Once per frame (the registry is per frame).
-    if (gR2ImpactRate > 0 && r2Valid(t) > 0.5 && gR2Sub < 1.5) {
+    if (third != 3 && gR2ImpactRate > 0 && r2Valid(t) > 0.5 && gR2Sub < 1.5) {
         float cellMM2 = gR2CellSizeMM.x * gR2CellSizeMM.y;
         float exposure = r2Exposure(t);
         uint seed0 = (uint)gR2Frame * 8u + 1u;
@@ -229,7 +241,7 @@ float4 main(PS_IN pin) {
     //  - a rivulet section beads up (Plateau-Rayleigh): an event cell turns the rivulet section whose centre
     //    line runs through it ((4/3) h0 hw x cell length, h0 >= gR2PearlMM) into a bead ON the line.
     // The field pass removes exactly that water (same hash of cell and frame, same F_prev / TG_prev).
-    if (gR2Sub < 1.5 && r2Valid(t) > 0.5) {
+    if (third != 3 && gR2Sub < 1.5 && r2Valid(t) > 0.5) {
         float vBead = 0;
         bool pearlB = false;                                                   // review marker: -2 = trail pearl
         float2 pBead = float2(r2Rand(uint3((uint)c.x, (uint)c.y, (uint)gR2Frame * 8u + 9003u)),
@@ -292,7 +304,7 @@ float4 main(PS_IN pin) {
     // (one fragment law). A piece below the drawn size is haze (Lua puts its expectation into G); the splashed rest leaves.
     // H1: the haze G a drop takes up is the water under its swept contact disc (r2SweepFrac, same function as the field).
     // N2: + the wipe halo; N3: texels below gR2HazeMinMM are skipped here AND in the haze pass (same set).
-    if (gR2Sub > gR2SubN - 0.5 && r2Valid(t) > 0.5) {
+    if (third != 3 && gR2Sub > gR2SubN - 0.5 && r2Valid(t) > 0.5) {
         float lamS = gR2SprayFineOn > 0.5 ? gR2SprayVisRate * r2Exposure(t) * gR2Exposure * gR2CellSizeMM.x * gR2CellSizeMM.y * gR2SimDt : 0.0;
         uint ks = (uint)gR2Frame * 8u + 9301u;
         if (lamS > 0 && r2Rand(uint3((uint)c.x, (uint)c.y, ks)) < 1.0 - exp(-lamS)) {
@@ -403,6 +415,17 @@ float4 main(PS_IN pin) {
         float3 aI = accV > 0 ? r2AirTopInfo((float2(c) + p) / gR2Cells, rNow) : float3(1, 0, 0);   // rev48-S5 E6
         res = accV > 0 ? r2ShapeRelax(shape, rNow, mov, gR2Dt, dMM, vms, r2PinAt(t), wetB, gI, aI)
                        : float4(0, 0, r2PackHarm(0, 0), 0);
+    }
+    if (third == 3) {
+        // B1 (docs/RAINFX_V2_TRAIL_REVIEW3.md section 11.2): the winner's tail stays where it lies on the visor and is re-laid on
+        // the path behind the new centre. The quarter skips the impact / bead / spray / haze births (a cell they create anew
+        // has no winner here -> no tail; one they merge into keeps the winner's tail, centre = the gathered one).
+        float2 hNew = float2(c) + min(saturate(p), 0.9995);
+        r2CoatSet(hNew / gR2Cells, txR2Field.SampleLevel(samLinearClamp, hNew / gR2Cells, 0));   // B1d: coat state at the head
+        res = accV > 0 ? r2TailUpdate(tailW, (tailOld - hNew) * gR2CellSizeMM, r2RadiusMM(accV), tailV,
+                                                       hNew / gR2Cells, gR2Dt, wetB, r2HazePhiAround(hNew / gR2Cells, r2RadiusMM(accV)))
+                         : float4(0, 0, 0, 0);
+        if (bigV <= 0) res = float4(0, 0, 0, 0);
     }
     return res;
 }

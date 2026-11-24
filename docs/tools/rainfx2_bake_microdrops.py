@@ -20,7 +20,10 @@ overlap, each overlap resolved by a CLEAR cut, some cuts with a dry gap between 
      paraboloid, a cut piece a dome that follows its outline: no facets), kappa_i = 2 rimSlope / R_eq (rim slope of
      the equal-area disc), then h <- H (h / H)^steep (steeper rim, flatter top: a coated, high-contact-angle visor).
      The edge texels between two touching pieces are part of neither (h = 0) -> a V groove = a clear separation;
-  5. channels: R, G = normal xy (0.5 + 0.5 n), B = signed distance to the piece outline (0.5 = edge, +-sdfRangeMM), A = rank
+  5. channels (U-micro, docs/RAINFX_V2_TRAIL_REVIEW3.md section 54): R, G = 0.5 + 0.5 u, u = (x - c) / r = the position in the piece's
+     OWN DROP DISC (centre c, radius r; a linear field -> bilinear filtering is exact inside a piece, no faceted normals: the
+     earlier normal xy channels gave quadrant facets on pieces of a few texels); the visor builds the cap analytically (contact
+     angle, same lens as the cell drops). Old format (--normals 1): R, G = normal xy (0.5 + 0.5 n), B = signed distance to the piece outline (0.5 = edge, +-sdfRangeMM), A = rank
      (area share of the pieces sorted largest first; in a gap the rank of the nearest piece -- H3-2c; older text:) (piece id hash: the order in
      which pieces appear as the coverage rises). Own mip chain: normals averaged and renormalised (flatten), coverage
      averaged, rank of the covering piece; written as DDS (DX10 header, R8G8B8A8_UNORM).
@@ -32,7 +35,7 @@ import numpy as np
 from scipy import ndimage
 
 DEF = dict(size=2048, texel=0.0125, density=2.2, alpha=1.5, rmin=0.03, rmax=0.3, zmix=0.5,
-           gapP=1.0, gapMM=0.025, minPieceTex=6, mode='layer', rimSlope=1.6, steep=0.5, sdfRangeMM=0.6, seed=7)
+           gapP=1.0, gapMM=0.025, minPieceTex=6, mode='layer', rimSlope=1.6, steep=0.5, sdfRangeMM=0.6, seed=7, normals=0)
 
 
 def bake(prm=None):
@@ -143,6 +146,13 @@ def bake(prm=None):
     nx, ny = (-gx / l).astype(np.float32), (-gy / l).astype(np.float32)
     cov = (ID >= 0).astype(np.float32)
     cnt = np.bincount(ID[ID >= 0], minlength=N)
+    # U-micro: position in the own drop disc, u = (x - c) / r (periodic)
+    yy, xx = (np.mgrid[0:n, 0:n] + 0.5) * tx
+    idc = np.maximum(ID, 0)
+    ux = ((xx - cx[idc] + T / 2) % T - T / 2) / r[idc]
+    uy = ((yy - cy[idc] + T / 2) % T - T / 2) / r[idc]
+    ux = np.where(ID >= 0, np.clip(ux, -1, 1), 0).astype(np.float32)
+    uy = np.where(ID >= 0, np.clip(uy, -1, 1), 0).astype(np.float32)
     # 5a. signed distance to the piece outline (mm, + inside) and, in the dry gaps, the id of the NEAREST piece
     #     (H3-2c: crisp edges at any magnification + each piece's own wipe halo just outside its rim)
     rng_mm = p['sdfRangeMM']
@@ -178,6 +188,8 @@ def bake(prm=None):
               piecesPerCm2=float((cnt > 0).sum() / (T * T) * 100), tileMM=T, rankQ=q, sdfRangeMM=rng_mm,
               pieceR_a50=float(np.interp(0.5, aa, rr)),   # area-weighted median radius = the octave reference a50
               rankRadius=[float(np.interp(x, aa, rr)) for x in (0.05, 0.25, 0.5, 0.75, 0.95)])
+    if not p['normals']: nx, ny = ux, uy                           # U-micro: R, G carry u (mips: coverage-weighted mean)
+    st['centreVec'] = 0 if p['normals'] else 1
     return dict(id=ID, h=h, nx=nx, ny=ny, cov=cov, rank=rank, sd=sd, stats=st, prm=p)
 
 
@@ -185,6 +197,17 @@ def mips(res):
     """own mip chain: average normal (renormalised xy of the averaged vector), coverage / height / signed distance mean,
     rank of the texel with the largest signed distance (the piece that owns most of the block; in a gap the nearest)."""
     nx, ny, h, cov, rank, sd = res['nx'], res['ny'], res['h'], res['cov'], res['rank'], res['sd']
+    if not res['prm'].get('normals', 1):                              # U-micro centre vectors: plain mean (fades to 0 = flat)
+        out = []
+        while True:
+            out.append((nx, ny, h, cov, rank, sd))
+            if nx.shape[0] == 1:
+                return out
+            def dn(x): return 0.25 * (x[0::2, 0::2] + x[1::2, 0::2] + x[0::2, 1::2] + x[1::2, 1::2])
+            def blk(x): return x.reshape(x.shape[0] // 2, 2, x.shape[1] // 2, 2).transpose(0, 2, 1, 3).reshape(-1, 4)
+            rk, sv = blk(rank), blk(sd)
+            rank = rk[np.arange(len(rk)), np.argmax(sv, 1)].reshape(nx.shape[0] // 2, -1)
+            nx, ny, h, cov, sd = dn(nx), dn(ny), dn(h), dn(cov), dn(sd)
     nz = np.sqrt(np.clip(1 - nx * nx - ny * ny, 0, 1)) * cov + (1 - cov)   # dry texels count as flat
     nx, ny = nx * cov, ny * cov
     out = []
@@ -222,7 +245,7 @@ HALO_R = (0.03, 0.06, 0.12, 0.24)   # mm (atlas scale 1): radii of the 'nearest 
 
 def write_halo(path, res):
     """H3-2d HALO ATLAS (docs/RAINFX_V2_H3_ATLAS_SPEC.md 8h): half-resolution RGBA8, channel i = the smallest piece rank
-    within HALO_R[i] (square window) of the texel. In the visor a piece exists when rank < threshold, so 'an EXISTING
+    within HALO_R[i] (disc window; was square until 2026-11-25) of the texel. In the visor a piece exists when rank < threshold, so 'an EXISTING
     piece lies within R_i' is minRank_i < threshold -> distance to the nearest existing piece, also across the area of
     pieces that do not exist yet (the per-texel SDF / rank only knows the nearest piece, whatever its state: the halo
     reached only the 0.025 mm gaps). Mips: min of the 2 x 2 block."""
@@ -230,7 +253,12 @@ def write_halo(path, res):
     rank, tx = res['rank'], res['prm']['texel']
     r2 = rank.reshape(rank.shape[0] // 2, 2, rank.shape[1] // 2, 2).min(axis=(1, 3))
     tx2 = 2 * tx
-    ch = [minimum_filter(r2, size=2 * int(round(R / tx2)) + 1, mode='wrap') for R in HALO_R]
+    # halo-disc (2026-11-25 review: a SQUARE window wiped rotated squares around the micro drops): a Euclidean disc footprint
+    def disc(R):
+        k = int(round(R / tx2))
+        y, x = np.mgrid[-k:k + 1, -k:k + 1]
+        return (x * x + y * y) <= (R / tx2) ** 2 + 0.25
+    ch = [minimum_filter(r2, footprint=disc(R), mode='wrap') for R in HALO_R]
     img = np.dstack(ch).astype(np.float32)
     n = img.shape[0]
     hdr = bytearray(124)

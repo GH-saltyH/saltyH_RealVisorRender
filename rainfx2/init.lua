@@ -73,8 +73,9 @@ local DEFAULTS = {
   shedU10 = 25.0,   -- rev48-F4b: outer air speed (m/s) that depins a 10 uL drop on the coat (R6b 20; F4b fit to the dryFlow reference frames)
   shedBeta = 0.11,  -- 2026-11-07 (SPRAY_RAIN_REF s23, user fix with stagnation 24 deg + F2 / F3); rev48-F4b 0.08: U_c(V) = shedU10 (V / 10 uL)^-shedBeta (reference: r 0.6 / 0.25 / 0.15 mm move from ~150 / 177 / 205 km/h)
   bigOn = true, bigRMM = 0.8,   -- rev48-R7a: drops >= bigRMM drawn / touching in a +-4 cell window (largest per 4 x 4 tile)   -- rev48-R3: drop volume = spherical cap of contactDeg (false: rev7 hemisphere 2.094)
-  contactDeg = 60,   -- rev35: 60 (user: stronger curl looked better; normal 40-60)
-  hysteresisDeg = 20, wetFlatten = 0.5,
+  contactDeg = 58,   -- R-steep2 (TRAIL_REVIEW3 section 45-46): 58 = steep rim without the 'button' outer layer of 70 (user test)
+  -- S-fix history (TRAIL_REVIEW3 sections 36-38): 45 = between the coat theta_r 40 / theta_a 54 (rev35 was 60: a full TIR ring)
+  hysteresisDeg = 20,
   -- rev20 wobble of pinned drops in airflow (amplitude ~ drag/pinning), visible-rate tones
   wobbleAmp = 0.08, wobbleHz = 8.0,   -- rev21: 0.12 -> 0.08 (user: 0.07-0.09 best at speed)
   motionStretch = 0.35,                     -- WF MOTION_STRETCH
@@ -85,7 +86,8 @@ local DEFAULTS = {
   apertureMM = 0.0,        -- entrance pupil A (rev23: 0 until the final whole-visor defocus step)
   focusM = 0.12,           -- focus distance zf (left visor ~ in focus, near-lens right blurred)
   defocusDA = true,        -- rev19: D-A stochastic colour gather (4 taps where CoC > 1 px); off = D-C
-  housingM = 0.05,         -- frame pixels closer than this (linear m) are helmet housing (rev27: UI slider)
+  housingMask = true,      -- H-mask (TRAIL_REVIEW3 section 59): remove the housing by its own coverage shot (any depth)
+  housingM = 0.05,         -- frame pixels closer than this (linear m) are helmet housing (rev27: UI slider; S-fix2 tried 0.15: removed car parts touching the visor -> back to 0.05, section 41)
   sourceScale = 0.5,       -- refraction source resolution (fraction of the frame)
   -- rev22: symmetric rim loss 0.75 -> 0.35; the one-sided rim shading now comes from the far lens
   glint = 0.45,
@@ -108,6 +110,8 @@ local DEFAULTS = {
   -- rev45 step 3 (docs/RAINFX_V2_DROP_PHYSICS_MODEL.md section 6 B): life cycle and trails
   growTime = 0.06, fadeTime = 0.10,          -- s: newborn drops grow in, swept drops fade out
   trailWidthK = 0.5,
+  coatOn = true, coatWear = 0.3, coatWearRate = 0.0, testDirt = 0.0, dirtMM = 3.0, coatKD = 0.5, coatKC = 0.5, coatKM = 0.4, coatTauA = 1.0, coatTauR = 20.0,   -- B1d coat state
+  tailOn = true, tailNeckRho = 0.75, tailK = 4.0, tailMax = 20.0, tailWidthK = 0.6, tailTau = 0.1, tailFlat = 0.85, headRound = 1.0, surfH = true, surfK = 0.04, rimPhys = true, steep = true, cubeK = 0.7, cubeMip = 2.0, imgPupilMM = 0.0, lensStable = true, sceneCompress = true, compressK = 0.01, bondFlatK = 0.5,   -- B1 drop tails (docs/RAINFX_V2_TRAIL_REVIEW3.md section 11)
   -- trail water (rule_trail; rev47j width 0.35 -> 0.5 r: reference ~1/4 of the head)
   surfThetaRDeg = 40.0,   -- FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md): ONE receding angle of the coat (user 2026-11-13); trailThetaRDeg,
                           -- filmRecedeDeg and hysteresisDeg are derived from it every frame (R2:syncSurface)
@@ -115,14 +119,14 @@ local DEFAULTS = {
   -- rev48-S1 shape state (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 6): birth class shares, relaxation
   shpImpactK = 0.15, shpImpactMax = 1.8,   -- rev48-S2' (birth events: splats spread nearly evenly; was 0.35 / 3)
   baseSpread = 1.0,
-  spreadVarK = 0.5, spreadR0 = 0.15, spreadR1 = 0.8, spreadWetK = 0.3,   -- rev48-S2c per-drop resting spread
     -- rev48-S2'b: resting drop profile = splat rule at this f (1 = rev48 dome; try 1.3-1.5)
   shpSpreadMin = 1.8, shpSpreadMax = 3.2, shpRecoilC = 3.0, shpLamShift = 0.15,
   shpRimK = 0.6, shpFingerK = 0.25,   -- rev48-U2 splat lamella: rim share of the profile, downstream finger amplitude   -- rev48-S2' splat spread / recoil
   shpSkidK = 0.01, shpSkidMax = 0.05,   -- rev48-S2b recoil 0.4 -> 0.8 s (60 s rest: settled drops stayed vertical ovals)
   -- (rev48-S2 oblique impact)
   shpMergeK = 1.0, shpWaist = 0.0,      -- rev48-S3 merged footprint (tensor gain); M2: waist 0 (bridge fills in ~20 ms)
-  shpMergeTau = 0.6,                    -- rev48-M1: s per mm of radius for a flat (merged / arrested) footprint to recede to theta_r
+  shpMergeTau = 0.015,   -- R-steep: Cox-Voinov recession U ~ (gamma / 9 mu ln)(theta_eq^3 - theta^3) ~ 0.1 m/s -> ~10-20 ms per mm (was 0.6)
+  -- rev48-M1 note:                    -- rev48-M1: s per mm of radius for a flat (merged / arrested) footprint to recede to theta_r
   asymK = 0.35, asymGravR = 1.0,       -- rev48-S2d off-centre apex (strength, radius where it points downhill)
   footPhys = true,                     -- rev48-S3b coalescence uses the drawn footprint (S4c: = the water radius x shape)
   footPinK = 1.0,                      -- rev48-S7 Furmidge: pinning by the contact width across the force (0 = 2r)
@@ -232,7 +236,26 @@ local function siteMean(thr)
   return m
 end
 
+-- B1d COATING STATE (docs/RAINFX_V2_TRAIL_REVIEW3.md section 18): values read by tgshared r2CoatFactor (sim passes + visor
+-- debug 10). Wear level W: UI value + optional growth per minute of rain; a tear-off resets W, draws a new defect field and
+-- clears the wetting memory (field G) for one frame.
+local function coatValues(self, v)
+  local p = self.p
+  v.gR2CoatOn = p.coatOn == false and 0 or 1
+  v.gR2CoatSeed = self.coatSeed or 0
+  v.gR2CoatWear = math.min(math.max(self.coatWear or p.coatWear or 0, 0), 1)
+  v.gR2TestDirt = p.testDirt or 0
+  v.gR2DirtMM = p.dirtMM or 3.0
+  v.gR2CoatKD, v.gR2CoatKC, v.gR2CoatKM = p.coatKD or 0.5, p.coatKC or 0.5, p.coatKM or 0.4
+  v.gR2CoatTauA, v.gR2CoatTauR = p.coatTauA or 1.0, p.coatTauR or 20.0
+  v.gR2CoatReset = (self.coatResetFrames or 0) > 0 and 1 or 0
+  v.gR2TrailMinMM = p.trailMinMM   -- field: the memory counts trail water from the drawn depth
+  v.gR2StrongThr = p.strongThr or 0.74
+  v.gR2StrongInvMM = 1.0 / math.max(p.strongMM or 0.4, 0.05)
+end
+
 local function sceneValuesImpl(self, v)
+  coatValues(self, v)
   -- Shared constant set for P1-P3 (one cbuffer layout; unused entries are harmless).
   local p, st = self.p, self.stats
   v.gR2Cells = self.cells
@@ -354,6 +377,7 @@ local function sceneValuesImpl(self, v)
   v.gR2TurbMM = p.turbMM or 15.0          -- T1 eddy size on the visor
   v.gR2AirSurface = p.airSurface
   v.gR2VMax = p.vMax
+  v.gR2MotionStretch = p.motionStretch   -- B3c: tailtex measures the tail from the drawn head (r2DrawnRadiiMM rear stretch)
   v.gR2SurfaceTension = p.surfaceTension
   v.gR2PinKinetic = p.pinKinetic
   v.gR2GatherCells = p.gatherCells
@@ -423,7 +447,8 @@ local function sceneValuesImpl(self, v)
   v.gR2ShpDefShape = p.shpDefShape or 1.0   -- rev48-R5: birth contour from the defect field (bend / lobe / sag classes removed)
   v.gR2ShpRelaxMove, v.gR2ShpRelaxStill = p.shpRelaxMove, p.shpRelaxStill
   v.gR2ShpMergeK, v.gR2ShpWaist = p.shpMergeK, p.shpWaist
-  v.gR2ShpMergeTau = p.shpMergeTau or 0.6
+  v.gR2ShpMergeTau = p.shpMergeTau or 0.015
+  v.gR2Steep = p.steep ~= false and 1 or 0   -- R-steep: arrested / merged drops recede to the cap
   v.gR2ShpMotionK, v.gR2ShpMotionV = p.shpMotionK, p.shpMotionV
   v.gR2ShpBoK, v.gR2ShpTearK = p.shpBoK, p.shpTearK
   v.gR2ShpSlugTau, v.gR2ShpAirK, v.gR2ShpAirMax = p.shpSlugTau, p.shpAirK, p.shpAirMax
@@ -432,13 +457,17 @@ local function sceneValuesImpl(self, v)
   v.gR2FootPhys = p.footPhys and 1 or 0
   v.gR2FootPinK = p.footPinK
   v.gR2BaseSpread = p.baseSpread
-  v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
   v.gR2ShpImpactK, v.gR2ShpImpactMax = p.shpImpactK, p.shpImpactMax
   v.gR2ShpSkidK, v.gR2ShpSkidMax = p.shpSkidK, p.shpSkidMax
   v.gR2ShpSpreadMin, v.gR2ShpSpreadMax, v.gR2ShpLamShift = p.shpSpreadMin, p.shpSpreadMax, p.shpLamShift
   v.gR2ShpRecoilC = p.shpRecoilC   -- rev48-R1: recoil tau = C sqrt(rho r^3 / gamma) (r2Predict ramp / walk)
   v.gR2TrailThetaRDeg = p.trailThetaRDeg
   v.gR2TrailWetK = p.trailWetK
+  v.gR2TailOn = p.tailOn == false and 0 or 1                     -- B1 drop tails (S quarter 3)
+  v.gR2TailNeckRho = p.tailNeckRho or 0.75                        -- L2b: the tail rises out of the head cap at rho_n x its radius
+  v.gR2TailNeckDeg = (p.contactDeg or 58) - 0.5 * (p.hysteresisDeg or 20)   -- L2b: the head's rear rim angle
+  v.gR2TailWidthK = p.tailWidthK or 0.6                           -- B3c: rivulet half-width 0.5 K W sqrt(1 - 1/s), W = drawn head half-width
+  v.gR2TailK, v.gR2TailMax, v.gR2TailTau = p.tailK or 4, p.tailMax or 20, p.tailTau or 0.1
   v.gR2TrailLL = p.trailLL
   v.gR2TrailPinMM = p.trailPinMM
   v.gR2TrailFlowK = p.trailFlowK
@@ -547,7 +576,8 @@ function R2:ensureResources()
   local u16 = render.TextureFormat.R16G16B16A16.UNorm
   -- rev45: twice the cell width, right half = per-drop life cycle (age, flight, fade, direction)
   -- rev48-S1: three cell widths [drop | life | shape state]
-  self.S = { canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(3 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
+  -- B1 (docs/RAINFX_V2_TRAIL_REVIEW3.md section 11): + tail quarter [drop | life | shape | tail]
+  self.S = { canvas(4 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells A'), canvas(4 * p.cellsU, p.cellsV, 1, f32, 'RainFX2 cells B') }
   self.C = canvas(p.cellsU, p.cellsV, 1, render.TextureFormat.R16G16B16A16.Float, 'RainFX2 claims')
   -- rev48-F8 (F7 review: a background of motionless droplets built up whenever intensity > 0, faster at speed): the field was
   -- R16G16B16A16 UNORM -- one step 1/65535 of fineMaxMM. A multiplicative loss per frame (fine evaporation 0.14 %/frame at
@@ -565,6 +595,7 @@ function R2:ensureResources()
   self.li = 1
   -- rev48-R7a big-drop tiles (4 x 4 cells -> the largest drop, drawn / touching in a +-4 cell window)
   self.BG = canvas(math.ceil(p.cellsU / 4), math.ceil(p.cellsV / 4), 1, f32, 'RainFX2 big drops')
+  self.TT = canvas(math.floor(p.fieldU / 2), math.floor(p.fieldV / 2) + math.ceil(p.cellsV / 4), 1, f32, 'RainFX2 tail raster')   -- B3g: + one TP row per big-drop tile row (tail constants)   -- B3a: half the field   -- B2 (tailtex.hlsl): the visor draws the drop tails from it
   -- rev47j trail geometry (line point / direction / half-width per field texel)
   local h16 = render.TextureFormat.R16G16B16A16.Float
   self.TG = { canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 trail A'), canvas(p.fieldU, p.fieldV, 1, f32, 'RainFX2 trail B') }   -- TR0: packed tag / depth (RGBA32F)
@@ -609,11 +640,12 @@ function R2:ensureResources()
   self.FAc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 film gate')
   self.Mc = canvas(32, 8, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 metrics')
   self.passAudit = newPass(self, self.src.audit, 'audit', true)   -- E3 mass audit (haze in the claims slot)
-  self.AUc = canvas(96, 8, 1, f32, 'RainFX2 mass audit')
+  self.AUc = canvas(160, 8, 1, f32, 'RainFX2 mass audit')   -- E3 (x < 96) + E4 tails (96..159)
   self.passSizes = newPass(self, self.src.sizes, 'sizes')
   self.Hc = canvas(10, 16, 1, render.TextureFormat.R8G8B8A8.UNorm, 'RainFX2 size histogram')
   self.passMerge = newPass(self, self.src.merge, 'merge')
   self.passBig = newPass(self, self.src.big, 'big')              -- rev48-R7a
+  self.passTailTex = newPass(self, self.src.tailtex, 'tailtex')  -- B2 tail raster (TT)
   self.ready = true
   return true
 end
@@ -913,7 +945,7 @@ function R2:simulate(sim)
     for _, k in ipairs({ 'S', 'F', 'TG', 'LM', 'HZ' }) do
       for _, c in ipairs(self[k] or {}) do c:clear(z) end
     end
-    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'SK', 'BG' }) do
+    for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'SK', 'BG', 'TT' }) do
       if self[k] then self[k]:clear(z) end
     end
     self.recValid, self.mskValid, self.hzmValid = false, false, false
@@ -957,6 +989,12 @@ function R2:simulate(sim)
   self.frameSeed = sim.frame % 1048576
   self.h = dt / p.substeps
   self.frameDt = dt
+  do   -- B1d: coat wear grows with rain time (optional), the tear-off reset lasts one frame
+    self.coatWear = self.coatWear or p.coatWear or 0
+    local raining = self.stats and (self.stats.fluxMMs or 0) > 0
+    if (p.coatWearRate or 0) > 0 and raining then self.coatWear = math.min(self.coatWear + dt * p.coatWearRate / 60, 1) end
+    if (self.coatResetFrames or 0) > 0 then self.coatResetFrames = self.coatResetFrames - 1 end
+  end
   self.diag = P.diagnose(p, self.inp, self.h, self.cellMM, self.diag)
   if self.ladderRequest then
     self.ladderRequest = false
@@ -1051,6 +1089,15 @@ function R2:simulate(sim)
     sceneValues(self, pg.values)
     if not p.bigOn or not run(self.BG, pg) then self.BG:clear(rgbm(0, 0, 0, 0)) end
   end
+  do   -- B2: tail raster of the final state (after the big tiles; the visor draws it in the txR2Trail slot)
+    local pq = self.passTailTex
+    pq.textures.txR2State = self.S[self.si]
+    pq.textures.txR2Big = self.BG
+    pq.textures.txR2Field = self.F[self.fi]          -- B3a: coat state / wetness at the head (rivulet width of the trail rule)
+    sceneValues(self, pq.values)
+    self.ttValid = p.bigOn and p.tailOn ~= false and run(self.TT, pq) or false
+    if not self.ttValid then self.TT:clear(rgbm(0, 0, 0, 0)) end
+  end
   do   -- H1c / H1b: haze layer on S_next (sweep, coalescence, supply); cells read HZ_prev this frame
     -- N3: reach mask + N1 nucleus ratio first (S_next, HZ_prev: the same inputs as the haze pass / the cells event)
     if not self.hzvValid then   -- H3-P2: static (geometry only), once per resource set
@@ -1133,6 +1180,7 @@ end
 -- docs/tools/check_rainfx2_shaders.py fails if cand.hlsl / rec.hlsl use a gR2 value not assigned here.
 local function candValues(self, v)
   local p = self.p
+  coatValues(self, v)   -- B1d: tgshared r2CoatFactor (visor debug 10)
   updateShapeK(p)
   v.gR2MaxRadiusMM = p.maxRadiusMM   -- R1: drawn radius stops at the largest cap (spill water is the field's)
   v.gR2Cells = self.cells
@@ -1141,6 +1189,18 @@ local function candValues(self, v)
   v.gR2CapVolume = p.capVolume ~= false and 1 or 0
   v.gR2BigOn, v.gR2BigRMM = p.bigOn and self.BG and 1 or 0, p.bigRMM or 0.8   -- rev48-R7a
   v.gR2KernelScale = p.kernelScale
+  v.gR2TailFlat = p.tailFlat or 0.85     -- B3e: rivulet section flatness (beta along the neck; 0 = dome like the head)
+  v.gR2HeadRound = p.headRound or 1.0   -- B3f: sliding head round at its front (0 = symmetric ellipse)
+  v.gR2Steep = p.steep ~= false and 1 or 0       -- R-steep: lens reflected ray exits the opposite side of the cap
+  v.gR2CubeK, v.gR2CubeMip = p.cubeK or 0.7, p.cubeMip or 2.0   -- R-img: CSP steep rim = cube x 0.7
+  v.gR2ImgPupilMM = p.imgPupilMM or 0.0   -- R-img: camera entrance pupil seen through a drop (in-drop image defocus)
+  v.gR2SceneCompress = p.sceneCompress ~= false and 1 or 0   -- R-img5 (visor inverse; cleanup: on, k 0.01)
+  v.gR2CompressK = p.compressK or 0.01
+  v.gR2LensStable = p.lensStable ~= false and 1 or 0   -- R-img3: per-drop lens mip (no ddx), fixed D-A taps
+  v.gR2RimPhys = p.rimPhys ~= false and 1 or 0   -- S-fix: own rim angle (f), front / rear hysteresis, Bond top flattening, Fresnel / TIR
+  v.gR2BondFlatK = p.bondFlatK or 0.5   -- S-fix2: top flattening = k (r / 2.7 mm)^2 (1.5 flattened big drops into puddles)
+  v.gR2SurfH = p.surfH ~= false and 1 or 0   -- B3h: one water height field (refraction from grad H); off = per-primitive lens union
+  v.gR2SurfK = p.surfK or 0.04          -- B3h: smooth-max width of the union (mm)
   v.gR2ShpOn = p.shpOn and 1 or 0   -- rev48-S1
   v.gR2ShpRecoilC = p.shpRecoilC   -- rev48-R1
   v.gR2ShpLamShift = p.shpLamShift   -- rev48-U2: lamella centre vs the recoiling residual
@@ -1212,7 +1272,8 @@ function R2:microAtlas()
       self.micro = { path = base .. '.dds', halo = base .. '_Halo.dds', tile = num('tileMM', 25.6),
         a50 = num('pieceR_a50', 0.212),      -- area-weighted median piece radius at octave 0 (the octave reference)
         rmax = num('pieceR_max', 0.30), q = num('rankQ', 0.5),   -- radius(rank) ~ rmax (1 - rank)^q
-        sdf = num('sdfRangeMM', 0.1), cover = num('coverage', 0.76) }
+        sdf = num('sdfRangeMM', 0.1), cover = num('coverage', 0.76),
+        centre = num('centreVec', 0) }   -- U-micro: R, G = position in the piece's drop disc (analytic cap)
     else
       self.micro = false
     end
@@ -1251,11 +1312,9 @@ function R2:drawParams(depth)
     coc(0.03), coc(0.06), coc(0.12))
   v.gR2AsymK, v.gR2AsymGravR = p.asymK, p.asymGravR   -- rev48-S2d
   v.gR2ShpFrontK = p.shpFrontK                         -- rev48-S6 F2 outer-front apex
-  v.gR2SpreadVarK, v.gR2SpreadR0, v.gR2SpreadR1, v.gR2SpreadWetK = p.spreadVarK, p.spreadR0, p.spreadR1, p.spreadWetK
   v.gR2WetHaze = p.wetHaze
   v.gR2Threshold = p.threshold
   v.gR2Hysteresis = p.hysteresisDeg
-  v.gR2WetFlatten = p.wetFlatten
   v.gR2WobbleHz = p.wobbleHz
   -- Fa/Fpin = (0.25 rho Cd pi / (2 gamma dcos_coat)) * r * u^2, r in mm -> * 1e-3
   v.gR2WobbleC = 0.25 * p.rhoAir * 1.0 * math.pi / (2 * p.surfaceTension * p.pinCoat) * 1e-3   -- R6b: tuned look (Cd 1)
@@ -1343,14 +1402,23 @@ function R2:prepareSource(src)
   local pass = self.passSource
   if not pass then
     pass = { async = true, blendMode = render.BlendMode.Opaque,
-      textures = { txR2Src = false, txR2Depth = 'dynamic::depth' }, values = {}, shader = self.src.source }
+      textures = { txR2Src = false, txR2Depth = 'dynamic::depth', txR2HousingMask = false }, values = {}, shader = self.src.source }
     self.passSource = pass
   end
   pass.textures.txR2Src = src
   local v = pass.values
+  v.gR2SceneCompress = self.p.sceneCompress ~= false and 1 or 0   -- R-img5: tone-compressed refraction source (HDR lights do not flood the mips)
+  v.gR2CompressK = self.p.compressK or 0.01
   v.gR2Near = near
   v.gR2Far = math.max(sim.cameraClipFar or 5000, near + 1)
   v.gR2HousingM = p.housingM
+  -- H-mask (docs/RAINFX_V2_TRAIL_REVIEW3.md section 59): housing-only coverage shot from realvisor.lua (nil -> depth rule only)
+  local hm, hmStatus, hmSize = nil, nil, nil
+  if p.housingMask ~= false and self.ctx.housingMask then hm, hmStatus, hmSize = self.ctx.housingMask() end
+  self.housingMaskStatus = hm and (hmStatus or 'H-mask on') or (p.housingMask == false and 'H-mask off' or ('H-mask unavailable' .. (hmStatus and (': ' .. hmStatus) or '')))
+  pass.textures.txR2HousingMask = hm or false
+  v.gR2HousingMaskOn = hm and 1 or 0
+  v.gR2HousingMaskTexel = hmSize and vec2(1 / math.max(hmSize.x, 1), 1 / math.max(hmSize.y, 1)) or vec2(0, 0)
   v.gR2DepthReversed = (self.ctx.depthReversed and self.ctx.depthReversed()) and 1 or 0
   if self.source:updateSceneWithShader(pass) == false then return nil end
   if self.source:mipsUpdate() == false then return nil end
@@ -1394,7 +1462,7 @@ function R2:draw(src, viewKey, depth)
   if not depth and self.offscreenTest == 'pending' then self:offscreenTestRun() end
   t.textures.txR2State = self.S[self.si]
   t.textures.txR2Field = self.F[self.fi]
-  t.textures.txR2Trail = self.TG and self.TG[self.ti] or false
+  t.textures.txR2Trail = self.TT or false   -- B3: tail raster (C8: the rev47j vector trail lines are no longer drawn)
   t.textures.txR2Lam = self.LM and self.LM[self.li] or false   -- rev48-P4 impacts on the sheet
   t.textures.txR2Big = self.BG or false                         -- rev48-R7a
   t.textures.txR2Haze = self.HZ and self.HZ[self.hi] or false   -- H1c haze layer
@@ -1404,6 +1472,7 @@ function R2:draw(src, viewKey, depth)
   t.textures.txR2MicroHalo = mic and mic.halo or false            -- H3-2d: nearest existing piece (halo)
   t.values.gR2MicroOn = (mic and self.p.microOn ~= false) and 1 or 0
   t.values.gR2MicroA50MM = mic and mic.a50 or 0.212
+  t.values.gR2MicroCentre = mic and mic.centre or 0   -- U-micro atlas format
   t.values.gR2CoarseInRMM = math.max((self.stats and self.stats.coarseInRMM) or 0, self.p.hazeAMM or 0.015)   -- H3-3b
   t.values.gR2MicroRMaxMM = mic and mic.rmax or 0.30
   t.values.gR2MicroRankQ = mic and mic.q or 0.5
@@ -1544,7 +1613,7 @@ function R2:ui()
     if not mic then uiInfo('H3 atlas missing: texture/RAINFX_MicroDrops.dds + .json (docs/tools/rainfx2_bake_microdrops.py)') end
     self.p.microBias = ui.slider('##rfx2mib', self.p.microBias or 0, -3, 4, 'Micro size bias (DEBUG, 0 = physical): %.1f octaves')
     self.p.microRefract = ui.slider('##rfx2mir', self.p.microRefract or 1.0, 0, 2, 'Micro lens slope gain: %.2f')
-    self.p.microResPx = ui.slider('##rfx2mip', self.p.microResPx or 2.0, 0.5, 4, 'Smallest micro drop drawn (radius): %.1f px')
+    self.p.microResPx = ui.slider('##rfx2mip', self.p.microResPx or 2.0, 0.1, 4, 'Smallest micro drop drawn (radius): %.2f px (smaller ones = haze veil)')
     self.p.microHaloK = ui.slider('##rfx2mih', self.p.microHaloK or 0.5, 0, 2, 'Micro drop wipe halo: %.2f x size')
     self.p.microHaloPx = ui.slider('##rfx2mhp', self.p.microHaloPx or 1.5, 0, 6, 'Micro drop wipe halo, at least: %.1f px')
     self.p.hazeCoarsenTau = ui.slider('##rfx2hct', self.p.hazeCoarsenTau or 0.5, 0.1, 5, 'Fine -> micro drops time at full coverage (E2): %.2f s')
@@ -1628,11 +1697,48 @@ function R2:ui()
     self.p.shpMotionK = ui.slider('##rfx2smk', self.p.shpMotionK, 0, 1.5, 'Sliding head elongation: %.2f')
     self.p.shpRelaxMove = ui.slider('##rfx2sm', self.p.shpRelaxMove, 0.02, 2, 'Sliding drop morphs to its head shape over: %.2f s')
   end)
+  uiSection('Coating state (B1d: wear, test dirt, wetting memory, tear-off)', false, function()
+    if ui.checkbox('Receding angle varies with the coat state (B1d; debug 10 = theta_r map, green = wetting memory)', self.p.coatOn ~= false) then self.p.coatOn = self.p.coatOn == false end
+    if ui.button('Tear off (new film: no wear, no memory, new defect field)') then
+      self.coatSeed = (self.coatSeed or 0) + 37.7
+      self.coatWear, self.p.coatWear = 0, 0
+      self.coatResetFrames = 2
+    end
+    local w = ui.slider('##rfx2cw', self.coatWear or self.p.coatWear or 0, 0, 1, 'Coat wear level W (worn / scratched spots): %.2f')
+    if w ~= (self.coatWear or self.p.coatWear or 0) then self.coatWear, self.p.coatWear = w, w end
+    self.p.coatWearRate = ui.slider('##rfx2cwr', self.p.coatWearRate or 0, 0, 0.5, 'Wear growth while it rains: %.2f / min (0 = fixed)')
+    self.p.coatKD = ui.slider('##rfx2ckd', self.p.coatKD or 0.5, 0, 0.8, 'Worn coat lowers theta_r by up to: %.2f')
+    self.p.testDirt = ui.slider('##rfx2tdt', self.p.testDirt or 0, 0, 1, 'TEST road dirt level (until the dirt model): %.2f')
+    self.p.coatKC = ui.slider('##rfx2ckc', self.p.coatKC or 0.5, 0, 0.8, 'Dirt lowers theta_r by up to: %.2f')
+    self.p.dirtMM = ui.slider('##rfx2dmm', self.p.dirtMM or 3, 0.5, 20, 'Dirt patch size: %.1f mm')
+    self.p.coatKM = ui.slider('##rfx2ckm', self.p.coatKM or 0.4, 0, 0.8, 'Wetting memory lowers theta_r by up to: %.2f')
+    self.p.coatTauA = ui.slider('##rfx2cta', self.p.coatTauA or 1, 0.1, 10, 'Memory builds under water over: %.1f s')
+    self.p.coatTauR = ui.slider('##rfx2ctr', self.p.coatTauR or 20, 1, 300, 'Memory recovers when dry over: %.0f s')
+  end)
   uiSection('Trails and thin film', false, function()
     self.p.surfThetaRDeg = ui.slider('##rfx2ttr', self.p.surfThetaRDeg or 40, 5, 90, 'Coat receding contact angle (trails, sheet, drops; FILM-UNIFY): %.1f deg')
     self.p.trailWetK = ui.slider('##rfx2twk', self.p.trailWetK, 0, 0.8, 'Wet surface lowers the receding angle by: %.2f')
     self.p.trailLL = ui.slider('##rfx2tll', self.p.trailLL, 0, 20, 'Trail depth (x r Ca^2/3): %.1f')
     self.p.trailWidthK = ui.slider('##rfx2tw', self.p.trailWidthK, 0.1, 1.0, 'Trail width at high speed (x head radius): %.2f')
+    if ui.checkbox('Drop tails (B1: head + attached tail on its path; debug 1 = yellow -> green centre line)', self.p.tailOn ~= false) then self.p.tailOn = self.p.tailOn == false end
+    self.p.tailWidthK = ui.slider('##rfx2tlw', self.p.tailWidthK or 0.6, 0.2, 2, 'Tail rivulet width (x DRAWN head half-width x sqrt(1 - 1/s) / 2, >= 0.2): %.2f')
+    self.p.tailNeckRho = ui.slider('##rfx2tnr', self.p.tailNeckRho or 0.75, 0.3, 1.0, 'Tail neck rises out of the head at %.2f x its radius (L2b; 1 = tail stays under the head)')
+    self.p.tailFlat = ui.slider('##rfx2tlf', self.p.tailFlat or 0.85, 0, 0.95, 'Tail rivulet flat top (B3e: 0 = dome lens, 0.85 = transparent interior, refracting edges): %.2f')
+    if ui.checkbox('Steep drops (R-steep: arrested / merged drops recede to the cap)', self.p.steep ~= false) then self.p.steep = self.p.steep == false end
+    self.p.imgPupilMM = ui.slider('##rfx2ipp', self.p.imgPupilMM or 0.0, 0, 3, 'In-drop image defocus: camera pupil %.2f mm (R-img; 0 = sharp, defocus is a separate pass)')
+    if ui.checkbox('Tone-compressed drop image (R-img5: lights do not flood small / blurred drops; off = linear HDR mips)', self.p.sceneCompress ~= false) then self.p.sceneCompress = self.p.sceneCompress == false end
+    self.p.compressK = ui.slider('##rfx2cpk', self.p.compressK or 0.01, 0, 1, '  compression strength %.2f (0 = linear light spread, 1 = full)')
+    if ui.checkbox('Stable lens (R-img3: one image mip per drop, no ddx / per-pixel tap noise; off = old)', self.p.lensStable ~= false) then self.p.lensStable = self.p.lensStable == false end
+    self.p.cubeK = ui.slider('##rfx2cbk', self.p.cubeK or 0.7, 0, 3, 'Off-frame lens exits: reflection cubemap brightness %.2f (R-steep2)')
+    self.p.cubeMip = ui.slider('##rfx2cbm', self.p.cubeMip or 2.0, 0, 6, 'Off-frame lens exits: cubemap blur (mip) %.1f')
+    if ui.checkbox('Physical rim angle (S-fix: own angle, hysteresis front / rear, Bond flattening; off = old)', self.p.rimPhys ~= false) then self.p.rimPhys = self.p.rimPhys == false end
+    self.p.bondFlatK = ui.slider('##rfx2bfk', self.p.bondFlatK or 0.5, 0, 4, 'Gravity top flattening k (r / 2.7 mm)^2: %.2f')
+    if ui.checkbox('One water height field (B3h: head + tail + drops refract at one surface; off = B3g lens union)', self.p.surfH ~= false) then self.p.surfH = self.p.surfH == false end
+    self.p.surfK = ui.slider('##rfx2sfk', self.p.surfK or 0.04, 0.005, 0.2, 'Height field smooth union width: %.3f mm')
+    self.p.headRound = ui.slider('##rfx2hrd', self.p.headRound or 1.0, 0, 1, 'Sliding head round front (B3f corner drop: 0 = symmetric ellipse): %.2f')
+    self.p.tailK = ui.slider('##rfx2tlk', self.p.tailK or 4, 0, 12, 'Tail length L = k r (s - 1), k: %.1f')
+    self.p.tailMax = ui.slider('##rfx2tlm', self.p.tailMax or 20, 1, 30, 'Tail length max (x head radius; packed points reach 24 mm): %.1f')
+    self.p.tailTau = ui.slider('##rfx2tlt', self.p.tailTau or 0.1, 0.02, 1, 'Tail length follows over: %.2f s')
     self.p.pearlRate = ui.slider('##rfx2pr', self.p.pearlRate, 0, 2, 'Trail beading into small drops (per cell): %.2f /s')
     self.p.trailSlopeMax = ui.slider('##rfx2ts2', self.p.trailSlopeMax, 0.1, 1.5, 'Trail edge slope max (rivulet height / width): %.2f')
     self.p.trailPinMM = ui.slider('##rfx2tp', self.p.trailPinMM, 0.0, 0.1, 'Trail runs along itself above: %.3f mm (below: pinned residue)')
@@ -1657,6 +1763,11 @@ function R2:ui()
         au.drops, au.nDrops, au.nCap, au.hf, au.hc, au.film, au.trail, au.total))
       ui.text(string.format('E3 per second (mm3/s): in ~%.1f | change %s | haze cap runoff ~%.1f (fine at cap %.0f mm2, coarse %.0f mm2) | evaporation ~%.1f | rest %s',
         au.inflow, au.dTot and string.format('%.1f', au.dTot) or '-', au.capRun, au.capF, au.capC, au.evap, au.rest and string.format('%.1f', au.rest) or '-'))
+      local e4 = au.e4
+      if e4 then
+        ui.text(string.format('E4 tails: big drops %d (moving >= 0.1 m/s %d, fastest %.2f m/s, coat theta_r there %.1f deg) | drops with s > 1: %d (largest s %.2f) | tails %d (longest %.1f mm)',
+          e4.nBig, e4.nMove, e4.vMax, e4.nMove > 0 and e4.phiSum / e4.nMove or 0, e4.nS1, e4.sMax, e4.nTail, e4.lMax))
+      end
     end
     if ui.checkbox('Trail beads that can move become drops (B2)', self.p.beadDrops ~= false) then self.p.beadDrops = self.p.beadDrops == false end
     if ui.checkbox('Smooth (B-spline) coarse scene mips: veil / blur light (V3)', self.p.sceneBicubic ~= false) then self.p.sceneBicubic = self.p.sceneBicubic == false end
@@ -1684,7 +1795,9 @@ function R2:ui()
     s.contactDeg = ui.slider('##rfx2ca', s.contactDeg, 20, 90, 'Contact angle: %.0f deg (rim curl; normal 40-60)')
     s.wfSceneMip = ui.slider('##rfx2mip', s.wfSceneMip, 0, 6, 'Image blur in the drop (scene mip): %.1f')
     s.wobbleAmp = ui.slider('##rfx2wb', s.wobbleAmp, 0, 0.3, 'Wobble in airflow: %.2f')
-    self.p.housingM = ui.slider('##rfx2hm', self.p.housingM, 0.05, 0.6, 'Refraction source: remove housing closer than %.2f m')
+    self.p.housingM = ui.slider('##rfx2hm', self.p.housingM, 0.00, 0.6, 'Refraction source: remove housing closer than %.2f m')
+    if ui.checkbox('Refraction source: remove the housing by its own coverage shot (H-mask; depth rule below stays as a floor)', self.p.housingMask ~= false) then self.p.housingMask = self.p.housingMask == false end
+    ui.text('  ' .. tostring(self.housingMaskStatus or '-'))
     if ui.checkbox('Hide water behind the helmet housing (depth test)', self.p.depthTest) then self.p.depthTest = not self.p.depthTest end
     if ui.checkbox('Shape state (off = rev47 seeded ellipse)', self.p.shpOn) then self.p.shpOn = not self.p.shpOn end
     self.p.shpDefShape = ui.slider('##rfx2ds', self.p.shpDefShape or 1.0, 0, 3, 'Birth contour from surface defects (x defect pinning): %.2f')
@@ -1702,10 +1815,7 @@ function R2:ui()
     if ui.checkbox('Merge at the drawn footprint (resting spread x shape)', self.p.footPhys) then self.p.footPhys = not self.p.footPhys end
     self.p.shpMergeK = ui.slider('##rfx2mk', self.p.shpMergeK, 0, 1.5, 'Merged footprint elongation: %.2f')
     self.p.shpWaist = ui.slider('##rfx2mw', self.p.shpWaist, 0, 0.45, 'Merged pair peanut waist: %.2f')
-    self.p.shpMergeTau = ui.slider('##rfx2mt', self.p.shpMergeTau or 0.6, 0.05, 5, 'Merged footprint recedes to theta_r over %.2f s / mm radius')
-    self.p.spreadVarK = ui.slider('##rfx2spv', self.p.spreadVarK, 0, 1.5, 'Per-drop flattening (large drops, seeded): +%.2f')
-    self.p.spreadR1 = ui.slider('##rfx2sr1', self.p.spreadR1, 0.2, 2.0, 'Full flattening from radius: %.2f mm (starts at 0.15 mm)')
-    self.p.spreadWetK = ui.slider('##rfx2swk', self.p.spreadWetK, 0, 1, 'Wet surface flattens more: x(1 + %.2f wet)')
+    self.p.shpMergeTau = ui.slider('##rfx2mt', self.p.shpMergeTau or 0.015, 0.005, 5, 'Merged footprint recedes to theta_r over %.3f s / mm radius (Cox-Voinov ~0.01)')
     self.p.vMax = ui.slider('##rfx2vm', self.p.vMax, 0.005, 0.2, 'Motion stretch reference speed (visor only, R6): %.3f m/s')
     self.p.fadeTime = ui.slider('##rfx2fd', self.p.fadeTime, 0.0, 0.3, 'Swept drops fade out over %.2f s')
     self.p.growTime = ui.slider('##rfx2gt', self.p.growTime, 0.0, 0.3, 'New drops grow in over %.2f s')
@@ -1750,7 +1860,7 @@ function R2:ui()
     self:metricsUI()
   end)
   uiSection('Diagnostics and performance', false, function()
-    s.debug = ui.slider('##rfx2dbg', s.debug, 0, 10, '(%.0f) Debug: 10 sheet state (R supply/q_c, G connected, B lamella, white >= 0.3 mm) 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rho, G squeeze, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up)', true)
+    s.debug = ui.slider('##rfx2dbg', s.debug, 0, 11, '(%.0f) Debug: 11 drop rim angle (blue 20 .. red 60 deg) 10 sheet state (R supply/q_c, G connected, B lamella, white >= 0.3 mm) 1 water 2 exposure 3 refr.src 4 physics 5 film 6 defocus 7 lens (R rho, G squeeze, B TIR/mip) 8 coverage 9 lens direction (R looks down, G up)', true)
     if ui.checkbox('Highlight impacts (magenta = born by an impact < 0.3 s, yellow = drop hit this frame)', self.p.hiImpact) then self.p.hiImpact = not self.p.hiImpact end
     if ui.checkbox('Highlight split pieces (cyan, 1.5 s)', self.p.hiSplit) then self.p.hiSplit = not self.p.hiSplit end
     self.p.perfProbe = ui.slider('##rfx2pp', self.p.perfProbe or 0, 0, 2, 'Visor cost probe: %.0f (0 off | 1 setup only | 2 + drop union, no lens) -- diagnostics', true)
@@ -1839,14 +1949,21 @@ function R2:auditUpdate()
   self.AUc:accessData(function(err, data)
     self.auditBusy = false
     if err or not data then self.auditErr = tostring(err); return end
-    local s = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    local s = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    local e4 = { vMax = 0, sMax = 0, phiSum = 0, lMax = 0 }
     for y = 0, 7 do
-      for x = 0, 95 do
+      for x = 0, 159 do
         data:colorTo(tmp, x, y)
-        local k = math.floor(x / 32) * 4
-        s[k + 1], s[k + 2], s[k + 3], s[k + 4] = s[k + 1] + tmp.rgb.r, s[k + 2] + tmp.rgb.g, s[k + 3] + tmp.rgb.b, s[k + 4] + tmp.mult
+        if x < 128 then
+          local k = math.floor(x / 32) * 4
+          s[k + 1], s[k + 2], s[k + 3], s[k + 4] = s[k + 1] + tmp.rgb.r, s[k + 2] + tmp.rgb.g, s[k + 3] + tmp.rgb.b, s[k + 4] + tmp.mult
+        else   -- E4 maxima
+          e4.vMax, e4.sMax = math.max(e4.vMax, tmp.rgb.r), math.max(e4.sMax, tmp.rgb.g)
+          e4.phiSum, e4.lMax = (e4.phiSum or 0) + tmp.rgb.b, math.max(e4.lMax, tmp.mult)
+        end
       end
     end
+    e4.nBig, e4.nMove, e4.nS1, e4.nTail = s[13], s[14], s[15], s[16]
     data:dispose()
     local a = { drops = s[1], film = s[2], trail = s[3], expA = s[4], hf = s[5], hc = s[6], capF = s[7], capC = s[8],
       trailA = s[9], nDrops = s[10], nCap = s[11], visA = s[12] }
@@ -1860,6 +1977,7 @@ function R2:auditUpdate()
     a.evap = (self.lastFineEvapK or 0) * a.hf + (p.trailEvapMMs or 0) * a.trailA
     if a.dTot then a.rest = a.inflow - a.dTot - a.capRun - a.evap end
     a.t = tNow
+    a.e4 = e4
     self.audit = a
   end)
 end
@@ -2101,7 +2219,7 @@ function R2:dispose()
   for _, list in ipairs({ self.S or {}, self.F or {}, self.TG or {}, self.LM or {}, self.HZ or {} }) do
     for _, c in ipairs(list) do free(c) end
   end
-  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'HZV', 'SK', 'BG', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
+  for _, k in ipairs({ 'C', 'PR', 'REC', 'MSK', 'HZM', 'HZV', 'SK', 'BG', 'TT', 'Mc', 'Hc', 'source', 'testCanvas', 'mesh' }) do
     free(self[k]); self[k] = nil
   end
   self.sceneTex = nil
@@ -2148,7 +2266,7 @@ return function(ctx)
   local common = tgs and readFile(dir .. 'common.hlsl') and (tgs .. '\n' .. readFile(dir .. 'common.hlsl')) or nil
   local cand = tgs and readFile(dir .. 'cand.hlsl') and (tgs .. '\n' .. readFile(dir .. 'cand.hlsl')) or nil   -- PERF-9: candidate code shared by visor and rec
   local src = {}
-  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'filmcoef', 'film', 'filmany', 'audit', 'lam', 'big', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
+  for _, name in ipairs({ 'hazenuc', 'wmalias', 'haze', 'cells', 'predict', 'field', 'trail', 'visor', 'source', 'claim', 'merge', 'seed', 'metrics', 'sizes', 'filmcoef', 'film', 'filmany', 'audit', 'lam', 'big', 'tailtex', 'rec', 'msk', 'hzm', 'hzv', 'wm' }) do
     src[name] = readFile(dir .. name .. '.hlsl')
     if not src[name] or not common or not cand then
       self.err = 'Missing shader: rainfx2/shaders/' .. name .. '.hlsl'
@@ -2172,9 +2290,10 @@ return function(ctx)
       filmcoef = common .. '\n' .. src.filmcoef,
       film = common .. '\n' .. src.film,   -- FILM S2-1
       filmany = common .. '\n' .. src.filmany,   -- F4b film gate
-      audit = common .. '\n' .. src.audit,       -- E3 mass audit
+      audit = common .. '\n' .. src.hazenuc .. '\n' .. src.audit,       -- E3 mass audit (+ E4: r2HazePhiAround)
       lam = common .. '\n' .. src.lam,
       big = common .. '\n' .. src.big,
+      tailtex = common .. '\n' .. src.tailtex,   -- B2 tail raster
       visor = cand .. '\n' .. src.visor,
       rec = cand .. '\n' .. src.rec,
       msk = src.msk,

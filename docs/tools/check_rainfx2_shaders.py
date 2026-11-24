@@ -53,7 +53,7 @@ HZM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2HzValid']  
 WM_TEXTURES = [t for t in HAZE_TEXTURES if t != 'txR2Pred'] + ['txR2Wm']   # T1: substep wipe mask (newPass haze = 'wm')
 FILM_TEXTURES = [t for t in SCENE_TEXTURES if t != 'txR2Claim'] + ['txR2FilmAny']   # F4c (newPass haze = 'film')
 VISOR_TEXTURES = init_textures('function R2:drawParams(depth)')
-SOURCE_TEXTURES = ['txR2Src', 'txR2Depth']
+SOURCE_TEXTURES = ['txR2Src', 'txR2Depth', 'txR2HousingMask']   # H-mask (TRAIL_REVIEW3 section 59)
 REC_TEXTURES = init_textures('function R2:recUpdate()')   # PERF-9 drop records (own table)
 MSK_TEXTURES = init_textures('  if self.recValid and self.MSK')   # PERF-10 candidate mask (own table)
 
@@ -73,9 +73,10 @@ PASSES = [  # name, template, files, textures, defines
     ('filmcoef', 'ui.fx', ['common.hlsl', 'filmcoef.hlsl'], SCENE_TEXTURES, ''),
     ('film', 'ui.fx', ['common.hlsl', 'film.hlsl'], FILM_TEXTURES, ''),
     ('filmany', 'ui.fx', ['common.hlsl', 'filmany.hlsl'], SCENE_TEXTURES, ''),
-    ('audit', 'ui.fx', ['common.hlsl', 'audit.hlsl'], HAZE_TEXTURES, ''),   # E3 mass audit
+    ('audit', 'ui.fx', ['common.hlsl', 'hazenuc.hlsl', 'audit.hlsl'], HAZE_TEXTURES, ''),   # E3 mass audit
     ('lam', 'ui.fx', ['common.hlsl', 'lam.hlsl'], SCENE_TEXTURES, ''),
     ('big', 'ui.fx', ['common.hlsl', 'big.hlsl'], SCENE_TEXTURES, ''),
+    ('tailtex', 'ui.fx', ['common.hlsl', 'tailtex.hlsl'], SCENE_TEXTURES, ''),   # B2 tail raster
     ('sizes', 'ui.fx', ['common.hlsl', 'sizes.hlsl'], SCENE_TEXTURES, ''),
     ('source', 'ui.fx', ['source.hlsl'], SOURCE_TEXTURES, ''),
     ('rec', 'ui.fx', ['cand.hlsl', 'rec.hlsl'], REC_TEXTURES, ''),
@@ -120,24 +121,26 @@ def lua_assigned(*anchors):
     return names
 
 
+# B1d (2026-11-18): coatValues (init.lua) fills the coat values of every sim / candidate table.
 # PERF-9: a gR2 value a shader reads but its Lua table never sets is silently 0 in game (no compile error).
 # pass -> the Lua functions that fill that pass's values table
 VALUE_SOURCES = {
     # H3-3 (2026-11-13): a sim value read but not set (gR2HazeAMM in haze.hlsl) failed only in game -> sim passes checked too
-    'cells': ('local function sceneValuesImpl(self, v)',),
-    'haze': ('local function sceneValuesImpl(self, v)',),
-    'hzm': ('local function sceneValuesImpl(self, v)',),
-    'hzv': ('local function sceneValuesImpl(self, v)',),
-    'wm': ('local function sceneValuesImpl(self, v)',),
-    'field': ('local function sceneValuesImpl(self, v)',),
-    'film': ('local function sceneValuesImpl(self, v)',),
-    'filmany': ('local function sceneValuesImpl(self, v)',),
-    'audit': ('local function sceneValuesImpl(self, v)',),
-    'merge': ('local function sceneValuesImpl(self, v)',),
-    'rec': ('local function candValues(self, v)',),
-    'msk': ('local function candValues(self, v)',),
-    'visor': ('local function candValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
-    'visor_depth': ('local function candValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
+    'cells': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'haze': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'hzm': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'hzv': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'wm': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'field': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'film': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'filmany': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'audit': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'merge': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'tailtex': ('local function sceneValuesImpl(self, v)', 'local function coatValues(self, v)'),
+    'rec': ('local function candValues(self, v)', 'local function coatValues(self, v)',),
+    'msk': ('local function candValues(self, v)', 'local function coatValues(self, v)',),
+    'visor': ('local function candValues(self, v)', 'local function coatValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
+    'visor_depth': ('local function candValues(self, v)', 'local function coatValues(self, v)', 'function R2:drawParams(depth)', 'function R2:draw(src, viewKey, depth)'),
 }
 
 

@@ -1,0 +1,13 @@
+blobs 14251
+bright background (sky, bg > 0.6)
+  diameter  4- 8 px: n  673  darker than bg  41%  |contrast| 0.049
+  diameter  8-14 px: n  320  darker than bg  47%  |contrast| 0.052
+  diameter 14-24 px: n  263  darker than bg  62%  |contrast| 0.061
+  diameter 24-40 px: n  130  darker than bg  62%  |contrast| 0.072
+  diameter 40-80 px: n   43  darker than bg  58%  |contrast| 0.068
+dark background (cockpit, bg < 0.35)
+  diameter  4- 8 px: n 2213  darker than bg  40%  |contrast| 0.051
+  diameter  8-14 px: n 1607  darker than bg  33%  |contrast| 0.071
+  diameter 14-24 px: n 1661  darker than bg  25%  |contrast| 0.094
+  diameter 24-40 px: n  903  darker than bg  28%  |contrast| 0.094
+  diameter 40-80 px: n  348  darker than bg  43%  |contrast| 0.089

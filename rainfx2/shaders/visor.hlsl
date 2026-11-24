@@ -121,9 +121,11 @@ float3 r2SceneS(float2 uv, float mip, bool smooth) {
     if (a.a < 0.999) {                                            // V3: the hole fill only where the fine level has holes
         float4 b = r2SceneTap(uv, mip + 2.5, smooth);
         float4 c = txR2Scene.SampleLevel(samLinearClamp, uv, mip + 6.0);   // ~1-2 texels: flat
-        float3 cc = c.a > 1e-3 ? c.rgb / c.a : gR2VeilColor;
+        float3 vC = gR2SceneCompress > 0.5 ? gR2VeilColor / (1.0 + gR2CompressK * dot(gR2VeilColor, float3(0.2126, 0.7152, 0.0722))) : gR2VeilColor;
+        float3 cc = c.a > 1e-3 ? c.rgb / c.a : vC;
         r = a.rgb + (1.0 - a.a) * (b.rgb + (1.0 - b.a) * cc);
     }
+    if (gR2SceneCompress > 0.5) r /= max(1.0 - gR2CompressK * dot(r, float3(0.2126, 0.7152, 0.0722)), 0.02);   // R-img5: back to HDR
     return r;
 }
 float3 r2Scene(float2 uv, float mip) { return r2SceneS(uv, mip, false); }
@@ -164,6 +166,17 @@ struct R2Shape { float2 u1; float s1; float2 u2; float s2; float2 u3; float s3; 
 // profile blends the dome toward the rim torus 6.75 x^2 (1 - x) (x = r^2 / R^2, peak 1 at r = 0.82 R, 0 at the
 // centre and the edge); the downstream rim of an oblique impact is torn into fingers (Rayleigh-Taylor of the rim,
 // Thoroddsen; ~8 per circumference), weak upstream. Both fade with the recoil (rho, fk ~ spread).
+// B3h ONE WATER HEIGHT FIELD (docs/RAINFX_V2_TRAIL_REVIEW3.md section 31; prototype docs/tools/rainfx2_heightfield_lens_proto.py):
+// every primitive also adds its PHYSICAL height (mm) -- a spherical cap of contact radius props.x / angle asin(props.y) over its
+// own footprint (rho^2 = x / x_t, x_t = the kernel's silhouette) -- into one surface by a smooth max (k = gR2SurfK mm). The lens
+// then refracts at the normal of that one surface (n - grad H): no per-primitive lens radius / angle averages (section 30 seam).
+// Single-lens path only (D-A taps keep the legacy union).
+static bool sHOn = false;
+// L1 (docs/RAINFX_V2_TRAIL_REVIEW3.md section 56): one height field PER D-A TAP (sTap 0..3; the single-lens path uses tap 0) --
+// the defocus path used the old per-primitive lens union (seams, different rim rule) next to the height-field drops
+static float sHa[4] = { -1000.0, -1000.0, -1000.0, -1000.0 };   // no water yet (the first primitive sets H and grad H exactly)
+static float2 sGHa[4] = { float2(0, 0), float2(0, 0), float2(0, 0), float2(0, 0) };
+static int sTap = 0;
 void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H, float2 hu, float3 AS, float4 SP,
               inout float P, inout float2 G, inout float2 RW, inout float HW) {
     float dR = 1.0;
@@ -186,6 +199,30 @@ void r2Kernel(float2 q, float Rk, float2 props, float beta, R2Shape T, float3 H,
     float h = 1.0 - (1.0 - beta) * x - beta * x * x;
     if (h <= 0.0) return;
     float2 g = (-2.0 * ik * (1.0 - beta + 2.0 * beta * x)) * q;
+    if (sHOn) {
+        float ct = 1.0 - gR2Threshold;
+        float xt = beta > 1e-3 ? (-(1.0 - beta) + sqrt((1.0 - beta) * (1.0 - beta) + 4.0 * beta * ct)) / (2.0 * beta) : ct;
+        float rho2r = x / max(xt, 1e-4);
+        if (rho2r < 1.44) {                                                     // + a skirt to 1.2 x the contact radius (AA)
+            float rho2 = min(rho2r, 1.0);
+            float sn = clamp(props.y, 0.02, 0.999), cs = sqrt(1.0 - sn * sn);
+            float Rs = props.x / sn;
+            float rt = sqrt(max(1.0 - rho2 * sn * sn, 1e-4));
+            float hp = Rs * (rt - cs) - max(sqrt(rho2r) - 1.0, 0.0) * props.x * sn / cs;   // outside: the rim slope continued
+            float2 gp = (Rs * sn * sn / (rt * max(xt, 1e-4))) * ik * q;          // d hp / d q' = dhp/drho2 * 2 ik q' / xt
+            gp *= rho2r > 1.0 ? rsqrt(rho2r) : 1.0;                             // skirt: |grad| stays the rim slope
+            gp -= T.u3 * (dot(T.u3, gp) * T.s3);                                 // the same footprint transforms as g
+            gp -= T.u2 * (dot(T.u2, gp) * T.s2);
+            gp -= T.u1 * (dot(T.u1, gp) * T.s1);
+            gp = -gp;                                                           // height falls outward
+            float kS = max(gR2SurfK, 1e-3);
+            float hOld = sHa[sTap];
+            float e = exp(-abs(hp - hOld) / kS);
+            float wN = hp > hOld ? 1.0 / (1.0 + e) : e / (1.0 + e);             // smooth-max weight of the new height
+            sGHa[sTap] = lerp(sGHa[sTap], gp, wN);
+            sHa[sTap] = max(hp, hOld) + kS * log(1.0 + e);
+        }
+    }
     if (SP.x > 1e-3) {
         float hr = 6.75 * x * x * (1.0 - x);
         float2 gr = (13.5 * ik * x * (2.0 - 3.0 * x)) * q;
@@ -211,7 +248,7 @@ struct R2Air { float2 dir; float u2; float2 gdir; float2 iDir; float iA; };   //
 
 // One drop into the union at offset q (mm from its centre).
 // rev20: lobes removed (C0 kernel edges drew a drop inside the drop, user rev19 review).
-void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
+void r2AddDrop(float2 q, R2Cand c, R2Air air,
                inout float P, inout float2 G, inout float2 RW, inout float HW) {
     float h1 = frac(c.seed * 0.7548776662 + 0.31);
     float h2 = frac(c.seed * 0.6180339887 + 0.17);
@@ -248,6 +285,24 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     float rk0 = gR2KernelScale * c.r;
     float rkS = rk0;
     float3 H = float3(0, 0, 0);
+    // B3f HEAD CORNER (docs/RAINFX_V2_TRAIL_REVIEW3.md section 27; Podgorski 2001 corner drop, flow study section 21): a sliding
+    // drop is round at its ADVANCING front and stretched / cornered only behind. The front half (along the motion) uses aspect
+    // A_f = lerp(A, 1, km) and the kernel radius that keeps the across-motion width W of the full ellipse -> continuous at the
+    // dividing line (q . m = 0) for any km; km = motion share (sliding stretch k / motionStretch, x gR2HeadRound, no lamella).
+    float kSagF = gR2SagK * saturate(c.r * c.r / 2.25) * (1.0 - c.e);
+    float kmF = (gR2ShpOn > 0.5 && c.k > kSagF && dot(c.m, c.m) > 0.5)
+              ? gR2HeadRound * saturate(c.k / max(gR2MotionStretch, 1e-3)) * (1.0 - c.e) : 0.0;
+    if (kmF > 1e-3) {
+        float2 u1F = float2(cos(sphi), sin(sphi));
+        float2 nF = float2(-c.m.y, c.m.x);
+        float cu = dot(nF, u1F), cv = nF.x * u1F.y - nF.y * u1F.x;                       // n along u1 / along v
+        float W = rk0 * rsqrt(cu * cu / shA + shA * cv * cv);                                // across-motion width (kernel units)
+        // B3h: front / rear blended over +-0.25 W along the motion (B3h prototype: a hard switch left a curvature crease)
+        float AF = lerp(shA, 1.0, kmF * smoothstep(-0.25, 0.25, dot(q, c.m) / max(W, 1e-4)));
+        rk0 = W * sqrt(cu * cu / AF + AF * cv * cv);                                          // same width at q . m = 0
+        shA = AF;
+        rkS = rk0;
+    }
     if (gR2ShpOn > 0.5) {
         T.u1 = float2(cos(sphi), sin(sphi));
         T.s1 = 1.0 - 1.0 / shA;
@@ -298,15 +353,26 @@ void r2AddDrop(float2 q, R2Cand c, R2Air air, float wetFlat,
     q -= T.u3 * (dot(q, T.u3) * T.s3);
     // Contact angle (rev20): impact-deposited drops settle near the RECEDING angle; per-drop
     // spread (surface heterogeneity), the sliding rear recedes further, a wet surface flattens.
-    float th = gR2ContactDeg;                                   // R5b: per-drop variation = its flatness f (local pinning)
-    th -= gR2Hysteresis * (a < 0.0 ? saturate(c.k / max(gR2MotionStretch, 1e-3)) : 0.0);
-    th *= 1.0 - wetFlat;
-    // rev48-S2' splat: a spreading lamella is a thin sheet with its mass in a thick RIM (reference: bright flat
-    // interior, dark crisp outline). S2'a: rim angle theta / f^1.5 (rev S2' f^3 flattened the rim away too)
-    // and a flat-top profile (beta -> 0.85) so the interior stays flat while the edge refracts.
-    th /= c.f * sqrt(c.f);
+    // S-fix (docs/RAINFX_V2_TRAIL_REVIEW3.md sections 37-38): the drop's OWN rim angle theta_drop = contactDeg / f^1.5 (f encodes it:
+    // equilibrium x coat state, arrested splat / merge = local receding angle); a sliding drop recedes at its rear and advances at
+    // its front (contact-angle hysteresis theta_a - theta_r = gR2Hysteresis, split around theta_drop); a wet film lowers it.
+    // Gravity flattens only the TOP (Bond number), the rim keeps its angle (Young); the transient splat lamella keeps its flat sheet.
+    float th = gR2ContactDeg / (c.f * sqrt(c.f));
+    if (gR2RimPhys < 0.5) {                                     // pre-S-fix rule (A/B): rear-only hysteresis, f^1.5 on all
+        th = gR2ContactDeg - gR2Hysteresis * (a < 0.0 ? saturate(c.k / max(gR2MotionStretch, 1e-3)) : 0.0);
+        th /= c.f * sqrt(c.f);
+    } else {
+        float kmH = saturate(c.k / max(gR2MotionStretch, 1e-3));
+        // S-fix2 (section 40; game review: a sliding drop drew two different halves): the angle varies smoothly around the contact
+        // line, theta_a at the front .. theta_r at the rear ~ cos of the direction to the motion (no switch at the midline)
+        float dcM = dot(q, c.m) * rsqrt(max(dot(q, q), 1e-10));
+        th += 0.5 * gR2Hysteresis * kmH * dcM;
+    }
+    // (cleanup 2026-11-25: wetFlatten removed -- wetting lowers theta via the coat state, S-fix2)
     float sth = sin(radians(clamp(th, 4.0, 89.0)));
-    float beta = 0.85 * saturate(c.f - 1.0);                    // C-clean: rev40 flatK (off since rev41) removed
+    float beta = gR2RimPhys > 0.5
+               ? max(saturate(gR2BondFlatK * c.r * c.r / 7.29), 0.85 * saturate(c.fx))     // Bond (r / 2.7 mm)^2 | lamella
+               : 0.85 * saturate(c.f - 1.0);
     // rev48-S2d apex offset: downhill (gravity) for large drops, a per-drop direction for small ones
     // R5b: the small drop's thick side = its strongest contour lobe (defect phase), not a seed direction
     float phL = r2UnpackHarmPh(c.sh.z);
@@ -372,75 +438,71 @@ float r2SupportMM(R2Cand c, R2Air air, float reachMM) {
 // Positions are fixed in visor mm along the line (phase = p . tau / spacing, key = the line's offset across itself), so
 // every texel holding the same line draws the same beads. Water = field R (evaporates, collected by drops, S1 / sheet).
 struct R2Trail { float2 q; float2 tau; float hw; float sth; bool fresh; float h0; float al; float off; float key; };
-bool r2TrailBest(float2 pc, out R2Trail tr) {
+// B3: the tail line of the 2 x 2 TT texels around the pixel with the highest surface here (tailtex.hlsl, packed geometry);
+// drawn as a connected cylindrical lens (the rivulet path of r2AddTrail) of half-width w, edge slope 2 h / w.
+bool r2TailBest(float2 pc, out R2Trail tr) {
     tr.q = float2(0, 0); tr.tau = float2(1, 0); tr.hw = 0; tr.sth = 0; tr.fresh = true; tr.h0 = 0; tr.al = 0; tr.off = 0; tr.key = 0;
-    float2 ft = pc / gR2Cells * gR2FieldSize;
+    float2 ttSize = floor(gR2FieldSize * 0.5);                      // B3a: TT raster rows are half the field size
+    int2 tn = int2((uint2(gR2Cells) + 3u) >> 2);                    // B3g: TP rows below (one texel per big-drop tile)
+    float2 ft = pc / gR2Cells * ttSize - 0.5;
     int2 f0 = int2(floor(ft));
-    int2 fmax = int2(gR2FieldSize) - 1;
+    int2 fmax = int2(ttSize) - 1;
     float2 pMM = pc * gR2CellSizeMM;
-    float2 texMM = gR2CellSizeMM * gR2Cells / gR2FieldSize;
+    float2 texMM = gR2CellSizeMM * gR2Cells / ttSize;
     float best = 0.0;
-    [loop] for (int j = -1; j <= 1; ++j) {
-        [loop] for (int i = -1; i <= 1; ++i) {
-            int2 f = clamp(f0 + int2(i, j), int2(0, 0), fmax);
-            float h0 = txR2Field.Load(int3(f, 0)).r * gR2TrailMaxMM;
-            if (h0 < gR2TrailMinMM) continue;
-            float4 g = txR2Trail.Load(int3(f, 0));
-            float hw = r2TgHw(g);
-            if (g.w <= 1e-4 || hw <= 1e-4) continue;
-            bool fresh = r2TgFresh(g);
-            float2 Q = (float2(f) + 0.5) * texMM + g.xy;
-            float ang = r2TgAngle(g);
-            float2 tau = float2(cos(ang), sin(ang));
-            float2 dv = pMM - Q;
-            float al = dot(dv, tau);
-            if (abs(al) > 1.2 * max(texMM.x, texMM.y)) continue;   // a line is valid near its own texel
-            float2 dp = dv - tau * al;
-            float Rk = gR2KernelScale * hw * (fresh ? 1.0 : 1.9);   // beads reach ~1.4 hw + jitter
-            float k = 1.0 - dot(dp, dp) / (Rk * Rk);
-            if (k <= best) continue;
-            best = k;
-            tr.q = dp;
-            tr.tau = tau;
-            tr.hw = hw;
-            tr.fresh = fresh;
-            tr.h0 = h0;
-            float2 nrm = float2(-tau.y, tau.x);
-            tr.al = dot(pMM, tau);                                   // along the line, global (same for every texel)
-            tr.off = dot(dp, nrm);                                   // pixel offset across the line
-            tr.key = dot(Q, nrm);                                    // the line's own offset across itself
-            float tn = min(2.0 * h0 / hw, 1.0) * smoothstep(gR2TrailMinMM, gR2TrailFullMM, h0);
-            tr.sth = tn * rsqrt(1.0 + tn * tn);
-        }
+    [unroll] for (int k = 0; k < 4; ++k) {
+        int2 f = clamp(f0 + int2(k & 1, k >> 1), int2(0, 0), fmax);
+        float4 g = txR2Trail.Load(int3(f, 0));
+        if (g.w < 0.5) continue;
+        float nkD;
+        float2 Q = (float2(f) + 0.5) * texMM + r2TailUnpackQ(g.x, nkD);
+        float aq = floor(g.y / 4096.0);
+        int tIdx = (int)(g.y - 4096.0 * aq);
+        float a0 = aq / 4095.0 * 64.0 - 8.0;                             // arc of Q behind the drawn rear edge (mm)
+        uint tnx = (uint)max(tn.x, 1);
+        int2 tt = int2((int)((uint)tIdx % tnx), (int)((uint)tIdx / tnx));
+        float4 tp = txR2Trail.Load(int3(tt.x, (int)ttSize.y + tt.y, 0));
+        if (tp.w < 0.5) continue;
+        float4 PP, PH; float vph;
+        r2TailTPUnpack(tp, PP, PH, vph);
+        float2 tau = float2(cos(g.z), sin(g.z));
+        float2 dv = pMM - Q;
+        float al = dot(dv, tau);
+        if (abs(al) > 1.2 * max(texMM.x, texMM.y)) continue;
+        float alc = clamp(al, -PP.x - a0, PH.z - a0);                    // rounded ends: L2b start cap = the section at the head
+                                                                         // centre (L2 ran the full section on ahead of the head)
+        float a = a0 + alc;
+        float2 dp = dv - tau * alc;
+        // B3g (docs/RAINFX_V2_TRAIL_REVIEW3.md section 29): the EXACT profile at the pixel's own arc position (B3d linear slope
+        // extrapolation over-predicted the neck / start cap by 1-2.5 mm -> spikes, section 28)
+        float2 wh = r2TailProf(a, dot(Q + tau * alc, tau) * PH.w, vph, PP, PH);
+        float w = wh.x, h = wh.y;
+        if (w < 0.02 || h <= 0.0) continue;
+        float hh = h * (1.0 - dot(dp, dp) / (w * w));
+        if (hh <= best) continue;
+        best = hh;
+        tr.q = dp; tr.tau = tau; tr.hw = w; tr.h0 = h;
+        tr.key = r2TailNeck(a, PP);                                      // B3e: fresh tail -> key = neck fraction (lens flatness)
+        float tq = h / max(w, 1e-4);                                     // L2: circular-arc section, tan(theta / 2) = h / w
+        tr.sth = 2.0 * tq / (1.0 + tq * tq);                             // -> the head's own angle at the neck start
     }
     return best > 0.0;
 }
+// (cleanup 2026-11-25: r2TrailBest -- the rev47j vector trail lines -- removed; not drawn since C8, tails come from TT)
 // The rivulet (fresh) or its bead row into the union at an extra offset dq (mm, D-A taps).
 void r2AddTrail(R2Trail tr, float2 dq, inout float P, inout float2 G, inout float2 RW, inout float HW) {
     R2Shape T;
     T.u1 = float2(1, 0); T.s1 = 0; T.u2 = float2(1, 0); T.s2 = 0; T.u3 = float2(1, 0); T.s3 = 0;
-    if (tr.fresh) {
-        float2 q = tr.q + (dq - tr.tau * dot(dq, tr.tau));
-        r2Kernel(q, gR2KernelScale * tr.hw, float2(tr.hw, tr.sth), 0.0, T, float3(0, 0, 0), float2(1, 0), float3(0, 0, 0), float4(0, 0, 0, 0), P, G, RW, HW);
-        return;
-    }
-    float2 row = r2BeadRow(tr.hw, tr.h0);
-    float lam = max(row.x, 1e-3);
-    float2 nrm = float2(-tr.tau.y, tr.tau.x);
-    float al = tr.al + dot(dq, tr.tau);
-    float off = tr.off + dot(dq, nrm);
-    float keyF = round(tr.key * 8.0) + 4099.0 * round(atan2(tr.tau.y, tr.tau.x) * 32.0);   // integer line key (r2Hash2 is integer)
-    float sthB = sin(radians(clamp(gR2ContactDeg, 4.0, 89.0)));
-    int n0 = (int)floor(al / lam);
-    [unroll] for (int k = -1; k <= 1; ++k) {
-        int n = n0 + k;
-        float2 hs = float2((float)n, keyF);
-        float jA = r2Hash2(hs) - 0.5, jL = r2Hash2(hs + float2(300000.0, 0.0)) - 0.5, jS = r2Hash2(hs + float2(600000.0, 0.0));
-        float rb = row.y * lerp(0.75, 1.2, jS);
-        if (rb < 0.02) continue;
-        float2 q = tr.tau * (al - ((float)n + 0.5 + 0.6 * jA) * lam) + nrm * (off - 0.6 * jL * tr.hw);
-        r2Kernel(q, gR2KernelScale * rb, float2(rb, sthB), 0.0, T, float3(0, 0, 0), float2(1, 0), float3(0, 0, 0), float4(0, 0, 0, 0), P, G, RW, HW);
-    }
+    float2 q = tr.q + (dq - tr.tau * dot(dq, tr.tau));
+    // B3e (docs/RAINFX_V2_TRAIL_REVIEW3.md section 27): the rivulet section is FLAT-TOPPED (beta -> gR2TailFlat along the neck,
+    // key = neck fraction): its interior hardly bends light, the steep edges do (reference: transparent rivulet, two dark edge
+    // lines). The neck keeps the head's dome (beta 0 at the head) -> the optics change continuously from head to rivulet.
+    // Kernel radius so the silhouette (U = threshold) stays at hw for any beta: x_t = root of (1-b) x + b x^2 = 1 - thr.
+    float b = saturate(gR2TailFlat * tr.key);
+    float c1 = 1.0 - b, ct = 1.0 - gR2Threshold;
+    float xt = b > 1e-3 ? (-c1 + sqrt(c1 * c1 + 4.0 * b * ct)) / (2.0 * b) : ct;
+    r2Kernel(q, tr.hw * rsqrt(max(xt, 1e-3)), float2(tr.hw, tr.sth), b, T, float3(0, 0, 0), float2(1, 0), float3(0, 0, 0), float4(0, 0, 0, 0), P, G, RW, HW);
+
 }
 
 // rev24 view context for the physical lens: eye ray, outward visor normal, world vectors of one mm
@@ -465,16 +527,31 @@ float2 r2Proj(float3 D, R2View w) {          // tangent-plane coordinates of a d
 // overlapping drops; small drops washed out): no early returns (uniform flow, so the sample footprint
 // can be measured with ddx/ddy), smooth TIR band from the refraction discriminant, mip from the
 // actual footprint of the refracted lookup, coverage band that keeps small drops solid.
+// R-steep2 (docs/RAINFX_V2_TRAIL_REVIEW3.md section 46): a lens exit direction outside the frame reads the CSP reflection cubemap
+// (world direction; CSP ksWindscreenFX convention: x mirrored) instead of the frame edge the soft compression squeezes it onto
+// (section 45: grazing rim exits smeared edge light sources into colour bands). w = 0 inside the frame .. 1 well outside / behind.
+float r2OffFrame(float2 uvC, float lo) {
+    return lo < 0.05 ? 1.0 : smoothstep(0.42, 0.62, max(abs(uvC.x), abs(uvC.y)));
+}
+float3 r2EnvDir(float3 d) {
+    return txReflectionCubemap.SampleLevel(samLinearSimple, float3(-d.x, d.y, d.z), gR2CubeMip).rgb * gR2CubeK;
+}
 float3 r2DropLens(float U, float2 G, float Rmm, float sth, float2 pxU, float2 pxV, float pixMM, float2 spT,
                   float2 offF, float minMip, float bandPx, float cocPx, float cocMipK,
-                  float aspect, R2View w, out float cov) {
+                  float aspect, R2View w, float4 HM, out float cov, bool noGrad = false) {   // B3h: HM = (on, H mm, grad H)
+                  // U-micro: noGrad (literal true at the micro call site, divergent branch) -> no ddx, the per-drop footprint
     float2 gs = G.x * pxU + G.y * pxV;                         // per px
     float gl = length(gs);
     float sd = (U - gR2Threshold) / max(gl, 1e-6);             // signed distance, px
+    bool hOn = HM.x > 0.5;
+    if (hOn) {                                                 // B3h: distance to the H = 0 contact line
+        float2 gh = HM.z * pxU + HM.w * pxV;
+        sd = HM.y / max(length(gh), 1e-6);
+    }
     float Rpx = Rmm / pixMM;
     // small drops: the AA band never exceeds a third of the radius (solid core down to ~1.5 px)
     float band = min(bandPx, max(0.75, 0.35 * Rpx));
-    float e = U > 1e-4 ? saturate(sd / band + 0.5) : 0.0;
+    float e = (hOn ? HM.y > -0.5 : U > 1e-4) ? saturate(sd / band + 0.5) : 0.0;
     cov = e * e * (3.0 - 2.0 * e);
     // rev31 lens mode 0 = legacy Water Field rule (user: P0 / pre-v2 drops are closer to the
     // reference than the physical (rev24-27) and CSP (rev28-29) lenses). Exactly rev18/19 r2DropLens.
@@ -505,7 +582,9 @@ float3 r2DropLens(float U, float2 G, float Rmm, float sth, float2 pxU, float2 px
         // drop resolution itself; seeded polygons read artificial).
         float rs = rho * sth;
         float capS = min(rs / sqrt(max(1.0 - rs * rs, 0.02)), 7.0);     // tan of the cap surface angle
-        float3 dUp = G.x * w.Tu + G.y * w.Tv;                          // toward the centre (world)
+        float2 Gd = G;
+        if (hOn) { capS = min(length(HM.zw), 7.0); Gd = HM.zw; rho = saturate(capS / 1.732); }   // B3h: slope of the one surface
+        float3 dUp = Gd.x * w.Tu + Gd.y * w.Tv;                        // toward the centre (world)
         dUp = dUp - w.n * dot(dUp, w.n);
         dUp = dot(dUp, dUp) > 1e-30 ? normalize(dUp) : float3(0, 0, 0);
         float3 N = normalize(w.n - capS * dUp);                         // outward cap normal
@@ -525,15 +604,40 @@ float3 r2DropLens(float U, float2 G, float Rmm, float sth, float2 pxU, float2 px
         float2 cmp = uvA / sqrt(sqrt(1.0 + xa * xa * xa * xa));
         float squeeze = saturate(1.0 - length(cmp) / max(length(uvA), 1e-6));
         float2 uvW = cmp + 0.5;
-        float2 fxW = ddx_fine(uvW) / gR2InvRT, fyW = ddy_fine(uvW) / gR2InvRT;
-        float mipFW = 0.5 * log2(max(max(dot(fxW, fxW), dot(fyW, fyW)), 1.0));
-        float mipW = clamp(gR2WFSceneMip + max(mipFW - 1.0, 0.0)
-                     + cocMipK * 0.5 * log2(1.0 + 0.35 * cocPx * 0.9 / max(Rpx * gR2InvRT.y, 1e-6)), minMip, 7.0);
+        float mipFW = 0.0;
+        if (!noGrad) {
+            float2 fxW = ddx_fine(uvW) / gR2InvRT, fyW = ddy_fine(uvW) / gR2InvRT;
+            mipFW = 0.5 * log2(max(max(dot(fxW, fxW), dot(fyW, fyW)), 1.0));
+        }
+        // R-img3 STABLE LENS (section 50): the per-pixel ddx footprint of a strongly non-linear lens map flips the mip per 2 x 2 quad
+        // (and with DLSS jitter / the D-A per-pixel tap rotation it changes every frame) -> a crosshatch 'metal' noise on the image.
+        // One footprint per DROP instead: the in-drop image (+-tan 40 deg ~ 1.68 FovK screen heights) over the drop diameter in px.
+        if (gR2LensStable > 0.5 || noGrad)
+            mipFW = log2(max(0.333 * max(sth, 0.05) * gR2FovK / max(gR2InvRT.y, 1e-6) * pixMM / max(Rmm, 1e-3), 1.0));
+            // R-img5 (section 52): the PARAXIAL footprint d tan(dev) / d(drop px) = (n - 1) sin(theta) / R at the drop centre (where the
+            // image is seen); R-img3 used the whole image span / diameter (~3x, 1.6 mips) -> small drops became one tone
+        // R-img (docs/RAINFX_V2_TRAIL_REVIEW3.md section 48): the drop is a strong lens (f = Rs / (n - 1) ~ 1.5-6 mm); its image of the
+        // far scene lies ~f in front of it, far out of focus for a camera focused beyond the visor -> the in-drop image is blurred by
+        // beta = min(entrance pupil, chord) / f (rad). Sharp minified images read metallic / aliased (user review, CSP comparison).
+        float betaI = min(gR2ImgPupilMM, 2.0 * Rmm) * 0.333 * max(sth, 0.05) / max(Rmm, 0.05);
+        float mipI = log2(max(betaI * gR2FovK * 0.5 / max(gR2InvRT.y, 1e-6), 1.0));     // half-res scene px
+        float mipW = clamp(max(gR2WFSceneMip + max(mipFW - 1.0, 0.0), mipI)
+                     + cocMipK * 0.5 * log2(1.0 + (gR2LensStable > 0.5 ? cocPx * cocPx                      // R-img5: CoC on the drop
+                                                   : 0.35 * cocPx * 0.9 / max(Rpx * gR2InvRT.y, 1e-6))), minMip, 7.0);   // x per-px footprint (no
+                                                   // second minification factor: aperture 0.05 mm erased the in-drop image)
+        // R-img2 (section 49): the defocused in-drop image reads coarse mips (5-7); bilinear on a few texels drew piecewise-linear
+        // stripes / colour blotches ('murky, striped, cross tears'). B-spline (C2) reads above mip 2.5 give the smooth blur kernel.
+        // cleanup 2026-11-25 (user slider decisions, docs/RAINFX_V2_DROP_LOOK_STATE.md): bilinear image (imgSmooth withdrawn), the
+        // reflection / TIR share + opposite-side exit + helmet interior removed (CSP-like rim: the grazing exit reads the world),
+        // off-frame exits read the cubemap (R-steep2), pre-S-fix 'TIR = same image dimmed' kept only for rimPhys off
         float3 cW = r2Scene(saturate(uvW), mipW);
-        cW *= lerp(1.0, 0.35, tir);       // TIR: same image, dimmed (rev44: fixed, the slider had no visible effect)
+        float offW = gR2Steep > 0.5 ? r2OffFrame(uvA, lo) : 0.0;
+        if (offW > 1e-3) cW = lerp(cW, r2EnvDir(Vo), offW);      // R-steep2: off-frame exit -> world cubemap
+        if (gR2RimPhys < 0.5) cW *= lerp(1.0, 0.35, tir);
         // Fresnel sky highlight on the part of the cap facing world-up (reflection, not a second image)
         float up = saturate(dot(-dUp, float3(0, 1, 0)));
-        cW += gR2VeilColor * (gR2Glint * up * up * up * up * smoothstep(0.8, 2.0, capS) * (1.0 - tir));
+        float glw = gR2Glint * up * up * up * up * smoothstep(0.8, 2.0, capS) * (1.0 - tir);
+        cW += gR2VeilColor * glw;
         if (gR2Debug > 8.5) {
             // Debug 9: where each lens point looks. R = deflected DOWN, G = deflected UP (world).
             // A real drop is an inverting lens: its upper part looks down (red top, green bottom).
@@ -557,6 +661,46 @@ float r2VRand(uint3 k) {
     return float(h & 0x00ffffffu) / 16777216.0;
 }
 
+// B1 debug view (docs/RAINFX_V2_TRAIL_REVIEW3.md section 11.7): distance from the pixel to the nearest drop tail centre line
+// (head -> q1 -> q2 -> q3), from the drops of the 5 x 5 cells around the pixel and the big-drop tiles +-4 (tails reach
+// <= 14 r). x = distance mm, y = position along the tail (0 head .. 1 end). Debug 1 only.
+void r2TailDebugOne(int2 s, float2 pMM, inout float best, inout float bx) {
+    if (all(s >= int2(0, 0)) && all(s < int2(gR2Cells))) {
+        float4 st = txR2State.Load(int3(s, 0));
+        if (st.z > 0) {
+            R2Tail T = r2TailUnpack(txR2State.Load(int3(s + int2(3 * (int)gR2Cells.x, 0), 0)));
+            if (T.on) {
+                float2 h = (float2(s) + st.xy) * gR2CellSizeMM;
+                float2 P[4] = { h, h + T.q1, h + T.q2, h + T.q3 };
+                [unroll] for (int k = 0; k < 3; ++k) {
+                    float2 ab = P[k + 1] - P[k];
+                    float u = saturate(dot(pMM - P[k], ab) / max(dot(ab, ab), 1e-8));
+                    float d = length(pMM - P[k] - ab * u);
+                    if (d < best) { best = d; bx = ((float)k + u) / 3.0; }
+                }
+            }
+        }
+    }
+}
+float2 r2TailDebug(float2 pc) {
+    float best = 1e9, bx = 0.0;
+    float2 pMM = pc * gR2CellSizeMM;
+    int2 c0 = int2(floor(pc));
+    [loop] for (int j = -2; j <= 2; ++j)
+        [loop] for (int i = -2; i <= 2; ++i) r2TailDebugOne(c0 + int2(i, j), pMM, best, bx);
+    if (gR2BigOn > 0.5) {
+        int2 tc = int2((uint2)c0 >> 2);
+        int2 tn = int2((uint2(gR2Cells) + 3u) >> 2);
+        [loop] for (int ty = -4; ty <= 4; ++ty)
+            [loop] for (int tx = -4; tx <= 4; ++tx) {
+                int2 tt = tc + int2(tx, ty);
+                if (any(tt < int2(0, 0)) || any(tt >= tn)) continue;
+                float4 b = txR2Big.Load(int3(tt, 0));
+                if (b.z > 0.5) r2TailDebugOne(int2(b.xy), pMM, best, bx);
+            }
+    }
+    return float2(best, bx);
+}
 float4 main(PS_IN pin) {
     float2 t = float2(pin.Tex.x, pin.Tex.y + 1.0);
     clip(r2VisorTap(txR2Mask, t).a - 0.5);
@@ -571,8 +715,13 @@ float4 main(PS_IN pin) {
     float pixMM = max(sqrt(max(dot(dtx * gR2TexMM, dtx * gR2TexMM), dot(dty * gR2TexMM, dty * gR2TexMM))), 1e-5);
 
     // Camera distance of this visor point -> circle of confusion (thin lens, focus gR2FocusM).
-    float3 posW = mul(float4(pin.PosL, 1.0), gR2ObjToWorld).xyz;
-    float z = length(posW - gR2CamPos);
+    // R-img4 PRECISION (docs/RAINFX_V2_TRAIL_REVIEW3.md section 51): world positions are hundreds of metres from the origin (fp32 ulp
+    // ~0.03-0.06 mm) while one visor pixel is ~0.02-0.05 mm -> ddx(posW) and posW - camPos were quantisation noise, so the
+    // surface frame Tu / Tv and the eye ray jittered per pixel: the dotted / torn 'metal' noise inside every drop (DLSS on or off).
+    // Camera-relative position from the SMALL local position: rotate PosL, add the per-draw constant (translation - camera).
+    float3 posC = mul(pin.PosL, (float3x3)gR2ObjToWorld) + (gR2ObjToWorld[3].xyz - gR2CamPos);
+    float3 posW = posC + gR2CamPos;
+    float z = length(posC);
     float cocMM = gR2ApertureMM * abs(gR2FocusM - z) / max(gR2FocusM, 1e-3);
     float cocPx = gR2LookLab > 0.5 ? 0.0 : cocMM / pixMM;   // rev23 look lab: no defocus
 
@@ -580,7 +729,7 @@ float4 main(PS_IN pin) {
     float aspect = gR2InvRT.x / max(gR2InvRT.y, 1e-9);    // H / W
     float4 Fd = txR2Field.SampleLevel(samLinearClamp, t, 0);
     // rev48-S2c local wetness (haze + film + trail water) for the per-drop resting spread
-    float wetV = saturate(Fd.g * gR2WetHaze + (Fd.b * gR2FilmMaxMM + Fd.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
+    float wetV = saturate((Fd.b * gR2FilmMaxMM + Fd.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
 
     // ---- water film (sheet W, field B): a thin refracting, scattering layer ----
     // rev13: thickness and its gradient from a cubic B-spline over 4x4 field texels (C2, no
@@ -613,7 +762,8 @@ float4 main(PS_IN pin) {
     bool multi = gR2DefocusMode > 0.5 && cocPx > 1.0;          // D-A only where it blurs
     float rbPx = 0.5 * cocPx;
     float2 oT[4], dqT[4];
-    float rot = 6.2831853 * frac(52.9829189 * frac(dot(pin.PosH.xy, float2(0.06711056, 0.00583715)))
+    float rot = 6.2831853                                     // R-img5: IGN rotation again (the crosshatch was fp32 world precision, R-img4)
+              * frac(52.9829189 * frac(dot(pin.PosH.xy, float2(0.06711056, 0.00583715)))
                                  + gR2FrameNoise * 0.6180339887);
     [unroll] for (int i = 0; i < 4; ++i) {
         float an = i * 2.39996323 + rot;
@@ -624,6 +774,9 @@ float4 main(PS_IN pin) {
     }
     float P = 1.0, HW = 0.0;
     float2 G = float2(0, 0), RW = float2(0, 0);
+    sHOn = gR2SurfH > 0.5;                                    // B3h one height field (L1: D-A taps too)
+    [unroll] for (int iH = 0; iH < 4; ++iH) { sHa[iH] = -1000.0; sGHa[iH] = float2(0, 0); }
+    sTap = 0;
     float Pm[4] = { 1.0, 1.0, 1.0, 1.0 };
     float2 RWm[4] = { float2(0, 0), float2(0, 0), float2(0, 0), float2(0, 0) };
     float HWm[4] = { 0.0, 0.0, 0.0, 0.0 };
@@ -631,7 +784,7 @@ float4 main(PS_IN pin) {
     float reachMM = multi ? rbPx * pixMM : 0.0;
     // Airflow in visor-mm coordinates for the wobble: surface tangents dP/du_mm, dP/dv_mm from
     // the screen Jacobian (J = [pxU; pxV], mm per px) and the world-position derivatives.
-    float3 dPdx = ddx_fine(posW), dPdy = ddy_fine(posW);
+    float3 dPdx = ddx_fine(posC), dPdy = ddy_fine(posC);      // R-img4: from the small camera-relative position
     float detJ = pxU.x * pxV.y - pxU.y * pxV.x;
     float idet = abs(detJ) > 1e-12 ? 1.0 / detJ : 0.0;
     float3 Tu = (dPdx * pxV.y - dPdy * pxV.x) * idet;
@@ -639,7 +792,7 @@ float4 main(PS_IN pin) {
     float3 nW = cross(Tu, Tv);
     nW = dot(nW, nW) > 1e-20 ? normalize(nW) : float3(0, 0, 1);
     R2View vw;
-    vw.V = normalize(posW - gR2CamPos);
+    vw.V = normalize(posC);
     // rev26: interpolated vertex normal (smooth); cross(ddx, ddy) of the position is flat per triangle
     // and put seams into large drops crossing triangle edges.
     float3 nS = normalize(pin.NormalW);
@@ -668,7 +821,6 @@ float4 main(PS_IN pin) {
     float covS = 0.0;
     float2 sImpD = float2(0, 0);
     // A wet surface (film / micro haze) lowers the effective contact angle: edges melt in (ref. A).
-    float wetFlat = gR2LookLab > 0.5 ? 0.0 : gR2WetFlatten * saturate(filmCov + 1.3333 * gR2WetHaze * Fd.g);   // H1: wetHaze 0 (micro caps are no film)
     // rev20: dynamic loops (rev19 unrolled 25 x (1 + 4 taps) x lobes: minutes of FXC and a long
     // first-use stall in game). Only the 4 D-A taps are unrolled (static register arrays).
     // rev48-R7a: ONE candidate loop (FXC failed silently with a second r2AddDrop site x 4 unrolled D-A taps): indices
@@ -724,18 +876,21 @@ float4 main(PS_IN pin) {
         if (maskOk && !early && ((ci < 17u ? (mLo >> ci) : (mHi >> (ci - 17u))) & 1u) == 0u) tightMiss = 1.0;   // PERF-10 verify
         float hwB = HW + HWm[0] + HWm[1] + HWm[2] + HWm[3];
         if (multi) {   // rev25: no [branch] - r2DropLens takes ddx/ddy of its lookup
-            [unroll] for (int k = 0; k < 4; ++k) r2AddDrop(c.q + dqT[k], c, air, wetFlat, Pm[k], Gm[k], RWm[k], HWm[k]);
+            [unroll] for (int k = 0; k < 4; ++k) { sTap = k; r2AddDrop(c.q + dqT[k], c, air, Pm[k], Gm[k], RWm[k], HWm[k]); }
+            sTap = 0;
         } else {
-            r2AddDrop(c.q, c, air, wetFlat, P, G, RW, HW);
+            sTap = 0; r2AddDrop(c.q, c, air, P, G, RW, HW);
         }
         if (beyond && HW + HWm[0] + HWm[1] + HWm[2] + HWm[3] != hwB) tightMiss = 1.0;
     }
     // rev48-F9: the F2 fine-droplet micro-grid is removed with the fine layer (it drew non-drops as drops)
-    // rev47j rivulets (trail lens kernels), only where the field holds trail water
+    // B3 DROP TAILS (docs/RAINFX_V2_TRAIL_REVIEW3.md section 20): the tail surface rasterised by tailtex.hlsl (txR2Trail slot = TT)
+    // into the same union as the drops -- head + tail one water surface. The rev47j vector trail lines are no longer drawn (C8).
     R2Trail trl;
-    if (gR2LookLab < 0.5 && Fd.r > 1e-4 && r2TrailBest(pc, trl)) {
+    if (gR2LookLab < 0.5 && r2TailBest(pc, trl)) {
         if (multi) {
-            [unroll] for (int k = 0; k < 4; ++k) r2AddTrail(trl, dqT[k], Pm[k], Gm[k], RWm[k], HWm[k]);
+            [unroll] for (int k = 0; k < 4; ++k) { sTap = k; r2AddTrail(trl, dqT[k], Pm[k], Gm[k], RWm[k], HWm[k]); }
+            sTap = 0;
         } else {
             r2AddTrail(trl, float2(0, 0), P, G, RW, HW);
         }
@@ -759,7 +914,7 @@ float4 main(PS_IN pin) {
             float sk = RWm[k].y / max(HWm[k], 1e-6);
             float2 GmI = Gm[k] + sImpD * (gR2ImpactWaveK * saturate((1.0 - Pm[k] - gR2Threshold) * 4.0) / (0.77 * max(Rk, 0.2) * max(sk, 0.2)));
             float3 col = r2DropLens(1.0 - Pm[k], GmI, Rk, sk, pxU, pxV, pixMM, sp + oT[k] * gR2InvRT,
-                                    offF, filmMip, max(1.5, 0.5 * cocPx), cocPx, 0.5, aspect, vw, ck);
+                                    offF, filmMip, max(1.5, 0.5 * cocPx), cocPx, 0.5, aspect, vw, float4(sHOn ? 1.0 : 0.0, sHa[k], sGHa[k]), ck);   // L1
             ca += ck;
             cc += col * ck;
         }
@@ -769,7 +924,7 @@ float4 main(PS_IN pin) {
         // D-C: sharp lens, edge = disc (x) disc of the CoC, peak min(1, (R / rb)^2).
         float2 GI = G + sImpD * (gR2ImpactWaveK * saturate((U - gR2Threshold) * 4.0) / (0.77 * max(Rmm, 0.2) * max(sth, 0.2)));
         cDrop = r2DropLens(U, GI, Rmm, sth, pxU, pxV, pixMM, sp, offF, filmMip,
-                           max(1.5, cocPx), cocPx, 1.0, aspect, vw, cov);
+                           max(1.5, cocPx), cocPx, 1.0, aspect, vw, float4(sHOn ? 1.0 : 0.0, sHa[0], sGHa[0]), cov);
         float rb = 0.5 * cocMM;
         float peak = rb > 1e-4 ? saturate(Rmm * Rmm / (rb * rb)) : 1.0;
         cov *= peak;
@@ -822,7 +977,7 @@ float4 main(PS_IN pin) {
         // existence strictly rank < threshold, and a cheap CSP lens (one scene tap + one cube tap on steep rims).
         if (gR2MicroOn > 0.5 && phiC > 0.002) {
             float aEff = aC * exp2(gR2MicroBias);
-            float rMin = gR2MicroResPx * max(pixMM, 2.0 * cocMM);        // smallest piece radius drawn as a drop
+            float rMin = gR2MicroResPx * pixMM;   // U-micro: PIXEL resolution only (CoC removed: aperture erased every piece)
             float L = clamp(log2(aEff / max(gR2MicroA50MM, 1e-6)), -8.0, 0.0);
             float L0 = floor(L), fL = L - L0;
             float2 pMMv = t * gR2TexMM;
@@ -845,26 +1000,49 @@ float4 main(PS_IN pin) {
                 float2 off = frac(Lk * float2(0.3719, 0.6180));
                 float2 uvA = mul(R, pMMv) / sc + off;
                 float2 ga = mul(R, gxMM) / sc * 0.5, gb = mul(R, gyMM) / sc * 0.5;   // one mip sharper
+                // U-micro2 (section 55): a defocused piece is blurred like the cell drops -- the atlas is read over the CoC footprint
+                // (the centre vector averages toward a flatter, lower-contrast lens; the outline widens) and the edge spans the CoC
+                float kB = gR2MicroCentre > 0.5 ? max(1.0, 0.5 * cocPx) : 1.0;
+                ga *= kB; gb *= kB;
                 float4 m = txR2Micro.SampleGrad(samLinear, uvA, ga, gb);    // H3-2d: one sample (rank blends only on edges)
                 float rk = m.a;
                 float sdMM = (m.b - 0.5) * 2.0 * gR2MicroSdfMM * sK;         // + inside the piece (range 0.6 mm: never clipped
                                                                              //   below a pixel -- 0.1 mm made every piece 25-75 %)
                 float ex = saturate((thr - rk) / 0.003);                     // strictly below the threshold (no rank-0 ghosts)
-                float add = ex * saturate(sdMM / pixMM + 0.5) * (1.0 - Dacc);
-                float3 n = float3(m.xy * 2.0 - 1.0, 0.0);
-                n.z = sqrt(saturate(1.0 - dot(n.xy, n.xy)));
-                float2 g = -n.xy / max(n.z, 0.15);                           // height gradient (atlas axes)
+                float edgeM = gR2MicroCentre > 0.5 ? max(pixMM, cocMM) : pixMM;   // U-micro2: edge blurred over the CoC
+                float add = ex * saturate(sdMM / edgeM + 0.5) * (1.0 - Dacc);
+                float2 g;
+                if (gR2MicroCentre > 0.5) {
+                    // U-micro (section 54): u = position in the piece's own drop disc (linear field, exact under bilinear) ->
+                    // analytic spherical cap of the drop contact angle: slope = rho sin th / sqrt(1 - rho^2 sin^2 th), uphill = -u
+                    float2 u = m.xy * 2.0 - 1.0;
+                    float rho = min(length(u), 0.999);
+                    float sT = sin(radians(clamp(gR2ContactDeg, 5.0, 89.0)));
+                    float sl = rho * sT * rsqrt(max(1.0 - rho * rho * sT * sT, 1e-3));
+                    g = rho > 1e-4 ? -u / rho * sl : float2(0, 0);
+                    // defocus: a blurred piece is a low-contrast disc (D-C peak min(1, (a / rb)^2)), not removed
+                    float rbM = 0.5 * cocMM;
+                    add *= rbM > 1e-4 ? saturate(gR2MicroA50MM * sK * gR2MicroA50MM * sK / (rbM * rbM)) : 1.0;
+                } else {
+                    float3 n = float3(m.xy * 2.0 - 1.0, 0.0);
+                    n.z = sqrt(saturate(1.0 - dot(n.xy, n.xy)));
+                    g = -n.xy / max(n.z, 0.15);                              // height gradient (atlas axes)
+                }
                 slope += add * mul(g, R);                                    // back to visor u / v axes (R^T g)
                 Dacc += add;
                 // H3-2d halo: distance to the nearest EXISTING piece -- the halo atlas holds the smallest rank within 4 radii
                 // (the per-texel rank only knows the nearest piece, existing or not: the halo reached only the 0.025 mm gaps)
                 float hW = max(gR2MicroHaloK * aEff, gR2MicroHaloPx * pixMM);
                 haloAcc = max(haloAcc, ex * saturate(1.0 + sdMM / hW));
-                float4 hl = txR2MicroHalo.SampleGrad(samPoint, uvA, ga * 2.0, gb * 2.0);
-                haloAcc = max(haloAcc, (hl.x < thr ? 1.0 : 0.0) * saturate(1.0 - 0.03 * sK / hW));
-                haloAcc = max(haloAcc, (hl.y < thr ? 1.0 : 0.0) * saturate(1.0 - 0.06 * sK / hW));
-                haloAcc = max(haloAcc, (hl.z < thr ? 1.0 : 0.0) * saturate(1.0 - 0.12 * sK / hW));
-                haloAcc = max(haloAcc, (hl.w < thr ? 1.0 : 0.0) * saturate(1.0 - 0.24 * sK / hW));   // radii = bake HALO_R
+                // halo-disc (2026-11-25 review: rotated SQUARES wiped around the micro drops): the bake window is now a disc, the
+                // read is bilinear with a soft rank test (point reads drew the half-res texel steps) at the SHARP footprint (the
+                // U-micro2 CoC widening x kB picked the min-of-2x2 coarse mips = large squares)
+                float4 hl = txR2MicroHalo.SampleGrad(samLinear, uvA, ga * (2.0 / kB), gb * (2.0 / kB));
+                float4 hIn = saturate((thr - hl) * 40.0 + 0.5);
+                haloAcc = max(haloAcc, hIn.x * saturate(1.0 - 0.03 * sK / hW));
+                haloAcc = max(haloAcc, hIn.y * saturate(1.0 - 0.06 * sK / hW));
+                haloAcc = max(haloAcc, hIn.z * saturate(1.0 - 0.12 * sK / hW));
+                haloAcc = max(haloAcc, hIn.w * saturate(1.0 - 0.24 * sK / hW));   // radii = bake HALO_R
             }
             microD = saturate(Dacc) * (1.0 - cov);
             if (microD > 0.0) {
@@ -874,6 +1052,14 @@ float4 main(PS_IN pin) {
                 // TIR dims the same image, sky glint on the up-facing rim. No ddx (divergent branch): the scene mip comes
                 // from the piece size -- the refracted image sweeps ~0.6 screen heights across a piece of rPx pixels.
                 slope = slope / max(Dacc, 1e-4) * gR2MicroRefract;
+                if (gR2MicroCentre > 0.5) {
+                    // U-micro: the SAME lens as the cell drops (Fresnel / rim rule, off-frame cube, stable footprint, image defocus,
+                    // tone handling); the piece is a one-surface height field (HM) of its own slope, radius = the octave's a50
+                    float covM;
+                    float aM = max(aEff, 0.02);
+                    cMicro = r2DropLens(1.0, float2(0, 0), aM, sin(radians(clamp(gR2ContactDeg, 5.0, 89.0))), pxU, pxV, pixMM, sp,
+                                        float2(0, 0), 0.0, max(1.5, cocPx), cocPx, 1.0, aspect, vw, float4(1.0, 1.0, slope), covM, true);
+                } else {
                 float3 sW = slope.x * vw.Tu + slope.y * vw.Tv;
                 sW -= vw.n * dot(sW, vw.n);
                 float capS = min(length(sW), 7.0);
@@ -892,10 +1078,11 @@ float4 main(PS_IN pin) {
                 float2 uvW = uvA / sqrt(sqrt(1.0 + xa * xa * xa * xa)) + 0.5;
                 float rPx = max(aEff / max(pixMM, 1e-5), 0.5);
                 float mipFW = log2(max(0.6 / (gR2InvRT.y * rPx), 1.0));
-                float mipW = clamp(gR2WFSceneMip + max(mipFW - 1.0, 0.0) + 0.5 * log2(1.0 + cocPx), 0.0, 7.0);
+                float mipW = clamp(gR2WFSceneMip + max(mipFW - 1.0, 0.0) + 0.5 * log2(1.0 + cocPx), 0.0, 7.0);   // (legacy atlas)
                 cMicro = r2Scene(saturate(uvW), mipW) * lerp(1.0, 0.35, tir);
                 float up = saturate(dot(-dUp, float3(0, 1, 0)));
                 cMicro += gR2VeilColor * (gR2Glint * up * up * up * up * smoothstep(0.8, 2.0, capS) * (1.0 - tir));
+                }
             }
             phiU = phiC * saturate(1.0 - resSum / max(relC, 1e-4));          // coarse water too small to resolve
             rUnres = min(aEff, 0.5 * rMin);
@@ -949,6 +1136,42 @@ float4 main(PS_IN pin) {
     col = (col * a * (1.0 - scat) + amb * scat) / max(aOut, 1e-4);
     a = aOut;
     if (false) {
+    } else if (gR2Debug > 10.5) {
+        // Debug 11 (S-fix3 review, section 42): each drop's own rim angle theta_drop = contactDeg / f^1.5 (sharp volume disc r):
+        // blue <= 20 deg, cyan 30, green 40, yellow 50, red >= 60; dark ring = the transient splat share (c.fx > 0)
+        col = float3(0.03, 0.03, 0.03);
+        a = 0.85;
+        float bestD = 1e9;
+        [loop] for (int py = -4; py <= 4; ++py) {
+            [loop] for (int px = -4; px <= 4; ++px) {
+                int2 s = c0 + int2(px, py);
+                if (any(s < int2(0, 0)) || any(s >= size)) continue;
+                R2Cand cD; float rlD; bool wD;
+                if (!r2CandCore(s, cD, rlD, wD)) continue;
+                float r = r2VisorRadiusMM(txR2State.Load(int3(s, 0)).z);
+                float d = length((pc - cD.q) * gR2CellSizeMM);
+                if (d > r || d / r > bestD) continue;
+                bestD = d / r;
+                float th = gR2ContactDeg / (cD.f * sqrt(cD.f));
+                float u = saturate((th - 20.0) / 40.0);
+                col = u < 0.25 ? lerp(float3(0.1, 0.2, 1.0), float3(0.1, 0.9, 1.0), u * 4.0)
+                    : u < 0.5 ? lerp(float3(0.1, 0.9, 1.0), float3(0.1, 1.0, 0.2), u * 4.0 - 1.0)
+                    : u < 0.75 ? lerp(float3(0.1, 1.0, 0.2), float3(1.0, 0.95, 0.1), u * 4.0 - 2.0)
+                    : lerp(float3(1.0, 0.95, 0.1), float3(1.0, 0.1, 0.05), u * 4.0 - 3.0);
+                if (cD.fx > 0.02 && d / r > 0.8) col *= 0.3;
+            }
+        }
+        col *= gR2DebugBright;
+    } else if (gR2Debug > 9.5) {
+        // Debug 10 (B1d coat state): the receding angle theta_r0 x factor -- white = theta_r0 (fresh coat) .. blue = 0.2 x;
+        // green tint = wetting memory M (field G)
+        int2 fT = clamp(int2(t * gR2FieldSize), int2(0, 0), int2(gR2FieldSize) - 1);
+        float mem = txR2Field.Load(int3(fT, 0)).g;
+        float fC = gR2CoatOn > 0.5 ? r2CoatFactor(t, mem) : 1.0;
+        float u = saturate((fC - 0.2) / 0.8);
+        col = lerp(float3(0.05, 0.15, 1.0), float3(1, 1, 1), u);
+        col = lerp(col, float3(0.1, 1.0, 0.2), 0.5 * saturate(mem)) * gR2DebugBright;
+        a = 0.85;
     } else if (gR2Debug > 8.5) {
         col = cDrop;                          // Debug 9 (drops only): lens direction, see r2DropLens
         a = max(cov, 0.0);
@@ -987,6 +1210,7 @@ float4 main(PS_IN pin) {
         col = float3(0.03, 0.03, 0.03) + Fd.r * 0.45;
         a = 0.85;
         float bestD = 1e9;
+        float ring = 0.0;   // B3c: white outline = the DRAWN silhouette (cap scale, aspect, rear stretch); the disc = volume radius r
         [loop] for (int py = -2; py <= 2; ++py) {
             for (int px = -2; px <= 2; ++px) {
                 int2 s = c0 + int2(px, py);
@@ -996,6 +1220,32 @@ float4 main(PS_IN pin) {
                 float r = r2VisorRadiusMM(st.z);
                 float2 dmm = (pc - (float2(s) + st.xy)) * gR2CellSizeMM;
                 float d = length(dmm);
+                {
+                    R2Cand cD; float rlD; bool wD;
+                    if (d > 1e-4 && r2CandCore(s, cD, rlD, wD)) {
+                        float2 dn = dmm / d;
+                        float shE = length(cD.sh.xy);
+                        float shA = gR2ShpOn > 0.5 ? min(sqrt((0.5 + shE) / max(0.5 - shE, 0.05)), cD.aMax) : 1.0;
+                        float sphi = 0.5 * atan2(cD.sh.y, cD.sh.x);
+                        float cs = dot(dn, float2(cos(sphi), sin(sphi)));
+                        float Rd = cD.r / sqrt(cs * cs / shA + shA * (1.0 - cs * cs));
+                        float cm = dot(dn, cD.m);
+                        // B3f: the round front of a sliding head (= r2AddDrop)
+                        float kSD = gR2SagK * saturate(cD.r * cD.r / 2.25) * (1.0 - cD.e);
+                        float kmD = (gR2ShpOn > 0.5 && cD.k > kSD && dot(cD.m, cD.m) > 0.5)
+                                  ? gR2HeadRound * saturate(cD.k / max(gR2MotionStretch, 1e-3)) * (1.0 - cD.e) : 0.0;
+                        if (kmD > 1e-3 && cm > 0.0) {
+                            float2 uD = float2(cos(sphi), sin(sphi));
+                            float2 nD = float2(-cD.m.y, cD.m.x);
+                            float cu = dot(nD, uD), cv2 = 1.0 - cu * cu;
+                            float AF = lerp(shA, 1.0, kmD);
+                            float rF = cD.r * rsqrt(cu * cu / shA + shA * cv2) * sqrt(cu * cu / AF + AF * cv2);
+                            Rd = rF / sqrt(cs * cs / AF + AF * (1.0 - cs * cs));
+                        }
+                        if (cm < 0.0) Rd /= sqrt(cm * cm / ((1.0 + cD.k) * (1.0 + cD.k)) + 1.0 - cm * cm);
+                        ring = max(ring, 1.0 - saturate(abs(d - Rd) / max(1.5 * pixMM, 0.02)));
+                    }
+                }
                 if (d > r || d / r > bestD) continue;
                 bestD = d / r;
                 float2 mv = r2VisorMove(st.w) * gR2CellSizeMM;      // mm per substep
@@ -1015,6 +1265,7 @@ float4 main(PS_IN pin) {
                 col *= 1.0 - 0.5 * smoothstep(0.8, 1.0, d / r);
             }
         }
+        col = lerp(col, float3(1.0, 1.0, 1.0), ring);
         col *= gR2DebugBright;
     } else if (gR2Debug > 2.5) {
         // Refraction source as the drops see it (housing must be gone, filled from around).
@@ -1026,8 +1277,10 @@ float4 main(PS_IN pin) {
         col = float3(ex, 0.1, 1.0 - ex) * gR2DebugBright;
         a = 0.6;
     } else if (gR2Debug > 0.5) {
-        col = float3(cov, Fd.g, Fd.r) * gR2DebugBright;   // R = drop coverage (sharp lens edge)
+        col = float3(cov, 0.0, Fd.r) * gR2DebugBright;    // R = drop coverage, B = trail water (B1d: G = wetting memory -> debug 10)
         a = max(a, 0.6);
+        float2 tdb = r2TailDebug(pc);                       // B1: tail centre line, yellow (head) -> green (end)
+        if (tdb.x < 0.12) { col = lerp(float3(1.0, 0.9, 0.0), float3(0.1, 1.0, 0.2), tdb.y); a = 1.0; }
     }
     // rev48-S6c: 'Highlight split pieces' -- E8 tail pieces younger than 1.5 s in cyan (review aid)
     if (gR2HiSplit > 0.5 && splitMark > 0.0) { col = lerp(col, float3(0.0, 1.0, 1.0), 0.8); a = max(a, 0.85); }

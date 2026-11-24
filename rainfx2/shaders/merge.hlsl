@@ -8,7 +8,7 @@
 float4 main(PS_IN pin) {
     // rev45: twice the cell width; the second third writes the life cycle of the winning drop.
     int2 px = int2(pin.PosH.xy);
-    int third = px.x >= 2 * (int)gR2Cells.x ? 2 : (px.x >= (int)gR2Cells.x ? 1 : 0);   // rev48-S1: + shape third
+    int third = px.x >= 3 * (int)gR2Cells.x ? 3 : (px.x >= 2 * (int)gR2Cells.x ? 2 : (px.x >= (int)gR2Cells.x ? 1 : 0));   // + shape, B1 tail
     bool lifeHalf = third == 1;
     int2 c = px - int2(third * (int)gR2Cells.x, 0);
     float4 shape = float4(0, 0, r2PackHarm(0, 0), 0);
@@ -24,11 +24,14 @@ float4 main(PS_IN pin) {
     float accV = 0, accW = 0, bigW = 0, w = r2PackMove(float2(0, 0), 0);
     float2 accP = float2(0, 0);
     float2 accM = float2(0, 0);                   // rev48-S4b: momentum (volume-weighted move) of the merged drop
+    float4 tailW = float4(0, 0, 0, 0);            // B1: the winner's tail and its old centre (cells, relative to c)
+    float2 tailOld = float2(0, 0);
     if (me.z > 0 && mc.z < 0.5) {
         accM = r2UnpackMove(me.w) * me.z;
         shape = r2Shape(c);
         float wa = r2FootW(me.z, shape);
         accV = me.z; accW = wa; accP = me.xy * wa; bigW = wa; w = me.w; life = r2Life(c);
+        if (third == 3) { tailW = r2Tail(c); tailOld = me.xy; }
         r2ShapeAccAdd(sacc, shape, me.z, me.xy * gR2CellSizeMM);
     }
     // rev48-R7a: a big-drop winner gathers claims from up to 5 cells (claim.hlsl tests it from the 3 x 3 tiles)
@@ -51,12 +54,18 @@ float4 main(PS_IN pin) {
             accM += r2UnpackMove(st.w) * st.z;
             accP += (float2(x, y) + st.xy) * wa;
             r2ShapeAccAdd(sacc, shs, st.z, (float2(x, y) + st.xy) * gR2CellSizeMM);
-            if (wa > bigW) { bigW = wa; w = st.w; life = r2Life(s); shape = shs; }
+            if (wa > bigW) {
+                bigW = wa; w = st.w; life = r2Life(s); shape = shs;
+                if (third == 3) { tailW = r2Tail(s); tailOld = float2(x, y) + st.xy; }
+            }
         }
     }
-    if (accV <= 0) return third == 2 ? float4(0, 0, r2PackHarm(0, 0), 0) : (lifeHalf ? float4(0, 0, 0, 0) : float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0)));
+    if (accV <= 0) return third == 3 ? float4(0, 0, 0, 0) : third == 2 ? float4(0, 0, r2PackHarm(0, 0), 0) : (lifeHalf ? float4(0, 0, 0, 0) : float4(0.4995, 0.4995, 0, r2PackMove(float2(0, 0), 0)));
     if (third == 2) return r2ShapeCompose(sacc, length(r2UnpackMove(w)) > 0.05);   // rev48-S3/S4 merged footprint; a moving head keeps its own
     float2 p = clamp(accP / max(accW, 1e-12), -0.75, 1.749);
+    // B1: the winner (widest footprint) keeps its tail, which stays where it lies (the merged centre moved); the smaller
+    // drops' tails go with their water into the head (their tail water is part of their volume)
+    if (third == 3) return r2TailShift(tailW, (tailOld - p) * gR2CellSizeMM);
     float vMax = gR2ShapeK * gR2MaxRadiusMM * gR2MaxRadiusMM * gR2MaxRadiusMM;
     // the winner (widest footprint) gives seed / life / shape; the motion is the momentum of all of them, so a
     // head that runs into a wider pinned drop carries on from THAT position (the new head) instead of stopping

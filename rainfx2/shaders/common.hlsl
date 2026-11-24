@@ -124,13 +124,7 @@ float r2AirTangent(float3 n) {
     return length(a) * gR2AirSurface;
 }
 
-float r2Hash21(float2 p) { return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
-float r2VNoise(float2 p) {
-    float2 i = floor(p), f = p - i;
-    f = f * f * (3.0 - 2.0 * f);
-    return lerp(lerp(r2Hash21(i), r2Hash21(i + float2(1, 0)), f.x),
-                lerp(r2Hash21(i + float2(0, 1)), r2Hash21(i + float2(1, 1)), f.x), f.y);
-}
+// r2Hash21 / r2VNoise: tgshared.hlsl (B1d: the visor's coat debug view uses the same noise)
 // rev48-S6 F1 SURFACE DEFECTS (docs/RAINFX_V2_SHAPE_STATE_PLAN.md sections 18-20; stick-slip on heterogeneous
 // coatings, Varagnolo et al. PRL 2013): a static field D in [0, 1] on the visor (features of defMM, mm space).
 float r2Defect(float2 pMM) {
@@ -151,7 +145,7 @@ float r2DefectC(float2 pMM, float rmm) {
             [unroll] for (int k = 0; k < 2; ++k) {
                 if ((float)j >= nW || (float)k >= nW) continue;
                 float2 o = rmm * (float2((float)j, (float)k) + 0.5) * (2.0 / nW) - rmm;
-                float v = r2VNoise((pMM + o) * gR2StrongInvMM + float2(5.1, 9.7));
+                float v = r2VNoise((pMM + o) * gR2StrongInvMM + float2(5.1, 9.7) + gR2CoatSeed);   // B1d: tear-off = new film
                 float e = max(0.0, (v - gR2StrongThr) / max(1.0 - gR2StrongThr, 1e-3));
                 S += e * e;
             }
@@ -439,9 +433,15 @@ float2 r2UnpackBF(float w) {
 // cell index (S3b review: the cell-index hash re-rolled a moving drop's flatness at every cell crossing).
 // rev48-R5b: the local pinning strength (same smooth field as r2Predict / R1 arrest) in place of per-drop hashes
 float r2PinAt(float2 t) { return r2VNoise(t * gR2PinScale + 53.1); }
+static float r2CoatF = 1.0;   // B1d coat factor at the evaluated point (r2CoatSet; declared before its first use)
+static float r2CoatFS = 1.0;  // S-fix3: the same without the wetting memory M (permanent wear / dirt) -> the drop SHAPE (rim angle)
+// S-fix (docs/RAINFX_V2_TRAIL_REVIEW3.md sections 37-38): the flatness f now ENCODES the drop's own rim angle,
+// theta_drop = contactDeg / f^1.5 (bijection, same storage). Resting equilibrium: the coat state at the drop lowers every angle
+// (theta_eq = contactDeg x r2CoatF -> f = (1 / coatF)^(2/3)); spreadVarK (size x pinning noise, default 0 since S-fix) is kept
+// only as an A/B knob -- it lowered the rim angle without a physical cause. Callers set r2CoatF (r2CoatSet) first.
 float r2RestEq(float rmm, float h, float wet) {
-    return max(gR2BaseSpread, 1.0) + gR2SpreadVarK * smoothstep(gR2SpreadR0, gR2SpreadR1, rmm)
-         * (0.35 + 0.65 * h) * (1.0 + gR2SpreadWetK * wet);
+    float fCoat = pow(1.0 / clamp(r2CoatFS, 0.2, 1.0), 2.0 / 3.0);   // S-fix3: wear / dirt only (M is a transient wet film)
+    return max(gR2BaseSpread, 1.0) * fCoat;   // (cleanup 2026-11-25: spreadVarK size x pinning noise removed, section 38)
 }
 float4 r2ShapeMake3(float A, float phi, float a2, float a3, float ph3, float bend, float f) {
     float A2 = A * A;
@@ -603,7 +603,7 @@ float4 r2ShapeImpact(uint2 c, uint k, float rmm, float2 t, float4 ig, float wet,
     // wide splats, a fresh coat recoils to compact drops. The cap volume (R3) turns the kept flatness into a WIDER
     // footprint of the same water.
     float pinN = r2VNoise(t * gR2PinScale + 53.1);
-    float thRl = clamp(gR2FilmRecedeDeg * (1.25 - 0.5 * pinN), 10.0, 100.0);
+    float thRl = clamp(gR2FilmRecedeDeg * r2CoatFS * (1.25 - 0.5 * pinN), 10.0, 100.0);   // S-fix: + the coat state (B1d)
     float fA = clamp(pow(max(gR2ContactDeg / thRl, 1e-3), 2.0 / 3.0), fEq, max(f0, fEq));
     float ar = saturate((fA - fEq) / max(f0 - fEq, 1e-3));          // kept share of the spread (0 recoiled .. 1 none)
     // R5: the arrested footprint keeps (0.3 + 0.7 ar) of the lamella's Vt elongation, and its contour follows the
@@ -660,6 +660,46 @@ float r2FootRadiusMM(int2 s, float4 st, float4 sh, float wet, float2 dirMM) {
     float dl = length(dirMM);
     float cs = dl > 1e-6 ? dot(dirMM / dl, float2(cos(phi), sin(phi))) : 1.0;
     return R / sqrt(cs * cs / A + A * (1.0 - cs * cs));
+}
+
+// B3c (docs/RAINFX_V2_TRAIL_REVIEW3.md section 24): the head as the VISOR draws it, radii along / across dir (unit): silhouette of
+// r2AddDrop (kernel 1.24 c.r at the 0.35 threshold = c.r = r x cap scale of the resting flatness), aspect ellipse with the
+// window fit (= r2FootRadiusMM, without its footPhys gate), and the sliding rear stretch 1 + k (k = motionStretch v / vMax)
+// on the half behind the motion. Harmonics / bend / splats are left out (small, transient).
+float2 r2DrawnRadiiMM(int2 s, float4 st, float2 dir, float vms, bool big) {
+    // returns (radius along dir, radius across dir); big = drawn by the big-tile loop (window). Branch-free (FXC /O3 stack
+    // overflow on the nested tailtex loops with early-return helpers, B3c FXC run): the helpers are inlined without returns.
+    float r = r2RadiusMM(st.z);
+    float4 sh = r2Shape(s);
+    float vb = -sh.w - 1.0;                                       // r2UnpackBF inline (w < 0 = packed bend + spread)
+    float qr = floor(vb / 4096.0);
+    float qb = qr - 1024.0 * floor(qr / 1024.0);
+    float2 bf = sh.w >= 0.0 ? float2(sh.w, 1.0) : float2((qb - 500.0) / 250.0, 1.0 + (vb - qr * 4096.0) / 1000.0);
+    float f = max(max(bf.y, gR2BaseSpread), 1.0);
+    float thD = gR2ContactDeg / (f * sqrt(f));                    // r2CapScale inline
+    float cap = gR2CapVolume > 0.5 ? clamp(pow(abs(gR2ShapeK / r2CapK(max(thD, 15.0))), 1.0 / 3.0), 0.8, 1.6) : 1.0;
+    float R = r * cap;
+    float e = length(sh.xy);
+    float A = sqrt((0.5 + e) / max(0.5 - e, 0.05));
+    float2 hm = r2UnpackHarm(sh.z);
+    float hF = min(1.0 + max(hm.x, 0.0) + hm.y, 1.7);
+    float base = 1.24 * R * hF, rest = abs(bf.x) * 1.24 * R;
+    float lWin = r2WinMM(big);
+    float room = max(lWin - rest, 0.3 * lWin);
+    float aF = (room / max(base, 1e-5)) * (room / max(base, 1e-5));
+    bool fit = base * sqrt(A) + rest > lWin;
+    A = fit ? (aF >= 1.0 ? min(A, aF) : 1.0) : A;
+    R = (fit && aF < 1.0) ? R * lWin / (base + rest) : R;
+    float phi = 0.5 * atan2(sh.y, sh.x);
+    float2 u = float2(cos(phi), sin(phi));
+    float c1 = dot(dir, u), c2 = dir.x * u.y - dir.y * u.x;       // across dir = (-dir.y, dir.x): cos to u = -c2... squared below
+    float2 Rd = R * rsqrt(float2(c1 * c1 / A + A * (1.0 - c1 * c1), c2 * c2 / A + A * (1.0 - c2 * c2)));
+    float2 mv = r2UnpackMove(st.w);
+    float ml = max(length(mv), 1e-6);
+    float k = gR2MotionStretch * saturate(vms / max(gR2VMax, 1e-3));
+    float cm = dot(dir, mv / ml);                                  // rear stretch on the half behind the motion (along dir only)
+    Rd.x *= cm < 0.0 ? rsqrt(cm * cm / ((1.0 + k) * (1.0 + k)) + 1.0 - cm * cm) : 1.0;
+    return gR2ShpOn > 0.5 ? Rd : float2(r, r);
 }
 
 // ---------- rev48-S3 MERGED FOOTPRINT (docs/RAINFX_V2_SHAPE_STATE_PLAN.md section 13) ----------
@@ -805,7 +845,8 @@ float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt, float2 dirMM, f
         float fMove = 1.0 + 0.5 * (fEq - 1.0);
         // rev48-M1b (M1 review: a sliding drop that ate another shrank first, then grew): a flat footprint (merged
         // union) recedes to the receding-angle limit over shpMergeTau x r while sliding too, not in shpRelaxMove
-        float fLimM = pow(abs(gR2ContactDeg) / clamp(gR2FilmRecedeDeg, 10.0, 100.0), 2.0 / 3.0);
+        float fLimM = pow(abs(gR2ContactDeg) / clamp(gR2FilmRecedeDeg * r2CoatFS, 10.0, 100.0), 2.0 / 3.0);
+        if (gR2Steep > 0.5) fLimM = fEq;                     // R-steep: no persistent flat state; recede to the equilibrium cap
         bool flatM = bf.y > max(fLimM, fMove);
         float fTM = flatM ? max(fLimM, fMove) : fMove;
         float kfM = flatM ? 1.0 - exp(-dt / max(gR2ShpMergeTau * rmm, 1e-3)) : k;
@@ -827,7 +868,8 @@ float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt, float2 dirMM, f
         // rev48-M1: a flat footprint (merged union, arrested splat) recedes only while its angle is below the receding
         // angle, i.e. down to fLim = (contactDeg / theta_r)^(2/3), over shpMergeTau x r (contact-line friction: Andrieu
         // 2002 t_c ~ R / u); a drop already above that limit relaxes to its equilibrium as before
-        float fLim = pow(abs(gR2ContactDeg) / clamp(gR2FilmRecedeDeg, 10.0, 100.0), 2.0 / 3.0);
+        float fLim = pow(abs(gR2ContactDeg) / clamp(gR2FilmRecedeDeg * r2CoatFS, 10.0, 100.0), 2.0 / 3.0);
+        if (gR2Steep > 0.5) fLim = fEq;                      // R-steep (section 44): arrested / merged drops recede to the cap
         float fT = bf.y > fLim ? max(fLim, fEq) : fEq;
         float kf = bf.y > fLim ? exp(-dt / max(gR2ShpMergeTau * rmm, 1e-3)) : k;
         res = float4(mg + (sh.xy - mg) * k, r2PackHarm3(hm.x * k * k, hm.y * k * k * k, r2UnpackHarmPh(sh.z)), r2PackBFM(bf.x * k, fT + (bf.y - fT) * kf, r2UnpackBMode(sh.w)));   // S6b: a stopped hook stays a hook
@@ -836,8 +878,8 @@ float4 r2ShapeRelax(float4 sh, float rmm, bool moving, float dt, float2 dirMM, f
 }
 
 // rev45 wetness of the surface at a field sample (rule_trail 5): micro haze + film.
-float r2Wet(float4 F) {
-    return saturate(F.g * gR2WetHaze + (F.b * gR2FilmMaxMM + F.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
+float r2Wet(float4 F) {   // B1d: field G is the wetting memory now (not haze water)
+    return saturate((F.b * gR2FilmMaxMM + F.r * gR2TrailMaxMM) / max(gR2FilmFullMM, 1e-4));
 }
 // rev45 trail water depth (mm) left behind a moving head drop (rule_trail 3-7, user-approved review):
 // film left by a receding contact line grows with speed ~ Ca^(2/3) (Landau-Levich), more on a wet
@@ -859,8 +901,21 @@ float r2Wet(float4 F) {
 // Big heads move faster (force ~ r^2, pinning ~ r) -> they cross the threshold first; small drops flow dry.
 // FILM-UNIFY A (docs/RAINFX_V2_FILM_UNIFY_PLAN.md section 1): ONE receding angle (gR2TrailThetaRDeg = the coat's theta_r,
 // Lua syncSurface) lowered by ONE wetness (r2WetU) for every flat water: trail threshold, dewetting of lines / films, beads.
+// B1d COATING STATE (docs/RAINFX_V2_TRAIL_REVIEW3.md section 18): the coat's receding angle varies over the visor and in time:
+//   theta_r(x, t) = theta_r0 (1 - wetK wet) x f,  f = (1 - kD D)(1 - kC C)(1 - kM M), f >= 0.2
+//   D = wear: the J1 worn / scratched / soiled spots (same strong-defect noise, S) x the film's wear level W (UI / rate; a
+//       tear-off resets W and draws a new defect field), D = W (0.3 + 0.7 sqrt S): worn coating is more hydrophilic
+//   C = road dirt (TEST until the contamination model: a uniform level x 0.5-1 value noise of dirtMM features)
+//   M = wetting memory (field G, 0..1): adaptive wetting (Butt et al. 2018) -- the receding angle of a hydrophobic polymer
+//       drops with the time it was under water and recovers when dry (field pass: up over coatTauA, down over coatTauR)
+// Each pass sets r2CoatF at the point it evaluates (r2CoatSet) before the trail / dewetting / tail laws read r2RecedeRad.
+// r2CoatFactor: tgshared.hlsl (sim + visor debug 10)
+void r2CoatSet(float2 t, float4 F) {
+    r2CoatF = gR2CoatOn > 0.5 ? r2CoatFactor(t, F.g) : 1.0;
+    r2CoatFS = gR2CoatOn > 0.5 ? r2CoatFactor(t, 0.0) : 1.0;   // S-fix3
+}
 float r2RecedeRad(float wet) {
-    return radians(gR2TrailThetaRDeg) * (1.0 - gR2TrailWetK * saturate(wet));
+    return radians(gR2TrailThetaRDeg) * (1.0 - gR2TrailWetK * saturate(wet)) * r2CoatF;
 }
 // receding speed of a contact line on a flat film / line of width wMM (Cox-Voinov / de Gennes, the trail law), mm/s
 float r2DewetSpeedMMs(float wMM, float wet) {
@@ -883,6 +938,73 @@ float r2TrailRule(float rmm, float vms, float wet, out float hw) {
     float h = gR2TrailLL * rmm * pow(max(ca, 1e-12), 0.6667);   // FXC X3571: base kept positive
     return min(h, 0.5 * hw * gR2TrailSlopeMax);
 }
+
+// B1 DROP TAIL UPDATE (docs/RAINFX_V2_TRAIL_REVIEW3.md sections 11.2, 13), one drop, one substep (cells; merge: shift only).
+// tl = the tail of the drop that won this cell, shiftMM = (its old centre - the new centre) in mm: the old points stay where
+// they lie on the visor. The path behind the head is the polyline new centre -> old centre -> q1 -> q2 -> q3; the new points
+// are re-sampled on it at r + L/3, r + 2L/3, r + L (the tail starts at the head's REAR edge, r = contact radius; B1 game test:
+// measured from the centre a short tail lay inside the head). L follows L_eq = gR2TailK r (s - 1) <= gR2TailMax r over
+// gR2TailTau, s = Ca / Ca* of the trail rule (the rear contact line cannot follow: Cox-Voinov); s <= 1 -> L shrinks.
+// Drift (gravity sag, air), only ACROSS the tail (along it the re-sampling sets the points; B1 test: a full drift at the head
+// speed folded the tail forward into a 'V' inside the head): a tail section of half-width w = 0.75 r (1 - xi)^0.8 is held like
+// a drop of that radius -- it moves at the head speed x saturate((w - r_c) / (r - r_c)), r_c = the moving radius of this frame
+// (B2 / P.criticalRadius, Furmidge), in the direction of the film law at its depth (air shear + gravity). Thin parts stay on
+// the path, thick parts near the head swing with the force -> the tail sags toward gravity when the air is weak.
+// B1b: the surface the rear contact line recedes over is a COMPOSITE of coat and water (micro caps / film, water fraction phi,
+// angle 0 there: water meets water): cos theta* = (1 - phi) cos theta_r + phi (Cassie; docs/RAINFX_V2_TRAIL_REVIEW3.md section 15).
+float r2TailExcess(float rmm, float vms, float wet, float phi) {
+    float th = acos(saturate((1.0 - phi) * cos(r2RecedeRad(wet)) + phi));
+    float caS = th * th * th / (9.0 * log(max(rmm * 1e6, 10.0)));
+    return (vms / 72.0) / max(caS, 1e-9);
+}
+float2 r2TailAt(float2 a, float2 b, float2 c, float2 d, float2 e, float s) {   // point at arc length s on a-b-c-d-e
+    float2 P[5] = { a, b, c, d, e };
+    float2 res = e;
+    float acc = 0.0;
+    bool done = false;
+    [unroll] for (int k = 0; k < 4; ++k) {
+        float l = length(P[k + 1] - P[k]);
+        if (!done && acc + l >= s) {
+            res = l > 1e-6 ? lerp(P[k], P[k + 1], (s - acc) / l) : P[k];
+            done = true;
+        }
+        acc += l;
+    }
+    return res;
+}
+float4 r2TailUpdate(float4 tl, float2 shiftMM, float rmm, float vms, float2 tHead, float dt, float wet, float phi) {
+    R2Tail T = r2TailUnpack(tl);
+    float sR = r2TailExcess(rmm, vms, wet, phi);
+    float Leq = gR2TailOn > 0.5 ? min(min(gR2TailK * rmm * max(sR - 1.0, 0.0), gR2TailMax * rmm), R2_TAIL_RANGE - rmm - 1.0) : 0.0;   // B3a: within the packed range
+    float L = T.L + (Leq - T.L) * (1.0 - exp(-dt / max(gR2TailTau, 1e-3)));
+    float4 res = float4(0, 0, 0, 0);
+    if (L > 0.05) {
+        float2 o = shiftMM;
+        float2 a1 = T.on ? T.q1 + shiftMM : o, a2 = T.on ? T.q2 + shiftMM : o, a3 = T.on ? T.q3 + shiftMM : o;
+        float2 z = float2(0, 0);
+        float2 nn[3];
+        nn[0] = r2TailAt(z, o, a1, a2, a3, rmm + L / 3.0);
+        nn[1] = r2TailAt(z, o, a1, a2, a3, rmm + 2.0 * L / 3.0);
+        nn[2] = r2TailAt(z, o, a1, a2, a3, rmm + L);
+        float2 rear = r2TailAt(z, o, a1, a2, a3, rmm);
+        // (cleanup 2026-11-25: B1a/B1c cross drift of the tail points removed -- folded the tail; tailDrift was 0)
+        R2Tail o2;
+        o2.on = true; o2.L = L;
+        o2.q1 = clamp(nn[0], -R2_TAIL_RANGE, R2_TAIL_RANGE);
+        o2.q2 = clamp(nn[1], -R2_TAIL_RANGE, R2_TAIL_RANGE);
+        o2.q3 = clamp(nn[2], -R2_TAIL_RANGE, R2_TAIL_RANGE);
+        res = r2TailPack(o2);
+    }
+    return res;
+}
+float4 r2TailShift(float4 tl, float2 shiftMM) {                    // merge: the winner's tail stays where it lies
+    R2Tail T = r2TailUnpack(tl);
+    T.q1 = clamp(T.q1 + shiftMM, -R2_TAIL_RANGE, R2_TAIL_RANGE);
+    T.q2 = clamp(T.q2 + shiftMM, -R2_TAIL_RANGE, R2_TAIL_RANGE);
+    T.q3 = clamp(T.q3 + shiftMM, -R2_TAIL_RANGE, R2_TAIL_RANGE);
+    return r2TailPack(T);
+}
+float4 r2Tail(int2 s) { return txR2State.Load(int3(s + int2(3 * (int)gR2Cells.x, 0), 0)); }
 
 // ---------- rev47j trail rivulets + mass-conserving dewetting (docs/RAINFX_V2_REV47J_REVIEW.md) ----------
 // Trail geometry texture (field resolution, RGBA16F): xy = nearest centre-line point of the rivulet
@@ -1242,6 +1364,7 @@ R2Move r2Predict(int2 cell, float4 s, float4 L, float4 sh) {
     float2 t = (float2(cell) + s.xy) / gR2Cells;
     float rmm = r2RadiusMM(s.z);
     float4 Fs = txR2Field.SampleLevel(samLinearClamp, t, 0);
+    r2CoatSet(t, Fs);                                                // B1d: coat state at the drop (trail rule)
     float2 dc = float2(0, 0);
     float vol = s.z;
     bool gone = false;

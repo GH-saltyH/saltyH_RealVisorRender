@@ -18,6 +18,7 @@
   0.1489963155672353,
   0.06425453695491443
  ],
+ "centreVec": 1,
  "heightMaxMM": 0.22963936626911163,
  "haloR": [
   0.03,
@@ -40,6 +41,7 @@
   "rimSlope": 1.6,
   "steep": 0.5,
   "sdfRangeMM": 0.6,
-  "seed": 7
+  "seed": 7,
+  "normals": 0
  }
 }
